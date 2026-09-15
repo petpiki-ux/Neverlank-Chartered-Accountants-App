@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}{% if person %}Edit Team Member{% else %}New Team Member{% endif %} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{% if person %}Edit {{ person.name }}{% else %}New Team Member{% endif %}</h1></div>
+<div class="card" style="max-width:480px;">
+  <form method="post">
+    {% if not person %}
+    <label for="username">Username *</label>
+    <input type="text" id="username" name="username" required>
+    {% endif %}
+    <label for="name">Full name *</label>
+    <input type="text" id="name" name="name" value="{{ person.name if person else '' }}" required>
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" value="{{ person.email if person else '' }}">
+    <label for="role">Role</label>
+    <select id="role" name="role">
+      <option value="staff" {% if person and person.role=='staff' %}selected{% endif %}>Staff</option>
+      <option value="partner" {% if person and person.role=='partner' %}selected{% endif %}>Partner</option>
+      <option value="admin" {% if person and person.role=='admin' %}selected{% endif %}>Admin</option>
+    </select>
+    {% if person %}
+    <label><input type="checkbox" name="is_active" style="width:auto;display:inline-block;" {% if person.is_active_flag %}checked{% endif %}> Active</label>
+    {% endif %}
+    <label for="password">{% if person %}Reset password (leave blank to keep current){% else %}Password{% endif %}</label>
+    <input type="password" id="password" name="password" {% if not person %}placeholder="default: changeme123"{% endif %}>
+    <button type="submit" class="btn gold">{% if person %}Save changes{% else %}Create team member{% endif %}</button>
+    <a href="{{ url_for('users.list_users') }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}
