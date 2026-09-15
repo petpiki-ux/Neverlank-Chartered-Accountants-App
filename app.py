@@ -1,0 +1,121 @@
+import os
+import click
+from flask import Flask, redirect, url_for
+from flask_login import current_user
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
+from config import Config, INSTANCE_DIR
+from extensions import db, login_manager
+from models import User, DocumentTemplate
+
+
+@event.listens_for(Engine, "connect")
+def _set_sqlite_pragmas(dbapi_connection, connection_record):
+    # Only applies to SQLite connections (harmless no-op otherwise). WAL mode
+    # lets reads and writes happen concurrently instead of locking the whole
+    # database file, and a busy_timeout makes a brief write collision wait and
+    # retry instead of failing outright - both matter once this is hosted
+    # online with more than one person using it at the same time (or more
+    # than one gunicorn worker process), not just one office PC.
+    if type(dbapi_connection).__module__.startswith("sqlite3"):
+        cursor = dbapi_connection.cursor()
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.close()
+
+
+def create_app():
+    app = Flask(
+        __name__,
+        template_folder=Config.TEMPLATE_FOLDER,
+        static_folder=Config.STATIC_FOLDER,
+    )
+    app.config.from_object(Config)
+
+    os.makedirs(INSTANCE_DIR, exist_ok=True)
+    os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+
+    db.init_app(app)
+    login_manager.init_app(app)
+
+    from auth import auth_bp
+    from clients import clients_bp
+    from engagements import engagements_bp
+    from users import users_bp
+    from doc_templates import doc_templates_bp
+
+    app.register_blueprint(auth_bp)
+    app.register_blueprint(clients_bp)
+    app.register_blueprint(engagements_bp)
+    app.register_blueprint(users_bp)
+    app.register_blueprint(doc_templates_bp)
+
+    @app.route("/")
+    def index():
+        if current_user.is_authenticated:
+            return redirect(url_for("engagements.dashboard"))
+        return redirect(url_for("auth.login"))
+
+    @app.context_processor
+    def inject_globals():
+        return {"firm_name": "Neverlank Chartered Accountants"}
+
+    with app.app_context():
+        db.create_all()
+        # First-run convenience: seed an admin login + starter checklist
+        # templates automatically so a freshly-installed copy works with zero
+        # command-line steps.
+        if User.query.count() == 0:
+            from seed import run_seed
+            run_seed()
+        elif DocumentTemplate.query.count() == 0:
+            # Existing installs updated to this version won't have any
+            # Document Template rows yet (new feature) - populate them from
+            # the bundled originals automatically on next launch, with zero
+            # steps needed from the user. Safe/idempotent either way.
+            from seed import seed_document_templates
+            seed_document_templates()
+
+    register_cli(app)
+
+    return app
+
+
+def register_cli(app):
+    @app.cli.command("seed")
+    def seed():
+        """Seed the database with an admin user and sample checklist templates."""
+        from seed import run_seed
+        run_seed()
+        click.echo("Database seeded.")
+
+
+app = create_app()
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return User.query.get(int(user_id))
+
+
+if __name__ == "__main__":
+    import threading
+    import webbrowser
+
+    port = int(os.environ.get("PORT", 5000))
+    debug = os.environ.get("FLASK_DEBUG", "0") == "1"
+
+    print("=" * 64)
+    print(" Neverlank Audit, Assurance & Consulting App")
+    print(" Starting up...")
+    print(f" On this computer:            http://localhost:{port}")
+    print(f" From other office computers: http://<this-PC-IP>:{port}")
+    print(" Keep this window open while the app is in use.")
+    print(" Close this window (or press CTRL+C) to stop the app.")
+    print("=" * 64)
+
+    if not debug:
+        threading.Timer(1.5, lambda: webbrowser.open(f"http://localhost:{port}")).start()
+
+    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)
