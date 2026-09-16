@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Checklist Templates - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Checklist Templates</h1>
+    <div class="subtitle">Reusable audit programs / procedure lists to start new engagements from.</div>
+  </div>
+  <a href="{{ url_for('engagements.new_template') }}" class="btn gold">+ New Template</a>
+</div>
+<div class="card">
+  {% if templates %}
+  <table>
+    <thead><tr><th>Name</th><th>Type</th><th>Items</th><th></th></tr></thead>
+    <tbody>
+      {% for t in templates %}
+      <tr>
+        <td><a href="{{ url_for('engagements.view_template', template_id=t.id) }}">{{ t.name }}</a></td>
+        <td><span class="badge type-{{ t.type }}">{{ t.type }}</span></td>
+        <td>{{ t.items|length }}</td>
+        <td class="text-right">
+          <form method="post" action="{{ url_for('engagements.delete_template', template_id=t.id) }}" class="inline" onsubmit="return confirm('Delete this template?')">
+            <button type="submit" class="btn small danger">Delete</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No templates yet. <a href="{{ url_for('engagements.new_template') }}">Create one</a> to speed up starting new engagements.</div>
+  {% endif %}
+</div>
+{% endblock %}
