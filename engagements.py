@@ -1,10 +1,13 @@
 import os
+import csv
+import io
 import uuid
 from datetime import datetime, date
 
 from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, send_from_directory, abort
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
+import openpyxl
 
 from extensions import db
 from models import (
@@ -12,11 +15,13 @@ from models import (
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation,
     RiskAssessment, MaterialityCalculation, EntityUnderstanding,
     AnalyticalReview, AnalyticalReviewLine,
+    COAMapping, TrialBalance, TrialBalanceLine, FinancialStatements,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
     ENTITY_UNDERSTANDING_FIELDS,
 )
+import financials as fin
 
 engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
 
@@ -202,6 +207,11 @@ def view_engagement(engagement_id):
     entity_understanding = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
     analytical_review = AnalyticalReview.query.filter_by(engagement_id=engagement_id).first()
     scope_suggestion = SCOPE_SUGGESTIONS.get(risk_assessment.rating) if risk_assessment and risk_assessment.rating else None
+
+    trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
+    financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
+    statements = fin.build_all_statements(trial_balance.lines) if trial_balance and trial_balance.lines else None
+
     return render_template(
         "engagements/detail.html",
         engagement=engagement,
@@ -219,6 +229,11 @@ def view_engagement(engagement_id):
         entity_understanding=entity_understanding,
         entity_fields=ENTITY_UNDERSTANDING_FIELDS,
         analytical_review=analytical_review,
+        trial_balance=trial_balance,
+        financial_statements=financial_statements,
+        statements=statements,
+        category_choices=fin.category_choices(),
+        category_label=fin.category_label,
     )
 
 
@@ -898,3 +913,294 @@ def save_materiality(engagement_id):
     db.session.commit()
     flash("Materiality calculation saved.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
+
+
+# ---------- Audit Finalisation: Trial Balance import + IAS 1 Financial Statements ----------
+
+def _allowed_tb_file(filename):
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return ext in ("xlsx", "xls", "csv")
+
+
+def _read_tb_upload_rows(file_storage, filename):
+    """Returns a list of {header: value} dicts from an uploaded .xlsx/.xls
+    or .csv trial balance file. Raises ValueError with a plain-English
+    message if it can't find a usable header row."""
+    ext = filename.rsplit(".", 1)[-1].lower()
+    if ext == "csv":
+        content = file_storage.read().decode("utf-8-sig", errors="replace")
+        return list(csv.DictReader(io.StringIO(content)))
+
+    workbook = openpyxl.load_workbook(file_storage, data_only=True)
+    sheet = workbook.active
+    all_rows = list(sheet.iter_rows(values_only=True))
+    header_idx = None
+    for i, row in enumerate(all_rows):
+        cells = [str(c).strip().lower() if c is not None else "" for c in row]
+        if "account name" in cells:
+            header_idx = i
+            break
+    if header_idx is None:
+        raise ValueError(
+            "Could not find a header row containing 'Account Name' in that file. "
+            "Download the template below and use its column headers."
+        )
+    headers = [str(c).strip() if c is not None else "" for c in all_rows[header_idx]]
+    data_rows = []
+    for row in all_rows[header_idx + 1:]:
+        if all(c is None or str(c).strip() == "" for c in row):
+            continue
+        data_rows.append({h: v for h, v in zip(headers, row) if h})
+    return data_rows
+
+
+def _get_or_create_trial_balance(engagement_id, source="manual"):
+    tb = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
+    if not tb:
+        tb = TrialBalance(engagement_id=engagement_id, source=source)
+        db.session.add(tb)
+        db.session.flush()
+    return tb
+
+
+def _touch_trial_balance(tb):
+    tb.completed_by_id = current_user.id
+    tb.completed_at = datetime.utcnow()
+    tb.reviewed_by_id = None
+    tb.reviewed_at = None
+
+
+def _lookup_coa_mapping(client_id, account_name):
+    norm = fin.normalize_account_name(account_name)
+    if not norm:
+        return None
+    return COAMapping.query.filter_by(client_id=client_id, account_name=norm).first()
+
+
+def _upsert_coa_mapping(client_id, account_name, fs_category, user_id):
+    norm = fin.normalize_account_name(account_name)
+    if not norm or not fs_category:
+        return
+    mapping = COAMapping.query.filter_by(client_id=client_id, account_name=norm).first()
+    if not mapping:
+        mapping = COAMapping(client_id=client_id, account_name=norm)
+        db.session.add(mapping)
+    mapping.fs_category = fs_category
+    mapping.updated_by_id = user_id
+    mapping.updated_at = datetime.utcnow()
+
+
+@engagements_bp.route("/<int:engagement_id>/trial-balance/upload", methods=["POST"])
+@login_required
+def upload_trial_balance(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    file = request.files.get("file")
+    if not file or file.filename == "":
+        flash("Please choose a file to upload.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    if not _allowed_tb_file(file.filename):
+        flash("Please upload a .xlsx or .csv file.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+    original_name = secure_filename(file.filename)
+    try:
+        raw_rows = _read_tb_upload_rows(file, original_name)
+        cleaned_rows = fin.parse_tb_rows(raw_rows)
+    except ValueError as e:
+        flash(str(e), "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    except Exception:
+        flash("Could not read that file - make sure it's a .xlsx or .csv using the template's columns.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+    tb = _get_or_create_trial_balance(engagement_id, source="upload")
+    tb.source = "upload"
+    tb.original_filename = original_name
+
+    # Preserve any category already set on the existing lines (in case it
+    # was set only on this TB and hadn't been saved to the reusable
+    # mapping yet) before replacing them with the freshly imported rows.
+    for existing_line in tb.lines:
+        if existing_line.fs_category:
+            _upsert_coa_mapping(engagement.client_id, existing_line.account_name, existing_line.fs_category, current_user.id)
+    TrialBalanceLine.query.filter_by(trial_balance_id=tb.id).delete()
+
+    for row in cleaned_rows:
+        mapping = _lookup_coa_mapping(engagement.client_id, row["account_name"])
+        db.session.add(TrialBalanceLine(
+            trial_balance_id=tb.id,
+            account_code=row["account_code"],
+            account_name=row["account_name"],
+            fs_category=mapping.fs_category if mapping else None,
+            current_debit=row["current_debit"], current_credit=row["current_credit"],
+            prior_debit=row["prior_debit"], prior_credit=row["prior_credit"],
+        ))
+
+    _touch_trial_balance(tb)
+    db.session.commit()
+    flash(f"Imported {len(cleaned_rows)} account(s) from '{original_name}'.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/<int:engagement_id>/trial-balance/lines/add", methods=["POST"])
+@login_required
+def add_trial_balance_line(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    name = request.form.get("account_name", "").strip()
+    if not name:
+        flash("Please give the account a name.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+    def to_float(field):
+        raw = request.form.get(field, "").strip()
+        try:
+            return float(raw) if raw else 0.0
+        except ValueError:
+            return 0.0
+
+    tb = _get_or_create_trial_balance(engagement_id, source="manual")
+    category = request.form.get("fs_category", "").strip() or None
+    db.session.add(TrialBalanceLine(
+        trial_balance_id=tb.id,
+        account_code=request.form.get("account_code", "").strip(),
+        account_name=name,
+        fs_category=category,
+        current_debit=to_float("current_debit"), current_credit=to_float("current_credit"),
+        prior_debit=to_float("prior_debit"), prior_credit=to_float("prior_credit"),
+    ))
+    if category:
+        _upsert_coa_mapping(engagement.client_id, name, category, current_user.id)
+    _touch_trial_balance(tb)
+    db.session.commit()
+    flash("Account added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/trial-balance/lines/<int:line_id>/update", methods=["POST"])
+@login_required
+def update_trial_balance_line(line_id):
+    line = TrialBalanceLine.query.get_or_404(line_id)
+    tb = line.trial_balance
+    engagement = tb.engagement
+
+    def to_float(field, current):
+        raw = request.form.get(field)
+        if raw is None:
+            return current
+        raw = raw.strip()
+        if not raw:
+            return 0.0
+        try:
+            return float(raw)
+        except ValueError:
+            return current
+
+    line.account_code = request.form.get("account_code", line.account_code or "").strip()
+    line.account_name = request.form.get("account_name", line.account_name).strip() or line.account_name
+    category = request.form.get("fs_category", "").strip() or None
+    line.fs_category = category
+    line.current_debit = to_float("current_debit", line.current_debit)
+    line.current_credit = to_float("current_credit", line.current_credit)
+    line.prior_debit = to_float("prior_debit", line.prior_debit)
+    line.prior_credit = to_float("prior_credit", line.prior_credit)
+    if category:
+        _upsert_coa_mapping(engagement.client_id, line.account_name, category, current_user.id)
+    _touch_trial_balance(tb)
+    db.session.commit()
+    flash("Account updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="finalisation"))
+
+
+@engagements_bp.route("/trial-balance/lines/<int:line_id>/delete", methods=["POST"])
+@login_required
+def delete_trial_balance_line(line_id):
+    line = TrialBalanceLine.query.get_or_404(line_id)
+    tb = line.trial_balance
+    engagement_id = tb.engagement_id
+    db.session.delete(line)
+    _touch_trial_balance(tb)
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/trial-balance/<int:tb_id>/review", methods=["POST"])
+@login_required
+def review_trial_balance(tb_id):
+    tb = TrialBalance.query.get_or_404(tb_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if not tb.is_fully_mapped:
+        flash("Every account needs an IAS 1 category (or 'Excluded') before the trial balance can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+    if tb.completed_by_id == current_user.id:
+        flash("You can't review a trial balance you imported/entered yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+    tb.reviewed_by_id = current_user.id
+    tb.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Trial balance marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/trial-balance/<int:tb_id>/unreview", methods=["POST"])
+@login_required
+def unreview_trial_balance(tb_id):
+    tb = TrialBalance.query.get_or_404(tb_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    tb.reviewed_by_id = None
+    tb.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/<int:engagement_id>/financial-statements/save", methods=["POST"])
+@login_required
+def save_financial_statements_notes(engagement_id):
+    Engagement.query.get_or_404(engagement_id)
+    fs = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
+    if not fs:
+        fs = FinancialStatements(engagement_id=engagement_id)
+        db.session.add(fs)
+    fs.basis_of_preparation = request.form.get("basis_of_preparation", "").strip()
+    fs.completed_by_id = current_user.id
+    fs.completed_at = datetime.utcnow()
+    fs.reviewed_by_id = None
+    fs.reviewed_at = None
+    db.session.commit()
+    flash("Financial statements notes saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/financial-statements/<int:fs_id>/review", methods=["POST"])
+@login_required
+def review_financial_statements(fs_id):
+    fs = FinancialStatements.query.get_or_404(fs_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    trial_balance = TrialBalance.query.filter_by(engagement_id=fs.engagement_id).first()
+    if not trial_balance or not trial_balance.lines:
+        flash("Import or enter the trial balance before the financial statements can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
+    if fs.completed_by_id == current_user.id:
+        flash("You can't review financial statements you prepared yourself - ask another supervisor/partner to review them.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
+    fs.reviewed_by_id = current_user.id
+    fs.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Financial statements marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/financial-statements/<int:fs_id>/unreview", methods=["POST"])
+@login_required
+def unreview_financial_statements(fs_id):
+    fs = FinancialStatements.query.get_or_404(fs_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    fs.reviewed_by_id = None
+    fs.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
