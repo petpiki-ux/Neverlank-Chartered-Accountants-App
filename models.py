@@ -165,6 +165,7 @@ class Document(db.Model):
     original_filename = db.Column(db.String(255), nullable=False)
     stored_filename = db.Column(db.String(255), nullable=False)
     category = db.Column(db.String(100), default="General")
+    reference = db.Column(db.String(100))  # e.g. a filing/working-paper reference like "A-1" or "SA-01/2026"
     version = db.Column(db.Integer, default=1)
     notes = db.Column(db.Text)
     uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
