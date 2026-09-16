@@ -17,6 +17,98 @@ USER_ROLES = ["staff", "supervisor", "partner", "admin"]
 # timesheets. A reviewer can never sign off their own work - that check is
 # enforced in the route, not here.
 REVIEWER_ROLES = ("supervisor", "partner", "admin")
+# Roles allowed to give the final Engagement Partner sign-off on a workpaper.
+# This is a separate, discretionary tier above the ordinary Preparer/Reviewer
+# sign-off - the partner can sign off any workpaper "where he sees fit"
+# rather than it being a hard gate, but (like a reviewer) can never sign off
+# their own work.
+PARTNER_SIGNOFF_ROLES = ("partner", "admin")
+
+# Configurable role permissions: a small set of firm-administration actions
+# (managing shared libraries, deleting whole clients/engagements/documents,
+# managing team members) that an admin can allow or deny per role from the
+# Team > Permissions settings screen, instead of them being hardcoded. This
+# is separate from - and never touches - the Preparer/Reviewer/Partner
+# sign-off workflow above, which stays exactly as it is regardless of these
+# settings. Each entry is (key, label, description, default_roles) where
+# default_roles are the roles allowed=True the very first time this is
+# seeded - chosen to exactly reproduce this app's behaviour before this
+# permissions system existed, so upgrading an existing install changes
+# nothing until an admin actually opens the settings screen and changes it.
+PERMISSIONS = [
+    ("manage_document_templates", "Manage Document Templates",
+     "Add, edit or delete templates in the Document Templates library (previously admin/partner only).",
+     ("partner", "admin")),
+    ("manage_policies", "Manage Policies & Procedures",
+     "Add, edit or delete documents in the Policies & Procedures library (previously admin/partner only).",
+     ("partner", "admin")),
+    ("manage_checklist_templates", "Manage Checklist Templates",
+     "Create, edit or delete the checklist templates used to start new engagements (previously unrestricted).",
+     tuple(USER_ROLES)),
+    ("manage_users", "Manage Team Members",
+     "Add or edit team members, including their role and password (previously admin only). "
+     "Only an actual admin can ever grant someone the admin role, regardless of this setting.",
+     ("admin",)),
+    ("delete_clients", "Delete Clients",
+     "Delete a client and all of its engagements (previously unrestricted).",
+     tuple(USER_ROLES)),
+    ("delete_engagements", "Delete Engagements",
+     "Delete an engagement and all of its checklist items, risks, documents and tasks (previously unrestricted).",
+     tuple(USER_ROLES)),
+    ("delete_documents", "Delete Documents",
+     "Delete an uploaded working paper/document from an engagement (previously unrestricted).",
+     tuple(USER_ROLES)),
+]
+PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
+
+
+def user_has_permission(user, key):
+    """The one place this app should ever ask "is this role allowed to do
+    X?" for the administrative actions in PERMISSIONS above - routes call
+    this instead of hardcoding a role check. Admin is always allowed,
+    hardcoded here rather than stored, so a mistaken/mischievous toggle on
+    the settings screen can never lock every admin out of fixing it."""
+    if user.role == "admin":
+        return True
+    perm = Permission.query.filter_by(role=user.role, permission_key=key).first()
+    if perm is not None:
+        return perm.allowed
+    # No row yet for this (role, key) - e.g. a permission added by an app
+    # update before the next seed/migration runs. Fall back to the
+    # registry's own default rather than silently denying everything.
+    for reg_key, _, _, default_roles in PERMISSIONS:
+        if reg_key == key:
+            return user.role in default_roles
+    return False
+
+
+# Standard industry list for clients - lets engagements automatically align
+# their suggested checklist/substantive-procedure content to the client's
+# sector (see the Substantive Procedures module). "Other" is always available
+# as a fallback with a free-text field alongside it.
+INDUSTRY_OPTIONS = [
+    "Agriculture & Agro-processing",
+    "Manufacturing",
+    "Mining & Extractives",
+    "Retail & Wholesale Trade",
+    "Construction & Real Estate",
+    "Banking & Financial Services",
+    "Insurance",
+    "Microfinance & Savings/Credit Cooperatives",
+    "NGOs & Non-Profit Organisations",
+    "Hospitality & Tourism",
+    "Transport & Logistics",
+    "Telecommunications",
+    "Information Technology & Software",
+    "Healthcare & Pharmaceuticals",
+    "Education",
+    "Energy & Utilities",
+    "Motor Trade",
+    "Professional & Business Services",
+    "Public Sector & Parastatals",
+    "Media & Entertainment",
+    "Other",
+]
 
 POLICY_CATEGORIES = ["HR Policy", "Firm Procedure", "Quality Control", "IT & Security", "Other"]
 TIMESHEET_STATUSES = ["Submitted", "Approved"]
@@ -162,6 +254,216 @@ ENTITY_UNDERSTANDING_FIELDS = [
 ]
 
 
+# Standard audit areas for the system-based Substantive Procedures module -
+# each becomes one section of the audit programme for an engagement, with
+# its own suggested procedures (seeded from the dictionaries below) and its
+# own Preparer/Reviewer/Partner sign-off (see SubstantiveProcedureArea).
+AUDIT_AREAS = [
+    "Cash and Bank",
+    "Trade Receivables",
+    "Inventories",
+    "Property, Plant and Equipment",
+    "Investments",
+    "Trade Payables and Accruals",
+    "Borrowings and Finance Costs",
+    "Revenue",
+    "Payroll and Employee Costs",
+    "Taxation",
+    "Equity and Reserves",
+    "Related Party Transactions",
+    "Going Concern",
+]
+
+# Baseline substantive procedures suggested for every engagement, regardless
+# of risk rating or industry - general-purpose starting points covering the
+# standard assertions (existence, completeness, valuation, rights and
+# obligations, presentation). Always review and tailor to the engagement.
+BASELINE_SUBSTANTIVE_PROCEDURES = {
+    "Cash and Bank": [
+        "Obtain bank confirmations for all bank accounts held during the year and agree confirmed balances to the trial balance/bank reconciliations.",
+        "Review bank reconciliations for all accounts and test reconciling items, agreeing outstanding items to subsequent bank statements.",
+        "Perform a cash count/confirmation for any material petty cash or cash-in-hand balances.",
+        "Test cut-off of significant receipts and payments around year end.",
+    ],
+    "Trade Receivables": [
+        "Circularise a sample of trade receivables (positive confirmation) and follow up non-replies with alternative procedures.",
+        "Review the aged receivables listing and evaluate the adequacy of the allowance for expected credit losses/doubtful debts.",
+        "Test a sample of post year-end receipts against year-end receivable balances.",
+        "Review credit notes issued after year end for evidence of overstated revenue/receivables.",
+    ],
+    "Inventories": [
+        "Attend (or review the results of) the year-end inventory count and reconcile count results to the inventory listing.",
+        "Test the valuation of a sample of inventory items against cost records and net realisable value.",
+        "Review for slow-moving, obsolete or damaged inventory and assess the adequacy of any write-down/provision.",
+        "Test cut-off of goods received/despatched around year end.",
+    ],
+    "Property, Plant and Equipment": [
+        "Agree a sample of additions to supporting invoices/contracts and confirm appropriate capitalisation.",
+        "Agree a sample of disposals to sale documentation and recompute the gain/loss on disposal.",
+        "Recompute depreciation for a sample of assets and assess the reasonableness of useful lives/rates applied.",
+        "Consider whether indicators of impairment exist and, if so, evaluate management's impairment assessment.",
+        "Physically inspect a sample of significant assets and confirm existence/condition.",
+    ],
+    "Investments": [
+        "Agree investment holdings to third-party statements/confirmations at year end.",
+        "Test the valuation basis applied (fair value, cost, equity method as applicable) and recompute for a sample.",
+        "Review for any impairment indicators and assess management's impairment conclusion.",
+    ],
+    "Trade Payables and Accruals": [
+        "Perform a search for unrecorded liabilities by reviewing post year-end payments/invoices.",
+        "Circularise a sample of suppliers (or review supplier statements) and reconcile to recorded balances.",
+        "Test the completeness and reasonableness of significant accruals.",
+        "Test cut-off of purchases around year end.",
+    ],
+    "Borrowings and Finance Costs": [
+        "Confirm outstanding loan/borrowing balances, terms and security directly with lenders.",
+        "Recompute finance costs for the year and agree to loan agreements/amortisation schedules.",
+        "Review loan covenants for compliance and consider classification (current/non-current) implications of any breach.",
+    ],
+    "Revenue": [
+        "Test a sample of revenue transactions to supporting contracts/invoices/dispatch documentation.",
+        "Perform cut-off testing on revenue recognised immediately before and after year end.",
+        "Perform analytical procedures on revenue (e.g. by month/product/customer) and investigate significant fluctuations.",
+        "Evaluate the appropriateness of the revenue recognition policy applied against the applicable financial reporting framework.",
+    ],
+    "Payroll and Employee Costs": [
+        "Test a sample of payroll transactions to supporting records (contracts, timesheets, statutory returns).",
+        "Recompute statutory deductions (PAYE, pension, other) for a sample of employees and agree to remittances.",
+        "Perform analytical procedures on payroll costs (e.g. headcount x average pay) and investigate significant variances.",
+        "Test for the existence of terminated/fictitious employees still receiving pay.",
+    ],
+    "Taxation": [
+        "Recompute the current tax charge/liability and agree to the tax computation and return.",
+        "Assess the recoverability and appropriateness of any deferred tax asset/liability recognised.",
+        "Review correspondence with the tax authority for unresolved matters or additional assessments.",
+    ],
+    "Equity and Reserves": [
+        "Agree share capital/share premium movements to statutory records (share register, resolutions).",
+        "Agree dividends declared/paid to board resolutions and recompute amounts.",
+        "Review the statement of changes in equity for completeness and correct classification of movements.",
+    ],
+    "Related Party Transactions": [
+        "Review minutes, contracts and disclosures for evidence of related party relationships and transactions not otherwise identified.",
+        "Test a sample of identified related party transactions for appropriate authorisation, terms and disclosure.",
+        "Confirm the completeness of related party disclosures against the applicable financial reporting framework.",
+    ],
+    "Going Concern": [
+        "Evaluate management's going concern assessment, including cash flow forecasts, for the foreseeable future (at least 12 months from year end).",
+        "Review for indicators of going concern issues (recurring losses, liquidity problems, covenant breaches, negative equity).",
+        "Assess the adequacy of going concern disclosures in the financial statements.",
+    ],
+}
+
+# Extra procedures added on top of the baseline when the engagement's Risk
+# Assessment rating is "High" - extending the nature/timing/extent of
+# testing for a higher assessed risk of material misstatement.
+HIGH_RISK_EXTRA_PROCEDURES = {
+    "Cash and Bank": [
+        "Extend bank confirmation coverage to all accounts (including dormant/nil-balance accounts) and obtain confirmations directly rather than relying on client-provided statements alone.",
+    ],
+    "Trade Receivables": [
+        "Increase the receivables circularisation sample size and consider negative confirmations for non-responses to positive confirmations.",
+        "Independently recalculate the allowance for doubtful debts using an aging/experience-based model.",
+    ],
+    "Inventories": [
+        "Attend the inventory count in person (rather than reviewing client-performed count results) and perform more extensive test counts.",
+        "Consider engaging an expert for specialised or high-value inventory valuation.",
+    ],
+    "Property, Plant and Equipment": [
+        "Obtain independent valuations or engage an expert for significant/specialised assets.",
+        "Extend physical verification to a larger sample of assets, including those at remote locations.",
+    ],
+    "Investments": [
+        "Obtain independent valuations for level 2/3 fair value investments rather than relying solely on management's valuation.",
+    ],
+    "Trade Payables and Accruals": [
+        "Extend the unrecorded liabilities search period further beyond year end.",
+        "Increase the supplier circularisation/statement reconciliation sample size.",
+    ],
+    "Borrowings and Finance Costs": [
+        "Obtain legal confirmation of loan terms/security in addition to lender confirmations.",
+        "Extend covenant compliance testing across the full facility term, not just at year end.",
+    ],
+    "Revenue": [
+        "Extend cut-off testing to a longer period either side of year end.",
+        "Perform detailed testing of manual journal entries affecting revenue for evidence of manipulation.",
+    ],
+    "Payroll and Employee Costs": [
+        "Extend testing for ghost/fictitious employees using independent verification (e.g. ID/attendance corroboration).",
+        "Increase the sample size for statutory deduction recomputation.",
+    ],
+    "Taxation": [
+        "Engage a tax specialist to review complex tax positions and the adequacy of provisions for uncertain tax treatments.",
+    ],
+    "Equity and Reserves": [
+        "Obtain independent confirmation of share register details from the transfer secretary/registrar.",
+    ],
+    "Related Party Transactions": [
+        "Extend procedures to identify related parties not disclosed by management (review of significant/unusual transactions, board minutes, legal confirmations).",
+        "Confirm the terms of significant related party transactions directly with the counterparty.",
+    ],
+    "Going Concern": [
+        "Extend the going concern assessment period and stress-test management's cash flow forecast assumptions.",
+        "Consider the need for a material uncertainty related to going concern paragraph and discuss with the engagement partner.",
+    ],
+}
+
+# Extra procedures added when the client's industry (Client.industry, one of
+# INDUSTRY_OPTIONS) makes a particular audit area especially relevant.
+# Deliberately not exhaustive - covers the combinations most likely to
+# matter; any industry/area combination without an entry here just gets the
+# baseline (and, if applicable, high-risk) procedures above.
+INDUSTRY_EXTRA_PROCEDURES = {
+    "Agriculture & Agro-processing": {
+        "Inventories": ["Assess the valuation of biological assets/agricultural produce at fair value less costs to sell (or the industry-appropriate basis) and consider the need for an expert valuation."],
+        "Revenue": ["Consider seasonality and weather/climate risk factors when performing analytical review of revenue."],
+    },
+    "Manufacturing": {
+        "Inventories": ["Test standard costing/overhead absorption rates used to value work-in-progress and finished goods."],
+        "Property, Plant and Equipment": ["Assess whether plant and machinery carrying values are supported given capacity utilisation and technological obsolescence risk."],
+    },
+    "Mining & Extractives": {
+        "Property, Plant and Equipment": ["Assess the reasonableness of mine/asset useful lives against reserve estimates and life-of-mine plans, and consider the need for an expert."],
+        "Going Concern": ["Evaluate commodity price assumptions and reserve/resource estimates used in going concern and impairment assessments."],
+    },
+    "Retail & Wholesale Trade": {
+        "Inventories": ["Consider shrinkage/theft risk in inventory valuation and review the adequacy of the shrinkage provision."],
+        "Revenue": ["Test point-of-sale system controls and reconcile daily takings to bank deposits for a sample of days."],
+    },
+    "Banking & Financial Services": {
+        "Trade Receivables": ["Test the expected credit loss (ECL) model and staging of loans/advances in line with IFRS 9, including a sample of individually assessed impairments."],
+        "Cash and Bank": ["Confirm statutory reserve/liquidity requirements held with the central bank and assess compliance."],
+    },
+    "Insurance": {
+        "Trade Payables and Accruals": ["Test the adequacy of insurance/claims reserves (outstanding claims, IBNR) with reference to actuarial valuations."],
+        "Revenue": ["Test premium recognition and unearned premium reserve calculations."],
+    },
+    "Microfinance & Savings/Credit Cooperatives": {
+        "Trade Receivables": ["Test loan portfolio at risk (PAR) classification and provisioning against the entity's credit policy and regulatory guidelines."],
+    },
+    "NGOs & Non-Profit Organisations": {
+        "Revenue": ["Test donor/grant income recognition against grant agreement terms and conditions, and confirm restricted vs unrestricted classification."],
+        "Trade Payables and Accruals": ["Confirm compliance with donor reporting and fund utilisation restrictions."],
+    },
+    "Construction & Real Estate": {
+        "Revenue": ["Test percentage-of-completion/input-method calculations for long-term contracts and recompute contract revenue and costs for a sample."],
+        "Trade Receivables": ["Assess the recoverability of retention receivables and amounts due from customers on construction contracts."],
+    },
+    "Hospitality & Tourism": {
+        "Revenue": ["Consider seasonality in analytical review of revenue and test occupancy/average-rate based revenue calculations for a sample of periods."],
+    },
+    "Telecommunications": {
+        "Revenue": ["Test multiple-element revenue arrangements (e.g. handset plus airtime bundles) for appropriate allocation and recognition under the applicable standard."],
+    },
+    "Healthcare & Pharmaceuticals": {
+        "Inventories": ["Assess expiry dating and obsolescence provisioning for pharmaceutical/medical inventory."],
+    },
+    "Public Sector & Parastatals": {
+        "Trade Payables and Accruals": ["Confirm compliance with public procurement regulations for a sample of significant payables/commitments."],
+    },
+}
+
+
 engagement_team = db.Table(
     "engagement_team",
     db.Column("engagement_id", db.Integer, db.ForeignKey("engagement.id"), primary_key=True),
@@ -284,13 +586,23 @@ class EngagementChecklistItem(db.Model):
     # never the same person as the preparer.
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     reviewed_at = db.Column(db.DateTime)
+    # Engagement Partner sign-off: a third, separate tier the partner can
+    # apply to any workpaper at their discretion - not gated on the
+    # reviewer step, and never the same person as the preparer.
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
 
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
 
     @property
     def is_reviewed(self):
         return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
 
 
 class RiskItem(db.Model):
@@ -375,10 +687,16 @@ class EngagementTask(db.Model):
     # work - always someone other than the preparer.
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     reviewed_at = db.Column(db.DateTime)
+    # Engagement Partner sign-off: a third, separate tier the partner can
+    # apply to any workpaper at their discretion - never the same person
+    # as the preparer.
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
 
     assigned_to = db.relationship("User", foreign_keys=[assigned_to_id])
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
 
     @property
     def is_overdue(self):
@@ -387,6 +705,10 @@ class EngagementTask(db.Model):
     @property
     def is_reviewed(self):
         return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
 
 
 # ---------- HR & Administration ----------
@@ -549,10 +871,13 @@ class RiskAssessment(db.Model):
     completed_at = db.Column(db.DateTime)
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
 
     engagement = db.relationship("Engagement", backref=db.backref("risk_assessment", uselist=False, cascade="all, delete-orphan"))
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
 
     @property
     def likelihood_answers(self):
@@ -589,6 +914,10 @@ class RiskAssessment(db.Model):
     def is_reviewed(self):
         return self.reviewed_by_id is not None
 
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
     def __repr__(self):
         return f"<RiskAssessment engagement={self.engagement_id} rating={self.rating}>"
 
@@ -618,11 +947,25 @@ class MaterialityCalculation(db.Model):
     trivial_pct = db.Column(db.Float, default=5.0)  # % of overall materiality
 
     notes = db.Column(db.Text)
-    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # preparer - set whenever the calculation is (re)saved
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
 
     engagement = db.relationship("Engagement", backref=db.backref("materiality", uselist=False, cascade="all, delete-orphan"))
-    updated_by = db.relationship("User")
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
 
     @property
     def revenue_materiality(self):
@@ -684,10 +1027,13 @@ class EntityUnderstanding(db.Model):
     completed_at = db.Column(db.DateTime)
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
 
     engagement = db.relationship("Engagement", backref=db.backref("entity_understanding", uselist=False, cascade="all, delete-orphan"))
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
 
     @property
     def field_values(self):
@@ -700,6 +1046,10 @@ class EntityUnderstanding(db.Model):
     @property
     def is_reviewed(self):
         return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
 
     def __repr__(self):
         return f"<EntityUnderstanding engagement={self.engagement_id}>"
@@ -721,10 +1071,13 @@ class AnalyticalReview(db.Model):
     completed_at = db.Column(db.DateTime)
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
 
     engagement = db.relationship("Engagement", backref=db.backref("analytical_review", uselist=False, cascade="all, delete-orphan"))
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
     lines = db.relationship(
         "AnalyticalReviewLine", backref="review", lazy=True,
         cascade="all, delete-orphan", order_by="AnalyticalReviewLine.id",
@@ -733,6 +1086,10 @@ class AnalyticalReview(db.Model):
     @property
     def is_reviewed(self):
         return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
 
     @property
     def significant_lines(self):
@@ -797,10 +1154,14 @@ class COAMapping(db.Model):
 
 
 class TrialBalance(db.Model):
-    """One per engagement - the imported/entered trial balance for the
-    period being audited, holding both current-year and prior-year
-    (comparative) columns per account. See financials.py for how this
-    feeds the IAS 1 financial statements."""
+    """One per engagement - the PRELIMINARY trial balance imported/entered
+    at planning, holding both current-year and prior-year (comparative)
+    columns per account. This preliminary version - before any audit
+    adjustments - is what the Analytical Review and Substantive Procedures
+    tabs work from. Audit adjustments (see AuditAdjustment below) are
+    layered on top of it, current year only, to produce the FINAL/ADJUSTED
+    trial balance that the Financial Statements are built from. See
+    financials.py for the maths."""
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
     source = db.Column(db.String(20), default="manual")  # "upload" | "manual"
@@ -810,18 +1171,29 @@ class TrialBalance(db.Model):
     completed_at = db.Column(db.DateTime)
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
 
     engagement = db.relationship("Engagement", backref=db.backref("trial_balance", uselist=False, cascade="all, delete-orphan"))
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
     lines = db.relationship(
         "TrialBalanceLine", backref="trial_balance", lazy=True,
         cascade="all, delete-orphan", order_by="TrialBalanceLine.id",
+    )
+    adjustments = db.relationship(
+        "AuditAdjustment", backref="trial_balance", lazy=True,
+        cascade="all, delete-orphan", order_by="AuditAdjustment.id",
     )
 
     @property
     def is_reviewed(self):
         return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
 
     @property
     def unmapped_count(self):
@@ -868,10 +1240,75 @@ class TrialBalanceLine(db.Model):
         return f"<TrialBalanceLine {self.account_name}>"
 
 
+class AuditAdjustment(db.Model):
+    """One audit adjustment (journal entry) proposed against the
+    preliminary trial balance, affecting the CURRENT year only - the
+    trial balance plus all of its adjustments together make up the
+    final/adjusted trial balance the Financial Statements are drawn from.
+    Carries its own Preparer/Reviewer/Partner sign-off, same as every
+    other workpaper, so adjustments get the same scrutiny as anything
+    else. Its line items live in AuditAdjustmentLine below."""
+    id = db.Column(db.Integer, primary_key=True)
+    trial_balance_id = db.Column(db.Integer, db.ForeignKey("trial_balance.id"), nullable=False)
+    reference = db.Column(db.String(50))  # e.g. "AJE 1"
+    description = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    lines = db.relationship(
+        "AuditAdjustmentLine", backref="adjustment", lazy=True,
+        cascade="all, delete-orphan", order_by="AuditAdjustmentLine.id",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def total_debit(self):
+        return sum(l.debit or 0 for l in self.lines)
+
+    @property
+    def total_credit(self):
+        return sum(l.credit or 0 for l in self.lines)
+
+    @property
+    def is_balanced(self):
+        return abs(self.total_debit - self.total_credit) < 0.01
+
+    def __repr__(self):
+        return f"<AuditAdjustment {self.reference}>"
+
+
+class AuditAdjustmentLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    adjustment_id = db.Column(db.Integer, db.ForeignKey("audit_adjustment.id"), nullable=False)
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50), nullable=False)
+    debit = db.Column(db.Float, default=0.0)
+    credit = db.Column(db.Float, default=0.0)
+
+    def __repr__(self):
+        return f"<AuditAdjustmentLine {self.account_name}>"
+
+
 class FinancialStatements(db.Model):
     """The Financial Statements pack for an engagement - mostly a sign-off
     and notes wrapper, since the statements themselves are computed live
-    from the TrialBalance (see financials.py) rather than stored."""
+    from the adjusted TrialBalance (see financials.py) rather than
+    stored."""
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
     basis_of_preparation = db.Column(db.Text)
@@ -880,14 +1317,103 @@ class FinancialStatements(db.Model):
     completed_at = db.Column(db.DateTime)
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
 
     engagement = db.relationship("Engagement", backref=db.backref("financial_statements", uselist=False, cascade="all, delete-orphan"))
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
 
     @property
     def is_reviewed(self):
         return self.reviewed_by_id is not None
 
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
     def __repr__(self):
         return f"<FinancialStatements engagement={self.engagement_id}>"
+
+
+class SubstantiveProcedureArea(db.Model):
+    """One row per (engagement, standard audit area) - e.g. "Cash and Bank"
+    for a given engagement - each forming one section of the substantive
+    audit programme. Suggested procedures (SubstantiveProcedureItem below)
+    are seeded into it by the "Generate suggested procedures" action, driven
+    by the engagement's Risk Assessment rating and the client's industry
+    (see AUDIT_AREAS / BASELINE_SUBSTANTIVE_PROCEDURES / etc. above), and
+    ticked off one by one - but the whole area carries a single
+    Preparer/Reviewer/Partner sign-off, like a section of an audit file
+    rather than each individual procedure needing its own."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    area = db.Column(db.String(80), nullable=False)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("substantive_procedure_areas", lazy=True, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    items = db.relationship(
+        "SubstantiveProcedureItem", backref="area_record", lazy=True,
+        cascade="all, delete-orphan", order_by="SubstantiveProcedureItem.id",
+    )
+
+    __table_args__ = (db.UniqueConstraint("engagement_id", "area", name="uq_subprocedure_area_engagement"),)
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def is_complete(self):
+        return len(self.items) > 0 and all(i.status in ("Done", "N/A") for i in self.items)
+
+    def __repr__(self):
+        return f"<SubstantiveProcedureArea {self.area} engagement={self.engagement_id}>"
+
+
+class SubstantiveProcedureItem(db.Model):
+    """A single substantive procedure within an audit area - either
+    system-suggested (source "baseline"/"risk"/"industry", from the
+    dictionaries above) or added by hand (source "manual")."""
+    id = db.Column(db.Integer, primary_key=True)
+    area_id = db.Column(db.Integer, db.ForeignKey("substantive_procedure_area.id"), nullable=False)
+    procedure_text = db.Column(db.Text, nullable=False)
+    source = db.Column(db.String(20), default="manual")  # "baseline" | "risk" | "industry" | "manual"
+    status = db.Column(db.String(20), default="Not Started")
+    notes = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<SubstantiveProcedureItem area={self.area_id}>"
+
+
+class Permission(db.Model):
+    """One (role, permission_key) toggle - see PERMISSIONS/user_has_permission
+    above. Seeded with defaults on first install/upgrade (see seed.py); an
+    admin can change them from Team > Permissions. There is deliberately no
+    row needed for admin - user_has_permission() always returns True for
+    admin regardless of what's stored here."""
+    id = db.Column(db.Integer, primary_key=True)
+    role = db.Column(db.String(20), nullable=False)
+    permission_key = db.Column(db.String(50), nullable=False)
+    allowed = db.Column(db.Boolean, default=False)
+
+    __table_args__ = (db.UniqueConstraint("role", "permission_key", name="uq_permission_role_key"),)
+
+    def __repr__(self):
+        return f"<Permission {self.role}:{self.permission_key}={self.allowed}>"
