@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}{% if policy %}Edit Policy{% else %}New Policy{% endif %} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{% if policy %}Edit {{ policy.title }}{% else %}New Policy / Procedure{% endif %}</h1>
+</div>
+<div class="card" style="max-width:640px;">
+  <form method="post" enctype="multipart/form-data">
+    <label for="category">Category *</label>
+    <select id="category" name="category" required>
+      {% for c in categories %}
+      <option value="{{ c }}" {% if policy and policy.category == c %}selected{% elif not policy and c == 'Other' %}selected{% endif %}>{{ c }}</option>
+      {% endfor %}
+    </select>
+
+    <label for="title">Name *</label>
+    <input type="text" id="title" name="title" value="{{ policy.title if policy else '' }}" required>
+
+    <label for="description">Description</label>
+    <textarea id="description" name="description">{{ policy.description if policy else '' }}</textarea>
+
+    <label for="file">{% if policy %}Replace file (leave blank to keep the current one){% else %}File (PDF, Word, Excel or PowerPoint) *{% endif %}</label>
+    <input type="file" id="file" name="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" {% if not policy %}required{% endif %}>
+    {% if policy %}
+    <p class="muted" style="font-size:12.5px;">Current file: {{ policy.filename }}</p>
+    {% endif %}
+
+    <button type="submit" class="btn gold">{% if policy %}Save changes{% else %}Add to library{% endif %}</button>
+    <a href="{{ url_for('hr.list_policies') }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}
