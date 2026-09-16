@@ -7,7 +7,7 @@ from sqlalchemy.engine import Engine
 
 from config import Config, INSTANCE_DIR
 from extensions import db, login_manager
-from models import User, DocumentTemplate
+from models import User, DocumentTemplate, Permission
 
 
 @event.listens_for(Engine, "connect")
@@ -37,19 +37,29 @@ def _add_missing_columns():
     """
     if db.engine.dialect.name != "sqlite":
         return  # only SQLite is supported/expected; skip silently otherwise
+    partner_signoff_cols = [("partner_signed_by_id", "INTEGER"), ("partner_signed_at", "DATETIME")]
     additions = {
         "document": [("reference", "VARCHAR(100)")],
         "engagement": [("subdivision", "VARCHAR(50)")],
         "engagement_checklist_item": [
             ("reviewed_by_id", "INTEGER"),
             ("reviewed_at", "DATETIME"),
-        ],
+        ] + partner_signoff_cols,
         "engagement_task": [
             ("completed_by_id", "INTEGER"),
             ("completed_at", "DATETIME"),
             ("reviewed_by_id", "INTEGER"),
             ("reviewed_at", "DATETIME"),
-        ],
+        ] + partner_signoff_cols,
+        "risk_assessment": list(partner_signoff_cols),
+        "materiality_calculation": [
+            ("reviewed_by_id", "INTEGER"),
+            ("reviewed_at", "DATETIME"),
+        ] + partner_signoff_cols,
+        "entity_understanding": list(partner_signoff_cols),
+        "analytical_review": list(partner_signoff_cols),
+        "trial_balance": list(partner_signoff_cols),
+        "financial_statements": list(partner_signoff_cols),
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
@@ -96,7 +106,8 @@ def create_app():
 
     @app.context_processor
     def inject_globals():
-        return {"firm_name": "Neverlank Chartered Accountants"}
+        from models import user_has_permission
+        return {"firm_name": "Neverlank Chartered Accountants", "user_has_permission": user_has_permission}
 
     with app.app_context():
         db.create_all()
@@ -114,6 +125,17 @@ def create_app():
             # steps needed from the user. Safe/idempotent either way.
             from seed import seed_document_templates
             seed_document_templates()
+        if Permission.query.count() == 0:
+            # Likewise for the configurable role permissions (also a new
+            # feature) - seed default rows that exactly reproduce this
+            # app's previous hardcoded behaviour, so upgrading changes
+            # nothing until an admin opens Team > Permissions and changes
+            # a toggle. A plain `if` (not `elif`) so this still runs on the
+            # very first launch of a brand-new install alongside the seeding
+            # above - though run_seed() already seeds permissions itself, so
+            # this is a no-op there and only does real work on an upgrade.
+            from seed import seed_permissions
+            seed_permissions()
 
     register_cli(app)
 
