@@ -21,12 +21,14 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from extensions import db
-from models import DocumentTemplate
+from models import DocumentTemplate, ENGAGEMENT_TYPES
 from config import Config
 
 doc_templates_bp = Blueprint("doc_templates", __name__, url_prefix="/document-templates")
 
-TEMPLATE_TYPES = ["Audit", "Assurance", "Consulting"]
+# Kept in sync with the engagement types in models.py so a new engagement
+# type (e.g. Secretarial) automatically becomes choosable here too.
+TEMPLATE_TYPES = ENGAGEMENT_TYPES
 ALLOWED_TEMPLATE_EXTENSIONS = {"docx", "xlsx"}
 
 
