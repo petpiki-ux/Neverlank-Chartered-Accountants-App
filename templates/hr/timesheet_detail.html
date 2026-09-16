@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Timesheet - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ sheet.user.name }}'s timesheet</h1>
+    <div class="subtitle">
+      Week of {{ sheet.week_start.strftime('%d %b %Y') }}
+      &middot; <span class="badge status-{{ sheet.status }}">{{ sheet.status }}</span>
+      {% if sheet.is_reviewed %}&middot; Reviewed by {{ sheet.reviewed_by.name }} on {{ sheet.reviewed_at.strftime('%d %b %Y') }}{% endif %}
+    </div>
+  </div>
+  <div>
+    <a href="{{ url_for('hr.list_timesheets') }}" class="btn secondary">Back to Time Sheets</a>
+  </div>
+</div>
+
+<div class="stat-grid">
+  <div class="stat-card"><div class="num">{{ sheet.total_hours }}</div><div class="label">Total hours</div></div>
+  <div class="stat-card"><div class="num">{{ sheet.regular_hours }}</div><div class="label">Regular hours</div></div>
+  <div class="stat-card{% if sheet.overtime_hours > 0 %} danger{% endif %}"><div class="num">{{ sheet.overtime_hours }}</div><div class="label">Overtime hours</div></div>
+</div>
+
+{% if can_edit %}
+<div class="card">
+  <h3 class="mt-0">Add an entry</h3>
+  <form method="post" action="{{ url_for('hr.add_time_entry', timesheet_id=sheet.id) }}" class="form-row" style="align-items:flex-end;">
+    <div>
+      <label for="work_date">Date</label>
+      <select id="work_date" name="work_date">
+        {% for d in week_dates %}<option value="{{ d.isoformat() }}">{{ d.strftime('%a %d %b') }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="engagement_id">Engagement (optional)</label>
+      <select id="engagement_id" name="engagement_id">
+        <option value="">General / non-billable</option>
+        {% for e in engagements %}<option value="{{ e.id }}">{{ e.client.name }} - {{ e.title }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label for="description">Description</label><input type="text" id="description" name="description" placeholder="e.g. Fieldwork - cash testing"></div>
+    <div><label for="hours">Hours</label><input type="number" id="hours" name="hours" step="0.25" min="0.25" max="24" required></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add entry</button></div>
+  </form>
+  <p class="muted" style="font-size:12px;">Any hours beyond {{ 8 }} on a single day are automatically counted as overtime.</p>
+</div>
+{% endif %}
+
+<div class="card">
+  {% if sheet.entries %}
+  <table>
+    <thead><tr><th>Date</th><th>Engagement</th><th>Description</th><th>Hours</th><th>Regular</th><th>Overtime</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+    {% for e in sheet.entries %}
+      <tr>
+        <td>{{ e.work_date.strftime('%a %d %b') }}</td>
+        <td class="muted">{{ e.engagement.title if e.engagement else 'General / non-billable' }}</td>
+        <td class="muted">{{ e.description or '—' }}</td>
+        <td>{{ e.hours }}</td>
+        <td>{{ e.regular_hours }}</td>
+        <td>{{ e.overtime_hours }}</td>
+        {% if can_edit %}
+        <td><form method="post" action="{{ url_for('hr.delete_time_entry', entry_id=e.id) }}" class="inline" onsubmit="return confirm('Delete this entry?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No hours logged yet.</div>
+  {% endif %}
+</div>
+
+{% if can_review %}
+<div class="card">
+  <h3 class="mt-0">Review</h3>
+  {% if sheet.status == 'Approved' %}
+  <p class="muted" style="font-size:13px;">Approved by {{ sheet.reviewed_by.name }} on {{ sheet.reviewed_at.strftime('%d %b %Y') }}.</p>
+  <form method="post" action="{{ url_for('hr.unapprove_timesheet', timesheet_id=sheet.id) }}"><button type="submit" class="btn secondary">Reopen for editing</button></form>
+  {% else %}
+  <form method="post" action="{{ url_for('hr.approve_timesheet', timesheet_id=sheet.id) }}"><button type="submit" class="btn gold">Approve timesheet</button></form>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
