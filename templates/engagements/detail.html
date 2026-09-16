@@ -6,7 +6,7 @@
     <h1>{{ engagement.title }}</h1>
     <div class="subtitle">
       <a href="{{ url_for('clients.view_client', client_id=engagement.client.id) }}">{{ engagement.client.name }}</a>
-      &middot; <span class="badge type-{{ engagement.type }}">{{ engagement.type }}</span>
+      &middot; <span class="badge type-{{ engagement.type }}">{{ engagement.type }}</span>{% if engagement.subdivision %} <span class="badge">{{ engagement.subdivision }}</span>{% endif %}
       &middot; <span class="badge status-{{ engagement.status|replace(' ', '') }}">{{ engagement.status }}</span>
       {% if engagement.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}
     </div>
