@@ -1,0 +1,436 @@
+"""HR & Administration: Policies and Procedures (a firm document library,
+same pattern as Document Templates), Time Sheets (in-app weekly hours entry
+with automatic overtime calculation, plus a downloadable Excel template and
+an upload option for staff who prefer filling it in offline), and a
+firm-wide Project Management task board pulling together every engagement's
+Tasks tab in one place.
+"""
+import os
+import uuid
+from datetime import datetime, date, timedelta
+from functools import wraps
+
+from flask import (
+    Blueprint, render_template, redirect, url_for, request, flash,
+    send_from_directory, abort, current_app,
+)
+from flask_login import login_required, current_user
+from werkzeug.utils import secure_filename
+
+from extensions import db
+from models import (
+    PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, User, Engagement,
+    EngagementTask, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
+)
+from config import Config
+
+hr_bp = Blueprint("hr", __name__, url_prefix="/hr")
+
+ALLOWED_POLICY_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"}
+ALLOWED_TIMESHEET_UPLOAD_EXTENSIONS = {"xlsx", "xls", "pdf"}
+
+
+def editor_required(f):
+    """Editing the Policies library is restricted to admin/partner, same
+    convention as the Document Templates library - everyone can view and
+    download."""
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if current_user.role not in ("admin", "partner"):
+            abort(403)
+        return f(*args, **kwargs)
+    return wrapped
+
+
+def reviewer_required(f):
+    """Approving timesheets and reviewing checklist items/tasks is
+    restricted to supervisor/partner/admin."""
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if current_user.role not in REVIEWER_ROLES:
+            abort(403)
+        return f(*args, **kwargs)
+    return wrapped
+
+
+@hr_bp.route("/")
+@login_required
+def index():
+    return render_template("hr/index.html")
+
+
+# ---------- Policies and Procedures ----------
+
+def _allowed_policy_file(filename):
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return ext in ALLOWED_POLICY_EXTENSIONS
+
+
+def _policies_dir():
+    os.makedirs(Config.POLICIES_DATA_DIR, exist_ok=True)
+    return Config.POLICIES_DATA_DIR
+
+
+@hr_bp.route("/policies")
+@login_required
+def list_policies():
+    library = {}
+    for category in POLICY_CATEGORIES:
+        items = PolicyDocument.query.filter_by(category=category).order_by(
+            PolicyDocument.order, PolicyDocument.title
+        ).all()
+        if items:
+            library[category] = items
+    can_edit = current_user.role in ("admin", "partner")
+    return render_template("hr/policies_list.html", library=library, can_edit=can_edit)
+
+
+@hr_bp.route("/policies/download/<int:policy_id>")
+@login_required
+def download_policy(policy_id):
+    policy = PolicyDocument.query.get_or_404(policy_id)
+    directory = _policies_dir()
+    if not os.path.exists(os.path.join(directory, policy.filename)):
+        abort(404)
+    return send_from_directory(directory, policy.filename, as_attachment=True)
+
+
+@hr_bp.route("/policies/new", methods=["GET", "POST"])
+@login_required
+@editor_required
+def new_policy():
+    if request.method == "POST":
+        category = request.form.get("category", "Other")
+        title = request.form.get("title", "").strip()
+        description = request.form.get("description", "").strip()
+        file = request.files.get("file")
+
+        if category not in POLICY_CATEGORIES:
+            category = "Other"
+        if not title:
+            flash("Please give the policy/procedure a name.", "danger")
+            return render_template("hr/policy_form.html", policy=None, categories=POLICY_CATEGORIES)
+        if not file or file.filename == "":
+            flash("Please choose a file to upload.", "danger")
+            return render_template("hr/policy_form.html", policy=None, categories=POLICY_CATEGORIES)
+        if not _allowed_policy_file(file.filename):
+            flash("Only PDF, Word, Excel and PowerPoint files are allowed.", "danger")
+            return render_template("hr/policy_form.html", policy=None, categories=POLICY_CATEGORIES)
+
+        policy = PolicyDocument(
+            category=category,
+            title=title,
+            description=description,
+            filename="pending",
+            updated_by_id=current_user.id,
+        )
+        db.session.add(policy)
+        db.session.flush()
+
+        original_name = secure_filename(file.filename)
+        stored_name = f"pol{policy.id}_{original_name}"
+        file.save(os.path.join(_policies_dir(), stored_name))
+        policy.filename = stored_name
+
+        db.session.commit()
+        flash(f"'{policy.title}' added to the Policies library.", "success")
+        return redirect(url_for("hr.list_policies"))
+
+    return render_template("hr/policy_form.html", policy=None, categories=POLICY_CATEGORIES)
+
+
+@hr_bp.route("/policies/<int:policy_id>/edit", methods=["GET", "POST"])
+@login_required
+@editor_required
+def edit_policy(policy_id):
+    policy = PolicyDocument.query.get_or_404(policy_id)
+    if request.method == "POST":
+        category = request.form.get("category", policy.category)
+        title = request.form.get("title", "").strip()
+        if category not in POLICY_CATEGORIES:
+            category = "Other"
+        if not title:
+            flash("Please give the policy/procedure a name.", "danger")
+            return render_template("hr/policy_form.html", policy=policy, categories=POLICY_CATEGORIES)
+
+        file = request.files.get("file")
+        if file and file.filename != "":
+            if not _allowed_policy_file(file.filename):
+                flash("Only PDF, Word, Excel and PowerPoint files are allowed.", "danger")
+                return render_template("hr/policy_form.html", policy=policy, categories=POLICY_CATEGORIES)
+            old_path = os.path.join(_policies_dir(), policy.filename)
+            if os.path.exists(old_path):
+                os.remove(old_path)
+            original_name = secure_filename(file.filename)
+            stored_name = f"pol{policy.id}_{original_name}"
+            file.save(os.path.join(_policies_dir(), stored_name))
+            policy.filename = stored_name
+
+        policy.category = category
+        policy.title = title
+        policy.description = request.form.get("description", "").strip()
+        policy.updated_by_id = current_user.id
+        db.session.commit()
+        flash(f"'{policy.title}' updated.", "success")
+        return redirect(url_for("hr.list_policies"))
+
+    return render_template("hr/policy_form.html", policy=policy, categories=POLICY_CATEGORIES)
+
+
+@hr_bp.route("/policies/<int:policy_id>/delete", methods=["POST"])
+@login_required
+@editor_required
+def delete_policy(policy_id):
+    policy = PolicyDocument.query.get_or_404(policy_id)
+    file_path = os.path.join(_policies_dir(), policy.filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
+    title = policy.title
+    db.session.delete(policy)
+    db.session.commit()
+    flash(f"'{title}' deleted.", "info")
+    return redirect(url_for("hr.list_policies"))
+
+
+# ---------- Time Sheets ----------
+
+def _monday_of(d):
+    return d - timedelta(days=d.weekday())
+
+
+@hr_bp.route("/timesheets")
+@login_required
+def list_timesheets():
+    my_sheets = (
+        TimeSheet.query.filter_by(user_id=current_user.id)
+        .order_by(TimeSheet.week_start.desc())
+        .all()
+    )
+    team_sheets = []
+    if current_user.role in REVIEWER_ROLES:
+        team_sheets = (
+            TimeSheet.query.filter(TimeSheet.user_id != current_user.id)
+            .order_by(TimeSheet.status.asc(), TimeSheet.week_start.desc())
+            .all()
+        )
+    uploads = (
+        TimeSheetUpload.query.filter_by(user_id=current_user.id).order_by(TimeSheetUpload.uploaded_at.desc()).all()
+        if current_user.role not in REVIEWER_ROLES else
+        TimeSheetUpload.query.order_by(TimeSheetUpload.uploaded_at.desc()).all()
+    )
+    return render_template(
+        "hr/timesheets_list.html",
+        my_sheets=my_sheets,
+        team_sheets=team_sheets,
+        uploads=uploads,
+        default_week=_monday_of(date.today()).isoformat(),
+    )
+
+
+@hr_bp.route("/timesheets/new", methods=["POST"])
+@login_required
+def new_timesheet():
+    week_start_raw = request.form.get("week_start")
+    try:
+        week_start = _monday_of(datetime.strptime(week_start_raw, "%Y-%m-%d").date()) if week_start_raw else _monday_of(date.today())
+    except ValueError:
+        week_start = _monday_of(date.today())
+
+    existing = TimeSheet.query.filter_by(user_id=current_user.id, week_start=week_start).first()
+    if existing:
+        flash("You already have a timesheet for that week - opening it below.", "info")
+        return redirect(url_for("hr.view_timesheet", timesheet_id=existing.id))
+
+    sheet = TimeSheet(user_id=current_user.id, week_start=week_start)
+    db.session.add(sheet)
+    db.session.commit()
+    flash("Timesheet started - add your hours below.", "success")
+    return redirect(url_for("hr.view_timesheet", timesheet_id=sheet.id))
+
+
+@hr_bp.route("/timesheets/<int:timesheet_id>")
+@login_required
+def view_timesheet(timesheet_id):
+    sheet = TimeSheet.query.get_or_404(timesheet_id)
+    if sheet.user_id != current_user.id and current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    engagements = Engagement.query.filter(Engagement.status != "Completed").order_by(Engagement.title).all()
+    can_edit = (sheet.user_id == current_user.id) and sheet.status != "Approved"
+    can_review = current_user.role in REVIEWER_ROLES and sheet.user_id != current_user.id
+    week_dates = [sheet.week_start + timedelta(days=i) for i in range(7)]
+    return render_template(
+        "hr/timesheet_detail.html",
+        sheet=sheet,
+        engagements=engagements,
+        can_edit=can_edit,
+        can_review=can_review,
+        week_dates=week_dates,
+    )
+
+
+@hr_bp.route("/timesheets/<int:timesheet_id>/entries/add", methods=["POST"])
+@login_required
+def add_time_entry(timesheet_id):
+    sheet = TimeSheet.query.get_or_404(timesheet_id)
+    if sheet.user_id != current_user.id:
+        abort(403)
+    if sheet.status == "Approved":
+        flash("This timesheet is already approved - ask your reviewer to reopen it before changing entries.", "danger")
+        return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+    work_date_raw = request.form.get("work_date")
+    try:
+        work_date = datetime.strptime(work_date_raw, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        flash("Please choose a valid date.", "danger")
+        return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+    try:
+        hours = float(request.form.get("hours", 0) or 0)
+    except ValueError:
+        hours = 0
+
+    if hours <= 0:
+        flash("Please enter hours greater than zero.", "danger")
+        return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+    entry = TimeEntry(
+        timesheet_id=sheet.id,
+        work_date=work_date,
+        engagement_id=request.form.get("engagement_id") or None,
+        description=request.form.get("description", "").strip(),
+        hours=hours,
+    )
+    db.session.add(entry)
+    db.session.commit()
+    flash("Entry added.", "success")
+    return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+
+@hr_bp.route("/timesheets/entries/<int:entry_id>/delete", methods=["POST"])
+@login_required
+def delete_time_entry(entry_id):
+    entry = TimeEntry.query.get_or_404(entry_id)
+    sheet = entry.timesheet
+    if sheet.user_id != current_user.id:
+        abort(403)
+    if sheet.status == "Approved":
+        flash("This timesheet is already approved - ask your reviewer to reopen it before changing entries.", "danger")
+        return redirect(url_for("hr.view_timesheet", timesheet_id=sheet.id))
+    db.session.delete(entry)
+    db.session.commit()
+    return redirect(url_for("hr.view_timesheet", timesheet_id=sheet.id))
+
+
+@hr_bp.route("/timesheets/<int:timesheet_id>/approve", methods=["POST"])
+@login_required
+@reviewer_required
+def approve_timesheet(timesheet_id):
+    sheet = TimeSheet.query.get_or_404(timesheet_id)
+    if sheet.user_id == current_user.id:
+        flash("You can't approve your own timesheet.", "danger")
+        return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+    sheet.status = "Approved"
+    sheet.reviewed_by_id = current_user.id
+    sheet.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash(f"Timesheet approved for {sheet.user.name}.", "success")
+    return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+
+@hr_bp.route("/timesheets/<int:timesheet_id>/unapprove", methods=["POST"])
+@login_required
+@reviewer_required
+def unapprove_timesheet(timesheet_id):
+    sheet = TimeSheet.query.get_or_404(timesheet_id)
+    sheet.status = "Submitted"
+    sheet.reviewed_by_id = None
+    sheet.reviewed_at = None
+    db.session.commit()
+    flash("Timesheet reopened for editing.", "info")
+    return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+
+@hr_bp.route("/timesheets/upload", methods=["POST"])
+@login_required
+def upload_timesheet():
+    file = request.files.get("file")
+    if not file or file.filename == "":
+        flash("Please choose a file to upload.", "danger")
+        return redirect(url_for("hr.list_timesheets"))
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in ALLOWED_TIMESHEET_UPLOAD_EXTENSIONS:
+        flash("Only .xlsx, .xls or .pdf files are allowed for timesheet uploads.", "danger")
+        return redirect(url_for("hr.list_timesheets"))
+
+    original_name = secure_filename(file.filename)
+    stored_name = f"ts_{current_user.id}_{uuid.uuid4().hex[:10]}_{original_name}"
+    upload_dir = os.path.join(current_app.config["UPLOAD_FOLDER"], "timesheets")
+    os.makedirs(upload_dir, exist_ok=True)
+    file.save(os.path.join(upload_dir, stored_name))
+
+    record = TimeSheetUpload(
+        user_id=current_user.id,
+        period_label=request.form.get("period_label", "").strip(),
+        original_filename=original_name,
+        stored_filename=stored_name,
+    )
+    db.session.add(record)
+    db.session.commit()
+    flash(f"Uploaded '{original_name}'.", "success")
+    return redirect(url_for("hr.list_timesheets"))
+
+
+@hr_bp.route("/timesheets/uploads/<int:upload_id>/download")
+@login_required
+def download_timesheet_upload(upload_id):
+    record = TimeSheetUpload.query.get_or_404(upload_id)
+    if record.user_id != current_user.id and current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    upload_dir = os.path.join(current_app.config["UPLOAD_FOLDER"], "timesheets")
+    return send_from_directory(
+        upload_dir, record.stored_filename, as_attachment=True, download_name=record.original_filename,
+    )
+
+
+@hr_bp.route("/timesheets/uploads/<int:upload_id>/delete", methods=["POST"])
+@login_required
+def delete_timesheet_upload(upload_id):
+    record = TimeSheetUpload.query.get_or_404(upload_id)
+    if record.user_id != current_user.id and current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    upload_dir = os.path.join(current_app.config["UPLOAD_FOLDER"], "timesheets")
+    try:
+        os.remove(os.path.join(upload_dir, record.stored_filename))
+    except OSError:
+        pass
+    db.session.delete(record)
+    db.session.commit()
+    return redirect(url_for("hr.list_timesheets"))
+
+
+# ---------- Project Management (firm-wide task board) ----------
+
+@hr_bp.route("/projects")
+@login_required
+def project_board():
+    status_filter = request.args.get("status", "")
+    assignee_filter = request.args.get("assigned_to", "")
+
+    query = EngagementTask.query.join(Engagement)
+    if status_filter:
+        query = query.filter(EngagementTask.status == status_filter)
+    if assignee_filter:
+        query = query.filter(EngagementTask.assigned_to_id == assignee_filter)
+
+    tasks = query.order_by(EngagementTask.due_date.asc().nullslast()).all()
+    people = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
+
+    return render_template(
+        "projects/board.html",
+        tasks=tasks,
+        people=people,
+        statuses=TASK_STATUSES,
+        status_filter=status_filter,
+        assignee_filter=assignee_filter,
+    )
