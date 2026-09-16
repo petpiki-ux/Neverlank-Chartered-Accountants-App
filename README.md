@@ -1,8 +1,8 @@
 # Neverlank Audit, Assurance & Consulting App
 
-An internal web app for tracking audit, assurance and consulting engagements:
-clients, engagements, working papers/documents, risk assessments & checklists,
-and team task assignment.
+An internal web app for tracking audit, assurance, consulting and
+secretarial engagements: clients, engagements, working papers/documents,
+risk assessments & checklists, and team task assignment.
 
 It runs on one office computer and the rest of the team accesses it from
 their own browser over your local network — no internet or cloud hosting
@@ -28,6 +28,10 @@ required.
 **Default login:** username `admin`, password `changeme123` — please change
 this immediately from the Account page (top right) once you're in, and add
 your team members from the "Team" menu.
+
+The Neverlank logo appears on the sign-in screen and in the top-left of
+every page (also used as the browser tab icon) — swap
+`static/img/neverlank-logo.png` for a different image any time to rebrand.
 
 ### Want an actual .exe file instead?
 
@@ -70,22 +74,115 @@ ever want to re-add the starter checklist templates).
 
 ## Everyday use
 
-- **Clients** — add each audit/assurance/consulting client once.
+- **Clients** — add each client once.
 - **Engagements** — create one per assignment (e.g. "FY2026 Statutory Audit"),
   set its type, status, partner/manager, deadline, and team members. You can
   start it from a checklist template to pre-populate audit procedures.
+  Choosing the **Secretarial** type reveals a subdivision field — Company
+  Registrations, Trusts, or PVOs — shown alongside the type everywhere the
+  engagement appears (list, detail page, dashboard) so secretarial work is
+  clearly split out from audit/assurance/consulting.
+  The engagement detail page's tabs follow the order a real audit is
+  actually planned in: understand the entity, then analytical review, then
+  risk assessment, then materiality/planning, then the checklist itself.
+- **Understanding the Entity tab** — system-guided, not a blank text box:
+  five structured prompts covering the nature of the entity, the industry
+  and regulatory environment, accounting policies, objectives/strategies
+  and related business risks, and how management measures performance.
+  Fill each section in and save; this is background documentation rather
+  than a score, but carries the same Preparer/Reviewer sign-off as the rest
+  of the app once all five sections are complete, and re-saving clears any
+  stale review.
+- **Analytical Review tab** — system-based: log each key figure's prior-
+  and current-year amount (revenue, gross profit, key expense lines, etc.)
+  and the app computes the variance and variance % automatically, flagging
+  anything at or above an adjustable significance threshold (10% by
+  default) so it doesn't get missed. Add an explanation against any
+  flagged line. Carries the same Preparer/Reviewer sign-off, and
+  adding/editing/removing a line or changing the threshold clears any
+  stale review.
+- **Risk Assessment tab** — system-based: answer a ten-question
+  questionnaire (five likelihood factors like transaction complexity,
+  control environment and fraud indicators; five impact factors like
+  materiality magnitude, going concern and regulatory consequences) and the
+  app computes likelihood, impact, a score out of 25 and an overall
+  Low/Medium/High rating automatically — no manual scoring. Re-answering
+  the questionnaire updates the same assessment and recalculates the
+  rating. Carries the same Preparer/Reviewer sign-off as the Checklist and
+  Tasks tabs (a supervisor/partner/admin other than whoever completed it),
+  and re-answering clears any stale review. Risk items logged the old
+  manual way before this change are kept and shown read-only underneath,
+  for reference.
+- **Planning tab** — a materiality calculator: enter the client's total
+  revenue, profit before tax and total assets, pick which basis to use (or
+  let it take the highest), and the system computes suggested overall
+  materiality, performance materiality and a "clearly trivial" threshold
+  automatically from adjustable % benchmarks. Also shows a suggested audit
+  approach (more/less substantive testing, staffing, etc.) driven by the
+  current Risk Assessment rating. These are practical starting points, not
+  a substitute for professional judgement or your firm's own methodology —
+  review and adjust the benchmark percentages per engagement.
 - **Checklist tab** — tick off procedures as they're completed; progress shows
-  as a bar on the dashboard and engagement list.
-- **Risk Assessment tab** — log risks with likelihood x impact scoring
-  (auto-rated Low/Medium/High) and mitigation/response notes.
+  as a bar on the dashboard and engagement list. Each item records who
+  **prepared** it (auto-recorded when marked Done/N/A) and has a separate
+  **"Mark as reviewed"** action for a supervisor, partner or admin to sign
+  off — never the same person who prepared it. Re-opening a completed item
+  clears any earlier review, since it needs a fresh look once redone.
 - **Documents tab** — automatically lists the Document Templates that match
-  this engagement's type (Audit/Assurance/Consulting) right at the top, ready
-  to download with one click — no need to go find the right one in the
-  separate Document Templates library. Below that, upload working papers;
-  re-uploading the same filename and category automatically creates a new
-  version rather than overwriting.
+  this engagement's type (Audit/Assurance/Consulting/Secretarial) right at
+  the top, ready to download with one click — no need to go find the right one in the
+  separate Document Templates library. Below that, upload working papers with
+  an optional filing/working-paper reference (e.g. "A-1") alongside the
+  category and notes, for your own indexing; re-uploading the same filename
+  and category automatically creates a new version rather than overwriting.
 - **Tasks tab** — assign specific pieces of work to team members with due
-  dates and priority; each person's open tasks show on their dashboard.
+  dates and priority; each person's open tasks show on their dashboard. The
+  same Preparer/Reviewer sign-off as the Checklist tab applies here too: a
+  task auto-records who completed it, and a supervisor/partner/admin (other
+  than whoever completed it) can mark it reviewed.
+- **Finalisation tab** — import the period's trial balance and draft the
+  IAS 1 financial statements from it:
+  - **Trial Balance** — download the **Neverlank_TB_Import_Template.xlsx**
+    template, fill in one row per account with both the current year and
+    prior year (comparative) debit/credit columns, and upload it (.xlsx or
+    .csv both work) — or add accounts one at a time by hand instead. Map
+    each account to an IAS 1 category (property, plant and equipment,
+    trade receivables, revenue, and so on) using the dropdown on each row;
+    once an account is mapped, that mapping is remembered **for this
+    client** and auto-applied the next time you import a trial balance for
+    them, so a repeat engagement mostly maps itself. A stat row flags
+    whether the current and prior year columns each balance (debits =
+    credits) and how many accounts are still unmapped. Carries the same
+    Preparer/Reviewer sign-off as the rest of the app, gated on every
+    account being mapped first, and re-importing or editing a line clears
+    any stale review automatically (your category choices are kept and
+    re-applied to matching accounts on re-import).
+  - **Financial statements** — once every account is mapped, the app
+    computes a full set of IAS 1 primary statements live from the trial
+    balance: Statement of Financial Position, Statement of Profit or Loss
+    and Other Comprehensive Income, Statement of Changes in Equity, and a
+    Statement of Cash Flows (indirect method, current year only — a prior
+    year comparative cash flow needs the trial balance from two years
+    back). Retained earnings is treated as the standard working-trial-
+    balance convention expects: the trial balance figure is the *opening*
+    balance brought forward, and the app computes the closing balance
+    itself (opening + profit for the year − dividends), checking that
+    figure against the prior year's own computed closing and flagging any
+    difference for you to investigate (dividends posted straight to
+    retained earnings, a prior period adjustment, etc. are common causes).
+    The cash flow statement similarly checks its computed closing cash
+    position against the trial balance's actual cash balance and flags any
+    gap. Investing activities are approximated as the net movement in each
+    non-current asset's carrying value (so depreciation is folded into
+    that net movement rather than added back separately) — review against
+    the fixed asset register if there were disposals during the year. Add
+    a basis of preparation note and carry the same Preparer/Reviewer
+    sign-off as everywhere else in the app.
+
+  As with the Risk Assessment and Planning tabs, this gives you a
+  system-computed first draft built from your mapped trial balance, not a
+  substitute for professional judgement, disclosure notes, or your firm's
+  own review of the final financial statements.
 - **Checklist Templates** (top menu) — build reusable audit programs once, use
   them on every new engagement of that type. Comes with 7 ready-made
   templates: Standard Statutory Audit, Full Statutory Audit Program
@@ -97,7 +194,7 @@ ever want to re-add the starter checklist templates).
 - **Document Templates** (top menu) — a library of ready-made, fillable Word
   and Excel workpapers (engagement letters, representation letters, planning
   memos, a CGT computation sheet with live formulas, findings reports, and
-  more) grouped by Audit / Assurance / Consulting, each carrying the
+  more) grouped by Audit / Assurance / Consulting / Secretarial, each carrying the
   Neverlank letterhead/logo, a "File reference:" field, and a footer showing
   its template reference code (e.g. SA-01). Download a blank one, fill it in
   for the specific engagement, then upload the completed file to that
@@ -108,8 +205,36 @@ ever want to re-add the starter checklist templates).
   immediately, with no need to wait for an app update. **Delete** removes a
   template from the library entirely. Staff can view and download but not
   edit the library.
-- **Team** (admin only) — add/deactivate staff and set roles (staff, partner,
-  admin).
+- **Team** (admin only) — add/deactivate staff and set roles (staff,
+  supervisor, partner, admin). Supervisors, partners and admins can review
+  and sign off checklist items, tasks and timesheets prepared by others;
+  staff cannot.
+- **HR & Admin** (top menu) — a landing page for three sections:
+  - **Policies and Procedures** — a firm document library (HR policies,
+    firm procedures, quality control manual, IT & security, forms) that
+    works just like Document Templates: everyone can view/download,
+    admins/partners can add, edit or delete entries.
+  - **Time Sheets** — log hours for the week directly in the app (pick an
+    engagement or mark it general/non-billable); regular vs overtime hours
+    are calculated automatically (anything past 8 hours in a single day
+    counts as overtime) and shown as running totals. Prefer Excel? Download
+    the ready-made **Neverlank_Timesheet_Template.xlsx** template — it has
+    the same live regular/overtime formulas built in — fill it in offline,
+    and upload the completed file back on the same page. A supervisor,
+    partner or admin approves each submitted timesheet (never their own);
+    approving locks it from further edits until a reviewer reopens it.
+  - **Project Management** — a firm-wide board listing every open task
+    across *all* engagements in one place (not just one engagement's Tasks
+    tab), filterable by staff member and status, with the same
+    Preparer/Reviewer sign-off available inline.
+  - **Planner** — an audit timetable showing every active engagement's key
+    dates (start, period end, deadline) side by side, soonest deadline
+    first, with a **Clash** badge flagging weeks where more than one
+    engagement's deadline lands — plus a staffing grid (staff × week)
+    showing who's booked on which engagement and at what % of their time.
+    Book a staff member onto an engagement for a date range from the
+    **Staffing** section on that engagement's Overview tab; it feeds
+    straight into this grid, with over-100%-booked weeks flagged in red.
 
 ## Data & backups
 
