@@ -20,6 +20,7 @@
       <a href="{{ url_for('engagements.list_engagements') }}">Engagements</a>
       <a href="{{ url_for('engagements.list_templates') }}">Checklist Templates</a>
       <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a>
+      <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
       {% if current_user.role == 'admin' %}
       <a href="{{ url_for('users.list_users') }}">Team</a>
       {% endif %}
