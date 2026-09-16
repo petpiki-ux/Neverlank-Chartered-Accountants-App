@@ -140,6 +140,27 @@ SCOPE_SUGGESTIONS = {
     ),
 }
 
+# "Obtain an understanding of the client's business and industry" - a
+# structured set of narrative prompts (rather than a scored questionnaire,
+# since this is background knowledge to document, not something with a
+# numeric answer) covering the standard areas: the entity itself, its
+# industry/regulatory/external environment, its accounting policies, its
+# objectives/strategies/business risks, and how management measures and
+# reviews its own performance. General-purpose starting prompts - adjust the
+# wording to match your firm's own methodology.
+ENTITY_UNDERSTANDING_FIELDS = [
+    ("nature_of_entity", "Nature of the entity",
+     "Operations, ownership and governance structure, key investments, financing structure, and any recent or planned changes (acquisitions, restructuring, new products/services)."),
+    ("industry_environment", "Industry, regulatory and other external factors",
+     "Industry conditions (competition, supply/demand, cyclicality), the regulatory environment, applicable financial reporting framework, and general economic conditions affecting the client."),
+    ("accounting_policies", "Accounting policies",
+     "Significant accounting policies applied, any changes since the prior period and the reasons for them, and appropriateness for the industry."),
+    ("objectives_strategies_risks", "Objectives, strategies and related business risks",
+     "The entity's objectives and strategies, and the business risks that could result in a material misstatement of the financial statements."),
+    ("performance_measurement", "Measurement and review of financial performance",
+     "Key performance indicators, budgets, variance analysis, employee performance measures, and other information management itself uses to assess results."),
+]
+
 
 engagement_team = db.Table(
     "engagement_team",
@@ -643,3 +664,109 @@ class MaterialityCalculation(db.Model):
 
     def __repr__(self):
         return f"<MaterialityCalculation engagement={self.engagement_id}>"
+
+
+class EntityUnderstanding(db.Model):
+    """Obtain an understanding of the client's business and industry - a
+    structured, system-guided form (see ENTITY_UNDERSTANDING_FIELDS above)
+    rather than one free-text box, so nothing gets missed. One row per
+    engagement; saving again updates it in place."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    nature_of_entity = db.Column(db.Text)
+    industry_environment = db.Column(db.Text)
+    accounting_policies = db.Column(db.Text)
+    objectives_strategies_risks = db.Column(db.Text)
+    performance_measurement = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("entity_understanding", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+
+    @property
+    def field_values(self):
+        return [getattr(self, field) for field, _, _ in ENTITY_UNDERSTANDING_FIELDS]
+
+    @property
+    def is_complete(self):
+        return all((v or "").strip() for v in self.field_values)
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    def __repr__(self):
+        return f"<EntityUnderstanding engagement={self.engagement_id}>"
+
+
+class AnalyticalReview(db.Model):
+    """System-based analytical review for one engagement: log current vs
+    prior year figures for whichever line items matter and the app computes
+    the variance and flags any fluctuation at or above threshold_pct as
+    significant, prompting an explanation - rather than a free-form write-up.
+    One row per engagement (holds settings + sign-off); its line items live
+    in AnalyticalReviewLine below.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    threshold_pct = db.Column(db.Float, default=10.0)  # flag |variance %| >= this as significant
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("analytical_review", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    lines = db.relationship(
+        "AnalyticalReviewLine", backref="review", lazy=True,
+        cascade="all, delete-orphan", order_by="AnalyticalReviewLine.id",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def significant_lines(self):
+        return [l for l in self.lines if l.is_significant]
+
+    def __repr__(self):
+        return f"<AnalyticalReview engagement={self.engagement_id}>"
+
+
+class AnalyticalReviewLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    analytical_review_id = db.Column(db.Integer, db.ForeignKey("analytical_review.id"), nullable=False)
+    label = db.Column(db.String(150), nullable=False)  # e.g. "Revenue", "Gross profit"
+    prior_amount = db.Column(db.Float)
+    current_amount = db.Column(db.Float)
+    explanation = db.Column(db.Text)
+
+    @property
+    def variance_amount(self):
+        if self.prior_amount is None or self.current_amount is None:
+            return None
+        return self.current_amount - self.prior_amount
+
+    @property
+    def variance_pct(self):
+        if self.prior_amount in (None, 0) or self.current_amount is None:
+            return None
+        return (self.current_amount - self.prior_amount) / abs(self.prior_amount) * 100
+
+    @property
+    def is_significant(self):
+        pct = self.variance_pct
+        threshold = self.review.threshold_pct if self.review else 10.0
+        return pct is not None and abs(pct) >= (threshold or 10.0)
+
+    def __repr__(self):
+        return f"<AnalyticalReviewLine {self.label}>"
