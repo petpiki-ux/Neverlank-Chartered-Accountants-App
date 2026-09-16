@@ -770,3 +770,124 @@ class AnalyticalReviewLine(db.Model):
 
     def __repr__(self):
         return f"<AnalyticalReviewLine {self.label}>"
+
+
+# ---------- Trial Balance import & IAS 1 Financial Statements ----------
+
+class COAMapping(db.Model):
+    """A remembered mapping from one of a client's trial balance account
+    names to an IAS 1 financial statement category (see financials.py) -
+    reusable across every engagement/period for that client, so a repeat
+    engagement's trial balance mostly auto-maps itself. Keyed on the
+    account name as typed/imported (matched case-insensitively)."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50), nullable=False)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("coa_mappings", cascade="all, delete-orphan"))
+    updated_by = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("client_id", "account_name", name="uq_coa_mapping_client_account"),)
+
+    def __repr__(self):
+        return f"<COAMapping {self.client_id}:{self.account_name}={self.fs_category}>"
+
+
+class TrialBalance(db.Model):
+    """One per engagement - the imported/entered trial balance for the
+    period being audited, holding both current-year and prior-year
+    (comparative) columns per account. See financials.py for how this
+    feeds the IAS 1 financial statements."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    source = db.Column(db.String(20), default="manual")  # "upload" | "manual"
+    original_filename = db.Column(db.String(255))
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("trial_balance", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    lines = db.relationship(
+        "TrialBalanceLine", backref="trial_balance", lazy=True,
+        cascade="all, delete-orphan", order_by="TrialBalanceLine.id",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def unmapped_count(self):
+        return sum(1 for l in self.lines if not l.fs_category)
+
+    @property
+    def is_fully_mapped(self):
+        return len(self.lines) > 0 and self.unmapped_count == 0
+
+    @property
+    def current_totals(self):
+        return sum(l.current_debit or 0 for l in self.lines), sum(l.current_credit or 0 for l in self.lines)
+
+    @property
+    def prior_totals(self):
+        return sum(l.prior_debit or 0 for l in self.lines), sum(l.prior_credit or 0 for l in self.lines)
+
+    @property
+    def is_current_balanced(self):
+        d, c = self.current_totals
+        return abs(d - c) < 0.01
+
+    @property
+    def is_prior_balanced(self):
+        d, c = self.prior_totals
+        return abs(d - c) < 0.01
+
+    def __repr__(self):
+        return f"<TrialBalance engagement={self.engagement_id}>"
+
+
+class TrialBalanceLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    trial_balance_id = db.Column(db.Integer, db.ForeignKey("trial_balance.id"), nullable=False)
+    account_code = db.Column(db.String(50))
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50))  # code from financials.FS_CATEGORIES, or "excluded" / blank if unmapped
+    current_debit = db.Column(db.Float, default=0.0)
+    current_credit = db.Column(db.Float, default=0.0)
+    prior_debit = db.Column(db.Float, default=0.0)
+    prior_credit = db.Column(db.Float, default=0.0)
+
+    def __repr__(self):
+        return f"<TrialBalanceLine {self.account_name}>"
+
+
+class FinancialStatements(db.Model):
+    """The Financial Statements pack for an engagement - mostly a sign-off
+    and notes wrapper, since the statements themselves are computed live
+    from the TrialBalance (see financials.py) rather than stored."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    basis_of_preparation = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("financial_statements", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    def __repr__(self):
+        return f"<FinancialStatements engagement={self.engagement_id}>"
