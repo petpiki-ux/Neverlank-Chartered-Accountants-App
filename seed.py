@@ -9,7 +9,7 @@ import os
 import shutil
 
 from extensions import db
-from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate
+from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES
 from config import Config
 
 
@@ -313,6 +313,24 @@ def seed_document_templates():
     db.session.commit()
 
 
+def seed_permissions():
+    """Create any missing (role, permission_key) rows from the PERMISSIONS
+    registry in models.py, using that entry's own default_roles. Safe to
+    re-run any time (including after a later update adds a new permission
+    key): it only ever adds a row that doesn't already exist, so it never
+    overwrites a toggle an admin has since changed on the settings screen.
+    Admin doesn't need a row (user_has_permission() always allows admin),
+    but one is still seeded (allowed=True) so the settings screen has
+    something consistent to show in that column.
+    """
+    for key, _, _, default_roles in PERMISSIONS:
+        for role in USER_ROLES:
+            if Permission.query.filter_by(role=role, permission_key=key).first():
+                continue
+            db.session.add(Permission(role=role, permission_key=key, allowed=role in default_roles))
+    db.session.commit()
+
+
 def run_seed():
     # Admin user
     if not User.query.filter_by(username="admin").first():
@@ -335,6 +353,7 @@ def run_seed():
 
     db.session.commit()
     seed_document_templates()
+    seed_permissions()
 
 
 if __name__ == "__main__":
