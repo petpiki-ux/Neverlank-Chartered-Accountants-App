@@ -46,6 +46,7 @@ a:hover { text-decoration: underline; }
   color: white;
 }
 .topbar .brand .tag { color: var(--gold-light); font-weight: 400; font-size: 12px; }
+.topbar .brand img { height: 32px; width: 32px; }
 
 .topbar nav a {
   color: #d8e0e8;
@@ -161,6 +162,7 @@ select[multiple] { min-height: 110px; }
 .badge.type-Audit { background: var(--navy); color: white; }
 .badge.type-Assurance { background: var(--gold); color: white; }
 .badge.type-Consulting { background: #567; color: white; }
+.badge.type-Secretarial { background: #6b3fa0; color: white; }
 .badge.risk-High { background: #fdecea; color: var(--danger); }
 .badge.risk-Medium { background: #fdf1dc; color: var(--warning); }
 .badge.risk-Low { background: #e5f6ea; color: var(--success); }
@@ -200,6 +202,8 @@ select[multiple] { min-height: 110px; }
   width: 340px;
   box-shadow: 0 10px 40px rgba(0,0,0,0.25);
 }
+.login-brand { text-align: center; margin-bottom: 6px; }
+.login-logo { width: 88px; height: 88px; margin-bottom: 12px; }
 .login-card h1 { color: var(--navy); font-size: 18px; margin: 0 0 2px 0; }
 .login-card .tag { color: var(--text-muted); font-size: 12.5px; margin-bottom: 20px; }
 
