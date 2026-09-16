@@ -9,7 +9,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
-    RiskItem, Document, EngagementTask,
+    RiskItem, Document, EngagementTask, DocumentTemplate,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
 )
 
@@ -177,6 +177,15 @@ def view_engagement(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
     tab = request.args.get("tab", "overview")
+    # Document Templates matching this engagement's type (Audit/Assurance/
+    # Consulting) - shown on the Documents tab so the right blank
+    # letters/workpapers for this client's engagement are one click away,
+    # with no need to go hunting in the separate Document Templates library.
+    matching_templates = (
+        DocumentTemplate.query.filter_by(type=engagement.type)
+        .order_by(DocumentTemplate.ref_code)
+        .all()
+    )
     return render_template(
         "engagements/detail.html",
         engagement=engagement,
@@ -185,6 +194,7 @@ def view_engagement(engagement_id):
         checklist_statuses=CHECKLIST_STATUSES,
         risk_statuses=RISK_STATUSES,
         task_statuses=TASK_STATUSES,
+        matching_templates=matching_templates,
     )
 
 
