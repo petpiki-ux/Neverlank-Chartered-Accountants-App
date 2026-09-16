@@ -17,9 +17,11 @@
       <option value="staff" {% if person and person.role=='staff' %}selected{% endif %}>Staff</option>
       <option value="supervisor" {% if person and person.role=='supervisor' %}selected{% endif %}>Supervisor</option>
       <option value="partner" {% if person and person.role=='partner' %}selected{% endif %}>Partner</option>
+      {% if current_user.role == 'admin' %}
       <option value="admin" {% if person and person.role=='admin' %}selected{% endif %}>Admin</option>
+      {% endif %}
     </select>
-    <p class="muted" style="font-size:12px;margin:-10px 0 14px 0;">Supervisors, partners and admins can review and sign off checklist items, tasks and timesheets prepared by others.</p>
+    <p class="muted" style="font-size:12px;margin:-10px 0 14px 0;">Supervisors, partners and admins can review and sign off checklist items, tasks and timesheets prepared by others.{% if current_user.role != 'admin' %} Only an admin can grant the admin role.{% endif %}</p>
     {% if person %}
     <label><input type="checkbox" name="is_active" style="width:auto;display:inline-block;" {% if person.is_active_flag %}checked{% endif %}> Active</label>
     {% endif %}

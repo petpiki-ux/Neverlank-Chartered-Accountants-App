@@ -6,7 +6,9 @@
     <h1>Checklist Templates</h1>
     <div class="subtitle">Reusable audit programs / procedure lists to start new engagements from.</div>
   </div>
+  {% if user_has_permission(current_user, 'manage_checklist_templates') %}
   <a href="{{ url_for('engagements.new_template') }}" class="btn gold">+ New Template</a>
+  {% endif %}
 </div>
 <div class="card">
   {% if templates %}
@@ -19,16 +21,21 @@
         <td><span class="badge type-{{ t.type }}">{{ t.type }}</span></td>
         <td>{{ t.items|length }}</td>
         <td class="text-right">
+          {% if user_has_permission(current_user, 'manage_checklist_templates') %}
           <form method="post" action="{{ url_for('engagements.delete_template', template_id=t.id) }}" class="inline" onsubmit="return confirm('Delete this template?')">
             <button type="submit" class="btn small danger">Delete</button>
           </form>
+          {% endif %}
         </td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <div class="empty-state">No templates yet. <a href="{{ url_for('engagements.new_template') }}">Create one</a> to speed up starting new engagements.</div>
+  <div class="empty-state">
+    No templates yet.
+    {% if user_has_permission(current_user, 'manage_checklist_templates') %}<a href="{{ url_for('engagements.new_template') }}">Create one</a> to speed up starting new engagements.{% endif %}
+  </div>
   {% endif %}
 </div>
 {% endblock %}

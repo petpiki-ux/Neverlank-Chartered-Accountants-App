@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Permissions - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Permissions</h1><div class="subtitle">Choose which roles can do what, beyond the normal Preparer/Reviewer/Partner sign-off workflow</div></div>
+  <a href="{{ url_for('users.list_users') }}" class="btn secondary">Back to Team</a>
+</div>
+
+<div class="card">
+  <p class="muted" style="font-size:12.5px;">
+    These toggles only affect the firm-administration actions listed below (managing shared libraries, deleting whole
+    clients/engagements/documents, and managing team members). They never affect who can prepare, review or give the
+    Engagement Partner sign-off on a workpaper - that always follows the same roles everywhere else in the app.
+    Admin always has full access to everything here and isn't shown as a column - there's nothing to toggle for it,
+    and it's not possible to lock every admin out by mistake.
+  </p>
+  <form method="post">
+    <table>
+      <thead>
+        <tr>
+          <th style="min-width:260px;">Capability</th>
+          {% for role in roles %}
+          <th class="text-right">{{ role|capitalize }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for key, label, description, default_roles in permissions %}
+        <tr>
+          <td>
+            <strong>{{ label }}</strong>
+            <div class="muted" style="font-size:11.5px;">{{ description }}</div>
+          </td>
+          {% for role in roles %}
+          <td class="text-right">
+            <input type="checkbox" name="perm__{{ key }}__{{ role }}" style="width:auto;" {% if current.get((role, key), role in default_roles) %}checked{% endif %}>
+          </td>
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="submit" class="btn gold" style="margin-top:14px;">Save permissions</button>
+  </form>
+</div>
+{% endblock %}

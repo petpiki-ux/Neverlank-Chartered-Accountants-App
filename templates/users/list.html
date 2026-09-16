@@ -3,7 +3,12 @@
 {% block content %}
 <div class="page-header">
   <div><h1>Team</h1><div class="subtitle">{{ people|length }} team member(s)</div></div>
-  <a href="{{ url_for('users.new_user') }}" class="btn gold">+ Add Team Member</a>
+  <div>
+    {% if current_user.role == 'admin' %}
+    <a href="{{ url_for('users.manage_permissions') }}" class="btn secondary">Permissions</a>
+    {% endif %}
+    <a href="{{ url_for('users.new_user') }}" class="btn gold">+ Add Team Member</a>
+  </div>
 </div>
 <div class="card">
   <table>

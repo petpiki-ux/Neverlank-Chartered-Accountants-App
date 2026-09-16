@@ -8,6 +8,7 @@
   </div>
 </div>
 
+{% if user_has_permission(current_user, 'manage_checklist_templates') %}
 <div class="card">
   <h3 class="mt-0">Add procedure</h3>
   <form method="post" action="{{ url_for('engagements.add_template_item', template_id=template.id) }}" class="form-row" style="align-items:flex-end;">
@@ -16,6 +17,7 @@
     <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add</button></div>
   </form>
 </div>
+{% endif %}
 
 <div class="card">
   {% if template.items %}
