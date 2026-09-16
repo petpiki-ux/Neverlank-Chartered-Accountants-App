@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Policies and Procedures - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Policies and Procedures</h1>
+    <div class="subtitle">The firm's HR policies, procedures, quality control manual and internal forms.</div>
+  </div>
+  {% if can_edit %}
+  <a href="{{ url_for('hr.new_policy') }}" class="btn gold">+ New Policy / Procedure</a>
+  {% endif %}
+</div>
+
+{% for category, items in library.items() %}
+<div class="card">
+  <h3 class="mt-0"><span class="badge">{{ category }}</span></h3>
+  <table>
+    <thead><tr><th>Name</th><th>Description</th><th>Format</th><th>Last updated</th><th></th></tr></thead>
+    <tbody>
+      {% for policy in items %}
+      <tr>
+        <td>{{ policy.title }}</td>
+        <td class="muted">{{ policy.description }}</td>
+        <td>{{ policy.file_ext|upper }}</td>
+        <td class="muted">{{ policy.updated_at.strftime('%d %b %Y') if policy.updated_at else '—' }}{% if policy.updated_by %} by {{ policy.updated_by.name }}{% endif %}</td>
+        <td class="text-right">
+          <a href="{{ url_for('hr.download_policy', policy_id=policy.id) }}" class="btn small secondary">Download</a>
+          {% if can_edit %}
+          <a href="{{ url_for('hr.edit_policy', policy_id=policy.id) }}" class="btn small secondary">Edit</a>
+          <form method="post" action="{{ url_for('hr.delete_policy', policy_id=policy.id) }}" style="display:inline;" onsubmit="return confirm('Delete this policy/procedure? This cannot be undone.');">
+            <button type="submit" class="btn small danger">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+
+{% if not library %}
+<div class="card">
+  <p class="muted">No policies or procedures added yet.{% if can_edit %} Click "+ New Policy / Procedure" above to add the first one.{% endif %}</p>
+</div>
+{% endif %}
+{% endblock %}
