@@ -159,6 +159,8 @@ select[multiple] { min-height: 110px; }
 .badge.status-Review { background: #f1e7fb; color: #6b3fa0; }
 .badge.status-Completed { background: #e5f6ea; color: var(--success); }
 .badge.status-OnHold, .badge.status-On.Hold { background: #f4f4f4; color: #888; }
+.badge.status-Submitted { background: #fdf1dc; color: var(--warning); }
+.badge.status-Approved { background: #e5f6ea; color: var(--success); }
 .badge.type-Audit { background: var(--navy); color: white; }
 .badge.type-Assurance { background: var(--gold); color: white; }
 .badge.type-Consulting { background: #567; color: white; }
