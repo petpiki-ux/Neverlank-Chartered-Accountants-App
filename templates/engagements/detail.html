@@ -177,20 +177,22 @@
     <form method="post" action="{{ url_for('engagements.upload_document', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
       <div><label for="file">File *</label><input type="file" id="file" name="file" required></div>
       <div><label for="category">Category</label><input type="text" id="category" name="category" placeholder="e.g. Working Papers" value="General"></div>
+      <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" placeholder="e.g. A-1"></div>
       <div><label for="notes">Notes</label><input type="text" id="notes" name="notes"></div>
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
     </form>
-    <p class="muted" style="font-size:12px;">Re-uploading a file with the same name and category creates a new version automatically.</p>
+    <p class="muted" style="font-size:12px;">Re-uploading a file with the same name and category creates a new version automatically. Reference is optional - use it for your own filing/working-paper index (e.g. "A-1").</p>
   </div>
 
   <div class="card">
     {% if engagement.documents %}
     <table>
-      <thead><tr><th>File</th><th>Category</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+      <thead><tr><th>File</th><th>Reference</th><th>Category</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
       <tbody>
       {% for d in engagement.documents|sort(attribute='uploaded_at', reverse=True) %}
         <tr>
           <td>{{ d.original_filename }}{% if d.notes %}<div class="muted" style="font-size:11.5px;">{{ d.notes }}</div>{% endif %}</td>
+          <td class="muted">{{ d.reference or '—' }}</td>
           <td>{{ d.category }}</td>
           <td>v{{ d.version }}</td>
           <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
