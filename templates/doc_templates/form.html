@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}{% if template %}Edit Template{% else %}New Template{% endif %} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{% if template %}Edit {{ template.title }}{% else %}New Template{% endif %}</h1>
+</div>
+<div class="card" style="max-width:640px;">
+  <form method="post" enctype="multipart/form-data">
+    <label for="type">Type *</label>
+    <select id="type" name="type" required>
+      {% for t in types %}
+      <option value="{{ t }}" {% if template and template.type == t %}selected{% elif not template and t == 'Audit' %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+
+    <div class="form-row">
+      <div>
+        <label for="ref_code">Reference code</label>
+        <input type="text" id="ref_code" name="ref_code" placeholder="e.g. SA-01" value="{{ template.ref_code if template else '' }}">
+      </div>
+      <div>
+        <label for="title">Template name *</label>
+        <input type="text" id="title" name="title" value="{{ template.title if template else '' }}" required>
+      </div>
+    </div>
+
+    <label for="description">Description</label>
+    <textarea id="description" name="description">{{ template.description if template else '' }}</textarea>
+
+    <label for="file">{% if template %}Replace file (leave blank to keep the current one){% else %}Template file (.docx or .xlsx) *{% endif %}</label>
+    <input type="file" id="file" name="file" accept=".docx,.xlsx" {% if not template %}required{% endif %}>
+    {% if template %}
+    <p class="muted" style="font-size:12.5px;">Current file: {{ template.filename }}</p>
+    {% endif %}
+
+    <button type="submit" class="btn gold">{% if template %}Save changes{% else %}Create template{% endif %}</button>
+    <a href="{{ url_for('doc_templates.list_templates') }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}
