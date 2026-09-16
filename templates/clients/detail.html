@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ client.name }}</h1>
+    <div class="subtitle">{{ client.industry or 'Client' }}{% if client.contact_person %} &middot; {{ client.contact_person }}{% endif %}</div>
+  </div>
+  <div>
+    <a href="{{ url_for('clients.edit_client', client_id=client.id) }}" class="btn secondary">Edit</a>
+    <a href="{{ url_for('engagements.new_engagement') }}" class="btn gold">+ New Engagement</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="form-row">
+    <div><strong>Email:</strong> {{ client.email or '—' }}</div>
+    <div><strong>Phone:</strong> {{ client.phone or '—' }}</div>
+  </div>
+  <div><strong>Address:</strong> {{ client.address or '—' }}</div>
+  {% if client.notes %}<p class="muted">{{ client.notes }}</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Engagements</h3>
+  {% if client.engagements %}
+  <table>
+    <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Deadline</th><th>Partner</th></tr></thead>
+    <tbody>
+      {% for e in client.engagements|sort(attribute='deadline') %}
+      <tr>
+        <td><a href="{{ url_for('engagements.view_engagement', engagement_id=e.id) }}">{{ e.title }}</a></td>
+        <td><span class="badge type-{{ e.type }}">{{ e.type }}</span></td>
+        <td><span class="badge status-{{ e.status|replace(' ', '') }}">{{ e.status }}</span></td>
+        <td>{{ e.deadline.strftime('%d %b %Y') if e.deadline else '—' }}</td>
+        <td>{{ e.partner.name if e.partner else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No engagements for this client yet.</div>
+  {% endif %}
+</div>
+
+<form method="post" action="{{ url_for('clients.delete_client', client_id=client.id) }}" onsubmit="return confirm('Delete this client and ALL its engagements? This cannot be undone.');">
+  <button type="submit" class="btn danger small">Delete client</button>
+</form>
+{% endblock %}
