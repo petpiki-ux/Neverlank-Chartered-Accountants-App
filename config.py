@@ -41,6 +41,11 @@ DOCUMENT_TEMPLATES_DATA_DIR = os.path.join(DATA_DIR, "document_templates_data")
 # Backwards-compatible alias (older code referenced this name for the
 # read-only bundled copy).
 DOCUMENT_TEMPLATES_DIR = DOCUMENT_TEMPLATES_SEED_DIR
+# Writable folder for the HR & Administration > Policies and Procedures
+# library (firm policies, procedures, forms) - same idea as
+# DOCUMENT_TEMPLATES_DATA_DIR above, but there's no bundled/seeded starting
+# set; it starts empty and admins/partners add files from the app.
+POLICIES_DATA_DIR = os.path.join(DATA_DIR, "policies_data")
 
 
 class Config:
@@ -59,3 +64,4 @@ class Config:
     DOCUMENT_TEMPLATES_SEED_DIR = DOCUMENT_TEMPLATES_SEED_DIR
     DOCUMENT_TEMPLATES_DATA_DIR = DOCUMENT_TEMPLATES_DATA_DIR
     DOCUMENT_TEMPLATES_DIR = DOCUMENT_TEMPLATES_DIR
+    POLICIES_DATA_DIR = POLICIES_DATA_DIR
