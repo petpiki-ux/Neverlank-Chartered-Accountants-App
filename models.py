@@ -5,7 +5,8 @@ from flask_login import UserMixin
 from extensions import db
 
 
-ENGAGEMENT_TYPES = ["Audit", "Assurance", "Consulting"]
+ENGAGEMENT_TYPES = ["Audit", "Assurance", "Consulting", "Secretarial"]
+SECRETARIAL_SUBDIVISIONS = ["Company Registrations", "Trusts", "PVOs"]
 ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"]
 TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
 CHECKLIST_STATUSES = ["Not Started", "In Progress", "Done", "N/A"]
@@ -65,6 +66,7 @@ class Engagement(db.Model):
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
     title = db.Column(db.String(200), nullable=False)
     type = db.Column(db.String(30), nullable=False, default="Audit")
+    subdivision = db.Column(db.String(50))  # only meaningful when type == "Secretarial"
     status = db.Column(db.String(30), nullable=False, default="Planning")
     period_end = db.Column(db.Date)
     start_date = db.Column(db.Date, default=date.today)
