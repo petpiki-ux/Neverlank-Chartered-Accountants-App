@@ -314,6 +314,7 @@ def upload_document(engagement_id):
 
     original_name = secure_filename(file.filename)
     category = request.form.get("category", "General").strip() or "General"
+    reference = request.form.get("reference", "").strip()
 
     # simple versioning: count existing docs with same original name+category in this engagement
     existing = Document.query.filter_by(
@@ -329,6 +330,7 @@ def upload_document(engagement_id):
         original_filename=original_name,
         stored_filename=stored_name,
         category=category,
+        reference=reference,
         version=version,
         notes=request.form.get("notes", "").strip(),
         uploaded_by_id=current_user.id,
