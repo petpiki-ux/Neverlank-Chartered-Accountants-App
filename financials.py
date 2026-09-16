@@ -374,8 +374,45 @@ def build_cash_flow(totals, pl):
     }
 
 
-def build_all_statements(lines):
+def apply_adjustments(totals, adjustments):
+    """Layers audit adjustments (journal entries) on top of the preliminary
+    trial balance's computed totals, to produce the FINAL/ADJUSTED totals the
+    Financial Statements are built from. Returns a NEW dict in the same
+    shape as compute_totals()'s output - `totals` itself is left untouched,
+    so the caller can still use the unadjusted (preliminary) totals
+    elsewhere (e.g. Analytical Review, Substantive Procedures).
+
+    Only the CURRENT year figures are ever adjusted - audit adjustments
+    relate to the year under audit, never to the prior year's comparative
+    column, which stays exactly as originally trial-balanced.
+
+    `adjustments` is an iterable of objects with a `.lines` relationship of
+    objects carrying `.fs_category`, `.debit`, `.credit` (see
+    models.AuditAdjustment / AuditAdjustmentLine). Lines mapped to a
+    category with no normal balance (or not present in `totals`, e.g. an
+    unmapped/blank category) are skipped rather than raising."""
+    adjusted = {code: dict(vals) for code, vals in totals.items()}
+    for adj in adjustments:
+        for line in adj.lines:
+            cat = CATEGORY_BY_CODE.get(line.fs_category)
+            if not cat or cat["normal"] is None or cat["code"] not in adjusted:
+                continue
+            debit = line.debit or 0.0
+            credit = line.credit or 0.0
+            amount = (debit - credit) if cat["normal"] == "debit" else (credit - debit)
+            adjusted[cat["code"]]["current"] += amount
+    return adjusted
+
+
+def build_all_statements(lines, adjustments=None):
+    """`adjustments`, when given (a TrialBalance's .adjustments), are applied
+    on top of the preliminary trial balance's totals before the statements
+    are built - see apply_adjustments() above. Leave it out (the default)
+    to build statements straight from the preliminary trial balance, e.g.
+    for a quick preliminary view before any adjustments are proposed."""
     totals = compute_totals(lines)
+    if adjustments:
+        totals = apply_adjustments(totals, adjustments)
     pl = build_income_statement(totals)
     equity = build_equity_statement(totals, pl)
     sfp = build_financial_position(totals, equity)
