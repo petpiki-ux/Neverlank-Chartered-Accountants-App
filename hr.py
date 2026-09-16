@@ -21,6 +21,7 @@ from extensions import db
 from models import (
     PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, User, Engagement,
     EngagementTask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
+    user_has_permission,
 )
 from config import Config
 
@@ -31,12 +32,13 @@ ALLOWED_TIMESHEET_UPLOAD_EXTENSIONS = {"xlsx", "xls", "pdf"}
 
 
 def editor_required(f):
-    """Editing the Policies library is restricted to admin/partner, same
-    convention as the Document Templates library - everyone can view and
-    download."""
+    """Editing the Policies library is gated by the configurable "Manage
+    Policies & Procedures" permission (Team > Permissions) - defaults to
+    admin/partner only, same as before this was made configurable -
+    everyone can still view and download regardless."""
     @wraps(f)
     def wrapped(*args, **kwargs):
-        if current_user.role not in ("admin", "partner"):
+        if not user_has_permission(current_user, "manage_policies"):
             abort(403)
         return f(*args, **kwargs)
     return wrapped
@@ -81,7 +83,7 @@ def list_policies():
         ).all()
         if items:
             library[category] = items
-    can_edit = current_user.role in ("admin", "partner")
+    can_edit = user_has_permission(current_user, "manage_policies")
     return render_template("hr/policies_list.html", library=library, can_edit=can_edit)
 
 
