@@ -4,12 +4,14 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}{{ firm_name }}{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/neverlank-logo.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
 </head>
 <body>
   {% if current_user.is_authenticated %}
   <div class="topbar">
     <div class="brand">
+      <img src="{{ url_for('static', filename='img/neverlank-logo.png') }}" alt="Neverlank">
       Neverlank <span class="tag">Audit &middot; Assurance &middot; Consulting</span>
     </div>
     <nav>
