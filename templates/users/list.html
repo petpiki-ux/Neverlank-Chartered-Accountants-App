@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Team - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Team</h1><div class="subtitle">{{ people|length }} team member(s)</div></div>
+  <a href="{{ url_for('users.new_user') }}" class="btn gold">+ Add Team Member</a>
+</div>
+<div class="card">
+  <table>
+    <thead><tr><th>Name</th><th>Username</th><th>Role</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for p in people %}
+      <tr>
+        <td>{{ p.name }}</td>
+        <td>{{ p.username }}</td>
+        <td><span class="badge">{{ p.role }}</span></td>
+        <td>{% if p.is_active_flag %}<span class="badge risk-Low">Active</span>{% else %}<span class="badge risk-High">Inactive</span>{% endif %}</td>
+        <td class="text-right"><a href="{{ url_for('users.edit_user', user_id=p.id) }}" class="btn small secondary">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
