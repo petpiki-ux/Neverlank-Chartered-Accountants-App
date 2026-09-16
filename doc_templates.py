@@ -21,7 +21,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from extensions import db
-from models import DocumentTemplate, ENGAGEMENT_TYPES
+from models import DocumentTemplate, ENGAGEMENT_TYPES, user_has_permission
 from config import Config
 
 doc_templates_bp = Blueprint("doc_templates", __name__, url_prefix="/document-templates")
@@ -33,12 +33,13 @@ ALLOWED_TEMPLATE_EXTENSIONS = {"docx", "xlsx"}
 
 
 def editor_required(f):
-    """Editing the master template library is restricted to admin/partner
-    roles so staff can't accidentally overwrite or delete a firm-wide
-    template - everyone can still view and download."""
+    """Editing the master template library is gated by the configurable
+    "Manage Document Templates" permission (Team > Permissions) - defaults
+    to admin/partner only, same as before this was made configurable -
+    everyone can still view and download regardless."""
     @wraps(f)
     def wrapped(*args, **kwargs):
-        if current_user.role not in ("admin", "partner"):
+        if not user_has_permission(current_user, "manage_document_templates"):
             abort(403)
         return f(*args, **kwargs)
     return wrapped
@@ -65,7 +66,7 @@ def list_templates():
         ).all()
         if items:
             library[eng_type] = items
-    can_edit = current_user.role in ("admin", "partner")
+    can_edit = user_has_permission(current_user, "manage_document_templates")
     return render_template("doc_templates/list.html", library=library, can_edit=can_edit)
 
 
