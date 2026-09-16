@@ -2,7 +2,7 @@ import os
 import click
 from flask import Flask, redirect, url_for
 from flask_login import current_user
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
 
 from config import Config, INSTANCE_DIR
@@ -23,6 +23,30 @@ def _set_sqlite_pragmas(dbapi_connection, connection_record):
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA busy_timeout=5000")
         cursor.close()
+
+
+def _add_missing_columns():
+    """Lightweight auto-migration for SQLite: db.create_all() only creates
+    brand-new tables, it never adds a column to a table that already exists.
+    So when a code update adds a new column to an existing model (like
+    Document.reference below), an already-running install's database needs a
+    one-time ALTER TABLE to pick it up. This runs on every startup, checks
+    what's actually there first, and only adds what's missing - so it's a
+    no-op on a fresh install (the column is already in db.create_all()'s
+    table definition) and safe to run repeatedly.
+    """
+    if db.engine.dialect.name != "sqlite":
+        return  # only SQLite is supported/expected; skip silently otherwise
+    additions = {
+        "document": [("reference", "VARCHAR(100)")],
+    }
+    with db.engine.connect() as conn:
+        for table, columns in additions.items():
+            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            for col_name, col_type in columns:
+                if col_name not in existing:
+                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"))
+                    conn.commit()
 
 
 def create_app():
@@ -63,6 +87,7 @@ def create_app():
 
     with app.app_context():
         db.create_all()
+        _add_missing_columns()
         # First-run convenience: seed an admin login + starter checklist
         # templates automatically so a freshly-installed copy works with zero
         # command-line steps.
