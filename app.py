@@ -39,6 +39,7 @@ def _add_missing_columns():
         return  # only SQLite is supported/expected; skip silently otherwise
     additions = {
         "document": [("reference", "VARCHAR(100)")],
+        "engagement": [("subdivision", "VARCHAR(50)")],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
