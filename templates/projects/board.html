@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Project Management - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Project Management</h1>
+    <div class="subtitle">Every open task across all engagements, in one place.</div>
+  </div>
+</div>
+
+<div class="card">
+  <form method="get" style="margin-bottom:0;" class="form-row">
+    <div>
+      <label for="status">Status</label>
+      <select name="status" id="status" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for s in statuses %}<option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="assigned_to">Staff</label>
+      <select name="assigned_to" id="assigned_to" onchange="this.form.submit()">
+        <option value="">Everyone</option>
+        {% for p in people %}<option value="{{ p.id }}" {% if assignee_filter==p.id|string %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  {% if tasks %}
+  <table>
+    <thead><tr><th>Task</th><th>Engagement</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th>Review</th><th></th></tr></thead>
+    <tbody>
+      {% for t in tasks %}
+      <tr>
+        <td>{{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
+        <td><a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id, tab='tasks') }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></td>
+        <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>
+        <td>{{ t.due_date.strftime('%d %b %Y') if t.due_date else '—' }} {% if t.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
+        <td>{{ t.priority }}</td>
+        <td>
+          <form method="post" action="{{ url_for('engagements.update_task', task_id=t.id) }}" class="inline">
+            <input type="hidden" name="return_to" value="board">
+            <input type="hidden" name="title" value="{{ t.title }}">
+            <input type="hidden" name="assigned_to_id" value="{{ t.assigned_to_id or '' }}">
+            <input type="hidden" name="due_date" value="{{ t.due_date.isoformat() if t.due_date else '' }}">
+            <input type="hidden" name="priority" value="{{ t.priority }}">
+            <select name="status" onchange="this.form.submit()">
+              {% for s in statuses %}<option value="{{ s }}" {% if t.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+            </select>
+          </form>
+          {% if t.completed_by %}<div class="muted" style="font-size:11px;">Prepared by {{ t.completed_by.name }}</div>{% endif %}
+        </td>
+        <td>
+          {% if t.is_reviewed %}
+            <div class="muted" style="font-size:11px;">Reviewed by {{ t.reviewed_by.name }}</div>
+            {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+            <form method="post" action="{{ url_for('engagements.unreview_task', task_id=t.id) }}" class="inline"><input type="hidden" name="return_to" value="board"><button type="submit" class="btn small secondary">Remove</button></form>
+            {% endif %}
+          {% elif current_user.role in ('supervisor', 'partner', 'admin') and t.status == 'Done' and t.completed_by_id != current_user.id %}
+            <form method="post" action="{{ url_for('engagements.review_task', task_id=t.id) }}" class="inline"><input type="hidden" name="return_to" value="board"><button type="submit" class="btn small gold">Mark reviewed</button></form>
+          {% elif t.status == 'Done' %}
+            <span class="muted" style="font-size:11px;">Awaiting review</span>
+          {% else %}
+            <span class="muted" style="font-size:11px;">—</span>
+          {% endif %}
+        </td>
+        <td><form method="post" action="{{ url_for('engagements.delete_task', task_id=t.id) }}" class="inline" onsubmit="return confirm('Delete this task?')"><input type="hidden" name="return_to" value="board"><button type="submit" class="btn small danger">Delete</button></form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No tasks match these filters.</div>
+  {% endif %}
+</div>
+{% endblock %}
