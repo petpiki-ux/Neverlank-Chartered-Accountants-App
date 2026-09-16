@@ -1,0 +1,94 @@
+{% extends "base.html" %}
+{% block title %}{% if engagement %}Edit Engagement{% else %}New Engagement{% endif %} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{% if engagement %}Edit {{ engagement.title }}{% else %}New Engagement{% endif %}</h1>
+</div>
+<div class="card" style="max-width:720px;">
+  <form method="post">
+    <div class="form-row">
+      <div>
+        <label for="client_id">Client *</label>
+        <select id="client_id" name="client_id" required>
+          <option value="">Select client...</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}" {% if engagement and engagement.client_id==c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="title">Engagement title *</label>
+        <input type="text" id="title" name="title" placeholder="e.g. FY2026 Statutory Audit" value="{{ engagement.title if engagement else '' }}" required>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="type">Type</label>
+        <select id="type" name="type">
+          {% for t in types %}<option value="{{ t }}" {% if engagement and engagement.type==t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="status">Status</label>
+        <select id="status" name="status">
+          {% for s in statuses %}<option value="{{ s }}" {% if engagement and engagement.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="start_date">Start date</label>
+        <input type="date" id="start_date" name="start_date" value="{{ engagement.start_date.isoformat() if engagement and engagement.start_date else '' }}">
+      </div>
+      <div>
+        <label for="period_end">Period end</label>
+        <input type="date" id="period_end" name="period_end" value="{{ engagement.period_end.isoformat() if engagement and engagement.period_end else '' }}">
+      </div>
+      <div>
+        <label for="deadline">Deadline</label>
+        <input type="date" id="deadline" name="deadline" value="{{ engagement.deadline.isoformat() if engagement and engagement.deadline else '' }}">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="partner_id">Engagement partner</label>
+        <select id="partner_id" name="partner_id">
+          <option value="">Unassigned</option>
+          {% for u in users %}<option value="{{ u.id }}" {% if engagement and engagement.partner_id==u.id %}selected{% endif %}>{{ u.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="manager_id">Engagement manager</label>
+        <select id="manager_id" name="manager_id">
+          <option value="">Unassigned</option>
+          {% for u in users %}<option value="{{ u.id }}" {% if engagement and engagement.manager_id==u.id %}selected{% endif %}>{{ u.name }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <label for="team_members">Team members (ctrl/cmd-click to select multiple)</label>
+    <select id="team_members" name="team_members" multiple>
+      {% for u in users %}
+      <option value="{{ u.id }}" {% if engagement and u in engagement.team_members %}selected{% endif %}>{{ u.name }}</option>
+      {% endfor %}
+    </select>
+
+    {% if templates %}
+    <label for="template_id">Start from a checklist template (optional)</label>
+    <select id="template_id" name="template_id">
+      <option value="">None — start with a blank checklist</option>
+      {% for t in templates %}<option value="{{ t.id }}">{{ t.name }} ({{ t.type }})</option>{% endfor %}
+    </select>
+    {% endif %}
+
+    <label for="description">Scope / description</label>
+    <textarea id="description" name="description">{{ engagement.description if engagement else '' }}</textarea>
+
+    <button type="submit" class="btn gold">{% if engagement %}Save changes{% else %}Create engagement{% endif %}</button>
+    <a href="{{ url_for('engagements.list_engagements') }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}
