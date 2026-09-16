@@ -16,7 +16,17 @@
       </div>
       <div>
         <label for="industry">Industry</label>
-        <input type="text" id="industry" name="industry" value="{{ client.industry if client else '' }}">
+        {% set current_industry = client.industry if client else '' %}
+        {% set is_known = current_industry in industry_options %}
+        <select id="industry" name="industry" onchange="document.getElementById('industry_other_wrap').style.display = (this.value === 'Other') ? 'block' : 'none';">
+          <option value="">Select...</option>
+          {% for opt in industry_options %}
+          <option value="{{ opt }}" {% if (is_known and current_industry == opt) or (not is_known and current_industry and opt == 'Other') %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+        <div id="industry_other_wrap" style="display:{% if not is_known and current_industry %}block{% else %}none{% endif %};margin-top:6px;">
+          <input type="text" id="industry_other" name="industry_other" placeholder="Please specify" value="{{ current_industry if not is_known else '' }}">
+        </div>
       </div>
     </div>
 
