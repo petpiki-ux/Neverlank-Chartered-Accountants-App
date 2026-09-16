@@ -20,7 +20,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, User, Engagement,
-    EngagementTask, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
+    EngagementTask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
 )
 from config import Config
 
@@ -433,4 +433,80 @@ def project_board():
         statuses=TASK_STATUSES,
         status_filter=status_filter,
         assignee_filter=assignee_filter,
+    )
+
+
+# ---------- Planner: audit timetable + staffing grid ----------
+
+def _monday(d):
+    return d - timedelta(days=d.weekday())
+
+
+@hr_bp.route("/planner")
+@login_required
+def planner():
+    today = date.today()
+
+    # --- Audit timetable: every active engagement's key dates, sorted by
+    # whichever is soonest, with a "clash" flag on weeks that have more than
+    # one deadline landing in them. ---
+    engagements = (
+        Engagement.query.filter(Engagement.status != "Completed")
+        .order_by(Engagement.deadline.asc().nullslast(), Engagement.start_date.asc().nullslast())
+        .all()
+    )
+    deadline_week_counts = {}
+    for e in engagements:
+        if e.deadline:
+            wk = _monday(e.deadline)
+            deadline_week_counts[wk] = deadline_week_counts.get(wk, 0) + 1
+    timetable = [
+        {"engagement": e, "clash": bool(e.deadline and deadline_week_counts.get(_monday(e.deadline), 0) > 1)}
+        for e in engagements
+    ]
+
+    # --- Staffing grid: staff x week, showing who's booked on what and how
+    # much of their time is committed that week. ---
+    try:
+        num_weeks = max(1, min(int(request.args.get("weeks", 8)), 16))
+    except ValueError:
+        num_weeks = 8
+    start_param = request.args.get("start")
+    try:
+        grid_start = _monday(datetime.strptime(start_param, "%Y-%m-%d").date()) if start_param else _monday(today)
+    except ValueError:
+        grid_start = _monday(today)
+
+    weeks = [grid_start + timedelta(weeks=i) for i in range(num_weeks)]
+    people = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
+    allocations = StaffAllocation.query.filter(
+        StaffAllocation.end_date >= weeks[0], StaffAllocation.start_date <= weeks[-1] + timedelta(days=6)
+    ).all()
+
+    grid = {}
+    for person in people:
+        row = []
+        for week_start in weeks:
+            week_end = week_start + timedelta(days=6)
+            cell_allocs = [
+                a for a in allocations
+                if a.user_id == person.id and a.overlaps(week_start, week_end)
+            ]
+            total_pct = sum(a.allocation_pct for a in cell_allocs)
+            row.append({"allocations": cell_allocs, "total_pct": total_pct})
+        grid[person.id] = row
+
+    prev_start = (grid_start - timedelta(weeks=num_weeks)).isoformat()
+    next_start = (grid_start + timedelta(weeks=num_weeks)).isoformat()
+
+    return render_template(
+        "hr/planner.html",
+        timetable=timetable,
+        people=people,
+        weeks=weeks,
+        grid=grid,
+        num_weeks=num_weeks,
+        prev_start=prev_start,
+        next_start=next_start,
+        today=today,
     )
