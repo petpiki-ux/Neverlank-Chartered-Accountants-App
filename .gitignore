@@ -1,0 +1,16 @@
+venv/
+__pycache__/
+*.pyc
+instance/*.db
+uploads/*
+!uploads/.gitkeep
+document_templates_data/
+build/
+dist/
+*.spec
+NeverlankApp.exe
+.env
+# Offline pip wheels bundled only for the Windows/.exe distribution zip -
+# not needed for cloud hosting (Render installs from PyPI directly), and
+# keeping it out of git keeps the repo small and pushes fast.
+wheelhouse/
