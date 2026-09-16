@@ -43,7 +43,9 @@
   {% endif %}
 </div>
 
+{% if user_has_permission(current_user, 'delete_clients') %}
 <form method="post" action="{{ url_for('clients.delete_client', client_id=client.id) }}" onsubmit="return confirm('Delete this client and ALL its engagements? This cannot be undone.');">
   <button type="submit" class="btn danger small">Delete client</button>
 </form>
+{% endif %}
 {% endblock %}
