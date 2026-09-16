@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Clients - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Clients</h1>
+    <div class="subtitle">{{ clients|length }} client(s)</div>
+  </div>
+  <a href="{{ url_for('clients.new_client') }}" class="btn gold">+ New Client</a>
+</div>
+
+<div class="card">
+  <form method="get" style="margin-bottom:0;">
+    <input type="text" name="q" placeholder="Search clients by name..." value="{{ q }}" style="margin-bottom:0;max-width:320px;display:inline-block;">
+    <button type="submit" class="btn secondary">Search</button>
+  </form>
+</div>
+
+<div class="card">
+  {% if clients %}
+  <table>
+    <thead><tr><th>Name</th><th>Contact</th><th>Industry</th><th>Engagements</th><th></th></tr></thead>
+    <tbody>
+      {% for c in clients %}
+      <tr>
+        <td><a href="{{ url_for('clients.view_client', client_id=c.id) }}">{{ c.name }}</a></td>
+        <td>{{ c.contact_person or '—' }}{% if c.email %} &middot; {{ c.email }}{% endif %}</td>
+        <td>{{ c.industry or '—' }}</td>
+        <td>{{ c.engagements|length }}</td>
+        <td class="text-right"><a href="{{ url_for('clients.edit_client', client_id=c.id) }}" class="btn small secondary">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No clients found. <a href="{{ url_for('clients.new_client') }}">Add your first client</a>.</div>
+  {% endif %}
+</div>
+{% endblock %}
