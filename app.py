@@ -40,6 +40,16 @@ def _add_missing_columns():
     additions = {
         "document": [("reference", "VARCHAR(100)")],
         "engagement": [("subdivision", "VARCHAR(50)")],
+        "engagement_checklist_item": [
+            ("reviewed_by_id", "INTEGER"),
+            ("reviewed_at", "DATETIME"),
+        ],
+        "engagement_task": [
+            ("completed_by_id", "INTEGER"),
+            ("completed_at", "DATETIME"),
+            ("reviewed_by_id", "INTEGER"),
+            ("reviewed_at", "DATETIME"),
+        ],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
@@ -69,12 +79,14 @@ def create_app():
     from engagements import engagements_bp
     from users import users_bp
     from doc_templates import doc_templates_bp
+    from hr import hr_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
     app.register_blueprint(engagements_bp)
     app.register_blueprint(users_bp)
     app.register_blueprint(doc_templates_bp)
+    app.register_blueprint(hr_bp)
 
     @app.route("/")
     def index():
