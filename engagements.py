@@ -9,7 +9,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
-    RiskItem, Document, EngagementTask, DocumentTemplate,
+    RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES,
 )
@@ -568,3 +568,53 @@ def delete_template(template_id):
     db.session.commit()
     flash("Template deleted.", "info")
     return redirect(url_for("engagements.list_templates"))
+
+
+# ---------- Staffing (date-ranged allocations, feeds the HR & Admin Planner) ----------
+
+@engagements_bp.route("/<int:engagement_id>/staffing/add", methods=["POST"])
+@login_required
+def add_staff_allocation(engagement_id):
+    Engagement.query.get_or_404(engagement_id)
+    user_id = request.form.get("user_id")
+    start_date = request.form.get("start_date")
+    end_date = request.form.get("end_date")
+
+    if not user_id or not start_date or not end_date:
+        flash("Please choose a staff member and both dates.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="overview"))
+
+    start = datetime.strptime(start_date, "%Y-%m-%d").date()
+    end = datetime.strptime(end_date, "%Y-%m-%d").date()
+    if end < start:
+        flash("End date can't be before the start date.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="overview"))
+
+    try:
+        pct = int(request.form.get("allocation_pct", 100) or 100)
+    except ValueError:
+        pct = 100
+    pct = max(1, min(pct, 100))
+
+    allocation = StaffAllocation(
+        engagement_id=engagement_id,
+        user_id=int(user_id),
+        start_date=start,
+        end_date=end,
+        allocation_pct=pct,
+        notes=request.form.get("notes", "").strip(),
+    )
+    db.session.add(allocation)
+    db.session.commit()
+    flash("Staffing allocation added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="overview"))
+
+
+@engagements_bp.route("/staffing/<int:allocation_id>/delete", methods=["POST"])
+@login_required
+def delete_staff_allocation(allocation_id):
+    allocation = StaffAllocation.query.get_or_404(allocation_id)
+    engagement_id = allocation.engagement_id
+    db.session.delete(allocation)
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="overview"))
