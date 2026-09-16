@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Planner - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Planner</h1>
+    <div class="subtitle">Firm-wide audit timetable and staffing allocations.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Audit timetable</h3>
+  <p class="muted" style="font-size:12.5px;">Every active engagement's key dates, soonest deadline first. A <span class="badge overdue">Clash</span> badge means more than one engagement has a deadline in the same week.</p>
+  {% if timetable %}
+  <table>
+    <thead><tr><th>Engagement</th><th>Client</th><th>Type</th><th>Start</th><th>Period end</th><th>Deadline</th><th>Status</th><th>Partner / Manager</th></tr></thead>
+    <tbody>
+    {% for row in timetable %}
+      {% set e = row.engagement %}
+      <tr>
+        <td><a href="{{ url_for('engagements.view_engagement', engagement_id=e.id) }}">{{ e.title }}</a></td>
+        <td>{{ e.client.name }}</td>
+        <td><span class="badge type-{{ e.type }}">{{ e.type }}</span></td>
+        <td>{{ e.start_date.strftime('%d %b %Y') if e.start_date else '—' }}</td>
+        <td>{{ e.period_end.strftime('%d %b %Y') if e.period_end else '—' }}</td>
+        <td>
+          {{ e.deadline.strftime('%d %b %Y') if e.deadline else '—' }}
+          {% if e.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}
+          {% if row.clash %}<span class="badge overdue">Clash</span>{% endif %}
+        </td>
+        <td><span class="badge status-{{ e.status|replace(' ', '') }}">{{ e.status }}</span></td>
+        <td>{{ e.partner.name if e.partner else '—' }}{% if e.manager %} / {{ e.manager.name }}{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No active engagements to show.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="page-header" style="margin-bottom:10px;">
+    <h3 class="mt-0">Staffing grid</h3>
+    <div>
+      <a href="{{ url_for('hr.planner', start=prev_start, weeks=num_weeks) }}" class="btn small secondary">&larr; Previous {{ num_weeks }} weeks</a>
+      <a href="{{ url_for('hr.planner') }}" class="btn small secondary">Today</a>
+      <a href="{{ url_for('hr.planner', start=next_start, weeks=num_weeks) }}" class="btn small secondary">Next {{ num_weeks }} weeks &rarr;</a>
+    </div>
+  </div>
+  <p class="muted" style="font-size:12.5px;">Booked % of each staff member's time per week, from the Staffing section on each engagement's Overview tab. <span class="badge overdue">Red</span> means over 100% booked that week; a blank cell means fully available.</p>
+  {% if people %}
+  <table>
+    <thead>
+      <tr>
+        <th>Staff</th>
+        {% for w in weeks %}<th>{{ w.strftime('%d %b') }}</th>{% endfor %}
+      </tr>
+    </thead>
+    <tbody>
+    {% for person in people %}
+      <tr>
+        <td>{{ person.name }}</td>
+        {% for cell in grid[person.id] %}
+        <td style="font-size:12px;">
+          {% if cell.allocations %}
+            {% for a in cell.allocations %}
+              <div><a href="{{ url_for('engagements.view_engagement', engagement_id=a.engagement_id) }}">{{ a.engagement.title }}</a> ({{ a.allocation_pct }}%)</div>
+            {% endfor %}
+            {% if cell.total_pct > 100 %}<span class="badge overdue">{{ cell.total_pct }}%</span>{% endif %}
+          {% else %}
+            <span class="muted">Available</span>
+          {% endif %}
+        </td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No active staff to show.</div>
+  {% endif %}
+</div>
+{% endblock %}
