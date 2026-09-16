@@ -78,8 +78,12 @@ ever want to re-add the starter checklist templates).
   as a bar on the dashboard and engagement list.
 - **Risk Assessment tab** — log risks with likelihood x impact scoring
   (auto-rated Low/Medium/High) and mitigation/response notes.
-- **Documents tab** — upload working papers; re-uploading the same filename
-  and category automatically creates a new version rather than overwriting.
+- **Documents tab** — automatically lists the Document Templates that match
+  this engagement's type (Audit/Assurance/Consulting) right at the top, ready
+  to download with one click — no need to go find the right one in the
+  separate Document Templates library. Below that, upload working papers;
+  re-uploading the same filename and category automatically creates a new
+  version rather than overwriting.
 - **Tasks tab** — assign specific pieces of work to team members with due
   dates and priority; each person's open tasks show on their dashboard.
 - **Checklist Templates** (top menu) — build reusable audit programs once, use
