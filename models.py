@@ -356,3 +356,28 @@ class TimeSheetUpload(db.Model):
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     user = db.relationship("User")
+
+
+class StaffAllocation(db.Model):
+    """A staff member booked onto an engagement for a specific date range,
+    optionally at less than 100% of their time. Powers the HR & Admin >
+    Planner staffing grid (who's booked where, and who's over/under
+    allocated in a given week) as well as the audit timetable's clash
+    detection."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    allocation_pct = db.Column(db.Integer, default=100)  # % of the staff member's time, per day, over this range
+    notes = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("allocations", lazy=True, cascade="all, delete-orphan"))
+    user = db.relationship("User")
+
+    def overlaps(self, range_start, range_end):
+        return self.start_date <= range_end and self.end_date >= range_start
+
+    def __repr__(self):
+        return f"<StaffAllocation user={self.user_id} engagement={self.engagement_id} {self.start_date}..{self.end_date}>"
