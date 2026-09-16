@@ -10,8 +10,10 @@ from extensions import db
 from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation,
+    RiskAssessment, MaterialityCalculation,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES,
+    RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
 )
 
 engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
@@ -193,6 +195,9 @@ def view_engagement(engagement_id):
         .order_by(DocumentTemplate.ref_code)
         .all()
     )
+    risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
+    materiality = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
+    scope_suggestion = SCOPE_SUGGESTIONS.get(risk_assessment.rating) if risk_assessment and risk_assessment.rating else None
     return render_template(
         "engagements/detail.html",
         engagement=engagement,
@@ -202,6 +207,11 @@ def view_engagement(engagement_id):
         risk_statuses=RISK_STATUSES,
         task_statuses=TASK_STATUSES,
         matching_templates=matching_templates,
+        risk_assessment=risk_assessment,
+        likelihood_questions=RISK_LIKELIHOOD_QUESTIONS,
+        impact_questions=RISK_IMPACT_QUESTIONS,
+        materiality=materiality,
+        scope_suggestion=scope_suggestion,
     )
 
 
@@ -287,42 +297,69 @@ def delete_checklist_item(item_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="checklist"))
 
 
-# ---------- Risks ----------
+# ---------- Risk Assessment (system-based questionnaire) ----------
 
-@engagements_bp.route("/<int:engagement_id>/risks/add", methods=["POST"])
+@engagements_bp.route("/<int:engagement_id>/risk-assessment/save", methods=["POST"])
 @login_required
-def add_risk(engagement_id):
+def save_risk_assessment(engagement_id):
     Engagement.query.get_or_404(engagement_id)
-    risk = RiskItem(
-        engagement_id=engagement_id,
-        category=request.form.get("category", "").strip(),
-        risk_description=request.form.get("risk_description", "").strip(),
-        likelihood=int(request.form.get("likelihood", 3)),
-        impact=int(request.form.get("impact", 3)),
-        mitigation=request.form.get("mitigation", "").strip(),
-        owner_id=request.form.get("owner_id") or None,
-        status=request.form.get("status", "Open"),
-    )
-    db.session.add(risk)
+    assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
+    if not assessment:
+        assessment = RiskAssessment(engagement_id=engagement_id)
+        db.session.add(assessment)
+
+    for field, _, options in RISK_LIKELIHOOD_QUESTIONS + RISK_IMPACT_QUESTIONS:
+        raw = request.form.get(field)
+        try:
+            value = int(raw)
+        except (TypeError, ValueError):
+            value = None
+        if value is not None and 1 <= value <= len(options):
+            setattr(assessment, field, value)
+
+    assessment.notes = request.form.get("notes", "").strip()
+    assessment.completed_by_id = current_user.id
+    assessment.completed_at = datetime.utcnow()
+    # Re-answering the questionnaire invalidates any earlier review - the
+    # updated assessment needs a fresh look.
+    assessment.reviewed_by_id = None
+    assessment.reviewed_at = None
+
     db.session.commit()
-    flash("Risk added.", "success")
+    flash("Risk assessment saved - rating computed automatically below.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="risks"))
 
 
-@engagements_bp.route("/risks/<int:risk_id>/update", methods=["POST"])
+@engagements_bp.route("/risk-assessment/<int:assessment_id>/review", methods=["POST"])
 @login_required
-def update_risk(risk_id):
-    risk = RiskItem.query.get_or_404(risk_id)
-    risk.category = request.form.get("category", risk.category)
-    risk.risk_description = request.form.get("risk_description", risk.risk_description)
-    risk.likelihood = int(request.form.get("likelihood", risk.likelihood))
-    risk.impact = int(request.form.get("impact", risk.impact))
-    risk.mitigation = request.form.get("mitigation", risk.mitigation)
-    risk.owner_id = request.form.get("owner_id") or None
-    risk.status = request.form.get("status", risk.status)
+def review_risk_assessment(assessment_id):
+    assessment = RiskAssessment.query.get_or_404(assessment_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if not assessment.is_complete:
+        flash("The questionnaire needs to be fully answered before it can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=assessment.engagement_id, tab="risks"))
+    if assessment.completed_by_id == current_user.id:
+        flash("You can't review your own risk assessment - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=assessment.engagement_id, tab="risks"))
+    assessment.reviewed_by_id = current_user.id
+    assessment.reviewed_at = datetime.utcnow()
     db.session.commit()
-    flash("Risk updated.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=risk.engagement_id, tab="risks"))
+    flash("Risk assessment marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=assessment.engagement_id, tab="risks"))
+
+
+@engagements_bp.route("/risk-assessment/<int:assessment_id>/unreview", methods=["POST"])
+@login_required
+def unreview_risk_assessment(assessment_id):
+    assessment = RiskAssessment.query.get_or_404(assessment_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    assessment.reviewed_by_id = None
+    assessment.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=assessment.engagement_id, tab="risks"))
 
 
 @engagements_bp.route("/risks/<int:risk_id>/delete", methods=["POST"])
@@ -618,3 +655,41 @@ def delete_staff_allocation(allocation_id):
     db.session.delete(allocation)
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="overview"))
+
+
+# ---------- Planning: materiality calculator ----------
+
+@engagements_bp.route("/<int:engagement_id>/materiality/save", methods=["POST"])
+@login_required
+def save_materiality(engagement_id):
+    Engagement.query.get_or_404(engagement_id)
+    calc = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
+    if not calc:
+        calc = MaterialityCalculation(engagement_id=engagement_id)
+        db.session.add(calc)
+
+    def _float_or_none(name):
+        raw = request.form.get(name, "").strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return None
+
+    calc.total_revenue = _float_or_none("total_revenue")
+    calc.profit_before_tax = _float_or_none("profit_before_tax")
+    calc.total_assets = _float_or_none("total_assets")
+    calc.revenue_pct = _float_or_none("revenue_pct") or 1.0
+    calc.pbt_pct = _float_or_none("pbt_pct") or 5.0
+    calc.assets_pct = _float_or_none("assets_pct") or 1.0
+    calc.performance_pct = _float_or_none("performance_pct") or 75.0
+    calc.trivial_pct = _float_or_none("trivial_pct") or 5.0
+    basis = request.form.get("basis", "highest")
+    calc.basis = basis if basis in ("revenue", "pbt", "assets", "highest", "lowest") else "highest"
+    calc.notes = request.form.get("notes", "").strip()
+    calc.updated_by_id = current_user.id
+
+    db.session.commit()
+    flash("Materiality calculation saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
