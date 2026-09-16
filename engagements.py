@@ -11,6 +11,7 @@ from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
     RiskItem, Document, EngagementTask, DocumentTemplate,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
+    SECRETARIAL_SUBDIVISIONS,
 )
 
 engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
@@ -81,12 +82,15 @@ def new_engagement():
         if not client_id:
             flash("Please select a client.", "danger")
             return render_template("engagements/form.html", engagement=None, clients=clients, users=users,
-                                    templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES)
+                                    templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
+                                    subdivisions=SECRETARIAL_SUBDIVISIONS)
 
+        engagement_type = request.form.get("type", "Audit")
         engagement = Engagement(
             client_id=int(client_id),
             title=request.form.get("title", "").strip(),
-            type=request.form.get("type", "Audit"),
+            type=engagement_type,
+            subdivision=(request.form.get("subdivision", "").strip() or None) if engagement_type == "Secretarial" else None,
             status=request.form.get("status", "Planning"),
             description=request.form.get("description", "").strip(),
             partner_id=request.form.get("partner_id") or None,
@@ -123,7 +127,8 @@ def new_engagement():
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id))
 
     return render_template("engagements/form.html", engagement=None, clients=clients, users=users,
-                            templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES)
+                            templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
+                            subdivisions=SECRETARIAL_SUBDIVISIONS)
 
 
 @engagements_bp.route("/<int:engagement_id>/edit", methods=["GET", "POST"])
@@ -137,6 +142,7 @@ def edit_engagement(engagement_id):
         engagement.client_id = int(request.form.get("client_id"))
         engagement.title = request.form.get("title", "").strip()
         engagement.type = request.form.get("type", "Audit")
+        engagement.subdivision = (request.form.get("subdivision", "").strip() or None) if engagement.type == "Secretarial" else None
         engagement.status = request.form.get("status", "Planning")
         engagement.description = request.form.get("description", "").strip()
         engagement.partner_id = request.form.get("partner_id") or None
@@ -157,7 +163,8 @@ def edit_engagement(engagement_id):
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id))
 
     return render_template("engagements/form.html", engagement=engagement, clients=clients, users=users,
-                            templates=[], types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES)
+                            templates=[], types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
+                            subdivisions=SECRETARIAL_SUBDIVISIONS)
 
 
 @engagements_bp.route("/<int:engagement_id>/delete", methods=["POST"])
