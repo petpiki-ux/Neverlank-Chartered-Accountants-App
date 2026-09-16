@@ -44,6 +44,43 @@
     {% endif %}
   </div>
 
+  <div class="card">
+    <h3 class="mt-0">Staffing</h3>
+    <p class="muted" style="font-size:12.5px;">Book a staff member onto this engagement for a specific date range and % of their time - feeds the firm-wide staffing grid on <a href="{{ url_for('hr.planner') }}">HR &amp; Admin &gt; Planner</a>.</p>
+    <form method="post" action="{{ url_for('engagements.add_staff_allocation', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div>
+        <label for="user_id">Staff member</label>
+        <select id="user_id" name="user_id" required>
+          {% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="start_date">From</label><input type="date" id="start_date" name="start_date" required></div>
+      <div><label for="end_date">To</label><input type="date" id="end_date" name="end_date" required></div>
+      <div><label for="allocation_pct">% of time</label><input type="number" id="allocation_pct" name="allocation_pct" min="1" max="100" value="100"></div>
+      <div><label for="notes">Notes</label><input type="text" id="notes" name="notes" placeholder="optional"></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add allocation</button></div>
+    </form>
+    {% if engagement.allocations %}
+    <table>
+      <thead><tr><th>Staff</th><th>From</th><th>To</th><th>% of time</th><th>Notes</th><th></th></tr></thead>
+      <tbody>
+      {% for a in engagement.allocations|sort(attribute='start_date') %}
+        <tr>
+          <td>{{ a.user.name }}</td>
+          <td>{{ a.start_date.strftime('%d %b %Y') }}</td>
+          <td>{{ a.end_date.strftime('%d %b %Y') }}</td>
+          <td>{{ a.allocation_pct }}%</td>
+          <td class="muted">{{ a.notes or '—' }}</td>
+          <td><form method="post" action="{{ url_for('engagements.delete_staff_allocation', allocation_id=a.id) }}" class="inline" onsubmit="return confirm('Remove this allocation?')"><button type="submit" class="btn small danger">Remove</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No staffing booked for this engagement yet.</div>
+    {% endif %}
+  </div>
+
   <form method="post" action="{{ url_for('engagements.delete_engagement', engagement_id=engagement.id) }}" onsubmit="return confirm('Delete this engagement and all its checklist items, risks, documents and tasks? This cannot be undone.');">
     <button type="submit" class="btn danger small">Delete engagement</button>
   </form>
