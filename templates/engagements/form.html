@@ -25,7 +25,7 @@
     <div class="form-row">
       <div>
         <label for="type">Type</label>
-        <select id="type" name="type">
+        <select id="type" name="type" onchange="toggleSubdivision()">
           {% for t in types %}<option value="{{ t }}" {% if engagement and engagement.type==t %}selected{% endif %}>{{ t }}</option>{% endfor %}
         </select>
       </div>
@@ -35,7 +35,23 @@
           {% for s in statuses %}<option value="{{ s }}" {% if engagement and engagement.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
         </select>
       </div>
+      <div id="subdivision-wrap">
+        <label for="subdivision">Secretarial subdivision</label>
+        <select id="subdivision" name="subdivision">
+          <option value="">Select...</option>
+          {% for sd in subdivisions %}<option value="{{ sd }}" {% if engagement and engagement.subdivision==sd %}selected{% endif %}>{{ sd }}</option>{% endfor %}
+        </select>
+      </div>
     </div>
+    <script>
+      function toggleSubdivision() {
+        var type = document.getElementById('type').value;
+        var wrap = document.getElementById('subdivision-wrap');
+        wrap.style.display = (type === 'Secretarial') ? '' : 'none';
+        if (type !== 'Secretarial') { document.getElementById('subdivision').value = ''; }
+      }
+      toggleSubdivision();
+    </script>
 
     <div class="form-row">
       <div>
