@@ -18,8 +18,9 @@
 
 <div class="tabs">
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='overview') }}" class="{% if tab=='overview' %}active{% endif %}">Overview</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}" class="{% if tab=='planning' %}active{% endif %}">Planning</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
-  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}" class="{% if tab=='risks' %}active{% endif %}">Risk Assessment ({{ engagement.risk_items|length }})</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}" class="{% if tab=='risks' %}active{% endif %}">Risk Assessment{% if risk_assessment and risk_assessment.rating %} ({{ risk_assessment.rating }}){% else %} (Not started){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
 </div>
@@ -85,6 +86,64 @@
     <button type="submit" class="btn danger small">Delete engagement</button>
   </form>
 
+{% elif tab == 'planning' %}
+  <div class="card">
+    <h3 class="mt-0">Materiality calculator</h3>
+    <p class="muted" style="font-size:12.5px;">Enter the client's key figures for the period - the system calculates suggested overall materiality, performance materiality and a "clearly trivial" threshold from them. The % benchmarks are common starting points in practice, not a fixed rule - adjust them and apply professional judgement for this specific engagement.</p>
+    <form method="post" action="{{ url_for('engagements.save_materiality', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        <div><label for="total_revenue">Total revenue</label><input type="number" step="0.01" id="total_revenue" name="total_revenue" value="{{ materiality.total_revenue if materiality and materiality.total_revenue is not none else '' }}"></div>
+        <div><label for="revenue_pct">% of revenue</label><input type="number" step="0.1" id="revenue_pct" name="revenue_pct" value="{{ materiality.revenue_pct if materiality else 1.0 }}"></div>
+        <div><label>Revenue-based materiality</label><input type="text" value="{{ '%.2f'|format(materiality.revenue_materiality) if materiality and materiality.revenue_materiality is not none else '—' }}" disabled></div>
+      </div>
+      <div class="form-row">
+        <div><label for="profit_before_tax">Profit before tax</label><input type="number" step="0.01" id="profit_before_tax" name="profit_before_tax" value="{{ materiality.profit_before_tax if materiality and materiality.profit_before_tax is not none else '' }}"></div>
+        <div><label for="pbt_pct">% of PBT</label><input type="number" step="0.1" id="pbt_pct" name="pbt_pct" value="{{ materiality.pbt_pct if materiality else 5.0 }}"></div>
+        <div><label>PBT-based materiality</label><input type="text" value="{{ '%.2f'|format(materiality.pbt_materiality) if materiality and materiality.pbt_materiality is not none else '—' }}" disabled></div>
+      </div>
+      <div class="form-row">
+        <div><label for="total_assets">Total assets</label><input type="number" step="0.01" id="total_assets" name="total_assets" value="{{ materiality.total_assets if materiality and materiality.total_assets is not none else '' }}"></div>
+        <div><label for="assets_pct">% of total assets</label><input type="number" step="0.1" id="assets_pct" name="assets_pct" value="{{ materiality.assets_pct if materiality else 1.0 }}"></div>
+        <div><label>Assets-based materiality</label><input type="text" value="{{ '%.2f'|format(materiality.assets_materiality) if materiality and materiality.assets_materiality is not none else '—' }}" disabled></div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="basis">Overall materiality basis</label>
+          <select id="basis" name="basis">
+            <option value="highest" {% if not materiality or materiality.basis=='highest' %}selected{% endif %}>Highest of the above</option>
+            <option value="lowest" {% if materiality and materiality.basis=='lowest' %}selected{% endif %}>Lowest of the above</option>
+            <option value="revenue" {% if materiality and materiality.basis=='revenue' %}selected{% endif %}>Revenue-based</option>
+            <option value="pbt" {% if materiality and materiality.basis=='pbt' %}selected{% endif %}>Profit-before-tax-based</option>
+            <option value="assets" {% if materiality and materiality.basis=='assets' %}selected{% endif %}>Assets-based</option>
+          </select>
+        </div>
+        <div><label for="performance_pct">Performance materiality (% of overall)</label><input type="number" step="1" id="performance_pct" name="performance_pct" value="{{ materiality.performance_pct if materiality else 75.0 }}"></div>
+        <div><label for="trivial_pct">Clearly trivial threshold (% of overall)</label><input type="number" step="1" id="trivial_pct" name="trivial_pct" value="{{ materiality.trivial_pct if materiality else 5.0 }}"></div>
+      </div>
+      <label for="notes">Notes</label>
+      <textarea id="notes" name="notes">{{ materiality.notes if materiality else '' }}</textarea>
+      <button type="submit" class="btn gold">{% if materiality %}Save / recalculate{% else %}Calculate materiality{% endif %}</button>
+    </form>
+  </div>
+
+  {% if materiality and materiality.overall_materiality is not none %}
+  <div class="stat-grid">
+    <div class="stat-card"><div class="num">{{ '%.2f'|format(materiality.overall_materiality) }}</div><div class="label">Overall materiality</div></div>
+    <div class="stat-card"><div class="num">{{ '%.2f'|format(materiality.performance_materiality) }}</div><div class="label">Performance materiality</div></div>
+    <div class="stat-card"><div class="num">{{ '%.2f'|format(materiality.trivial_threshold) }}</div><div class="label">Clearly trivial threshold</div></div>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h3 class="mt-0">Suggested audit approach</h3>
+    {% if scope_suggestion %}
+    <p class="muted" style="font-size:12px;">Based on the current Risk Assessment rating of <span class="badge risk-{{ risk_assessment.rating }}">{{ risk_assessment.rating }}</span>. A starting point only - always apply professional judgement and your firm's methodology.</p>
+    <p>{{ scope_suggestion }}</p>
+    {% else %}
+    <div class="empty-state">Complete the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}">Risk Assessment</a> questionnaire first to get a suggested audit approach here.</div>
+    {% endif %}
+  </div>
+
 {% elif tab == 'checklist' %}
   <div class="card">
     <h3 class="mt-0">Add checklist item</h3>
@@ -133,49 +192,70 @@
   </div>
 
 {% elif tab == 'risks' %}
+  {% if risk_assessment and risk_assessment.rating %}
+  <div class="stat-grid">
+    <div class="stat-card"><div class="num">{{ risk_assessment.likelihood }}</div><div class="label">Likelihood (1-5)</div></div>
+    <div class="stat-card"><div class="num">{{ risk_assessment.impact }}</div><div class="label">Impact (1-5)</div></div>
+    <div class="stat-card{% if risk_assessment.rating == 'High' %} danger{% endif %}"><div class="num"><span class="badge risk-{{ risk_assessment.rating }}">{{ risk_assessment.rating }}</span></div><div class="label">Overall rating ({{ risk_assessment.score }}/25)</div></div>
+  </div>
+  {% endif %}
+
   <div class="card">
-    <h3 class="mt-0">Add risk item</h3>
-    <form method="post" action="{{ url_for('engagements.add_risk', engagement_id=engagement.id) }}">
-      <div class="form-row">
-        <div><label for="category">Category</label><input type="text" id="category" name="category" placeholder="e.g. Revenue recognition"></div>
-        <div>
-          <label for="owner_id">Owner</label>
-          <select id="owner_id" name="owner_id">
-            <option value="">Unassigned</option>
-            {% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}
-          </select>
-        </div>
-      </div>
-      <label for="risk_description">Risk description *</label>
-      <textarea id="risk_description" name="risk_description" required></textarea>
-      <div class="form-row">
-        <div>
-          <label for="likelihood">Likelihood (1-5)</label>
-          <select id="likelihood" name="likelihood">
-            {% for i in range(1,6) %}<option value="{{ i }}" {% if i==3 %}selected{% endif %}>{{ i }}</option>{% endfor %}
-          </select>
-        </div>
-        <div>
-          <label for="impact">Impact (1-5)</label>
-          <select id="impact" name="impact">
-            {% for i in range(1,6) %}<option value="{{ i }}" {% if i==3 %}selected{% endif %}>{{ i }}</option>{% endfor %}
-          </select>
-        </div>
-        <div>
-          <label for="status">Status</label>
-          <select id="status" name="status">
-            {% for s in risk_statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
-          </select>
-        </div>
-      </div>
-      <label for="mitigation">Mitigation / audit response</label>
-      <textarea id="mitigation" name="mitigation"></textarea>
-      <button type="submit" class="btn gold">Add risk</button>
+    <h3 class="mt-0">Risk assessment questionnaire</h3>
+    <p class="muted" style="font-size:12.5px;">Answer each question below - the system computes likelihood, impact and the overall rating automatically, no manual scoring needed. This is a general-purpose starting questionnaire; review the wording against your own methodology and professional judgement.</p>
+    <form method="post" action="{{ url_for('engagements.save_risk_assessment', engagement_id=engagement.id) }}">
+      <p class="section-title">Likelihood factors</p>
+      {% for field, question, options in likelihood_questions %}
+      <label for="{{ field }}">{{ question }}</label>
+      <select id="{{ field }}" name="{{ field }}" required>
+        <option value="">Select...</option>
+        {% for opt in options %}
+        <option value="{{ loop.index }}" {% if risk_assessment and risk_assessment[field] == loop.index %}selected{% endif %}>{{ loop.index }} - {{ opt }}</option>
+        {% endfor %}
+      </select>
+      {% endfor %}
+
+      <p class="section-title">Impact factors</p>
+      {% for field, question, options in impact_questions %}
+      <label for="{{ field }}">{{ question }}</label>
+      <select id="{{ field }}" name="{{ field }}" required>
+        <option value="">Select...</option>
+        {% for opt in options %}
+        <option value="{{ loop.index }}" {% if risk_assessment and risk_assessment[field] == loop.index %}selected{% endif %}>{{ loop.index }} - {{ opt }}</option>
+        {% endfor %}
+      </select>
+      {% endfor %}
+
+      <label for="notes">Additional notes (optional)</label>
+      <textarea id="notes" name="notes">{{ risk_assessment.notes if risk_assessment else '' }}</textarea>
+
+      <button type="submit" class="btn gold">{% if risk_assessment %}Save / re-assess{% else %}Complete assessment{% endif %}</button>
     </form>
   </div>
 
+  {% if risk_assessment and risk_assessment.is_complete %}
   <div class="card">
-    {% if engagement.risk_items %}
+    <h3 class="mt-0">Sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ risk_assessment.completed_by.name if risk_assessment.completed_by else '—' }} on {{ risk_assessment.completed_at.strftime('%d %b %Y') if risk_assessment.completed_at else '—' }}.
+      {% if risk_assessment.is_reviewed %}Reviewed by {{ risk_assessment.reviewed_by.name }} on {{ risk_assessment.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if risk_assessment.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_risk_assessment', assessment_id=risk_assessment.id) }}"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif risk_assessment.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_risk_assessment', assessment_id=risk_assessment.id) }}"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if engagement.risk_items %}
+  <div class="card">
+    <h3 class="mt-0">Previously logged risks (manual entries)</h3>
+    <p class="muted" style="font-size:12px;">These were logged before Risk Assessment became questionnaire-based - kept for reference. New risks are captured through the questionnaire above.</p>
     <table>
       <thead><tr><th>Category</th><th>Description</th><th>L</th><th>I</th><th>Rating</th><th>Owner</th><th>Status</th><th></th></tr></thead>
       <tbody>
@@ -193,10 +273,8 @@
       {% endfor %}
       </tbody>
     </table>
-    {% else %}
-    <div class="empty-state">No risks logged yet.</div>
-    {% endif %}
   </div>
+  {% endif %}
 
 {% elif tab == 'documents' %}
   <div class="card">
