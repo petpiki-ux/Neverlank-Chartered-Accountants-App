@@ -11,7 +11,7 @@ from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
     RiskItem, Document, EngagementTask, DocumentTemplate,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
-    SECRETARIAL_SUBDIVISIONS,
+    SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES,
 )
 
 engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
@@ -236,8 +236,44 @@ def update_checklist_item(item_id):
     else:
         item.completed_by_id = None
         item.completed_at = None
+        # Re-opening a previously completed item invalidates any earlier
+        # review sign-off - it needs to be looked at again once re-done.
+        item.reviewed_by_id = None
+        item.reviewed_at = None
     db.session.commit()
     flash("Checklist item updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
+
+
+@engagements_bp.route("/checklist/<int:item_id>/review", methods=["POST"])
+@login_required
+def review_checklist_item(item_id):
+    item = EngagementChecklistItem.query.get_or_404(item_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if item.status not in ("Done", "N/A"):
+        flash("This item needs to be prepared (marked Done or N/A) before it can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
+    if item.completed_by_id == current_user.id:
+        flash("You can't review your own work - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
+    item.reviewed_by_id = current_user.id
+    item.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Checklist item marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
+
+
+@engagements_bp.route("/checklist/<int:item_id>/unreview", methods=["POST"])
+@login_required
+def unreview_checklist_item(item_id):
+    item = EngagementChecklistItem.query.get_or_404(item_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    item.reviewed_by_id = None
+    item.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
 
 
@@ -394,6 +430,16 @@ def add_task(engagement_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tasks"))
 
 
+def _task_redirect(task, tab="tasks"):
+    """Most task actions are reachable both from an engagement's Tasks tab
+    and from the firm-wide Project Management board - a hidden
+    return_to=board field on those forms sends the user back to the board
+    instead of the engagement page."""
+    if request.form.get("return_to") == "board":
+        return redirect(url_for("hr.project_board"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=task.engagement_id, tab=tab))
+
+
 @engagements_bp.route("/tasks/<int:task_id>/update", methods=["POST"])
 @login_required
 def update_task(task_id):
@@ -405,9 +451,51 @@ def update_task(task_id):
     task.due_date = datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None
     task.priority = request.form.get("priority", task.priority)
     task.status = request.form.get("status", task.status)
+    if task.status == "Done":
+        task.completed_by_id = current_user.id
+        task.completed_at = datetime.utcnow()
+    else:
+        task.completed_by_id = None
+        task.completed_at = None
+        # Re-opening a previously completed task invalidates any earlier
+        # review sign-off - it needs to be looked at again once re-done.
+        task.reviewed_by_id = None
+        task.reviewed_at = None
     db.session.commit()
     flash("Task updated.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=task.engagement_id, tab="tasks"))
+    return _task_redirect(task)
+
+
+@engagements_bp.route("/tasks/<int:task_id>/review", methods=["POST"])
+@login_required
+def review_task(task_id):
+    task = EngagementTask.query.get_or_404(task_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if task.status != "Done":
+        flash("This task needs to be marked Done before it can be reviewed.", "danger")
+        return _task_redirect(task)
+    if task.completed_by_id == current_user.id:
+        flash("You can't review your own work - ask another supervisor/partner to review it.", "danger")
+        return _task_redirect(task)
+    task.reviewed_by_id = current_user.id
+    task.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Task marked as reviewed.", "success")
+    return _task_redirect(task)
+
+
+@engagements_bp.route("/tasks/<int:task_id>/unreview", methods=["POST"])
+@login_required
+def unreview_task(task_id):
+    task = EngagementTask.query.get_or_404(task_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    task.reviewed_by_id = None
+    task.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return _task_redirect(task)
 
 
 @engagements_bp.route("/tasks/<int:task_id>/delete", methods=["POST"])
@@ -415,8 +503,11 @@ def update_task(task_id):
 def delete_task(task_id):
     task = EngagementTask.query.get_or_404(task_id)
     engagement_id = task.engagement_id
+    return_to_board = request.form.get("return_to") == "board"
     db.session.delete(task)
     db.session.commit()
+    if return_to_board:
+        return redirect(url_for("hr.project_board"))
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tasks"))
 
 
