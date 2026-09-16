@@ -12,6 +12,16 @@ TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
 CHECKLIST_STATUSES = ["Not Started", "In Progress", "Done", "N/A"]
 RISK_STATUSES = ["Open", "Mitigated", "Accepted", "Closed"]
 
+USER_ROLES = ["staff", "supervisor", "partner", "admin"]
+# Roles allowed to sign off work as "Reviewed" on checklist items, tasks and
+# timesheets. A reviewer can never sign off their own work - that check is
+# enforced in the route, not here.
+REVIEWER_ROLES = ("supervisor", "partner", "admin")
+
+POLICY_CATEGORIES = ["HR Policy", "Firm Procedure", "Quality Control", "IT & Security", "Other"]
+TIMESHEET_STATUSES = ["Submitted", "Approved"]
+STANDARD_HOURS_PER_DAY = 8  # anything beyond this on a given day counts as overtime
+
 
 engagement_team = db.Table(
     "engagement_team",
@@ -26,7 +36,7 @@ class User(UserMixin, db.Model):
     name = db.Column(db.String(120), nullable=False)
     email = db.Column(db.String(120))
     password_hash = db.Column(db.String(255), nullable=False)
-    role = db.Column(db.String(20), default="staff")  # admin | partner | staff
+    role = db.Column(db.String(20), default="staff")  # staff | supervisor | partner | admin
     is_active_flag = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -130,8 +140,18 @@ class EngagementChecklistItem(db.Model):
     notes = db.Column(db.Text)
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     completed_at = db.Column(db.DateTime)
+    # Review sign-off: separate from completed_by/completed_at (the preparer)
+    # so a supervisor/partner/admin can independently confirm the work -
+    # never the same person as the preparer.
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
 
-    completed_by = db.relationship("User")
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
 
 
 class RiskItem(db.Model):
@@ -214,8 +234,125 @@ class EngagementTask(db.Model):
     status = db.Column(db.String(20), default="To Do")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    assigned_to = db.relationship("User")
+    # Preparer sign-off: auto-recorded when the task is marked Done.
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    # Reviewer sign-off: a supervisor/partner/admin confirming the completed
+    # work - always someone other than the preparer.
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+
+    assigned_to = db.relationship("User", foreign_keys=[assigned_to_id])
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
 
     @property
     def is_overdue(self):
         return bool(self.due_date and self.due_date < date.today() and self.status != "Done")
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+
+# ---------- HR & Administration ----------
+
+class PolicyDocument(db.Model):
+    """A firm policy/procedure/form in the HR & Administration > Policies and
+    Procedures library - same download/edit pattern as DocumentTemplate, but
+    grouped by a free-standing category list rather than engagement type,
+    and stored in its own data folder (Config.POLICIES_DATA_DIR).
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(50), nullable=False, default="Other")
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    filename = db.Column(db.String(255), nullable=False)
+    order = db.Column(db.Integer, default=0)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    updated_by = db.relationship("User")
+
+    @property
+    def file_ext(self):
+        return self.filename.rsplit(".", 1)[-1].lower() if "." in self.filename else ""
+
+    def __repr__(self):
+        return f"<PolicyDocument {self.title}>"
+
+
+class TimeSheet(db.Model):
+    """One staff member's timesheet for a given week, filled in directly in
+    the app (see TimeEntry). Kept separate from TimeSheetUpload, which is for
+    a filled-in copy of the downloadable Excel template instead."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    week_start = db.Column(db.Date, nullable=False)  # Monday of the week
+    status = db.Column(db.String(20), default="Submitted")  # Submitted | Approved
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Reviewer sign-off - a supervisor/partner/admin approving the timesheet,
+    # never the timesheet's own owner.
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+
+    user = db.relationship("User", foreign_keys=[user_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    entries = db.relationship(
+        "TimeEntry", backref="timesheet", lazy=True,
+        cascade="all, delete-orphan", order_by="TimeEntry.work_date",
+    )
+
+    @property
+    def total_hours(self):
+        return round(sum(e.hours or 0 for e in self.entries), 2)
+
+    @property
+    def regular_hours(self):
+        return round(sum(min(e.hours or 0, STANDARD_HOURS_PER_DAY) for e in self.entries), 2)
+
+    @property
+    def overtime_hours(self):
+        return round(sum(max((e.hours or 0) - STANDARD_HOURS_PER_DAY, 0) for e in self.entries), 2)
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    def __repr__(self):
+        return f"<TimeSheet {self.user_id} w/o {self.week_start}>"
+
+
+class TimeEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    timesheet_id = db.Column(db.Integer, db.ForeignKey("time_sheet.id"), nullable=False)
+    work_date = db.Column(db.Date, nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    description = db.Column(db.String(255))
+    hours = db.Column(db.Float, default=0)
+
+    engagement = db.relationship("Engagement")
+
+    @property
+    def regular_hours(self):
+        return min(self.hours or 0, STANDARD_HOURS_PER_DAY)
+
+    @property
+    def overtime_hours(self):
+        return max((self.hours or 0) - STANDARD_HOURS_PER_DAY, 0)
+
+
+class TimeSheetUpload(db.Model):
+    """A completed copy of the downloadable Excel timesheet template,
+    uploaded as-is rather than entered into the app - for staff who prefer
+    filling it in Excel offline."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    period_label = db.Column(db.String(100))  # free text, e.g. "Week of 14 Sep 2026"
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User")
