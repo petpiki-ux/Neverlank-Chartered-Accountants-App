@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% block title %}{% if client %}Edit Client{% else %}New Client{% endif %} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{% if client %}Edit {{ client.name }}{% else %}New Client{% endif %}</h1>
+</div>
+<div class="card" style="max-width:640px;">
+  <form method="post">
+    <label for="name">Client name *</label>
+    <input type="text" id="name" name="name" value="{{ client.name if client else '' }}" required>
+
+    <div class="form-row">
+      <div>
+        <label for="contact_person">Contact person</label>
+        <input type="text" id="contact_person" name="contact_person" value="{{ client.contact_person if client else '' }}">
+      </div>
+      <div>
+        <label for="industry">Industry</label>
+        <input type="text" id="industry" name="industry" value="{{ client.industry if client else '' }}">
+      </div>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="email">Email</label>
+        <input type="email" id="email" name="email" value="{{ client.email if client else '' }}">
+      </div>
+      <div>
+        <label for="phone">Phone</label>
+        <input type="text" id="phone" name="phone" value="{{ client.phone if client else '' }}">
+      </div>
+    </div>
+
+    <label for="address">Address</label>
+    <input type="text" id="address" name="address" value="{{ client.address if client else '' }}">
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes">{{ client.notes if client else '' }}</textarea>
+
+    <button type="submit" class="btn gold">{% if client %}Save changes{% else %}Create client{% endif %}</button>
+    <a href="{{ url_for('clients.list_clients') }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}
