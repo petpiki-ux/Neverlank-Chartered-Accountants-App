@@ -151,6 +151,28 @@
 
 {% elif tab == 'documents' %}
   <div class="card">
+    <h3 class="mt-0">Templates for this engagement <span class="badge type-{{ engagement.type }}">{{ engagement.type }}</span></h3>
+    {% if matching_templates %}
+    <p class="muted" style="font-size:12.5px;">Automatically matched to this engagement's type. Download, fill in, then upload the completed file below to keep it with the engagement.</p>
+    <table>
+      <thead><tr><th>Ref</th><th>Template</th><th>Format</th><th></th></tr></thead>
+      <tbody>
+      {% for tpl in matching_templates %}
+        <tr>
+          <td class="muted">{{ tpl.ref_code }}</td>
+          <td>{{ tpl.title }}{% if tpl.description %}<div class="muted" style="font-size:11.5px;">{{ tpl.description }}</div>{% endif %}</td>
+          <td>{{ 'Excel' if tpl.file_ext == 'xlsx' else 'Word' }}</td>
+          <td class="text-right"><a href="{{ url_for('doc_templates.download_template', template_id=tpl.id) }}" class="btn small secondary">Download</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No {{ engagement.type }} templates in the library yet. Add some from the <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a> page.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
     <h3 class="mt-0">Upload working paper / document</h3>
     <form method="post" action="{{ url_for('engagements.upload_document', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
       <div><label for="file">File *</label><input type="file" id="file" name="file" required></div>
