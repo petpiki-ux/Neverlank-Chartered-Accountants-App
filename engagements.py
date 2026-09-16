@@ -10,10 +10,12 @@ from extensions import db
 from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation,
-    RiskAssessment, MaterialityCalculation,
+    RiskAssessment, MaterialityCalculation, EntityUnderstanding,
+    AnalyticalReview, AnalyticalReviewLine,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
+    ENTITY_UNDERSTANDING_FIELDS,
 )
 
 engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
@@ -197,6 +199,8 @@ def view_engagement(engagement_id):
     )
     risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
     materiality = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
+    entity_understanding = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
+    analytical_review = AnalyticalReview.query.filter_by(engagement_id=engagement_id).first()
     scope_suggestion = SCOPE_SUGGESTIONS.get(risk_assessment.rating) if risk_assessment and risk_assessment.rating else None
     return render_template(
         "engagements/detail.html",
@@ -212,6 +216,9 @@ def view_engagement(engagement_id):
         impact_questions=RISK_IMPACT_QUESTIONS,
         materiality=materiality,
         scope_suggestion=scope_suggestion,
+        entity_understanding=entity_understanding,
+        entity_fields=ENTITY_UNDERSTANDING_FIELDS,
+        analytical_review=analytical_review,
     )
 
 
@@ -295,6 +302,204 @@ def delete_checklist_item(item_id):
     db.session.delete(item)
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="checklist"))
+
+
+# ---------- Understanding the Entity (system-based, structured prompts) ----------
+
+@engagements_bp.route("/<int:engagement_id>/entity-understanding/save", methods=["POST"])
+@login_required
+def save_entity_understanding(engagement_id):
+    Engagement.query.get_or_404(engagement_id)
+    record = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
+    if not record:
+        record = EntityUnderstanding(engagement_id=engagement_id)
+        db.session.add(record)
+
+    for field, _, _ in ENTITY_UNDERSTANDING_FIELDS:
+        setattr(record, field, request.form.get(field, "").strip())
+
+    record.completed_by_id = current_user.id
+    record.completed_at = datetime.utcnow()
+    # Changing the write-up invalidates any earlier review sign-off.
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+
+    db.session.commit()
+    flash("Understanding of the entity saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
+
+
+@engagements_bp.route("/entity-understanding/<int:record_id>/review", methods=["POST"])
+@login_required
+def review_entity_understanding(record_id):
+    record = EntityUnderstanding.query.get_or_404(record_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if not record.is_complete:
+        flash("All sections need to be filled in before this can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
+    if record.completed_by_id == current_user.id:
+        flash("You can't review your own write-up - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
+    record.reviewed_by_id = current_user.id
+    record.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
+
+
+@engagements_bp.route("/entity-understanding/<int:record_id>/unreview", methods=["POST"])
+@login_required
+def unreview_entity_understanding(record_id):
+    record = EntityUnderstanding.query.get_or_404(record_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
+
+
+# ---------- Analytical Review (system-based: log figures, system flags fluctuations) ----------
+
+def _get_or_create_analytical_review(engagement_id):
+    review = AnalyticalReview.query.filter_by(engagement_id=engagement_id).first()
+    if not review:
+        review = AnalyticalReview(engagement_id=engagement_id)
+        db.session.add(review)
+        db.session.flush()
+    return review
+
+
+def _touch_analytical_review(review):
+    """Every change to the analytical review (a line added/edited/removed,
+    or the threshold changed) re-records who last worked on it and clears
+    any stale review sign-off, the same convention used everywhere else."""
+    review.completed_by_id = current_user.id
+    review.completed_at = datetime.utcnow()
+    review.reviewed_by_id = None
+    review.reviewed_at = None
+
+
+@engagements_bp.route("/<int:engagement_id>/analytical-review/threshold", methods=["POST"])
+@login_required
+def save_analytical_review_threshold(engagement_id):
+    Engagement.query.get_or_404(engagement_id)
+    review = _get_or_create_analytical_review(engagement_id)
+    try:
+        threshold = float(request.form.get("threshold_pct", 10.0))
+    except ValueError:
+        threshold = 10.0
+    review.threshold_pct = max(0.1, threshold)
+    _touch_analytical_review(review)
+    db.session.commit()
+    flash("Significance threshold updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
+
+@engagements_bp.route("/<int:engagement_id>/analytical-review/lines/add", methods=["POST"])
+@login_required
+def add_analytical_review_line(engagement_id):
+    Engagement.query.get_or_404(engagement_id)
+    review = _get_or_create_analytical_review(engagement_id)
+
+    label = request.form.get("label", "").strip()
+    if not label:
+        flash("Please name the line item (e.g. Revenue, Gross profit).", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
+    def _float_or_none(name):
+        raw = request.form.get(name, "").strip()
+        try:
+            return float(raw) if raw else None
+        except ValueError:
+            return None
+
+    line = AnalyticalReviewLine(
+        analytical_review_id=review.id,
+        label=label,
+        prior_amount=_float_or_none("prior_amount"),
+        current_amount=_float_or_none("current_amount"),
+        explanation=request.form.get("explanation", "").strip(),
+    )
+    db.session.add(line)
+    _touch_analytical_review(review)
+    db.session.commit()
+    flash("Line added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
+
+@engagements_bp.route("/analytical-review/lines/<int:line_id>/update", methods=["POST"])
+@login_required
+def update_analytical_review_line(line_id):
+    line = AnalyticalReviewLine.query.get_or_404(line_id)
+    review = line.review
+
+    def _float_or_none(name, current):
+        raw = request.form.get(name)
+        if raw is None:
+            return current
+        raw = raw.strip()
+        if not raw:
+            return None
+        try:
+            return float(raw)
+        except ValueError:
+            return current
+
+    line.label = request.form.get("label", line.label).strip() or line.label
+    line.prior_amount = _float_or_none("prior_amount", line.prior_amount)
+    line.current_amount = _float_or_none("current_amount", line.current_amount)
+    line.explanation = request.form.get("explanation", line.explanation or "").strip()
+    _touch_analytical_review(review)
+    db.session.commit()
+    flash("Line updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
+
+
+@engagements_bp.route("/analytical-review/lines/<int:line_id>/delete", methods=["POST"])
+@login_required
+def delete_analytical_review_line(line_id):
+    line = AnalyticalReviewLine.query.get_or_404(line_id)
+    review = line.review
+    engagement_id = review.engagement_id
+    db.session.delete(line)
+    _touch_analytical_review(review)
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
+
+@engagements_bp.route("/analytical-review/<int:review_id>/review", methods=["POST"])
+@login_required
+def review_analytical_review(review_id):
+    review = AnalyticalReview.query.get_or_404(review_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if not review.lines:
+        flash("Add at least one line item before this can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
+    if review.completed_by_id == current_user.id:
+        flash("You can't review your own analytical review - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
+    review.reviewed_by_id = current_user.id
+    review.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Analytical review marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
+
+
+@engagements_bp.route("/analytical-review/<int:review_id>/unreview", methods=["POST"])
+@login_required
+def unreview_analytical_review(review_id):
+    review = AnalyticalReview.query.get_or_404(review_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    review.reviewed_by_id = None
+    review.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
 
 
 # ---------- Risk Assessment (system-based questionnaire) ----------
