@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block title %}Time Sheets - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Time Sheets</h1>
+    <div class="subtitle">Log hours in the app (overtime is calculated automatically), or fill in the Excel template offline and upload it back.</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="form-row">
+    <div>
+      <h3 class="mt-0">Start a new timesheet</h3>
+      <form method="post" action="{{ url_for('hr.new_timesheet') }}" style="margin-bottom:0;">
+        <label for="week_start">Week starting (Monday)</label>
+        <input type="date" id="week_start" name="week_start" value="{{ default_week }}">
+        <button type="submit" class="btn gold">Start / open timesheet</button>
+      </form>
+    </div>
+    <div>
+      <h3 class="mt-0">Prefer Excel?</h3>
+      <p class="muted" style="font-size:13px;">Download the template - it auto-computes your daily regular and overtime hours - fill it in, then upload the completed file below.</p>
+      <a href="{{ url_for('static', filename='downloads/Neverlank_Timesheet_Template.xlsx') }}" class="btn secondary">Download Excel template</a>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">My timesheets</h3>
+  {% if my_sheets %}
+  <table>
+    <thead><tr><th>Week of</th><th>Total hours</th><th>Regular</th><th>Overtime</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for s in my_sheets %}
+      <tr>
+        <td>{{ s.week_start.strftime('%d %b %Y') }}</td>
+        <td>{{ s.total_hours }}</td>
+        <td>{{ s.regular_hours }}</td>
+        <td>{{ s.overtime_hours }}</td>
+        <td><span class="badge status-{{ s.status }}">{{ s.status }}</span></td>
+        <td class="text-right"><a href="{{ url_for('hr.view_timesheet', timesheet_id=s.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No timesheets yet - start one above.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Upload a completed timesheet</h3>
+  <form method="post" action="{{ url_for('hr.upload_timesheet') }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
+    <div><label for="period_label">Period</label><input type="text" id="period_label" name="period_label" placeholder="e.g. Week of 14 Sep 2026"></div>
+    <div><label for="file">File (.xlsx, .xls or .pdf)</label><input type="file" id="file" name="file" accept=".xlsx,.xls,.pdf" required></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
+  </form>
+  {% if uploads %}
+  <table>
+    <thead><tr><th>File</th><th>Period</th>{% if current_user.role in ('supervisor', 'partner', 'admin') %}<th>Staff</th>{% endif %}<th>Uploaded</th><th></th></tr></thead>
+    <tbody>
+      {% for u in uploads %}
+      <tr>
+        <td>{{ u.original_filename }}</td>
+        <td class="muted">{{ u.period_label or '—' }}</td>
+        {% if current_user.role in ('supervisor', 'partner', 'admin') %}<td>{{ u.user.name }}</td>{% endif %}
+        <td class="muted">{{ u.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
+        <td class="text-right">
+          <a href="{{ url_for('hr.download_timesheet_upload', upload_id=u.id) }}" class="btn small secondary">Download</a>
+          <form method="post" action="{{ url_for('hr.delete_timesheet_upload', upload_id=u.id) }}" class="inline" onsubmit="return confirm('Delete this upload?')"><button type="submit" class="btn small danger">Delete</button></form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No uploaded timesheets yet.</div>
+  {% endif %}
+</div>
+
+{% if current_user.role in ('supervisor', 'partner', 'admin') %}
+<div class="card">
+  <h3 class="mt-0">Team timesheets</h3>
+  {% if team_sheets %}
+  <table>
+    <thead><tr><th>Staff</th><th>Week of</th><th>Total hours</th><th>Regular</th><th>Overtime</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for s in team_sheets %}
+      <tr>
+        <td>{{ s.user.name }}</td>
+        <td>{{ s.week_start.strftime('%d %b %Y') }}</td>
+        <td>{{ s.total_hours }}</td>
+        <td>{{ s.regular_hours }}</td>
+        <td>{{ s.overtime_hours }}</td>
+        <td><span class="badge status-{{ s.status }}">{{ s.status }}</span></td>
+        <td class="text-right"><a href="{{ url_for('hr.view_timesheet', timesheet_id=s.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No team timesheets submitted yet.</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
