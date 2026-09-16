@@ -15,11 +15,14 @@ from models import (
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation,
     RiskAssessment, MaterialityCalculation, EntityUnderstanding,
     AnalyticalReview, AnalyticalReviewLine,
-    COAMapping, TrialBalance, TrialBalanceLine, FinancialStatements,
+    COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
+    SubstantiveProcedureArea, SubstantiveProcedureItem,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
-    SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES,
+    SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
     ENTITY_UNDERSTANDING_FIELDS,
+    AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
+    user_has_permission,
 )
 import financials as fin
 
@@ -179,6 +182,8 @@ def edit_engagement(engagement_id):
 @engagements_bp.route("/<int:engagement_id>/delete", methods=["POST"])
 @login_required
 def delete_engagement(engagement_id):
+    if not user_has_permission(current_user, "delete_engagements"):
+        abort(403)
     engagement = Engagement.query.get_or_404(engagement_id)
     client_id = engagement.client_id
     db.session.delete(engagement)
@@ -210,7 +215,18 @@ def view_engagement(engagement_id):
 
     trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
     financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
-    statements = fin.build_all_statements(trial_balance.lines) if trial_balance and trial_balance.lines else None
+    # The Financial Statements are always built from the ADJUSTED trial
+    # balance (preliminary TB + audit adjustments, current year only) -
+    # Analytical Review and Substantive Procedures work from the preliminary
+    # trial_balance.lines directly, unadjusted, so they're unaffected by this.
+    statements = (
+        fin.build_all_statements(trial_balance.lines, trial_balance.adjustments)
+        if trial_balance and trial_balance.lines else None
+    )
+
+    substantive_areas_by_name = {
+        a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).all()
+    }
 
     return render_template(
         "engagements/detail.html",
@@ -234,6 +250,8 @@ def view_engagement(engagement_id):
         statements=statements,
         category_choices=fin.category_choices(),
         category_label=fin.category_label,
+        audit_areas=AUDIT_AREAS,
+        substantive_areas=substantive_areas_by_name,
     )
 
 
@@ -269,9 +287,11 @@ def update_checklist_item(item_id):
         item.completed_by_id = None
         item.completed_at = None
         # Re-opening a previously completed item invalidates any earlier
-        # review sign-off - it needs to be looked at again once re-done.
+        # review/partner sign-off - it needs to be looked at again once re-done.
         item.reviewed_by_id = None
         item.reviewed_at = None
+        item.partner_signed_by_id = None
+        item.partner_signed_at = None
     db.session.commit()
     flash("Checklist item updated.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
@@ -309,6 +329,38 @@ def unreview_checklist_item(item_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
 
 
+@engagements_bp.route("/checklist/<int:item_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_checklist_item(item_id):
+    item = EngagementChecklistItem.query.get_or_404(item_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if item.status not in ("Done", "N/A"):
+        flash("This item needs to be prepared (marked Done or N/A) before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
+    if item.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on work you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
+    item.partner_signed_by_id = current_user.id
+    item.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
+
+
+@engagements_bp.route("/checklist/<int:item_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_checklist_item(item_id):
+    item = EngagementChecklistItem.query.get_or_404(item_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    item.partner_signed_by_id = None
+    item.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="checklist"))
+
+
 @engagements_bp.route("/checklist/<int:item_id>/delete", methods=["POST"])
 @login_required
 def delete_checklist_item(item_id):
@@ -335,9 +387,11 @@ def save_entity_understanding(engagement_id):
 
     record.completed_by_id = current_user.id
     record.completed_at = datetime.utcnow()
-    # Changing the write-up invalidates any earlier review sign-off.
+    # Changing the write-up invalidates any earlier review/partner sign-off.
     record.reviewed_by_id = None
     record.reviewed_at = None
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
 
     db.session.commit()
     flash("Understanding of the entity saved.", "success")
@@ -376,6 +430,38 @@ def unreview_entity_understanding(record_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
 
 
+@engagements_bp.route("/entity-understanding/<int:record_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_entity_understanding(record_id):
+    record = EntityUnderstanding.query.get_or_404(record_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if not record.is_complete:
+        flash("All sections need to be filled in before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
+    if record.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a write-up you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
+    record.partner_signed_by_id = current_user.id
+    record.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
+
+
+@engagements_bp.route("/entity-understanding/<int:record_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_entity_understanding(record_id):
+    record = EntityUnderstanding.query.get_or_404(record_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
+
+
 # ---------- Analytical Review (system-based: log figures, system flags fluctuations) ----------
 
 def _get_or_create_analytical_review(engagement_id):
@@ -395,6 +481,8 @@ def _touch_analytical_review(review):
     review.completed_at = datetime.utcnow()
     review.reviewed_by_id = None
     review.reviewed_at = None
+    review.partner_signed_by_id = None
+    review.partner_signed_at = None
 
 
 @engagements_bp.route("/<int:engagement_id>/analytical-review/threshold", methods=["POST"])
@@ -517,6 +605,38 @@ def unreview_analytical_review(review_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
 
 
+@engagements_bp.route("/analytical-review/<int:review_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_analytical_review(review_id):
+    review = AnalyticalReview.query.get_or_404(review_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if not review.lines:
+        flash("Add at least one line item before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
+    if review.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on an analytical review you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
+    review.partner_signed_by_id = current_user.id
+    review.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
+
+
+@engagements_bp.route("/analytical-review/<int:review_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_analytical_review(review_id):
+    review = AnalyticalReview.query.get_or_404(review_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    review.partner_signed_by_id = None
+    review.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=review.engagement_id, tab="analytical"))
+
+
 # ---------- Risk Assessment (system-based questionnaire) ----------
 
 @engagements_bp.route("/<int:engagement_id>/risk-assessment/save", methods=["POST"])
@@ -540,10 +660,12 @@ def save_risk_assessment(engagement_id):
     assessment.notes = request.form.get("notes", "").strip()
     assessment.completed_by_id = current_user.id
     assessment.completed_at = datetime.utcnow()
-    # Re-answering the questionnaire invalidates any earlier review - the
-    # updated assessment needs a fresh look.
+    # Re-answering the questionnaire invalidates any earlier review/partner
+    # sign-off - the updated assessment needs a fresh look.
     assessment.reviewed_by_id = None
     assessment.reviewed_at = None
+    assessment.partner_signed_by_id = None
+    assessment.partner_signed_at = None
 
     db.session.commit()
     flash("Risk assessment saved - rating computed automatically below.", "success")
@@ -579,6 +701,38 @@ def unreview_risk_assessment(assessment_id):
     assessment.reviewed_at = None
     db.session.commit()
     flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=assessment.engagement_id, tab="risks"))
+
+
+@engagements_bp.route("/risk-assessment/<int:assessment_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_risk_assessment(assessment_id):
+    assessment = RiskAssessment.query.get_or_404(assessment_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if not assessment.is_complete:
+        flash("The questionnaire needs to be fully answered before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=assessment.engagement_id, tab="risks"))
+    if assessment.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a risk assessment you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=assessment.engagement_id, tab="risks"))
+    assessment.partner_signed_by_id = current_user.id
+    assessment.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=assessment.engagement_id, tab="risks"))
+
+
+@engagements_bp.route("/risk-assessment/<int:assessment_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_risk_assessment(assessment_id):
+    assessment = RiskAssessment.query.get_or_404(assessment_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    assessment.partner_signed_by_id = None
+    assessment.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=assessment.engagement_id, tab="risks"))
 
 
@@ -654,6 +808,8 @@ def download_document(doc_id):
 @engagements_bp.route("/documents/<int:doc_id>/delete", methods=["POST"])
 @login_required
 def delete_document(doc_id):
+    if not user_has_permission(current_user, "delete_documents"):
+        abort(403)
     doc = Document.query.get_or_404(doc_id)
     engagement_id = doc.engagement_id
     try:
@@ -715,9 +871,11 @@ def update_task(task_id):
         task.completed_by_id = None
         task.completed_at = None
         # Re-opening a previously completed task invalidates any earlier
-        # review sign-off - it needs to be looked at again once re-done.
+        # review/partner sign-off - it needs to be looked at again once re-done.
         task.reviewed_by_id = None
         task.reviewed_at = None
+        task.partner_signed_by_id = None
+        task.partner_signed_at = None
     db.session.commit()
     flash("Task updated.", "success")
     return _task_redirect(task)
@@ -755,6 +913,38 @@ def unreview_task(task_id):
     return _task_redirect(task)
 
 
+@engagements_bp.route("/tasks/<int:task_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_task(task_id):
+    task = EngagementTask.query.get_or_404(task_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if task.status != "Done":
+        flash("This task needs to be marked Done before the partner can sign off.", "danger")
+        return _task_redirect(task)
+    if task.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on work you prepared yourself - ask another partner to sign off.", "danger")
+        return _task_redirect(task)
+    task.partner_signed_by_id = current_user.id
+    task.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return _task_redirect(task)
+
+
+@engagements_bp.route("/tasks/<int:task_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_task(task_id):
+    task = EngagementTask.query.get_or_404(task_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    task.partner_signed_by_id = None
+    task.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return _task_redirect(task)
+
+
 @engagements_bp.route("/tasks/<int:task_id>/delete", methods=["POST"])
 @login_required
 def delete_task(task_id):
@@ -780,6 +970,8 @@ def list_templates():
 @engagements_bp.route("/templates/new", methods=["GET", "POST"])
 @login_required
 def new_template():
+    if not user_has_permission(current_user, "manage_checklist_templates"):
+        abort(403)
     if request.method == "POST":
         template = ChecklistTemplate(
             name=request.form.get("name", "").strip(),
@@ -803,6 +995,8 @@ def view_template(template_id):
 @engagements_bp.route("/templates/<int:template_id>/items/add", methods=["POST"])
 @login_required
 def add_template_item(template_id):
+    if not user_has_permission(current_user, "manage_checklist_templates"):
+        abort(403)
     from models import ChecklistTemplateItem
     template = ChecklistTemplate.query.get_or_404(template_id)
     max_order = max([i.order for i in template.items], default=0)
@@ -820,6 +1014,8 @@ def add_template_item(template_id):
 @engagements_bp.route("/templates/<int:template_id>/delete", methods=["POST"])
 @login_required
 def delete_template(template_id):
+    if not user_has_permission(current_user, "manage_checklist_templates"):
+        abort(403)
     template = ChecklistTemplate.query.get_or_404(template_id)
     db.session.delete(template)
     db.session.commit()
@@ -909,10 +1105,79 @@ def save_materiality(engagement_id):
     calc.basis = basis if basis in ("revenue", "pbt", "assets", "highest", "lowest") else "highest"
     calc.notes = request.form.get("notes", "").strip()
     calc.updated_by_id = current_user.id
+    # Changing the calculation invalidates any earlier review/partner sign-off.
+    calc.reviewed_by_id = None
+    calc.reviewed_at = None
+    calc.partner_signed_by_id = None
+    calc.partner_signed_at = None
 
     db.session.commit()
     flash("Materiality calculation saved.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/materiality/<int:calc_id>/review", methods=["POST"])
+@login_required
+def review_materiality(calc_id):
+    calc = MaterialityCalculation.query.get_or_404(calc_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if calc.overall_materiality is None:
+        flash("Enter at least one financial figure before this can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
+    if calc.updated_by_id == current_user.id:
+        flash("You can't review a materiality calculation you prepared yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
+    calc.reviewed_by_id = current_user.id
+    calc.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Materiality calculation marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/materiality/<int:calc_id>/unreview", methods=["POST"])
+@login_required
+def unreview_materiality(calc_id):
+    calc = MaterialityCalculation.query.get_or_404(calc_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    calc.reviewed_by_id = None
+    calc.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/materiality/<int:calc_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_materiality(calc_id):
+    calc = MaterialityCalculation.query.get_or_404(calc_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if calc.overall_materiality is None:
+        flash("Enter at least one financial figure before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
+    if calc.updated_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a calculation you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
+    calc.partner_signed_by_id = current_user.id
+    calc.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/materiality/<int:calc_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_materiality(calc_id):
+    calc = MaterialityCalculation.query.get_or_404(calc_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    calc.partner_signed_by_id = None
+    calc.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
 
 
 # ---------- Audit Finalisation: Trial Balance import + IAS 1 Financial Statements ----------
@@ -968,6 +1233,8 @@ def _touch_trial_balance(tb):
     tb.completed_at = datetime.utcnow()
     tb.reviewed_by_id = None
     tb.reviewed_at = None
+    tb.partner_signed_by_id = None
+    tb.partner_signed_at = None
 
 
 def _lookup_coa_mapping(client_id, account_name):
@@ -1155,6 +1422,226 @@ def unreview_trial_balance(tb_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
 
 
+@engagements_bp.route("/trial-balance/<int:tb_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_trial_balance(tb_id):
+    tb = TrialBalance.query.get_or_404(tb_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if not tb.is_fully_mapped:
+        flash("Every account needs an IAS 1 category (or 'Excluded') before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+    if tb.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a trial balance you imported/entered yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+    tb.partner_signed_by_id = current_user.id
+    tb.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/trial-balance/<int:tb_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_trial_balance(tb_id):
+    tb = TrialBalance.query.get_or_404(tb_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    tb.partner_signed_by_id = None
+    tb.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/trial-balance/<int:tb_id>/adjustments/add", methods=["POST"])
+@login_required
+def add_audit_adjustment(tb_id):
+    tb = TrialBalance.query.get_or_404(tb_id)
+    reference = request.form.get("reference", "").strip() or f"AJE {len(tb.adjustments) + 1}"
+    adjustment = AuditAdjustment(
+        trial_balance_id=tb.id,
+        reference=reference,
+        description=request.form.get("description", "").strip(),
+        completed_by_id=current_user.id,
+        completed_at=datetime.utcnow(),
+    )
+    db.session.add(adjustment)
+    db.session.commit()
+    flash(f"Adjustment '{reference}' added - now add its debit/credit lines below.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+
+
+def _touch_adjustment(adjustment):
+    """Every change to an adjustment (its reference/description, or a line
+    added/edited/removed) re-records who last worked on it and clears any
+    stale review/partner sign-off - the same convention used everywhere
+    else in the app."""
+    adjustment.completed_by_id = current_user.id
+    adjustment.completed_at = datetime.utcnow()
+    adjustment.reviewed_by_id = None
+    adjustment.reviewed_at = None
+    adjustment.partner_signed_by_id = None
+    adjustment.partner_signed_at = None
+
+
+@engagements_bp.route("/adjustments/<int:adjustment_id>/update", methods=["POST"])
+@login_required
+def update_audit_adjustment(adjustment_id):
+    adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    adjustment.reference = request.form.get("reference", adjustment.reference or "").strip() or adjustment.reference
+    adjustment.description = request.form.get("description", "").strip()
+    _touch_adjustment(adjustment)
+    db.session.commit()
+    flash("Adjustment updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/adjustments/<int:adjustment_id>/delete", methods=["POST"])
+@login_required
+def delete_audit_adjustment(adjustment_id):
+    adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    engagement_id = adjustment.trial_balance.engagement_id
+    db.session.delete(adjustment)
+    db.session.commit()
+    flash("Adjustment deleted.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/adjustments/<int:adjustment_id>/lines/add", methods=["POST"])
+@login_required
+def add_audit_adjustment_line(adjustment_id):
+    adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    name = request.form.get("account_name", "").strip()
+    category = request.form.get("fs_category", "").strip()
+    if not name or not category:
+        flash("Please give the line an account name and an IAS 1 category.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+
+    def to_float(field):
+        raw = request.form.get(field, "").strip()
+        try:
+            return float(raw) if raw else 0.0
+        except ValueError:
+            return 0.0
+
+    db.session.add(AuditAdjustmentLine(
+        adjustment_id=adjustment.id,
+        account_name=name,
+        fs_category=category,
+        debit=to_float("debit"),
+        credit=to_float("credit"),
+    ))
+    _touch_adjustment(adjustment)
+    db.session.commit()
+    flash("Adjustment line added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/adjustment-lines/<int:line_id>/update", methods=["POST"])
+@login_required
+def update_audit_adjustment_line(line_id):
+    line = AuditAdjustmentLine.query.get_or_404(line_id)
+    adjustment = line.adjustment
+
+    def to_float(field, current):
+        raw = request.form.get(field)
+        if raw is None:
+            return current
+        raw = raw.strip()
+        if not raw:
+            return 0.0
+        try:
+            return float(raw)
+        except ValueError:
+            return current
+
+    line.account_name = request.form.get("account_name", line.account_name).strip() or line.account_name
+    line.fs_category = request.form.get("fs_category", line.fs_category).strip() or line.fs_category
+    line.debit = to_float("debit", line.debit)
+    line.credit = to_float("credit", line.credit)
+    _touch_adjustment(adjustment)
+    db.session.commit()
+    flash("Adjustment line updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/adjustment-lines/<int:line_id>/delete", methods=["POST"])
+@login_required
+def delete_audit_adjustment_line(line_id):
+    line = AuditAdjustmentLine.query.get_or_404(line_id)
+    adjustment = line.adjustment
+    engagement_id = adjustment.trial_balance.engagement_id
+    db.session.delete(line)
+    _touch_adjustment(adjustment)
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/adjustments/<int:adjustment_id>/review", methods=["POST"])
+@login_required
+def review_audit_adjustment(adjustment_id):
+    adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if not adjustment.lines or not adjustment.is_balanced:
+        flash("The adjustment needs at least one line and must balance (debits = credits) before it can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+    if adjustment.completed_by_id == current_user.id:
+        flash("You can't review an adjustment you prepared yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+    adjustment.reviewed_by_id = current_user.id
+    adjustment.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Adjustment marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/adjustments/<int:adjustment_id>/unreview", methods=["POST"])
+@login_required
+def unreview_audit_adjustment(adjustment_id):
+    adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    adjustment.reviewed_by_id = None
+    adjustment.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/adjustments/<int:adjustment_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_audit_adjustment(adjustment_id):
+    adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if not adjustment.lines or not adjustment.is_balanced:
+        flash("The adjustment needs at least one line and must balance (debits = credits) before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+    if adjustment.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on an adjustment you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+    adjustment.partner_signed_by_id = current_user.id
+    adjustment.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/adjustments/<int:adjustment_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_audit_adjustment(adjustment_id):
+    adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    adjustment.partner_signed_by_id = None
+    adjustment.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=adjustment.trial_balance.engagement_id, tab="finalisation"))
+
+
 @engagements_bp.route("/<int:engagement_id>/financial-statements/save", methods=["POST"])
 @login_required
 def save_financial_statements_notes(engagement_id):
@@ -1168,6 +1655,8 @@ def save_financial_statements_notes(engagement_id):
     fs.completed_at = datetime.utcnow()
     fs.reviewed_by_id = None
     fs.reviewed_at = None
+    fs.partner_signed_by_id = None
+    fs.partner_signed_at = None
     db.session.commit()
     flash("Financial statements notes saved.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
@@ -1204,3 +1693,221 @@ def unreview_financial_statements(fs_id):
     db.session.commit()
     flash("Review sign-off removed.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/financial-statements/<int:fs_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_financial_statements(fs_id):
+    fs = FinancialStatements.query.get_or_404(fs_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    trial_balance = TrialBalance.query.filter_by(engagement_id=fs.engagement_id).first()
+    if not trial_balance or not trial_balance.lines:
+        flash("Import or enter the trial balance before the partner can sign off the financial statements.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
+    if fs.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on financial statements you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
+    fs.partner_signed_by_id = current_user.id
+    fs.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/financial-statements/<int:fs_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_financial_statements(fs_id):
+    fs = FinancialStatements.query.get_or_404(fs_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    fs.partner_signed_by_id = None
+    fs.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
+
+
+# ---------- Substantive Procedures (system-based: by audit area, driven by risk + industry) ----------
+
+@engagements_bp.route("/<int:engagement_id>/substantive-procedures/generate", methods=["POST"])
+@login_required
+def generate_substantive_procedures(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
+    high_risk = bool(risk_assessment and risk_assessment.rating == "High")
+    industry_map = INDUSTRY_EXTRA_PROCEDURES.get(engagement.client.industry, {})
+
+    added_count = 0
+    for area_name in AUDIT_AREAS:
+        area = SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id, area=area_name).first()
+        if not area:
+            area = SubstantiveProcedureArea(engagement_id=engagement_id, area=area_name)
+            db.session.add(area)
+            db.session.flush()
+
+        desired = [(t, "baseline") for t in BASELINE_SUBSTANTIVE_PROCEDURES.get(area_name, [])]
+        if high_risk:
+            desired += [(t, "risk") for t in HIGH_RISK_EXTRA_PROCEDURES.get(area_name, [])]
+        desired += [(t, "industry") for t in industry_map.get(area_name, [])]
+
+        existing_texts = {i.procedure_text for i in area.items}
+        next_order = len(area.items)
+        area_changed = False
+        for text, source in desired:
+            if text not in existing_texts:
+                db.session.add(SubstantiveProcedureItem(area_id=area.id, procedure_text=text, source=source, order=next_order))
+                next_order += 1
+                added_count += 1
+                area_changed = True
+        if area_changed:
+            # Only touch (and clear any existing sign-off on) areas that
+            # actually gained new suggested procedures - re-running this on
+            # an already-signed-off area with nothing new to add shouldn't
+            # disturb it.
+            _touch_substantive_area(area)
+
+    db.session.commit()
+    if added_count:
+        flash(f"Generated {added_count} suggested procedure(s) across the audit areas, based on the current risk rating{' (High)' if high_risk else ''} and the client's industry.", "success")
+    else:
+        flash("No new suggested procedures to add - everything suggested for the current risk rating and industry is already listed below.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+
+
+def _touch_substantive_area(area):
+    """Every change within an area (a procedure added/edited/removed, or its
+    notes changed) re-records who last worked on it and clears any stale
+    review/partner sign-off - the same convention used everywhere else."""
+    area.completed_by_id = current_user.id
+    area.completed_at = datetime.utcnow()
+    area.reviewed_by_id = None
+    area.reviewed_at = None
+    area.partner_signed_by_id = None
+    area.partner_signed_at = None
+
+
+def _get_or_create_substantive_area(engagement_id, area_name):
+    area = SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id, area=area_name).first()
+    if not area:
+        area = SubstantiveProcedureArea(engagement_id=engagement_id, area=area_name)
+        db.session.add(area)
+        db.session.flush()
+    return area
+
+
+@engagements_bp.route("/<int:engagement_id>/substantive-procedures/areas/<area_name>/items/add", methods=["POST"])
+@login_required
+def add_substantive_procedure_item(engagement_id, area_name):
+    Engagement.query.get_or_404(engagement_id)
+    text = request.form.get("procedure_text", "").strip()
+    if not text:
+        flash("Please enter the procedure text.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+    area = _get_or_create_substantive_area(engagement_id, area_name)
+    db.session.add(SubstantiveProcedureItem(area_id=area.id, procedure_text=text, source="manual", order=len(area.items)))
+    _touch_substantive_area(area)
+    db.session.commit()
+    flash("Procedure added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+
+
+@engagements_bp.route("/substantive-procedures/items/<int:item_id>/update", methods=["POST"])
+@login_required
+def update_substantive_procedure_item(item_id):
+    item = SubstantiveProcedureItem.query.get_or_404(item_id)
+    area = item.area_record
+    item.procedure_text = request.form.get("procedure_text", item.procedure_text).strip() or item.procedure_text
+    item.status = request.form.get("status", item.status)
+    item.notes = request.form.get("notes", item.notes or "").strip()
+    _touch_substantive_area(area)
+    db.session.commit()
+    flash("Procedure updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+
+
+@engagements_bp.route("/substantive-procedures/items/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_substantive_procedure_item(item_id):
+    item = SubstantiveProcedureItem.query.get_or_404(item_id)
+    area = item.area_record
+    engagement_id = area.engagement_id
+    db.session.delete(item)
+    _touch_substantive_area(area)
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+
+
+@engagements_bp.route("/substantive-procedures/areas/<int:area_id>/notes", methods=["POST"])
+@login_required
+def save_substantive_area_notes(area_id):
+    area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    area.notes = request.form.get("notes", "").strip()
+    _touch_substantive_area(area)
+    db.session.commit()
+    flash("Notes saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+
+
+@engagements_bp.route("/substantive-procedures/areas/<int:area_id>/review", methods=["POST"])
+@login_required
+def review_substantive_area(area_id):
+    area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if not area.is_complete:
+        flash("Every procedure in this area needs to be marked Done or N/A before the area can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+    if area.completed_by_id == current_user.id:
+        flash("You can't review an area you prepared yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+    area.reviewed_by_id = current_user.id
+    area.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Area marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+
+
+@engagements_bp.route("/substantive-procedures/areas/<int:area_id>/unreview", methods=["POST"])
+@login_required
+def unreview_substantive_area(area_id):
+    area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    area.reviewed_by_id = None
+    area.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+
+
+@engagements_bp.route("/substantive-procedures/areas/<int:area_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_substantive_area(area_id):
+    area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if not area.is_complete:
+        flash("Every procedure in this area needs to be marked Done or N/A before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+    if area.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on an area you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+    area.partner_signed_by_id = current_user.id
+    area.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+
+
+@engagements_bp.route("/substantive-procedures/areas/<int:area_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_substantive_area(area_id):
+    area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    area.partner_signed_by_id = None
+    area.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
