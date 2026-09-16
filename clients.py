@@ -1,10 +1,24 @@
-from flask import Blueprint, render_template, redirect, url_for, request, flash
-from flask_login import login_required
+from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
+from flask_login import login_required, current_user
 
 from extensions import db
-from models import Client
+from models import Client, INDUSTRY_OPTIONS, user_has_permission
 
 clients_bp = Blueprint("clients", __name__, url_prefix="/clients")
+
+
+def _resolve_industry(form):
+    """The industry field is a <select> of INDUSTRY_OPTIONS with "Other"
+    revealing a free-text companion field - resolve whichever was actually
+    meant. Anything unexpected (e.g. a stale value) falls back to "Other"
+    with the raw value preserved as free text rather than being dropped."""
+    choice = form.get("industry", "").strip()
+    other_text = form.get("industry_other", "").strip()
+    if choice == "Other":
+        return other_text or "Other"
+    if choice in INDUSTRY_OPTIONS:
+        return choice
+    return choice  # blank, or a legacy free-text value from before this field existed
 
 
 @clients_bp.route("/")
@@ -28,14 +42,14 @@ def new_client():
             email=request.form.get("email", "").strip(),
             phone=request.form.get("phone", "").strip(),
             address=request.form.get("address", "").strip(),
-            industry=request.form.get("industry", "").strip(),
+            industry=_resolve_industry(request.form),
             notes=request.form.get("notes", "").strip(),
         )
         db.session.add(client)
         db.session.commit()
         flash(f"Client '{client.name}' created.", "success")
         return redirect(url_for("clients.view_client", client_id=client.id))
-    return render_template("clients/form.html", client=None)
+    return render_template("clients/form.html", client=None, industry_options=INDUSTRY_OPTIONS)
 
 
 @clients_bp.route("/<int:client_id>")
@@ -55,17 +69,19 @@ def edit_client(client_id):
         client.email = request.form.get("email", "").strip()
         client.phone = request.form.get("phone", "").strip()
         client.address = request.form.get("address", "").strip()
-        client.industry = request.form.get("industry", "").strip()
+        client.industry = _resolve_industry(request.form)
         client.notes = request.form.get("notes", "").strip()
         db.session.commit()
         flash("Client updated.", "success")
         return redirect(url_for("clients.view_client", client_id=client.id))
-    return render_template("clients/form.html", client=client)
+    return render_template("clients/form.html", client=client, industry_options=INDUSTRY_OPTIONS)
 
 
 @clients_bp.route("/<int:client_id>/delete", methods=["POST"])
 @login_required
 def delete_client(client_id):
+    if not user_has_permission(current_user, "delete_clients"):
+        abort(403)
     client = Client.query.get_or_404(client_id)
     db.session.delete(client)
     db.session.commit()
