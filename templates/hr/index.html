@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}HR & Administration - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>HR &amp; Administration</h1></div>
+
+<div class="stat-grid">
+  <a href="{{ url_for('hr.list_policies') }}" class="card" style="text-decoration:none;color:inherit;">
+    <h3 class="mt-0">Policies and Procedures</h3>
+    <p class="muted" style="font-size:13px;">The firm's HR policies, procedures, quality control manual and internal forms - browse, download, and (for admins/partners) keep up to date.</p>
+  </a>
+  <a href="{{ url_for('hr.list_timesheets') }}" class="card" style="text-decoration:none;color:inherit;">
+    <h3 class="mt-0">Time Sheets</h3>
+    <p class="muted" style="font-size:13px;">Log your weekly hours in the app (overtime calculated automatically), or download the Excel template and upload it back once filled in.</p>
+  </a>
+  <a href="{{ url_for('hr.project_board') }}" class="card" style="text-decoration:none;color:inherit;">
+    <h3 class="mt-0">Project Management</h3>
+    <p class="muted" style="font-size:13px;">A firm-wide board of every open task across all engagements - who's working on what, due dates, and review status, all in one place.</p>
+  </a>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Related</h3>
+  <p style="font-size:13.5px;">
+    {% if current_user.role == 'admin' %}<a href="{{ url_for('users.list_users') }}">Team</a> - add/deactivate staff and set roles &middot;{% endif %}
+    <a href="{{ url_for('engagements.list_templates') }}">Checklist Templates</a> - reusable audit programs &middot;
+    <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a> - engagement letters, workpapers and more
+  </p>
+</div>
+{% endblock %}
