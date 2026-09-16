@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Document Templates - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Document Templates</h1>
+    <div class="subtitle">Blank workpapers and letters to download, fill in, and upload back onto an engagement's Documents tab.</div>
+  </div>
+  {% if can_edit %}
+  <a href="{{ url_for('doc_templates.new_template') }}" class="btn gold">+ New Template</a>
+  {% endif %}
+</div>
+
+{% for eng_type, items in library.items() %}
+<div class="card">
+  <h3 class="mt-0"><span class="badge type-{{ eng_type }}">{{ eng_type }}</span></h3>
+  <table>
+    <thead><tr><th>Ref</th><th>Template</th><th>Description</th><th>Format</th><th></th></tr></thead>
+    <tbody>
+      {% for tpl in items %}
+      <tr>
+        <td class="muted">{{ tpl.ref_code }}</td>
+        <td>{{ tpl.title }}</td>
+        <td class="muted">{{ tpl.description }}</td>
+        <td>{{ 'Excel' if tpl.file_ext == 'xlsx' else 'Word' }}</td>
+        <td class="text-right">
+          <a href="{{ url_for('doc_templates.download_template', template_id=tpl.id) }}" class="btn small secondary">Download</a>
+          {% if can_edit %}
+          <a href="{{ url_for('doc_templates.edit_template', template_id=tpl.id) }}" class="btn small secondary">Edit</a>
+          <form method="post" action="{{ url_for('doc_templates.delete_template', template_id=tpl.id) }}" style="display:inline;" onsubmit="return confirm('Delete this template? This cannot be undone.');">
+            <button type="submit" class="btn small danger">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+
+{% if not library %}
+<div class="card">
+  <p class="muted">No templates yet.{% if can_edit %} Click "+ New Template" above to add one.{% endif %}</p>
+</div>
+{% endif %}
+
+<p class="muted" style="font-size:12.5px;">
+  These are starting templates only &mdash; always confirm current legislation, standards and firm policy
+  before relying on any figures, rates or wording. Once filled in for a specific engagement, upload the
+  completed file to that engagement's <strong>Documents</strong> tab so it's kept with the engagement file.
+  {% if can_edit %}As an admin/partner you can update the master copy of any template here at any time using Edit.{% endif %}
+</p>
+{% endblock %}
