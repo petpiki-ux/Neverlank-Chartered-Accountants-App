@@ -25,6 +25,7 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}" class="{% if tab=='finalisation' %}active{% endif %}">Finalisation{% if trial_balance and trial_balance.lines %} ({{ trial_balance.lines|length }} accounts){% endif %}</a>
 </div>
 
 {% if tab == 'overview' %}
@@ -523,5 +524,240 @@
     <div class="empty-state">No tasks assigned yet.</div>
     {% endif %}
   </div>
+
+{% elif tab == 'finalisation' %}
+  <div class="card">
+    <h3 class="mt-0">Trial Balance</h3>
+    <p class="muted" style="font-size:12.5px;">Import the period's trial balance - current year and prior year comparative columns - to drive the financial statements below. Map each account to an IAS 1 category once and it's remembered for this client's future periods.</p>
+    <div class="form-row" style="align-items:flex-end;">
+      <form method="post" action="{{ url_for('engagements.upload_trial_balance', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end; grid-column: span 2;">
+        <div><label for="tb_file">Upload .xlsx / .csv</label><input type="file" id="tb_file" name="file" accept=".xlsx,.xls,.csv" required></div>
+        <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Import</button></div>
+      </form>
+      <div><a href="{{ url_for('static', filename='downloads/Neverlank_TB_Import_Template.xlsx') }}" class="btn secondary">Download template</a></div>
+    </div>
+    {% if trial_balance %}
+    <p class="muted" style="font-size:11.5px;">{% if trial_balance.source == 'upload' %}Last imported from '{{ trial_balance.original_filename }}'{% else %}Entered manually{% endif %}{% if trial_balance.completed_by %} by {{ trial_balance.completed_by.name }} on {{ trial_balance.completed_at.strftime('%d %b %Y') }}{% endif %}. Importing again replaces the accounts below with the new file's rows (any category you'd already set is kept for matching accounts).</p>
+    {% endif %}
+  </div>
+
+  {% if trial_balance %}
+  <div class="stat-grid">
+    <div class="stat-card{% if not trial_balance.is_current_balanced %} danger{% endif %}"><div class="num">{{ 'Balanced' if trial_balance.is_current_balanced else 'Out of balance' }}</div><div class="label">Current year TB</div></div>
+    <div class="stat-card{% if not trial_balance.is_prior_balanced %} danger{% endif %}"><div class="num">{{ 'Balanced' if trial_balance.is_prior_balanced else 'Out of balance' }}</div><div class="label">Prior year TB</div></div>
+    <div class="stat-card{% if trial_balance.unmapped_count > 0 %} danger{% endif %}"><div class="num">{{ trial_balance.lines|length - trial_balance.unmapped_count }}/{{ trial_balance.lines|length }}</div><div class="label">Accounts mapped</div></div>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Add an account manually</h3>
+    <form method="post" action="{{ url_for('engagements.add_trial_balance_line', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div><label for="account_code">Code</label><input type="text" id="account_code" name="account_code" style="width:90px;"></div>
+      <div><label for="account_name">Account name *</label><input type="text" id="account_name" name="account_name" required></div>
+      <div>
+        <label for="fs_category">Category</label>
+        <select id="fs_category" name="fs_category">
+          <option value="">Select...</option>
+          {% for group_label, choices in category_choices %}
+          <optgroup label="{{ group_label }}">
+            {% for code, label in choices %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+      </div>
+      <div><label for="current_debit">Current Dr</label><input type="number" step="0.01" id="current_debit" name="current_debit"></div>
+      <div><label for="current_credit">Current Cr</label><input type="number" step="0.01" id="current_credit" name="current_credit"></div>
+      <div><label for="prior_debit">Prior Dr</label><input type="number" step="0.01" id="prior_debit" name="prior_debit"></div>
+      <div><label for="prior_credit">Prior Cr</label><input type="number" step="0.01" id="prior_credit" name="prior_credit"></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    {% if trial_balance.lines %}
+    <table>
+      <thead><tr><th>Code</th><th>Account</th><th>IAS 1 category</th><th>Current Dr</th><th>Current Cr</th><th>Prior Dr</th><th>Prior Cr</th><th></th></tr></thead>
+      <tbody>
+      {% for line in trial_balance.lines %}
+        <tr{% if not line.fs_category %} class="danger"{% endif %}>
+          <form method="post" action="{{ url_for('engagements.update_trial_balance_line', line_id=line.id) }}" class="inline">
+          <td><input type="text" name="account_code" value="{{ line.account_code or '' }}" style="width:70px;margin-bottom:0;"></td>
+          <td><input type="text" name="account_name" value="{{ line.account_name }}" style="width:170px;margin-bottom:0;"></td>
+          <td>
+            <select name="fs_category" style="margin-bottom:0;">
+              <option value="">Unmapped</option>
+              {% for group_label, choices in category_choices %}
+              <optgroup label="{{ group_label }}">
+                {% for code, label in choices %}<option value="{{ code }}" {% if line.fs_category==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+              </optgroup>
+              {% endfor %}
+            </select>
+          </td>
+          <td><input type="number" step="0.01" name="current_debit" value="{{ line.current_debit or 0 }}" style="width:95px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="current_credit" value="{{ line.current_credit or 0 }}" style="width:95px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="prior_debit" value="{{ line.prior_debit or 0 }}" style="width:95px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="prior_credit" value="{{ line.prior_credit or 0 }}" style="width:95px;margin-bottom:0;"></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_trial_balance_line', line_id=line.id) }}" class="btn small danger" onclick="return confirm('Delete this account?')">Delete</button>
+          </td>
+          </form>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No accounts yet - import a file above or add one manually.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ trial_balance.completed_by.name if trial_balance.completed_by else '—' }} on {{ trial_balance.completed_at.strftime('%d %b %Y') if trial_balance.completed_at else '—' }}.
+      {% if trial_balance.is_reviewed %}Reviewed by {{ trial_balance.reviewed_by.name }} on {{ trial_balance.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if trial_balance.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_trial_balance', tb_id=trial_balance.id) }}"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif trial_balance.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_trial_balance', tb_id=trial_balance.id) }}"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if statements %}
+  {% if trial_balance.unmapped_count > 0 %}
+  <div class="card"><div class="empty-state">{{ trial_balance.unmapped_count }} account(s) above still need a category - the statements below exclude anything unmapped, so treat them as a draft until every account is mapped.</div></div>
+  {% endif %}
+
+  <div class="card">
+    <h3 class="mt-0">Statement of Financial Position</h3>
+    <table>
+      <thead><tr><th></th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
+      <tbody>
+        <tr><td class="section-title" colspan="3">Non-current assets</td></tr>
+        {% for r in statements.sfp.non_current_assets %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total non-current assets</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.nca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.nca_total.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="3">Current assets</td></tr>
+        {% for r in statements.sfp.current_assets %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total current assets</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ca_total.prior) }}</strong></td></tr>
+        <tr><td><strong>Total assets</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_assets.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_assets.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="3">Equity</td></tr>
+        {% for r in statements.sfp.equity %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total equity</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="3">Non-current liabilities</td></tr>
+        {% for r in statements.sfp.non_current_liabilities %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total non-current liabilities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ncl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ncl_total.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="3">Current liabilities</td></tr>
+        {% for r in statements.sfp.current_liabilities %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total current liabilities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.cl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.cl_total.prior) }}</strong></td></tr>
+        <tr><td><strong>Total equity and liabilities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity_and_liabilities.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity_and_liabilities.prior) }}</strong></td></tr>
+      </tbody>
+    </table>
+    {% set bc = statements.sfp.balance_check %}
+    <p class="muted" style="font-size:11.5px;{% if bc.current|abs > 0.01 or bc.prior|abs > 0.01 %}color:#b02a2a;{% endif %}">
+      Balance check (assets less equity and liabilities): current year {{ '%.2f'|format(bc.current) }}, prior year {{ '%.2f'|format(bc.prior) }}.
+      {% if bc.current|abs > 0.01 or bc.prior|abs > 0.01 %}Non-zero - check every account is mapped to the right category and that the trial balance above balances.{% else %}Ties out.{% endif %}
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Statement of Profit or Loss and Other Comprehensive Income</h3>
+    <table>
+      <thead><tr><th></th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
+      <tbody>
+      {% for r in statements.pl.rows %}
+        <tr>
+          <td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}</td>
+          <td class="text-right">{% if r.bold %}<strong>{{ '%.2f'|format(r.current) }}</strong>{% else %}{{ '%.2f'|format(r.current) }}{% endif %}</td>
+          <td class="text-right">{% if r.bold %}<strong>{{ '%.2f'|format(r.prior) }}</strong>{% else %}{{ '%.2f'|format(r.prior) }}{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Statement of Changes in Equity</h3>
+    <table>
+      <thead><tr><th>Component</th><th class="text-right">Opening</th><th>Movement</th><th class="text-right"></th><th class="text-right">Closing</th></tr></thead>
+      <tbody>
+      {% for r in statements.equity.rows %}
+        <tr>
+          <td>{{ r.label }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.opening) }}</td>
+          <td class="muted" style="font-size:11.5px;">{{ r.movement_desc }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.movement) }}</td>
+          <td class="text-right"><strong>{{ '%.2f'|format(r.closing) }}</strong></td>
+        </tr>
+        {% if r.label == 'Retained earnings' %}
+        <tr><td colspan="5" class="muted" style="font-size:11px;{% if r.opening_variance|abs > 0.01 %}color:#b02a2a;{% endif %}">Opening balance should agree with prior year's closing retained earnings ({{ '%.2f'|format(r.opening_check) }}){% if r.opening_variance|abs > 0.01 %} - currently differs by {{ '%.2f'|format(r.opening_variance) }} (may reflect dividends posted directly to retained earnings, a prior period adjustment, or a mapping to review).{% else %} - agrees.{% endif %}</td></tr>
+        {% endif %}
+      {% endfor %}
+        <tr><td><strong>Total equity</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.equity.total_opening) }}</strong></td><td></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.equity.total_closing) }}</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Statement of Cash Flows (current year, indirect method)</h3>
+    <p class="muted" style="font-size:12px;">Investing activities are approximated as the net movement in each non-current asset's carrying value, so depreciation is not separately added back in operating activities (see the memo line below) - review against the fixed asset register and adjust for any disposals during the year. Shown for the current year only; a prior-year comparative needs the trial balance from two years back.</p>
+    <table>
+      <thead><tr><th></th><th class="text-right">Amount</th></tr></thead>
+      <tbody>
+        <tr><td class="section-title" colspan="2">Operating activities</td></tr>
+        {% for r in statements.cf.operating_rows %}
+        <tr{% if r.memo %} class="muted"{% endif %}>
+          <td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}</td>
+          <td class="text-right">{% if r.bold %}<strong>{{ '%.2f'|format(r.current) }}</strong>{% else %}{{ '%.2f'|format(r.current) }}{% endif %}</td>
+        </tr>
+        {% endfor %}
+        <tr><td><strong>Net cash from operating activities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_operating) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="2">Investing activities</td></tr>
+        {% for r in statements.cf.investing_rows %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td></tr>{% endfor %}
+        <tr><td><strong>Net cash used in investing activities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_investing) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="2">Financing activities</td></tr>
+        {% for r in statements.cf.financing_rows %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td></tr>{% endfor %}
+        <tr><td><strong>Net cash from financing activities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_financing) }}</strong></td></tr>
+        <tr><td><strong>Net increase/(decrease) in cash</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_movement) }}</strong></td></tr>
+        <tr><td>Cash at beginning of year</td><td class="text-right">{{ '%.2f'|format(statements.cf.cash_open) }}</td></tr>
+        <tr><td><strong>Cash at end of year (computed)</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.cash_close_computed) }}</strong></td></tr>
+        <tr><td>Cash at end of year (per trial balance)</td><td class="text-right">{{ '%.2f'|format(statements.cf.cash_close_actual) }}</td></tr>
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:11.5px;{% if statements.cf.variance|abs > 0.01 %}color:#b02a2a;{% endif %}">
+      {% if statements.cf.variance|abs > 0.01 %}Computed closing cash differs from the trial balance by {{ '%.2f'|format(statements.cf.variance) }} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust.{% else %}Ties out to the trial balance.{% endif %}
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Basis of preparation &amp; sign-off</h3>
+    <form method="post" action="{{ url_for('engagements.save_financial_statements_notes', engagement_id=engagement.id) }}">
+      <label for="basis_of_preparation">Basis of preparation / notes</label>
+      <textarea id="basis_of_preparation" name="basis_of_preparation" rows="3">{{ financial_statements.basis_of_preparation if financial_statements else '' }}</textarea>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+    {% if financial_statements %}
+    <p class="muted" style="font-size:12.5px;margin-top:10px;">
+      Prepared by {{ financial_statements.completed_by.name if financial_statements.completed_by else '—' }} on {{ financial_statements.completed_at.strftime('%d %b %Y') if financial_statements.completed_at else '—' }}.
+      {% if financial_statements.is_reviewed %}Reviewed by {{ financial_statements.reviewed_by.name }} on {{ financial_statements.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if financial_statements.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_financial_statements', fs_id=financial_statements.id) }}"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif financial_statements.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_financial_statements', fs_id=financial_statements.id) }}"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% endif %}
+  </div>
+  {% elif trial_balance %}
+  <div class="card"><div class="empty-state">Import or add trial balance accounts above, then map each to an IAS 1 category, to generate the financial statements here.</div></div>
+  {% endif %}
 {% endif %}
 {% endblock %}
