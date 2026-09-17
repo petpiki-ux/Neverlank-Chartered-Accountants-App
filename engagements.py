@@ -23,7 +23,7 @@ from models import (
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
-    ENTITY_UNDERSTANDING_FIELDS,
+    ENTITY_UNDERSTANDING_FIELDS, EntityUnderstandingChecklistItem, FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
@@ -550,6 +550,89 @@ def partner_unsign_entity_understanding(record_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="entity"))
 
 
+def _get_or_create_entity_understanding(engagement_id):
+    record = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
+    if not record:
+        record = EntityUnderstanding(engagement_id=engagement_id)
+        db.session.add(record)
+        db.session.flush()
+    return record
+
+
+@engagements_bp.route("/<int:engagement_id>/entity-understanding/checklist/seed", methods=["POST"])
+@login_required
+def seed_entity_checklist(engagement_id):
+    """Populate the Understanding Business/Assignment checklist with the
+    firm's Forensic Audit questions (Investigative Engagements only) -
+    mirrors acceptance.seed_acceptance_checklist: only does anything the
+    first time, so it's safe to expose as a single button."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_entity_understanding(engagement_id)
+    if record.checklist_items:
+        flash("The checklist already has items on it.", "info")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
+    for order, (section, item_text) in enumerate(FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS, start=1):
+        db.session.add(EntityUnderstandingChecklistItem(
+            entity_understanding_id=record.id,
+            section=section,
+            item_text=item_text,
+            order=order,
+            created_by_id=current_user.id,
+        ))
+    record.completed_by_id = current_user.id
+    record.completed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Default checklist items added - tick and comment on each one.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
+
+
+@engagements_bp.route("/<int:engagement_id>/entity-understanding/checklist/add", methods=["POST"])
+@login_required
+def add_entity_checklist_item(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_entity_understanding(engagement_id)
+    item_text = request.form.get("item_text", "").strip()
+    if not item_text:
+        flash("Enter the checklist item's wording before adding it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
+    max_order = max([i.order for i in record.checklist_items], default=0)
+    db.session.add(EntityUnderstandingChecklistItem(
+        entity_understanding_id=record.id,
+        section=request.form.get("section", "").strip(),
+        item_text=item_text,
+        order=max_order + 1,
+        created_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash("Checklist item added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
+
+
+@engagements_bp.route("/entity-understanding/checklist/<int:item_id>/update", methods=["POST"])
+@login_required
+def update_entity_checklist_item(item_id):
+    item = EntityUnderstandingChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.entity_understanding.engagement)
+    response = request.form.get("response", "").strip()
+    item.response = response if response in CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES else ""
+    item.comment = request.form.get("comment", "").strip()
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=item.entity_understanding.engagement_id, tab="entity"))
+
+
+@engagements_bp.route("/entity-understanding/checklist/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_entity_checklist_item(item_id):
+    item = EntityUnderstandingChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.entity_understanding.engagement)
+    engagement_id = item.entity_understanding.engagement_id
+    db.session.delete(item)
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
+
+
 # ---------- Analytical Review (system-based: log figures, system flags fluctuations) ----------
 
 def _get_or_create_analytical_review(engagement_id):
@@ -819,9 +902,25 @@ def save_risk_assessment(engagement_id):
     assessment.reviewed_at = None
     assessment.partner_signed_by_id = None
     assessment.partner_signed_at = None
+    db.session.flush()
+
+    # Keep the Substantive Procedures checklist in sync with the rating
+    # that was just (re)computed, rather than leaving it static at whatever
+    # it was the last time someone clicked "Generate suggested procedures" -
+    # e.g. moving from Medium to High automatically adds the extra
+    # high-risk procedures for every area already in use. Only runs if that
+    # section has actually been started (see sync_substantive_procedures_if_started).
+    added_count = sync_substantive_procedures_if_started(engagement_id)
 
     db.session.commit()
-    flash("Risk assessment saved - rating computed automatically below.", "success")
+    if added_count:
+        flash(
+            f"Risk assessment saved - rating computed automatically below. "
+            f"{added_count} suggested procedure(s) were also added to the Substantive Procedures checklist to match the updated rating.",
+            "success",
+        )
+    else:
+        flash("Risk assessment saved - rating computed automatically below.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="risks"))
 
 
@@ -1980,20 +2079,32 @@ def partner_unsign_financial_statements(fs_id):
 
 # ---------- Substantive Procedures (system-based: by audit area, driven by risk + industry) ----------
 
-@engagements_bp.route("/<int:engagement_id>/substantive-procedures/generate", methods=["POST"])
-@login_required
-def generate_substantive_procedures(engagement_id):
-    engagement = Engagement.query.get_or_404(engagement_id)
-    _ensure_engagement_access(engagement)
-    risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
+def sync_substantive_procedures(engagement):
+    """Additive top-up of suggested procedures across every audit area,
+    driven by the engagement's CURRENT Risk Assessment rating and the
+    client's CURRENT industry (see AUDIT_AREAS / BASELINE_SUBSTANTIVE_
+    PROCEDURES / HIGH_RISK_EXTRA_PROCEDURES / INDUSTRY_EXTRA_PROCEDURES
+    above). This is the shared engine behind both the manual "Generate
+    suggested procedures" button and the automatic re-sync fired whenever
+    the risk rating or the client's industry changes (see
+    sync_substantive_procedures_if_started, save_risk_assessment, and
+    clients.edit_client) - so the suggested-procedures checklist keeps
+    itself current instead of only ever reflecting whatever the risk
+    rating/industry happened to be the first time someone clicked the
+    button. Exactly like the manual button, it only ever ADDS whatever's
+    newly applicable and not already present - it never edits, reorders or
+    removes an existing item (ticked-off work, sign-offs and manually added
+    procedures are never touched), so it's safe to call as often as
+    needed. Returns how many procedures were added."""
+    risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement.id).first()
     high_risk = bool(risk_assessment and risk_assessment.rating == "High")
     industry_map = INDUSTRY_EXTRA_PROCEDURES.get(engagement.client.industry, {})
 
     added_count = 0
     for area_name in AUDIT_AREAS:
-        area = SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id, area=area_name).first()
+        area = SubstantiveProcedureArea.query.filter_by(engagement_id=engagement.id, area=area_name).first()
         if not area:
-            area = SubstantiveProcedureArea(engagement_id=engagement_id, area=area_name)
+            area = SubstantiveProcedureArea(engagement_id=engagement.id, area=area_name)
             db.session.add(area)
             db.session.flush()
 
@@ -2018,6 +2129,35 @@ def generate_substantive_procedures(engagement_id):
             # disturb it.
             _touch_substantive_area(area)
 
+    return added_count
+
+
+def sync_substantive_procedures_if_started(engagement_id):
+    """Auto-sync wrapper used by triggers OTHER than the explicit "Generate
+    suggested procedures" button (i.e. saving the Risk Assessment, and
+    editing the client's industry) - deliberately only does anything when
+    the Substantive Procedures section has already been started for this
+    engagement (at least one area/procedure already exists), so it never
+    conjures the whole audit-area section out of nowhere on an engagement
+    that hasn't opened that tab, e.g. an Investigative Engagement, which
+    doesn't use Substantive Procedures at all. Returns how many procedures
+    were added (0 if nothing to do or the section hasn't been started)."""
+    engagement = Engagement.query.get(engagement_id)
+    if not engagement or not engagement.client:
+        return 0
+    if not SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).first():
+        return 0
+    return sync_substantive_procedures(engagement)
+
+
+@engagements_bp.route("/<int:engagement_id>/substantive-procedures/generate", methods=["POST"])
+@login_required
+def generate_substantive_procedures(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
+    high_risk = bool(risk_assessment and risk_assessment.rating == "High")
+    added_count = sync_substantive_procedures(engagement)
     db.session.commit()
     if added_count:
         flash(f"Generated {added_count} suggested procedure(s) across the audit areas, based on the current risk rating{' (High)' if high_risk else ''} and the client's industry.", "success")

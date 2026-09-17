@@ -274,6 +274,42 @@ ENTITY_UNDERSTANDING_FIELDS = [
      "Key performance indicators, budgets, variance analysis, employee performance measures, and other information management itself uses to assess results."),
 ]
 
+# Seeded instead of the five free-text ENTITY_UNDERSTANDING_FIELDS above when
+# the engagement's type is "Investigative Engagement" (see
+# engagements.seed_entity_checklist) - understanding the business for a
+# forensic investigation is about the specifics of the assignment (why now,
+# what's alleged, who's involved, what data exists, who to loop in, and
+# whether it's safe to proceed), not the ISA 315-style entity/industry/
+# accounting-policy prompts the general fields ask for. Presented the same
+# way as the Client Acceptance detailed checklist - tick Yes/No/N-A and add
+# a comment on each question (see EntityUnderstandingChecklistItem below).
+FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
+    ("Objectives & Scope of the Engagement", "What is the core trigger for this investigation (e.g. whistleblower report, regulatory red flag, internal audit finding, sudden cash shortfall)?"),
+    ("Objectives & Scope of the Engagement", "What specific allegations or suspicions need to be investigated (e.g. asset misappropriation, financial statement fraud, bribery and corruption, cyber fraud)?"),
+    ("Objectives & Scope of the Engagement", "What is the precise target period for the investigation?"),
+    ("Objectives & Scope of the Engagement", "Which business units, physical locations, or subsidiaries are included in the scope?"),
+    ("Objectives & Scope of the Engagement", "Who are the known subjects or persons of interest, if any?"),
+    ("Objectives & Scope of the Engagement", "What is the ultimate goal of the deliverable - internal disciplinary action, filing an insurance claim, submission to law enforcement for criminal prosecution, or civil litigation to recover assets?"),
+    ("Legal, Regulatory & Governance Context", "Is this engagement protected by attorney-client privilege - are we being retained directly by the client, or by their outside legal counsel, to protect the work product?"),
+    ("Legal, Regulatory & Governance Context", "What specific laws or regulations govern the subject matter (e.g. anti-corruption legislation, local anti-money laundering laws, specific industry regulations)?"),
+    ("Legal, Regulatory & Governance Context", "What are the client's internal policies regarding employee privacy - can we search corporate emails and personal devices used for work without explicit consent?"),
+    ("Legal, Regulatory & Governance Context", "Are there data privacy laws (e.g. the Cyber and Data Protection Act, GDPR, or other local equivalents) that restrict data transfer across borders?"),
+    ("Legal, Regulatory & Governance Context", "Is there an active or pending lawsuit related to this matter?"),
+    ("Data, Systems & Access Checklist", "Financial systems: what ERP or accounting software does the company use, and can they provision read-only administrator access?"),
+    ("Data, Systems & Access Checklist", "Communication channels: where do employees communicate (e.g. Microsoft Teams, Slack, corporate email, WhatsApp on company phones)?"),
+    ("Data, Systems & Access Checklist", "Data preservation: has a legal hold or data preservation order been issued, and have IT backups been frozen to prevent wiping or altering logs?"),
+    ("Data, Systems & Access Checklist", "Supporting documentation: where are physical or digital invoices, receipts, contracts, and bank statements stored, and who controls access to them?"),
+    ("Data, Systems & Access Checklist", "External data: will bank confirmations, vendor verifications, or customer circularisations be required and permitted?"),
+    ("Stakeholders, Logistics & Timeline", "Who is the primary point of contact for the investigation, and who receives updates?"),
+    ("Stakeholders, Logistics & Timeline", "Who needs to be kept out of the loop to maintain confidentiality (e.g. is the CFO or Head of HR a subject of suspicion)?"),
+    ("Stakeholders, Logistics & Timeline", "Will the investigation be overt (everyone knows we are there) or covert (disguised as a routine internal audit or IT upgrade)?"),
+    ("Stakeholders, Logistics & Timeline", "What is the target deadline for the preliminary findings and the final report?"),
+    ("Stakeholders, Logistics & Timeline", "What budget constraints or billing caps apply to this phase of the engagement?"),
+    ("Risk Assessment & Safety", "Is there any physical safety risk to the investigative team (e.g. organised crime, high-level corruption, a hostile work environment)?"),
+    ("Risk Assessment & Safety", "Is there a risk of collusion - could the subjects destroy evidence if they realise an investigation is underway?"),
+    ("Risk Assessment & Safety", "Does the forensic team have any conflict of interest with the client, its competitors, or the suspected individuals?"),
+]
+
 
 # Standard audit areas for the system-based Substantive Procedures module -
 # each becomes one section of the audit programme for an engagement, with
@@ -1120,7 +1156,37 @@ class EntityUnderstanding(db.Model):
 
     @property
     def is_complete(self):
+        """On an Investigative Engagement (see FORENSIC_ENTITY_UNDERSTANDING_
+        CHECKLIST_ITEMS above), the five free-text fields aren't shown at all -
+        completion instead means every detailed checklist question has been
+        answered. Every other engagement type keeps the original all-fields-
+        filled-in check."""
+        if self.engagement and self.engagement.type == "Investigative Engagement":
+            items = list(self.checklist_items)
+            return bool(items) and all(i.response for i in items)
         return all((v or "").strip() for v in self.field_values)
+
+    @property
+    def checklist_assessment(self):
+        """Advisory-only read of the detailed checklist, same pattern as
+        ClientAcceptance.checklist_assessment - never overrides anything,
+        just a plain-language pointer to what still needs attention."""
+        items = list(self.checklist_items)
+        total = len(items)
+        if total == 0:
+            return {"label": "No checklist items added yet.", "level": "muted", "flagged": 0, "outstanding": 0, "total": 0}
+        flagged = sum(1 for i in items if i.response == "No")
+        outstanding = sum(1 for i in items if not i.response)
+        if flagged:
+            label = f"{flagged} of {total} item{'s' if total != 1 else ''} flagged for follow-up."
+            level = "danger"
+        elif outstanding:
+            label = f"{outstanding} of {total} item{'s' if total != 1 else ''} not yet assessed."
+            level = "warning"
+        else:
+            label = f"All {total} checklist item{'s' if total != 1 else ''} assessed."
+            level = "success"
+        return {"label": label, "level": level, "flagged": flagged, "outstanding": outstanding, "total": total}
 
     @property
     def is_reviewed(self):
@@ -1132,6 +1198,32 @@ class EntityUnderstanding(db.Model):
 
     def __repr__(self):
         return f"<EntityUnderstanding engagement={self.engagement_id}>"
+
+
+class EntityUnderstandingChecklistItem(db.Model):
+    """A single tick + comment line within an EntityUnderstanding record -
+    the Understanding Business/Assignment equivalent of
+    ClientAcceptanceChecklistItem, used for the Forensic Audit questions on
+    Investigative Engagements (see FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_
+    ITEMS above)."""
+    id = db.Column(db.Integer, primary_key=True)
+    entity_understanding_id = db.Column(db.Integer, db.ForeignKey("entity_understanding.id"), nullable=False)
+    section = db.Column(db.String(150))
+    item_text = db.Column(db.Text, nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    entity_understanding = db.relationship(
+        "EntityUnderstanding",
+        backref=db.backref("checklist_items", lazy=True, cascade="all, delete-orphan", order_by="EntityUnderstandingChecklistItem.order"),
+    )
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<EntityUnderstandingChecklistItem {self.item_text!r} response={self.response!r}>"
 
 
 class AnalyticalReview(db.Model):

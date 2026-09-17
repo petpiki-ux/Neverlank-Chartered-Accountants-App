@@ -3,6 +3,7 @@ from flask_login import login_required, current_user
 
 from extensions import db
 from models import Client, INDUSTRY_OPTIONS, user_has_permission, user_can_access_engagement
+from engagements import sync_substantive_procedures_if_started
 
 clients_bp = Blueprint("clients", __name__, url_prefix="/clients")
 
@@ -117,11 +118,27 @@ def edit_client(client_id):
         client.email = request.form.get("email", "").strip()
         client.phone = request.form.get("phone", "").strip()
         client.address = request.form.get("address", "").strip()
+        old_industry = client.industry
         client.industry = _resolve_industry(request.form)
         client.company_number = company_number
         client.notes = request.form.get("notes", "").strip()
+        db.session.flush()
+
+        # If the industry actually changed, keep every one of this client's
+        # engagements' Substantive Procedures checklists in sync rather than
+        # leaving them static at whatever industry was on file when someone
+        # last clicked "Generate suggested procedures" - only touches
+        # engagements where that section has already been started.
+        added_count = 0
+        if client.industry != old_industry:
+            for engagement in client.engagements:
+                added_count += sync_substantive_procedures_if_started(engagement.id)
+
         db.session.commit()
-        flash("Client updated.", "success")
+        if added_count:
+            flash(f"Client updated. {added_count} suggested procedure(s) were also added across this client's engagements to match the updated industry.", "success")
+        else:
+            flash("Client updated.", "success")
         return redirect(url_for("clients.view_client", client_id=client.id))
     return render_template("clients/form.html", client=client, industry_options=INDUSTRY_OPTIONS)
 

@@ -436,6 +436,60 @@
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
 {% else %}
+  {% if engagement.type == 'Investigative Engagement' %}
+  {% macro entity_checklist_row(item, responses) %}
+    <form method="post" action="{{ url_for('engagements.update_entity_checklist_item', item_id=item.id) }}" class="checklist-row">
+      <span class="item-text">{{ item.item_text }}</span>
+      <select name="response">
+        <option value="" {% if not item.response %}selected{% endif %}>—</option>
+        {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+      </select>
+      <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Save</button>
+      <button type="submit" formaction="{{ url_for('engagements.delete_entity_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+    </form>
+  {% endmacro %}
+
+  {% macro entity_checklist_section(items, prefix, engagement, responses) %}
+    {% set matched = [] %}
+    {% for item in items %}{% if item.section and item.section.startswith(prefix) %}{{ matched.append(item) or "" }}{% endif %}{% endfor %}
+    <div class="card">
+      <h3 class="mt-0">{{ prefix }}</h3>
+      {% if matched %}
+        {% for item in matched %}{{ entity_checklist_row(item, responses) }}{% endfor %}
+      {% else %}
+      <div class="empty-state" style="padding:16px 0;">No checklist questions for this section yet - add one below, or load the firm's default checklist at the top of this tab.</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('engagements.add_entity_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+        <input type="hidden" name="section" value="{{ prefix }}">
+        <div style="flex:2;"><input type="text" name="item_text" placeholder="Add a checklist question for this section" required></div>
+        <div><button type="submit" class="btn small secondary" style="margin-bottom:0;">Add item</button></div>
+      </form>
+    </div>
+  {% endmacro %}
+
+  <div class="card">
+    <h3 class="mt-0">Understanding the Business/Assignment</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Forensic Audit questions covering the objectives and scope of the engagement, the legal/regulatory context,
+      data and systems access, stakeholders and logistics, and risk and safety - work through each section below
+      before planning fieldwork.
+    </p>
+    {% if entity_understanding and entity_understanding.checklist_assessment %}
+    <div class="flash {{ entity_understanding.checklist_assessment.level }}" style="margin-bottom:4px;">
+      {{ entity_understanding.checklist_assessment.label }}
+    </div>
+    {% endif %}
+    {% if not entity_understanding or not entity_understanding.checklist_items %}
+    <form method="post" action="{{ url_for('engagements.seed_entity_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist</button></form>
+    {% endif %}
+  </div>
+
+  {% set entity_forensic_sections = ['Objectives & Scope of the Engagement', 'Legal, Regulatory & Governance Context', 'Data, Systems & Access Checklist', 'Stakeholders, Logistics & Timeline', 'Risk Assessment & Safety'] %}
+  {% for section in entity_forensic_sections %}
+    {% if entity_understanding %}{{ entity_checklist_section(entity_understanding.checklist_items, section, engagement, acceptance_checklist_responses) }}{% endif %}
+  {% endfor %}
+  {% else %}
   <div class="card">
     <h3 class="mt-0">Understanding the entity's business and industry</h3>
     <p class="muted" style="font-size:12.5px;">Work through each section below to build a structured understanding of the client before assessing risk or planning the engagement. This is a general-purpose starting structure covering the areas practitioners typically consider - review and adjust the prompts to your own methodology.</p>
@@ -448,6 +502,7 @@
       <button type="submit" class="btn gold">{% if entity_understanding %}Save{% else %}Save understanding of the entity{% endif %}</button>
     </form>
   </div>
+  {% endif %}
 
   {% if entity_understanding and entity_understanding.is_complete %}
   <div class="card">
