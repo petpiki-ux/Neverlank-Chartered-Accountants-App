@@ -15,7 +15,7 @@ from models import (
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation,
     RiskAssessment, MaterialityCalculation, EntityUnderstanding,
     AnalyticalReview, AnalyticalReviewLine,
-    ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS,
+    ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
     EngagementQuery, QueryReply,
@@ -325,6 +325,7 @@ def view_engagement(engagement_id):
         client_acceptance=client_acceptance,
         acceptance_cleared=acceptance_cleared,
         acceptance_decisions=CLIENT_ACCEPTANCE_DECISIONS,
+        acceptance_checklist_responses=CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     )
 
 

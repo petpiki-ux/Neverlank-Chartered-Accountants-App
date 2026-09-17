@@ -1722,8 +1722,83 @@ class ClientAcceptance(db.Model):
             self.engagement_letter_signed_at is not None,
         ])
 
+    @property
+    def checklist_assessment(self):
+        """A plain-language, advisory-only read of the tick + comment
+        checklist below, surfaced next to the Decision field to help the
+        Partner judge whether to accept, decline, or keep looking into an
+        engagement - it never sets or overrides the `decision` field
+        itself, that's always a deliberate choice made by the Partner.
+        A "No" response on any checklist item is treated as a flagged
+        concern; an item with no response yet is "outstanding"."""
+        items = list(self.checklist_items)
+        total = len(items)
+        if total == 0:
+            return {"label": "No checklist items added yet.", "level": "muted", "flagged": 0, "outstanding": 0, "total": 0}
+        flagged = sum(1 for i in items if i.response == "No")
+        outstanding = sum(1 for i in items if not i.response)
+        if flagged:
+            label = f"{flagged} of {total} item{'s' if total != 1 else ''} flagged as a concern - recommend reviewing these before accepting."
+            level = "danger"
+        elif outstanding:
+            label = f"{outstanding} of {total} item{'s' if total != 1 else ''} not yet assessed."
+            level = "warning"
+        else:
+            label = f"No concerns identified across all {total} checklist item{'s' if total != 1 else ''}."
+            level = "success"
+        return {"label": label, "level": level, "flagged": flagged, "outstanding": outstanding, "total": total}
+
     def __repr__(self):
         return f"<ClientAcceptance engagement={self.engagement_id} decision={self.decision}>"
+
+
+CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES = ["Yes", "No", "N/A"]
+
+# Seeded the first time someone opens a fresh Client Acceptance checklist
+# (see acceptance.seed_acceptance_checklist) - a starting point covering the
+# same six areas above at a finer grain, editable/deletable/extendable like
+# any other item.
+DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS = [
+    ("Background & integrity", "Management/owners have no known history of fraud, serious litigation, or regulatory sanctions."),
+    ("Background & integrity", "The client's public reputation and financial stability are acceptable for the firm to be associated with."),
+    ("Independence", "No partner or staff member on the proposed team has a financial interest, family tie, or other relationship with the client that would impair independence."),
+    ("Independence", "The firm does not provide any other service to this client that would create a self-review, advocacy, or management-participation threat."),
+    ("Predecessor auditor", "The predecessor auditor (if any) was contacted, with the client's permission, and raised no matters affecting acceptance."),
+    ("Competence", "The engagement team has the industry knowledge and technical skills the job requires."),
+    ("Competence", "The team has (or the firm can obtain) enough time and, if needed, specialists to complete the work to the required standard."),
+    ("Regulatory / AML", "Client identity and beneficial ownership have been verified (KYC)."),
+    ("Regulatory / AML", "No money-laundering, sanctions-list, or other regulatory concerns were identified."),
+    ("Fee & quality", "The expected fee is commensurate with the work required, without compromising the quality of the engagement."),
+    ("Engagement letter", "The client has agreed to the scope, timeline, responsibilities, and fee basis set out in the engagement letter."),
+]
+
+
+class ClientAcceptanceChecklistItem(db.Model):
+    """A single tick + comment line within a Client Acceptance record,
+    letting the team work through a detailed list of individual
+    considerations - beyond the six broad narrative areas above - and
+    record a Yes/No/N-A response with a supporting comment for each. The
+    aggregate of these responses is summarised in
+    ClientAcceptance.checklist_assessment to help (not replace) the
+    Partner's accept/decline decision."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_acceptance_id = db.Column(db.Integer, db.ForeignKey("client_acceptance.id"), nullable=False)
+    section = db.Column(db.String(100))
+    item_text = db.Column(db.String(300), nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client_acceptance = db.relationship(
+        "ClientAcceptance",
+        backref=db.backref("checklist_items", lazy=True, cascade="all, delete-orphan", order_by="ClientAcceptanceChecklistItem.order"),
+    )
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<ClientAcceptanceChecklistItem {self.item_text!r} response={self.response!r}>"
 
 
 # ---------- Native Invoicing ----------

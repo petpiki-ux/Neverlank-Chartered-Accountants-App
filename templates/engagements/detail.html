@@ -20,9 +20,7 @@
 
 <div class="tabs">
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='overview') }}" class="{% if tab=='overview' %}active{% endif %}">Overview</a>
-  {% if engagement.acceptance_required %}
-  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}" class="{% if tab=='acceptance' %}active{% endif %}">Client Acceptance{% if acceptance_cleared %} &#10003;{% elif client_acceptance and client_acceptance.decision == 'Declined' %} (Declined){% else %} &#128274;{% endif %}</a>
-  {% endif %}
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}" class="{% if tab=='acceptance' %}active{% endif %}">Client Acceptance{% if acceptance_cleared %} &#10003;{% elif client_acceptance and client_acceptance.decision == 'Declined' %} (Declined){% elif engagement.acceptance_required %} &#128274;{% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='entity') }}" class="{% if tab=='entity' %}active{% endif %}">Understanding the Entity{% if entity_understanding and entity_understanding.is_complete %} &#10003;{% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='analytical') }}" class="{% if tab=='analytical' %}active{% endif %}">Analytical Review{% if analytical_review and analytical_review.significant_lines %} ({{ analytical_review.significant_lines|length }} flagged){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}" class="{% if tab=='risks' %}active{% endif %}">Risk Assessment{% if risk_assessment and risk_assessment.rating %} ({{ risk_assessment.rating }}){% else %} (Not started){% endif %}</a>
@@ -183,6 +181,12 @@
 
     <div class="card">
       <h3 class="mt-0">Decision</h3>
+      {% if client_acceptance %}
+      <div class="flash {{ client_acceptance.checklist_assessment.level }}" style="margin-bottom:12px;">
+        <strong>System assessment:</strong> {{ client_acceptance.checklist_assessment.label }}
+        <span class="muted" style="font-size:11.5px;">(from the detailed checklist below - advisory only, the decision is always yours)</span>
+      </div>
+      {% endif %}
       <div class="form-row">
         <div>
           <label for="decision">Acceptance decision</label>
@@ -196,6 +200,44 @@
       <button type="submit" class="btn gold" style="margin-top:8px;">Save Client Acceptance &amp; Continuance</button>
     </div>
   </form>
+
+  <div class="card">
+    <h3 class="mt-0">Detailed acceptance checklist</h3>
+    <p class="muted" style="font-size:12px;">
+      Work through as many specific considerations as you like, tick Yes / No / N/A on each, and add a comment.
+      The system uses these ticks to build the assessment shown next to the Decision above - it flags any "No" as a
+      concern worth a closer look; it never accepts or declines an engagement on its own.
+    </p>
+    {% if client_acceptance and client_acceptance.checklist_items %}
+      {% set ns = namespace(section='') %}
+      {% for item in client_acceptance.checklist_items %}
+        {% if item.section and item.section != ns.section %}
+          <div class="section-title">{{ item.section }}</div>
+          {% set ns.section = item.section %}
+        {% endif %}
+        <form method="post" action="{{ url_for('acceptance.update_acceptance_checklist_item', item_id=item.id) }}" class="checklist-row">
+          <span class="item-text">{{ item.item_text }}</span>
+          <select name="response">
+            <option value="" {% if not item.response %}selected{% endif %}>—</option>
+            {% for r in acceptance_checklist_responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+          </select>
+          <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:220px;margin-bottom:0;">
+          <button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" formaction="{{ url_for('acceptance.delete_acceptance_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+        </form>
+      {% endfor %}
+    {% else %}
+    <div class="empty-state">
+      No checklist items yet.
+      {% if client_acceptance %}<form method="post" action="{{ url_for('acceptance.seed_acceptance_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist</button></form>{% endif %}
+    </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('acceptance.add_acceptance_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:12px;">
+      <div><label for="checklist_section">Section (optional)</label><input type="text" id="checklist_section" name="section" placeholder="e.g. Independence"></div>
+      <div style="flex:2;"><label for="checklist_item_text">New checklist item</label><input type="text" id="checklist_item_text" name="item_text" placeholder="e.g. Client's ultimate beneficial owners have been identified" required></div>
+      <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Add item</button></div>
+    </form>
+  </div>
 
   <div class="card">
     <h3 class="mt-0">6. Engagement letter</h3>

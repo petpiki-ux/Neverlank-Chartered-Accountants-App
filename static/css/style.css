@@ -193,6 +193,8 @@ select[multiple] { min-height: 110px; }
 .flash.success { background: #e5f6ea; color: var(--success); }
 .flash.danger { background: #fdecea; color: var(--danger); }
 .flash.info { background: #e8eef7; color: var(--info); }
+.flash.warning { background: #fdf1dc; color: var(--warning); }
+.flash.muted { background: #f4f4f4; color: var(--text-muted); }
 
 .login-wrap {
   min-height: 100vh;

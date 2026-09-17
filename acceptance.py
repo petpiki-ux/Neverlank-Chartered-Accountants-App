@@ -26,6 +26,8 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     Engagement, Document, ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS,
+    ClientAcceptanceChecklistItem, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
+    DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS,
     REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES, user_can_access_engagement,
 )
 
@@ -204,3 +206,76 @@ def partner_unsign_client_acceptance(record_id):
     db.session.commit()
     flash("Partner sign-off removed - the engagement is locked again until it's re-signed.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
+
+
+# ---------- Acceptance checklist (tick + comment, feeds the system assessment) ----------
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/checklist/seed", methods=["POST"])
+@login_required
+def seed_acceptance_checklist(engagement_id):
+    """Populate the checklist with the firm's default starting items - only
+    does anything the first time (i.e. while the list is still empty), so
+    it's safe to expose as a single button without risking duplicates."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    if record.checklist_items:
+        flash("The checklist already has items on it.", "info")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+    for order, (section, item_text) in enumerate(DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, start=1):
+        db.session.add(ClientAcceptanceChecklistItem(
+            client_acceptance_id=record.id,
+            section=section,
+            item_text=item_text,
+            order=order,
+            created_by_id=current_user.id,
+        ))
+    db.session.commit()
+    flash("Default checklist items added - tick and comment on each one.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/checklist/add", methods=["POST"])
+@login_required
+def add_acceptance_checklist_item(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    item_text = request.form.get("item_text", "").strip()
+    if not item_text:
+        flash("Enter the checklist item's wording before adding it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+    max_order = max([i.order for i in record.checklist_items], default=0)
+    db.session.add(ClientAcceptanceChecklistItem(
+        client_acceptance_id=record.id,
+        section=request.form.get("section", "").strip(),
+        item_text=item_text,
+        order=max_order + 1,
+        created_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash("Checklist item added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/acceptance/checklist/<int:item_id>/update", methods=["POST"])
+@login_required
+def update_acceptance_checklist_item(item_id):
+    item = ClientAcceptanceChecklistItem.query.get_or_404(item_id)
+    _ensure_access(item.client_acceptance.engagement)
+    response = request.form.get("response", "").strip()
+    item.response = response if response in CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES else ""
+    item.comment = request.form.get("comment", "").strip()
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=item.client_acceptance.engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/acceptance/checklist/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_acceptance_checklist_item(item_id):
+    item = ClientAcceptanceChecklistItem.query.get_or_404(item_id)
+    _ensure_access(item.client_acceptance.engagement)
+    engagement_id = item.client_acceptance.engagement_id
+    db.session.delete(item)
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
