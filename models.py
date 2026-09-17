@@ -664,6 +664,25 @@ FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES = {
     ],
 }
 
+# Working-paper reference codes, in the traditional audit-file convention
+# (a short letter/code prefix per section, e.g. "B" for Cash, "B-1" for the
+# first working paper within it) - shown next to each area's heading on the
+# Substantive Procedures tab and embedded in the generated Word/Excel
+# workpapers, so a paper reviewer can cite "see B-2" the same way they would
+# in a paper file. AUDIT_AREA_REFERENCES runs B through N for the 13
+# AUDIT_AREAS (A is conventionally reserved for the index/lead schedule,
+# which this app doesn't have a separate tab for). FORENSIC_AREA_REFERENCES
+# uses short mnemonic codes instead of single letters, since there are only
+# four forensic categories and a mnemonic is easier to recall in a report.
+AUDIT_AREA_REFERENCES = {area: chr(ord("B") + i) for i, area in enumerate(AUDIT_AREAS)}
+
+FORENSIC_AREA_REFERENCES = {
+    "Advanced Data Analytics & Forensic Technology": "DA",
+    "Asset Tracing & Financial Reconstruction": "AT",
+    "Document Examination & Verification": "DE",
+    "Physical & Observational Procedures": "PO",
+}
+
 
 engagement_team = db.Table(
     "engagement_team",
@@ -2362,6 +2381,135 @@ class ClientAcceptanceChecklistItem(db.Model):
 
     def __repr__(self):
         return f"<ClientAcceptanceChecklistItem {self.item_text!r} response={self.response!r}>"
+
+
+# ---------- Finalisation checklist ("what's left to close this engagement") ----------
+
+# Standard file-closing checklist for every engagement type EXCEPT
+# Investigative Engagements (see FORENSIC_FINALISATION_CHECKLIST_ITEMS
+# below) - the standard steps a financial-statement audit/assurance/
+# consulting/secretarial engagement works through before the file can be
+# archived. Same tick (Yes/No/N-A) + comment pattern as every other
+# checklist in this app.
+DEFAULT_FINALISATION_CHECKLIST_ITEMS = [
+    ("Subsequent Events & Going Concern", "Has a subsequent events review been performed through to the date of the report, with nothing further requiring adjustment or disclosure?"),
+    ("Subsequent Events & Going Concern", "Has the going concern conclusion been reassessed in light of the final (adjusted) financial statements?"),
+    ("Overall Conclusions", "Has the summary of uncorrected misstatements been evaluated, individually and in aggregate, against overall and performance materiality?"),
+    ("Overall Conclusions", "Has an overall analytical review of the final financial statements been performed, with the results consistent with our understanding of the entity?"),
+    ("Overall Conclusions", "Have all significant risks and key audit/engagement matters been addressed and the conclusions documented?"),
+    ("Overall Conclusions", "Has the engagement partner formed and documented an overall conclusion on the engagement?"),
+    ("Management Communication", "Has the management representation letter been obtained, signed and dated on or before the date of the report?"),
+    ("Management Communication", "Has communication with those charged with governance been completed (significant findings, control deficiencies, etc.)?"),
+    ("File Completion & Archiving", "Have all working papers been reviewed and cleared, with every review point resolved?"),
+    ("File Completion & Archiving", "Has independence and quality control compliance been reconfirmed as at the date of the report?"),
+    ("File Completion & Archiving", "Is the engagement file assembled and ready for the archiving deadline?"),
+]
+
+# Forensic-specific finalisation checklist for Investigative Engagements -
+# closing out an investigation looks nothing like closing out a financial
+# statement audit, so this replaces the list above entirely for that
+# engagement type (see acceptance/entity-understanding/risk-assessment/
+# substantive-procedures above for the same type-branching pattern).
+FORENSIC_FINALISATION_CHECKLIST_ITEMS = [
+    ("Findings & Conclusions", "Has the preliminary fraud theory (see Audit Strategy) been tested against the evidence gathered and confirmed, revised or ruled out?"),
+    ("Findings & Conclusions", "Has the quantum of loss/exposure been calculated and is it fully supported by the underlying evidence?"),
+    ("Findings & Conclusions", "Have the root-cause control weaknesses been identified and documented for remediation recommendations?"),
+    ("Reporting & Referral", "Has the final forensic report been drafted, reviewed and approved by the engagement partner?"),
+    ("Reporting & Referral", "Has the reporting destination been reconfirmed (Audit Committee/Board/law enforcement/insurance), with the report meeting their requirements?"),
+    ("Reporting & Referral", "Has a decision on referral to law enforcement, insurers, or regulators been made, documented, and taken with legal counsel's input?"),
+    ("Evidence & Chain of Custody", "Is all evidence collected logged, indexed, and its chain of custody documented end to end?"),
+    ("Evidence & Chain of Custody", "Has original evidence been secured or returned appropriately, with working copies retained per the firm's retention policy?"),
+    ("File Completion", "Have interview notes/statements been finalised, signed where applicable, and filed?"),
+    ("File Completion", "Is the engagement file assembled, reviewed, and ready for archiving, with confidentiality/access restrictions reconfirmed?"),
+]
+
+
+class FinalisationChecklist(db.Model):
+    """One per engagement - the "what's left to close this engagement"
+    checklist shown on the Finalisation tab. Seeded from DEFAULT_
+    FINALISATION_CHECKLIST_ITEMS or FORENSIC_FINALISATION_CHECKLIST_ITEMS
+    above depending on engagement type, then ticked through item by item
+    (see FinalisationChecklistItem below) - same tick + comment + advisory
+    summary pattern as ClientAcceptance/EntityUnderstanding's checklists,
+    plus its own overall Preparer/Reviewer/Partner sign-off."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("finalisation_checklist", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def is_complete(self):
+        items = list(self.checklist_items)
+        return bool(items) and all(i.response for i in items)
+
+    @property
+    def checklist_assessment(self):
+        """Advisory-only read of the checklist, same pattern as
+        ClientAcceptance.checklist_assessment / EntityUnderstanding.
+        checklist_assessment above - never gates anything by itself, just a
+        plain-language pointer to what still needs attention before the
+        file can be archived."""
+        items = list(self.checklist_items)
+        total = len(items)
+        if total == 0:
+            return {"label": "No checklist items added yet.", "level": "muted", "flagged": 0, "outstanding": 0, "total": 0}
+        flagged = sum(1 for i in items if i.response == "No")
+        outstanding = sum(1 for i in items if not i.response)
+        if flagged:
+            label = f"{flagged} of {total} item{'s' if total != 1 else ''} flagged - not ready to close."
+            level = "danger"
+        elif outstanding:
+            label = f"{outstanding} of {total} item{'s' if total != 1 else ''} not yet assessed."
+            level = "warning"
+        else:
+            label = f"All {total} item{'s' if total != 1 else ''} confirmed - ready to close."
+            level = "success"
+        return {"label": label, "level": level, "flagged": flagged, "outstanding": outstanding, "total": total}
+
+    def __repr__(self):
+        return f"<FinalisationChecklist engagement={self.engagement_id}>"
+
+
+class FinalisationChecklistItem(db.Model):
+    """A single tick + comment line within a FinalisationChecklist - see
+    DEFAULT_FINALISATION_CHECKLIST_ITEMS / FORENSIC_FINALISATION_CHECKLIST_
+    ITEMS above."""
+    id = db.Column(db.Integer, primary_key=True)
+    finalisation_checklist_id = db.Column(db.Integer, db.ForeignKey("finalisation_checklist.id"), nullable=False)
+    section = db.Column(db.String(150))
+    item_text = db.Column(db.Text, nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    finalisation_checklist = db.relationship(
+        "FinalisationChecklist",
+        backref=db.backref("checklist_items", lazy=True, cascade="all, delete-orphan", order_by="FinalisationChecklistItem.order"),
+    )
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<FinalisationChecklistItem {self.item_text!r} response={self.response!r}>"
 
 
 # ---------- Native Invoicing ----------

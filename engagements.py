@@ -4,7 +4,7 @@ import io
 import uuid
 from datetime import datetime, date
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, send_from_directory, abort
+from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, send_from_directory, send_file, abort
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 import openpyxl
@@ -19,6 +19,8 @@ from models import (
     RISK_CATEGORIES,
     COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
+    FinalisationChecklist, FinalisationChecklistItem, DEFAULT_FINALISATION_CHECKLIST_ITEMS, FORENSIC_FINALISATION_CHECKLIST_ITEMS,
+    AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES,
     EngagementQuery, QueryReply,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
@@ -31,6 +33,7 @@ from models import (
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
 )
 import financials as fin
+import workpapers as wp
 
 engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
 
@@ -292,6 +295,11 @@ def view_engagement(engagement_id):
     substantive_areas_by_name = {
         a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).all()
     }
+    # Working-paper reference codes (see models.py) shown next to each area
+    # heading and embedded in the generated Substantive Procedures workpapers.
+    substantive_area_refs = FORENSIC_AREA_REFERENCES if is_forensic_risk else AUDIT_AREA_REFERENCES
+
+    finalisation_checklist = FinalisationChecklist.query.filter_by(engagement_id=engagement_id).first()
 
     # Review Queries, grouped for the template: by section for every plain
     # section, and separately by audit area for "substantive" (which has one
@@ -338,6 +346,7 @@ def view_engagement(engagement_id):
         category_label=fin.category_label,
         audit_areas=substantive_area_names,
         substantive_areas=substantive_areas_by_name,
+        substantive_area_refs=substantive_area_refs,
         queries_by_section=queries_by_section,
         queries_by_area=queries_by_area,
         open_query_count=open_query_count,
@@ -346,6 +355,8 @@ def view_engagement(engagement_id):
         acceptance_decisions=CLIENT_ACCEPTANCE_DECISIONS,
         acceptance_checklist_responses=CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
         risk_categories=RISK_CATEGORIES,
+        finalisation_checklist=finalisation_checklist,
+        finalisation_checklist_responses=CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     )
 
 
@@ -1655,6 +1666,165 @@ def partner_unsign_audit_strategy(strategy_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
 
 
+# ---------- Finalisation checklist ("what's left to close this engagement") ----------
+
+def _get_or_create_finalisation_checklist(engagement_id):
+    record = FinalisationChecklist.query.filter_by(engagement_id=engagement_id).first()
+    if not record:
+        record = FinalisationChecklist(engagement_id=engagement_id)
+        db.session.add(record)
+        db.session.flush()
+    return record
+
+
+@engagements_bp.route("/<int:engagement_id>/finalisation-checklist/seed", methods=["POST"])
+@login_required
+def seed_finalisation_checklist(engagement_id):
+    """Populate the Finalisation checklist with the firm's default items -
+    the forensic set (see FORENSIC_FINALISATION_CHECKLIST_ITEMS) on an
+    Investigative Engagement, the ordinary close-out set (see DEFAULT_
+    FINALISATION_CHECKLIST_ITEMS) otherwise. Mirrors seed_entity_checklist:
+    only does anything the first time, so it's safe to expose as a single
+    button."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_finalisation_checklist(engagement_id)
+    if record.checklist_items:
+        flash("The checklist already has items on it.", "info")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    source_items = (
+        FORENSIC_FINALISATION_CHECKLIST_ITEMS if engagement.type == "Investigative Engagement"
+        else DEFAULT_FINALISATION_CHECKLIST_ITEMS
+    )
+    for order, (section, item_text) in enumerate(source_items, start=1):
+        db.session.add(FinalisationChecklistItem(
+            finalisation_checklist_id=record.id,
+            section=section,
+            item_text=item_text,
+            order=order,
+            created_by_id=current_user.id,
+        ))
+    record.completed_by_id = current_user.id
+    record.completed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Default checklist items added - tick and comment on each one.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/<int:engagement_id>/finalisation-checklist/add", methods=["POST"])
+@login_required
+def add_finalisation_checklist_item(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_finalisation_checklist(engagement_id)
+    item_text = request.form.get("item_text", "").strip()
+    if not item_text:
+        flash("Enter the checklist item's wording before adding it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    max_order = max([i.order for i in record.checklist_items], default=0)
+    db.session.add(FinalisationChecklistItem(
+        finalisation_checklist_id=record.id,
+        section=request.form.get("section", "").strip(),
+        item_text=item_text,
+        order=max_order + 1,
+        created_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash("Checklist item added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/finalisation-checklist/<int:item_id>/update", methods=["POST"])
+@login_required
+def update_finalisation_checklist_item(item_id):
+    item = FinalisationChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.finalisation_checklist.engagement)
+    response = request.form.get("response", "").strip()
+    item.response = response if response in CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES else ""
+    item.comment = request.form.get("comment", "").strip()
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=item.finalisation_checklist.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/finalisation-checklist/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_finalisation_checklist_item(item_id):
+    item = FinalisationChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.finalisation_checklist.engagement)
+    engagement_id = item.finalisation_checklist.engagement_id
+    db.session.delete(item)
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/finalisation-checklist/<int:record_id>/review", methods=["POST"])
+@login_required
+def review_finalisation_checklist(record_id):
+    record = FinalisationChecklist.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if not record.is_complete:
+        flash("Every checklist item needs a response before this can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+    if record.completed_by_id == current_user.id:
+        flash("You can't review a checklist you prepared yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+    record.reviewed_by_id = current_user.id
+    record.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Finalisation checklist marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/finalisation-checklist/<int:record_id>/unreview", methods=["POST"])
+@login_required
+def unreview_finalisation_checklist(record_id):
+    record = FinalisationChecklist.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/finalisation-checklist/<int:record_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_finalisation_checklist(record_id):
+    record = FinalisationChecklist.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if not record.is_complete:
+        flash("Every checklist item needs a response before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+    if record.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a checklist you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+    record.partner_signed_by_id = current_user.id
+    record.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/finalisation-checklist/<int:record_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_finalisation_checklist(record_id):
+    record = FinalisationChecklist.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+
+
 # ---------- Audit Finalisation: Trial Balance import + IAS 1 Financial Statements ----------
 
 def _allowed_tb_file(filename):
@@ -2591,4 +2761,130 @@ def queries_board():
         all_queries = [q for q in all_queries if user_can_access_engagement(current_user, q.engagement)]
     return render_template(
         "engagements/queries_board.html", queries=all_queries, status_filter=status_filter,
+    )
+
+
+# ---------- Working papers: Word/Excel generation (Finalisation + Substantive Procedures tabs) ----------
+
+def _workpaper_filename(engagement, label, ext):
+    client_name = engagement.client.name if engagement.client else "Client"
+    return secure_filename(f"{client_name}_{engagement.title}_{label}.{ext}") or f"workpaper.{ext}"
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/financial-statements.docx")
+@login_required
+def download_financial_statements_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
+    if not trial_balance or not trial_balance.lines:
+        flash("Enter or import the trial balance (Planning tab) before generating the financial statements working paper.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    statements = fin.build_all_statements(trial_balance.lines, trial_balance.adjustments)
+    financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
+    buf = wp.build_financial_statements_docx(engagement, statements, financial_statements)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Financial_Statements", "docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/trial-balance.xlsx")
+@login_required
+def download_trial_balance_xlsx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
+    if not trial_balance or not trial_balance.lines:
+        flash("Enter or import the trial balance (Planning tab) before generating this working paper.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    buf = wp.build_trial_balance_adjustments_xlsx(engagement, trial_balance)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Trial_Balance_and_Adjustments", "xlsx"),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/rep-letter.docx")
+@login_required
+def download_rep_letter_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
+    statements = (
+        fin.build_all_statements(trial_balance.lines, trial_balance.adjustments)
+        if trial_balance and trial_balance.lines else None
+    )
+    buf = wp.build_rep_letter_docx(engagement, statements)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Management_Representation_Letter", "docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/forensic-report.docx")
+@login_required
+def download_forensic_report_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    if engagement.type != "Investigative Engagement":
+        flash("The forensic investigation report is only available on Investigative Engagements.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    buf = wp.build_forensic_report_docx(engagement)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Forensic_Investigation_Report", "docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+def _substantive_programme_context(engagement):
+    """Shared setup for the two Substantive Procedures workpaper downloads
+    below - the same area list/order/reference codes the tab itself shows
+    (see view_engagement), so the generated file always matches the screen."""
+    is_forensic = engagement.type == "Investigative Engagement"
+    area_order = FORENSIC_SUBSTANTIVE_AREAS if is_forensic else AUDIT_AREAS
+    area_refs = FORENSIC_AREA_REFERENCES if is_forensic else AUDIT_AREA_REFERENCES
+    areas_by_name = {
+        a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement.id).all()
+    }
+    return areas_by_name, area_order, area_refs
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/substantive-procedures.docx")
+@login_required
+def download_substantive_procedures_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    areas_by_name, area_order, area_refs = _substantive_programme_context(engagement)
+    if not areas_by_name:
+        flash("Generate suggested procedures (or add some manually) before downloading this working paper.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+    buf = wp.build_substantive_procedures_docx(engagement, areas_by_name, area_order, area_refs)
+    label = "Investigative_Procedures_Programme" if engagement.type == "Investigative Engagement" else "Substantive_Procedures_Programme"
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, label, "docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/substantive-procedures.xlsx")
+@login_required
+def download_substantive_procedures_xlsx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    areas_by_name, area_order, area_refs = _substantive_programme_context(engagement)
+    if not areas_by_name:
+        flash("Generate suggested procedures (or add some manually) before downloading this working paper.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+    buf = wp.build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, area_refs)
+    label = "Investigative_Procedures_Programme" if engagement.type == "Investigative Engagement" else "Substantive_Procedures_Programme"
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, label, "xlsx"),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )

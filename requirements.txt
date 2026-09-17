@@ -5,6 +5,7 @@ Werkzeug==3.0.4
 python-dotenv==1.0.1
 gunicorn==23.0.0
 openpyxl==3.1.5
+python-docx==1.2.0
 Flask-SocketIO==5.3.6
 python-socketio==5.11.2
 python-engineio==4.9.0
