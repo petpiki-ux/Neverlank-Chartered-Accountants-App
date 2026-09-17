@@ -684,6 +684,7 @@
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
 {% else %}
+  {% if engagement.type != 'Investigative Engagement' %}
   <div class="card">
     <h3 class="mt-0">Materiality calculator</h3>
     <p class="muted" style="font-size:12.5px;">Enter the client's key figures for the period - the system calculates suggested overall materiality, performance materiality and a "clearly trivial" threshold from them. The % benchmarks are common starting points in practice, not a fixed rule - adjust them and apply professional judgement for this specific engagement.</p>
@@ -756,6 +757,7 @@
       {% endif %}
     {% endif %}
   </div>
+  {% endif %}
   {% endif %}
 
   <div class="card">
