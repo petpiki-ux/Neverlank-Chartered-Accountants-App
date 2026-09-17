@@ -17,17 +17,20 @@
     <div><strong>Email:</strong> {{ client.email or '—' }}</div>
     <div><strong>Phone:</strong> {{ client.phone or '—' }}</div>
   </div>
-  <div><strong>Address:</strong> {{ client.address or '—' }}</div>
+  <div class="form-row">
+    <div><strong>Company number:</strong> {{ client.company_number or '—' }}</div>
+    <div><strong>Address:</strong> {{ client.address or '—' }}</div>
+  </div>
   {% if client.notes %}<p class="muted">{{ client.notes }}</p>{% endif %}
 </div>
 
 <div class="card">
   <h3 class="mt-0">Engagements</h3>
-  {% if client.engagements %}
+  {% if visible_engagements %}
   <table>
     <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Deadline</th><th>Partner</th></tr></thead>
     <tbody>
-      {% for e in client.engagements|sort(attribute='deadline') %}
+      {% for e in visible_engagements|sort(attribute='deadline') %}
       <tr>
         <td><a href="{{ url_for('engagements.view_engagement', engagement_id=e.id) }}">{{ e.title }}</a></td>
         <td><span class="badge type-{{ e.type }}">{{ e.type }}</span></td>
@@ -39,7 +42,9 @@
     </tbody>
   </table>
   {% else %}
-  <div class="empty-state">No engagements for this client yet.</div>
+  <div class="empty-state">
+    {% if client.engagements %}You're not assigned to any of this client's engagements.{% else %}No engagements for this client yet.{% endif %}
+  </div>
   {% endif %}
 </div>
 

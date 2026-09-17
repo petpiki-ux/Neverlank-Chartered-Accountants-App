@@ -20,7 +20,12 @@
         <td>{{ p.username }}</td>
         <td><span class="badge">{{ p.role }}</span></td>
         <td>{% if p.is_active_flag %}<span class="badge risk-Low">Active</span>{% else %}<span class="badge risk-High">Inactive</span>{% endif %}</td>
-        <td class="text-right"><a href="{{ url_for('users.edit_user', user_id=p.id) }}" class="btn small secondary">Edit</a></td>
+        <td class="text-right">
+          {% if p.id != current_user.id and p.is_active_flag %}
+          <a href="{{ url_for('calls.call_room', user_id=p.id) }}" class="btn small secondary">Call</a>
+          {% endif %}
+          <a href="{{ url_for('users.edit_user', user_id=p.id) }}" class="btn small secondary">Edit</a>
+        </td>
       </tr>
       {% endfor %}
     </tbody>

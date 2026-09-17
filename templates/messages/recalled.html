@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Message recalled - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ message.subject }}</h1>
+    <div class="subtitle">From {{ message.sender.name if message.sender else '—' }}</div>
+  </div>
+  <a href="{{ url_for('messages.inbox') }}" class="btn secondary">Back to Messages</a>
+</div>
+
+<div class="card" style="max-width:720px;">
+  <div class="empty-state">This message was recalled by {{ message.sender.name if message.sender else 'the sender' }} before you opened it.</div>
+</div>
+{% endblock %}

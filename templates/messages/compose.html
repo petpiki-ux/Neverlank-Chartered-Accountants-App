@@ -23,11 +23,14 @@
       <label>Recipients *</label>
       <div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px;">
         {% for person in people %}
-        <label style="display:block;font-weight:400;margin-bottom:6px;">
-          <input type="checkbox" name="recipient_ids" value="{{ person.id }}" style="width:auto;"
-            {% if person.id|string in prefill_to %}checked{% endif %}>
-          {{ person.name }} <span class="muted" style="font-size:11.5px;">({{ person.role|capitalize }})</span>
-        </label>
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+          <label style="font-weight:400;margin-bottom:0;">
+            <input type="checkbox" name="recipient_ids" value="{{ person.id }}" style="width:auto;"
+              {% if person.id|string in prefill_to %}checked{% endif %}>
+            {{ person.name }} <span class="muted" style="font-size:11.5px;">({{ person.role|capitalize }})</span>
+          </label>
+          <a href="{{ url_for('calls.call_room', user_id=person.id) }}" class="btn small secondary" style="margin-left:8px;">Call</a>
+        </div>
         {% endfor %}
       </div>
     </div>

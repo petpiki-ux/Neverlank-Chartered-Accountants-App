@@ -6,7 +6,7 @@ from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
 
 from config import Config, INSTANCE_DIR
-from extensions import db, login_manager
+from extensions import db, login_manager, socketio
 from models import User, DocumentTemplate, Permission
 
 
@@ -40,6 +40,8 @@ def _add_missing_columns():
     partner_signoff_cols = [("partner_signed_by_id", "INTEGER"), ("partner_signed_at", "DATETIME")]
     additions = {
         "document": [("reference", "VARCHAR(100)"), ("substantive_area_id", "INTEGER")],
+        "client": [("company_number", "VARCHAR(80)")],
+        "message_recipient": [("recalled_at", "DATETIME")],
         "engagement": [("subdivision", "VARCHAR(50)")],
         "engagement_checklist_item": [
             ("reviewed_by_id", "INTEGER"),
@@ -83,6 +85,7 @@ def create_app():
 
     db.init_app(app)
     login_manager.init_app(app)
+    socketio.init_app(app)
 
     from auth import auth_bp
     from clients import clients_bp
@@ -91,6 +94,8 @@ def create_app():
     from doc_templates import doc_templates_bp
     from hr import hr_bp
     from messages import messages_bp
+    import calls  # noqa: F401 - registers the @socketio.on(...) handlers as a side effect
+    from calls import calls_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -99,6 +104,7 @@ def create_app():
     app.register_blueprint(doc_templates_bp)
     app.register_blueprint(hr_bp)
     app.register_blueprint(messages_bp)
+    app.register_blueprint(calls_bp)
 
     @app.route("/")
     def index():
@@ -189,4 +195,6 @@ if __name__ == "__main__":
     if not debug:
         threading.Timer(1.5, lambda: webbrowser.open(f"http://localhost:{port}")).start()
 
-    app.run(host="0.0.0.0", port=port, debug=debug, use_reloader=False)
+    # socketio.run() (not app.run()) so Messages > Call works in the
+    # standalone desktop build too, not just under gunicorn on Render.
+    socketio.run(app, host="0.0.0.0", port=port, debug=debug, use_reloader=False, allow_unsafe_werkzeug=True)

@@ -11,7 +11,7 @@
 
 <div class="card">
   <form method="get" style="margin-bottom:0;">
-    <input type="text" name="q" placeholder="Search clients by name..." value="{{ q }}" style="margin-bottom:0;max-width:320px;display:inline-block;">
+    <input type="text" name="q" placeholder="Search clients by name or company number..." value="{{ q }}" style="margin-bottom:0;max-width:320px;display:inline-block;">
     <button type="submit" class="btn secondary">Search</button>
   </form>
 </div>
@@ -23,7 +23,10 @@
     <tbody>
       {% for c in clients %}
       <tr>
-        <td><a href="{{ url_for('clients.view_client', client_id=c.id) }}">{{ c.name }}</a></td>
+        <td>
+          <a href="{{ url_for('clients.view_client', client_id=c.id) }}">{{ c.name }}</a>
+          {% if c.company_number %}<div class="muted" style="font-size:11px;">{{ c.company_number }}</div>{% endif %}
+        </td>
         <td>{{ c.contact_person or '—' }}{% if c.email %} &middot; {{ c.email }}{% endif %}</td>
         <td>{{ c.industry or '—' }}</td>
         <td>{{ c.engagements|length }}</td>

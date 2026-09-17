@@ -6,6 +6,9 @@
   <title>{% block title %}{{ firm_name }}{% endblock %}</title>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/neverlank-logo.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% if current_user.is_authenticated %}
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  {% endif %}
 </head>
 <body>
   {% if current_user.is_authenticated %}
@@ -48,5 +51,49 @@
 
     {% block content %}{% endblock %}
   </div>
+
+  {% if current_user.is_authenticated %}
+  <div id="incoming-call-banner" style="display:none;position:fixed;bottom:20px;right:20px;z-index:1000;max-width:320px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.18);padding:14px;">
+    <div style="font-weight:600;">Incoming call</div>
+    <div id="incoming-call-from" class="muted" style="font-size:12.5px;margin:4px 0 10px;"></div>
+    <button type="button" id="incoming-call-accept" class="btn small gold">Accept</button>
+    <button type="button" id="incoming-call-decline" class="btn small secondary">Decline</button>
+  </div>
+  <script>
+    (function () {
+      var socket = window.__neverlankSocket || io();
+      window.__neverlankSocket = socket;
+      var banner = document.getElementById("incoming-call-banner");
+      var fromEl = document.getElementById("incoming-call-from");
+      var acceptBtn = document.getElementById("incoming-call-accept");
+      var declineBtn = document.getElementById("incoming-call-decline");
+      var current = null;
+
+      socket.on("call:incoming", function (data) {
+        current = data;
+        fromEl.textContent = data.from_name + " is calling you.";
+        banner.style.display = "block";
+      });
+      ["call:cancelled", "call:declined", "call:ended"].forEach(function (evt) {
+        socket.on(evt, function (data) {
+          if (current && data.call_id === current.call_id) {
+            current = null;
+            banner.style.display = "none";
+          }
+        });
+      });
+      acceptBtn.addEventListener("click", function () {
+        if (!current) return;
+        window.location.href = "/calls/" + current.from_id + "?call_id=" + encodeURIComponent(current.call_id);
+      });
+      declineBtn.addEventListener("click", function () {
+        if (!current) return;
+        socket.emit("call:decline", { call_id: current.call_id });
+        banner.style.display = "none";
+        current = null;
+      });
+    })();
+  </script>
+  {% endif %}
 </body>
 </html>

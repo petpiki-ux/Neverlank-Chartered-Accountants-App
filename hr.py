@@ -21,7 +21,7 @@ from extensions import db
 from models import (
     PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, User, Engagement,
     EngagementTask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
-    user_has_permission,
+    user_has_permission, user_can_access_engagement,
 )
 from config import Config
 
@@ -29,6 +29,18 @@ hr_bp = Blueprint("hr", __name__, url_prefix="/hr")
 
 ALLOWED_POLICY_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"}
 ALLOWED_TIMESHEET_UPLOAD_EXTENSIONS = {"xlsx", "xls", "pdf"}
+
+
+def _visible_engagements_for(user, engagement_list):
+    """Same confidentiality rule as engagements.py's _visible_to_current_user
+    (a non-admin only sees engagements they're Partner/Manager/Team on) -
+    duplicated here rather than imported since it's a plain list filter with
+    no request/route context of its own. Used everywhere in this module
+    that lists engagements or engagement-linked rows firm-wide (the
+    timesheet engagement picker, the Projects board, and the Planner)."""
+    if user.role == "admin":
+        return engagement_list
+    return [e for e in engagement_list if user_can_access_engagement(user, e)]
 
 
 def editor_required(f):
@@ -256,7 +268,10 @@ def view_timesheet(timesheet_id):
     sheet = TimeSheet.query.get_or_404(timesheet_id)
     if sheet.user_id != current_user.id and current_user.role not in REVIEWER_ROLES:
         abort(403)
-    engagements = Engagement.query.filter(Engagement.status != "Completed").order_by(Engagement.title).all()
+    engagements = _visible_engagements_for(
+        current_user,
+        Engagement.query.filter(Engagement.status != "Completed").order_by(Engagement.title).all(),
+    )
     can_edit = (sheet.user_id == current_user.id) and sheet.status != "Approved"
     can_review = current_user.role in REVIEWER_ROLES and sheet.user_id != current_user.id
     week_dates = [sheet.week_start + timedelta(days=i) for i in range(7)]
@@ -426,6 +441,8 @@ def project_board():
         query = query.filter(EngagementTask.assigned_to_id == assignee_filter)
 
     tasks = query.order_by(EngagementTask.due_date.asc().nullslast()).all()
+    if current_user.role != "admin":
+        tasks = [t for t in tasks if user_can_access_engagement(current_user, t.engagement)]
     people = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
 
     return render_template(
@@ -452,10 +469,11 @@ def planner():
     # --- Audit timetable: every active engagement's key dates, sorted by
     # whichever is soonest, with a "clash" flag on weeks that have more than
     # one deadline landing in them. ---
-    engagements = (
+    engagements = _visible_engagements_for(
+        current_user,
         Engagement.query.filter(Engagement.status != "Completed")
         .order_by(Engagement.deadline.asc().nullslast(), Engagement.start_date.asc().nullslast())
-        .all()
+        .all(),
     )
     deadline_week_counts = {}
     for e in engagements:
@@ -484,6 +502,12 @@ def planner():
     allocations = StaffAllocation.query.filter(
         StaffAllocation.end_date >= weeks[0], StaffAllocation.start_date <= weeks[-1] + timedelta(days=6)
     ).all()
+    if current_user.role != "admin":
+        # A non-admin's staffing grid shouldn't reveal that a colleague is
+        # booked on an engagement they themselves aren't assigned to -
+        # their cells simply show less than the full picture; Admin always
+        # sees every allocation.
+        allocations = [a for a in allocations if user_can_access_engagement(current_user, a.engagement)]
 
     grid = {}
     for person in people:

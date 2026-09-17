@@ -1,22 +1,47 @@
 {% extends "base.html" %}
 {% block title %}{% if client %}Edit Client{% else %}New Client{% endif %} - {{ firm_name }}{% endblock %}
 {% block content %}
+{% set fv = form_values or {} %}
+{% macro field(name) %}{{ (client[name] if client else none) or fv.get(name, '') }}{% endmacro %}
 <div class="page-header">
   <h1>{% if client %}Edit {{ client.name }}{% else %}New Client{% endif %}</h1>
 </div>
+
+{% if duplicate_client %}
+<div class="card" style="max-width:640px;border-left:3px solid var(--danger, #c0392b);">
+  <strong>This company number is already in use.</strong>
+  <p class="muted" style="font-size:12.5px;margin:6px 0 0;">
+    <a href="{{ url_for('clients.view_client', client_id=duplicate_client.id) }}">{{ duplicate_client.name }}</a>
+    already uses this company number. Open that client instead, or correct the number below if this is a
+    different company.
+  </p>
+</div>
+{% endif %}
+
 <div class="card" style="max-width:640px;">
   <form method="post">
     <label for="name">Client name *</label>
-    <input type="text" id="name" name="name" value="{{ client.name if client else '' }}" required>
+    <input type="text" id="name" name="name" value="{{ field('name') }}" required>
 
     <div class="form-row">
       <div>
-        <label for="contact_person">Contact person</label>
-        <input type="text" id="contact_person" name="contact_person" value="{{ client.contact_person if client else '' }}">
+        <label for="company_number">Company number</label>
+        <input type="text" id="company_number" name="company_number" value="{{ field('company_number') }}" placeholder="e.g. registration/incorporation number">
       </div>
       <div>
+        <label for="contact_person">Contact person</label>
+        <input type="text" id="contact_person" name="contact_person" value="{{ field('contact_person') }}">
+      </div>
+    </div>
+    <p class="muted" style="font-size:11.5px;margin:-8px 0 12px;">
+      Used to catch the same company being onboarded twice under two different client names. Leave blank if the
+      client isn't a registered company (e.g. an individual or sole trader).
+    </p>
+
+    <div class="form-row">
+      <div>
         <label for="industry">Industry</label>
-        {% set current_industry = client.industry if client else '' %}
+        {% set current_industry = client.industry if client else (fv.get('industry_other', '') if fv.get('industry') == 'Other' else fv.get('industry', '')) %}
         {% set is_known = current_industry in industry_options %}
         <select id="industry" name="industry" onchange="document.getElementById('industry_other_wrap').style.display = (this.value === 'Other') ? 'block' : 'none';">
           <option value="">Select...</option>
@@ -28,24 +53,20 @@
           <input type="text" id="industry_other" name="industry_other" placeholder="Please specify" value="{{ current_industry if not is_known else '' }}">
         </div>
       </div>
-    </div>
-
-    <div class="form-row">
-      <div>
-        <label for="email">Email</label>
-        <input type="email" id="email" name="email" value="{{ client.email if client else '' }}">
-      </div>
       <div>
         <label for="phone">Phone</label>
-        <input type="text" id="phone" name="phone" value="{{ client.phone if client else '' }}">
+        <input type="text" id="phone" name="phone" value="{{ field('phone') }}">
       </div>
     </div>
 
+    <label for="email">Email</label>
+    <input type="email" id="email" name="email" value="{{ field('email') }}">
+
     <label for="address">Address</label>
-    <input type="text" id="address" name="address" value="{{ client.address if client else '' }}">
+    <input type="text" id="address" name="address" value="{{ field('address') }}">
 
     <label for="notes">Notes</label>
-    <textarea id="notes" name="notes">{{ client.notes if client else '' }}</textarea>
+    <textarea id="notes" name="notes">{{ field('notes') }}</textarea>
 
     <button type="submit" class="btn gold">{% if client %}Save changes{% else %}Create client{% endif %}</button>
     <a href="{{ url_for('clients.list_clients') }}" class="btn secondary">Cancel</a>

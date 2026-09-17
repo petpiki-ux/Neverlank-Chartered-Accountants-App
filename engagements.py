@@ -24,11 +24,29 @@ from models import (
     ENTITY_UNDERSTANDING_FIELDS,
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
-    user_has_permission,
+    user_has_permission, user_can_access_engagement,
 )
 import financials as fin
 
 engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
+
+
+def _ensure_engagement_access(engagement):
+    """Confidentiality gate for every engagement-scoped route below: aborts
+    403 unless current_user is that engagement's Partner/Manager/Team (or
+    Admin, who always passes). See models.user_can_access_engagement."""
+    if not user_can_access_engagement(current_user, engagement):
+        abort(403)
+
+
+def _visible_to_current_user(engagement_list):
+    """Same confidentiality rule as _ensure_engagement_access, applied to a
+    list rather than a single engagement - for the dashboard, the
+    engagements list, and the firm-wide Queries board, which must not even
+    reveal that a non-assigned engagement exists. Admin sees everything."""
+    if current_user.role == "admin":
+        return engagement_list
+    return [e for e in engagement_list if user_can_access_engagement(current_user, e)]
 
 
 # ---------- Dashboard ----------
@@ -36,7 +54,9 @@ engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
 @engagements_bp.route("/dashboard")
 @login_required
 def dashboard():
-    all_engagements = Engagement.query.order_by(Engagement.deadline.asc().nullslast()).all()
+    all_engagements = _visible_to_current_user(
+        Engagement.query.order_by(Engagement.deadline.asc().nullslast()).all()
+    )
     active = [e for e in all_engagements if e.status != "Completed"]
     overdue = [e for e in active if e.is_overdue]
     my_tasks = (
@@ -73,7 +93,9 @@ def list_engagements():
         query = query.filter_by(status=status_filter)
     if type_filter:
         query = query.filter_by(type=type_filter)
-    all_engagements = query.order_by(Engagement.deadline.asc().nullslast()).all()
+    all_engagements = _visible_to_current_user(
+        query.order_by(Engagement.deadline.asc().nullslast()).all()
+    )
     return render_template(
         "engagements/list.html",
         engagements=all_engagements,
@@ -149,6 +171,7 @@ def new_engagement():
 @login_required
 def edit_engagement(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     clients = Client.query.order_by(Client.name).all()
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
 
@@ -187,6 +210,7 @@ def delete_engagement(engagement_id):
     if not user_has_permission(current_user, "delete_engagements"):
         abort(403)
     engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     client_id = engagement.client_id
     db.session.delete(engagement)
     db.session.commit()
@@ -198,6 +222,7 @@ def delete_engagement(engagement_id):
 @login_required
 def view_engagement(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
     tab = request.args.get("tab", "overview")
     # Document Templates matching this engagement's type (Audit/Assurance/
@@ -284,6 +309,7 @@ def view_engagement(engagement_id):
 @login_required
 def add_checklist_item(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     max_order = max([i.order for i in engagement.checklist_items], default=0)
     item = EngagementChecklistItem(
         engagement_id=engagement.id,
@@ -301,6 +327,7 @@ def add_checklist_item(engagement_id):
 @login_required
 def update_checklist_item(item_id):
     item = EngagementChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
     item.status = request.form.get("status", item.status)
     item.notes = request.form.get("notes", item.notes)
     if item.status in ("Done", "N/A"):
@@ -324,6 +351,7 @@ def update_checklist_item(item_id):
 @login_required
 def review_checklist_item(item_id):
     item = EngagementChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     if item.status not in ("Done", "N/A"):
@@ -343,6 +371,7 @@ def review_checklist_item(item_id):
 @login_required
 def unreview_checklist_item(item_id):
     item = EngagementChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     item.reviewed_by_id = None
@@ -356,6 +385,7 @@ def unreview_checklist_item(item_id):
 @login_required
 def partner_sign_checklist_item(item_id):
     item = EngagementChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if item.status not in ("Done", "N/A"):
@@ -375,6 +405,7 @@ def partner_sign_checklist_item(item_id):
 @login_required
 def partner_unsign_checklist_item(item_id):
     item = EngagementChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     item.partner_signed_by_id = None
@@ -388,6 +419,7 @@ def partner_unsign_checklist_item(item_id):
 @login_required
 def delete_checklist_item(item_id):
     item = EngagementChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
     engagement_id = item.engagement_id
     db.session.delete(item)
     db.session.commit()
@@ -399,7 +431,8 @@ def delete_checklist_item(item_id):
 @engagements_bp.route("/<int:engagement_id>/entity-understanding/save", methods=["POST"])
 @login_required
 def save_entity_understanding(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     record = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
     if not record:
         record = EntityUnderstanding(engagement_id=engagement_id)
@@ -425,6 +458,7 @@ def save_entity_understanding(engagement_id):
 @login_required
 def review_entity_understanding(record_id):
     record = EntityUnderstanding.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     if not record.is_complete:
@@ -444,6 +478,7 @@ def review_entity_understanding(record_id):
 @login_required
 def unreview_entity_understanding(record_id):
     record = EntityUnderstanding.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     record.reviewed_by_id = None
@@ -457,6 +492,7 @@ def unreview_entity_understanding(record_id):
 @login_required
 def partner_sign_entity_understanding(record_id):
     record = EntityUnderstanding.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if not record.is_complete:
@@ -476,6 +512,7 @@ def partner_sign_entity_understanding(record_id):
 @login_required
 def partner_unsign_entity_understanding(record_id):
     record = EntityUnderstanding.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     record.partner_signed_by_id = None
@@ -511,7 +548,8 @@ def _touch_analytical_review(review):
 @engagements_bp.route("/<int:engagement_id>/analytical-review/threshold", methods=["POST"])
 @login_required
 def save_analytical_review_threshold(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     review = _get_or_create_analytical_review(engagement_id)
     try:
         threshold = float(request.form.get("threshold_pct", 10.0))
@@ -527,7 +565,8 @@ def save_analytical_review_threshold(engagement_id):
 @engagements_bp.route("/<int:engagement_id>/analytical-review/lines/add", methods=["POST"])
 @login_required
 def add_analytical_review_line(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     review = _get_or_create_analytical_review(engagement_id)
 
     label = request.form.get("label", "").strip()
@@ -560,6 +599,7 @@ def add_analytical_review_line(engagement_id):
 @login_required
 def update_analytical_review_line(line_id):
     line = AnalyticalReviewLine.query.get_or_404(line_id)
+    _ensure_engagement_access(line.review.engagement)
     review = line.review
 
     def _float_or_none(name, current):
@@ -588,6 +628,7 @@ def update_analytical_review_line(line_id):
 @login_required
 def delete_analytical_review_line(line_id):
     line = AnalyticalReviewLine.query.get_or_404(line_id)
+    _ensure_engagement_access(line.review.engagement)
     review = line.review
     engagement_id = review.engagement_id
     db.session.delete(line)
@@ -600,6 +641,7 @@ def delete_analytical_review_line(line_id):
 @login_required
 def review_analytical_review(review_id):
     review = AnalyticalReview.query.get_or_404(review_id)
+    _ensure_engagement_access(review.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     if not review.lines:
@@ -619,6 +661,7 @@ def review_analytical_review(review_id):
 @login_required
 def unreview_analytical_review(review_id):
     review = AnalyticalReview.query.get_or_404(review_id)
+    _ensure_engagement_access(review.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     review.reviewed_by_id = None
@@ -632,6 +675,7 @@ def unreview_analytical_review(review_id):
 @login_required
 def partner_sign_analytical_review(review_id):
     review = AnalyticalReview.query.get_or_404(review_id)
+    _ensure_engagement_access(review.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if not review.lines:
@@ -651,6 +695,7 @@ def partner_sign_analytical_review(review_id):
 @login_required
 def partner_unsign_analytical_review(review_id):
     review = AnalyticalReview.query.get_or_404(review_id)
+    _ensure_engagement_access(review.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     review.partner_signed_by_id = None
@@ -665,7 +710,8 @@ def partner_unsign_analytical_review(review_id):
 @engagements_bp.route("/<int:engagement_id>/risk-assessment/save", methods=["POST"])
 @login_required
 def save_risk_assessment(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
     if not assessment:
         assessment = RiskAssessment(engagement_id=engagement_id)
@@ -699,6 +745,7 @@ def save_risk_assessment(engagement_id):
 @login_required
 def review_risk_assessment(assessment_id):
     assessment = RiskAssessment.query.get_or_404(assessment_id)
+    _ensure_engagement_access(assessment.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     if not assessment.is_complete:
@@ -718,6 +765,7 @@ def review_risk_assessment(assessment_id):
 @login_required
 def unreview_risk_assessment(assessment_id):
     assessment = RiskAssessment.query.get_or_404(assessment_id)
+    _ensure_engagement_access(assessment.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     assessment.reviewed_by_id = None
@@ -731,6 +779,7 @@ def unreview_risk_assessment(assessment_id):
 @login_required
 def partner_sign_risk_assessment(assessment_id):
     assessment = RiskAssessment.query.get_or_404(assessment_id)
+    _ensure_engagement_access(assessment.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if not assessment.is_complete:
@@ -750,6 +799,7 @@ def partner_sign_risk_assessment(assessment_id):
 @login_required
 def partner_unsign_risk_assessment(assessment_id):
     assessment = RiskAssessment.query.get_or_404(assessment_id)
+    _ensure_engagement_access(assessment.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     assessment.partner_signed_by_id = None
@@ -763,6 +813,7 @@ def partner_unsign_risk_assessment(assessment_id):
 @login_required
 def delete_risk(risk_id):
     risk = RiskItem.query.get_or_404(risk_id)
+    _ensure_engagement_access(risk.engagement)
     engagement_id = risk.engagement_id
     db.session.delete(risk)
     db.session.commit()
@@ -812,7 +863,8 @@ def _save_engagement_document(engagement_id, file, category, reference, notes, s
 @engagements_bp.route("/<int:engagement_id>/documents/upload", methods=["POST"])
 @login_required
 def upload_document(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     file = request.files.get("file")
     if not file or file.filename == "":
         flash("Please choose a file to upload.", "danger")
@@ -840,7 +892,8 @@ def upload_substantive_area_document(engagement_id, area_name):
     Documents tab, just tagged with which audit area it supports, and
     filed under a category named after that area so it's easy to spot in
     the general Documents list too."""
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     if area_name not in AUDIT_AREAS:
         abort(404)
 
@@ -868,6 +921,7 @@ def upload_substantive_area_document(engagement_id, area_name):
 @login_required
 def download_document(doc_id):
     doc = Document.query.get_or_404(doc_id)
+    _ensure_engagement_access(doc.engagement)
     return send_from_directory(
         current_app.config["UPLOAD_FOLDER"], doc.stored_filename, as_attachment=True,
         download_name=doc.original_filename,
@@ -880,6 +934,7 @@ def delete_document(doc_id):
     if not user_has_permission(current_user, "delete_documents"):
         abort(403)
     doc = Document.query.get_or_404(doc_id)
+    _ensure_engagement_access(doc.engagement)
     engagement_id = doc.engagement_id
     return_tab = "substantive" if doc.substantive_area_id else "documents"
     try:
@@ -896,7 +951,8 @@ def delete_document(doc_id):
 @engagements_bp.route("/<int:engagement_id>/tasks/add", methods=["POST"])
 @login_required
 def add_task(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     due_date = request.form.get("due_date")
     task = EngagementTask(
         engagement_id=engagement_id,
@@ -927,6 +983,7 @@ def _task_redirect(task, tab="tasks"):
 @login_required
 def update_task(task_id):
     task = EngagementTask.query.get_or_404(task_id)
+    _ensure_engagement_access(task.engagement)
     task.title = request.form.get("title", task.title)
     task.description = request.form.get("description", task.description)
     task.assigned_to_id = request.form.get("assigned_to_id") or None
@@ -955,6 +1012,7 @@ def update_task(task_id):
 @login_required
 def review_task(task_id):
     task = EngagementTask.query.get_or_404(task_id)
+    _ensure_engagement_access(task.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     if task.status != "Done":
@@ -974,6 +1032,7 @@ def review_task(task_id):
 @login_required
 def unreview_task(task_id):
     task = EngagementTask.query.get_or_404(task_id)
+    _ensure_engagement_access(task.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     task.reviewed_by_id = None
@@ -987,6 +1046,7 @@ def unreview_task(task_id):
 @login_required
 def partner_sign_task(task_id):
     task = EngagementTask.query.get_or_404(task_id)
+    _ensure_engagement_access(task.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if task.status != "Done":
@@ -1006,6 +1066,7 @@ def partner_sign_task(task_id):
 @login_required
 def partner_unsign_task(task_id):
     task = EngagementTask.query.get_or_404(task_id)
+    _ensure_engagement_access(task.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     task.partner_signed_by_id = None
@@ -1019,6 +1080,7 @@ def partner_unsign_task(task_id):
 @login_required
 def delete_task(task_id):
     task = EngagementTask.query.get_or_404(task_id)
+    _ensure_engagement_access(task.engagement)
     engagement_id = task.engagement_id
     return_to_board = request.form.get("return_to") == "board"
     db.session.delete(task)
@@ -1098,7 +1160,8 @@ def delete_template(template_id):
 @engagements_bp.route("/<int:engagement_id>/staffing/add", methods=["POST"])
 @login_required
 def add_staff_allocation(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     user_id = request.form.get("user_id")
     start_date = request.form.get("start_date")
     end_date = request.form.get("end_date")
@@ -1137,6 +1200,7 @@ def add_staff_allocation(engagement_id):
 @login_required
 def delete_staff_allocation(allocation_id):
     allocation = StaffAllocation.query.get_or_404(allocation_id)
+    _ensure_engagement_access(allocation.engagement)
     engagement_id = allocation.engagement_id
     db.session.delete(allocation)
     db.session.commit()
@@ -1148,7 +1212,8 @@ def delete_staff_allocation(allocation_id):
 @engagements_bp.route("/<int:engagement_id>/materiality/save", methods=["POST"])
 @login_required
 def save_materiality(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     calc = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
     if not calc:
         calc = MaterialityCalculation(engagement_id=engagement_id)
@@ -1190,6 +1255,7 @@ def save_materiality(engagement_id):
 @login_required
 def review_materiality(calc_id):
     calc = MaterialityCalculation.query.get_or_404(calc_id)
+    _ensure_engagement_access(calc.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     if calc.overall_materiality is None:
@@ -1209,6 +1275,7 @@ def review_materiality(calc_id):
 @login_required
 def unreview_materiality(calc_id):
     calc = MaterialityCalculation.query.get_or_404(calc_id)
+    _ensure_engagement_access(calc.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     calc.reviewed_by_id = None
@@ -1222,6 +1289,7 @@ def unreview_materiality(calc_id):
 @login_required
 def partner_sign_materiality(calc_id):
     calc = MaterialityCalculation.query.get_or_404(calc_id)
+    _ensure_engagement_access(calc.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if calc.overall_materiality is None:
@@ -1241,6 +1309,7 @@ def partner_sign_materiality(calc_id):
 @login_required
 def partner_unsign_materiality(calc_id):
     calc = MaterialityCalculation.query.get_or_404(calc_id)
+    _ensure_engagement_access(calc.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     calc.partner_signed_by_id = None
@@ -1331,6 +1400,7 @@ def _upsert_coa_mapping(client_id, account_name, fs_category, user_id):
 @login_required
 def upload_trial_balance(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     file = request.files.get("file")
     if not file or file.filename == "":
         flash("Please choose a file to upload.", "danger")
@@ -1383,6 +1453,7 @@ def upload_trial_balance(engagement_id):
 @login_required
 def add_trial_balance_line(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     name = request.form.get("account_name", "").strip()
     if not name:
         flash("Please give the account a name.", "danger")
@@ -1417,6 +1488,7 @@ def add_trial_balance_line(engagement_id):
 @login_required
 def update_trial_balance_line(line_id):
     line = TrialBalanceLine.query.get_or_404(line_id)
+    _ensure_engagement_access(line.trial_balance.engagement)
     tb = line.trial_balance
     engagement = tb.engagement
 
@@ -1452,6 +1524,7 @@ def update_trial_balance_line(line_id):
 @login_required
 def delete_trial_balance_line(line_id):
     line = TrialBalanceLine.query.get_or_404(line_id)
+    _ensure_engagement_access(line.trial_balance.engagement)
     tb = line.trial_balance
     engagement_id = tb.engagement_id
     db.session.delete(line)
@@ -1464,6 +1537,7 @@ def delete_trial_balance_line(line_id):
 @login_required
 def review_trial_balance(tb_id):
     tb = TrialBalance.query.get_or_404(tb_id)
+    _ensure_engagement_access(tb.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     if not tb.is_fully_mapped:
@@ -1483,6 +1557,7 @@ def review_trial_balance(tb_id):
 @login_required
 def unreview_trial_balance(tb_id):
     tb = TrialBalance.query.get_or_404(tb_id)
+    _ensure_engagement_access(tb.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     tb.reviewed_by_id = None
@@ -1496,6 +1571,7 @@ def unreview_trial_balance(tb_id):
 @login_required
 def partner_sign_trial_balance(tb_id):
     tb = TrialBalance.query.get_or_404(tb_id)
+    _ensure_engagement_access(tb.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if not tb.is_fully_mapped:
@@ -1515,6 +1591,7 @@ def partner_sign_trial_balance(tb_id):
 @login_required
 def partner_unsign_trial_balance(tb_id):
     tb = TrialBalance.query.get_or_404(tb_id)
+    _ensure_engagement_access(tb.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     tb.partner_signed_by_id = None
@@ -1528,6 +1605,7 @@ def partner_unsign_trial_balance(tb_id):
 @login_required
 def add_audit_adjustment(tb_id):
     tb = TrialBalance.query.get_or_404(tb_id)
+    _ensure_engagement_access(tb.engagement)
     reference = request.form.get("reference", "").strip() or f"AJE {len(tb.adjustments) + 1}"
     adjustment = AuditAdjustment(
         trial_balance_id=tb.id,
@@ -1559,6 +1637,7 @@ def _touch_adjustment(adjustment):
 @login_required
 def update_audit_adjustment(adjustment_id):
     adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    _ensure_engagement_access(adjustment.trial_balance.engagement)
     adjustment.reference = request.form.get("reference", adjustment.reference or "").strip() or adjustment.reference
     adjustment.description = request.form.get("description", "").strip()
     _touch_adjustment(adjustment)
@@ -1571,6 +1650,7 @@ def update_audit_adjustment(adjustment_id):
 @login_required
 def delete_audit_adjustment(adjustment_id):
     adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    _ensure_engagement_access(adjustment.trial_balance.engagement)
     engagement_id = adjustment.trial_balance.engagement_id
     db.session.delete(adjustment)
     db.session.commit()
@@ -1582,6 +1662,7 @@ def delete_audit_adjustment(adjustment_id):
 @login_required
 def add_audit_adjustment_line(adjustment_id):
     adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    _ensure_engagement_access(adjustment.trial_balance.engagement)
     name = request.form.get("account_name", "").strip()
     category = request.form.get("fs_category", "").strip()
     if not name or not category:
@@ -1612,6 +1693,7 @@ def add_audit_adjustment_line(adjustment_id):
 @login_required
 def update_audit_adjustment_line(line_id):
     line = AuditAdjustmentLine.query.get_or_404(line_id)
+    _ensure_engagement_access(line.adjustment.trial_balance.engagement)
     adjustment = line.adjustment
 
     def to_float(field, current):
@@ -1640,6 +1722,7 @@ def update_audit_adjustment_line(line_id):
 @login_required
 def delete_audit_adjustment_line(line_id):
     line = AuditAdjustmentLine.query.get_or_404(line_id)
+    _ensure_engagement_access(line.adjustment.trial_balance.engagement)
     adjustment = line.adjustment
     engagement_id = adjustment.trial_balance.engagement_id
     db.session.delete(line)
@@ -1652,6 +1735,7 @@ def delete_audit_adjustment_line(line_id):
 @login_required
 def review_audit_adjustment(adjustment_id):
     adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    _ensure_engagement_access(adjustment.trial_balance.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     if not adjustment.lines or not adjustment.is_balanced:
@@ -1671,6 +1755,7 @@ def review_audit_adjustment(adjustment_id):
 @login_required
 def unreview_audit_adjustment(adjustment_id):
     adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    _ensure_engagement_access(adjustment.trial_balance.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     adjustment.reviewed_by_id = None
@@ -1684,6 +1769,7 @@ def unreview_audit_adjustment(adjustment_id):
 @login_required
 def partner_sign_audit_adjustment(adjustment_id):
     adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    _ensure_engagement_access(adjustment.trial_balance.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if not adjustment.lines or not adjustment.is_balanced:
@@ -1703,6 +1789,7 @@ def partner_sign_audit_adjustment(adjustment_id):
 @login_required
 def partner_unsign_audit_adjustment(adjustment_id):
     adjustment = AuditAdjustment.query.get_or_404(adjustment_id)
+    _ensure_engagement_access(adjustment.trial_balance.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     adjustment.partner_signed_by_id = None
@@ -1715,7 +1802,8 @@ def partner_unsign_audit_adjustment(adjustment_id):
 @engagements_bp.route("/<int:engagement_id>/financial-statements/save", methods=["POST"])
 @login_required
 def save_financial_statements_notes(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     fs = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
     if not fs:
         fs = FinancialStatements(engagement_id=engagement_id)
@@ -1736,6 +1824,7 @@ def save_financial_statements_notes(engagement_id):
 @login_required
 def review_financial_statements(fs_id):
     fs = FinancialStatements.query.get_or_404(fs_id)
+    _ensure_engagement_access(fs.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     trial_balance = TrialBalance.query.filter_by(engagement_id=fs.engagement_id).first()
@@ -1756,6 +1845,7 @@ def review_financial_statements(fs_id):
 @login_required
 def unreview_financial_statements(fs_id):
     fs = FinancialStatements.query.get_or_404(fs_id)
+    _ensure_engagement_access(fs.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     fs.reviewed_by_id = None
@@ -1769,6 +1859,7 @@ def unreview_financial_statements(fs_id):
 @login_required
 def partner_sign_financial_statements(fs_id):
     fs = FinancialStatements.query.get_or_404(fs_id)
+    _ensure_engagement_access(fs.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     trial_balance = TrialBalance.query.filter_by(engagement_id=fs.engagement_id).first()
@@ -1789,6 +1880,7 @@ def partner_sign_financial_statements(fs_id):
 @login_required
 def partner_unsign_financial_statements(fs_id):
     fs = FinancialStatements.query.get_or_404(fs_id)
+    _ensure_engagement_access(fs.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     fs.partner_signed_by_id = None
@@ -1804,6 +1896,7 @@ def partner_unsign_financial_statements(fs_id):
 @login_required
 def generate_substantive_procedures(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
     high_risk = bool(risk_assessment and risk_assessment.rating == "High")
     industry_map = INDUSTRY_EXTRA_PROCEDURES.get(engagement.client.industry, {})
@@ -1869,7 +1962,8 @@ def _get_or_create_substantive_area(engagement_id, area_name):
 @engagements_bp.route("/<int:engagement_id>/substantive-procedures/areas/<area_name>/items/add", methods=["POST"])
 @login_required
 def add_substantive_procedure_item(engagement_id, area_name):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     text = request.form.get("procedure_text", "").strip()
     if not text:
         flash("Please enter the procedure text.", "danger")
@@ -1886,6 +1980,7 @@ def add_substantive_procedure_item(engagement_id, area_name):
 @login_required
 def update_substantive_procedure_item(item_id):
     item = SubstantiveProcedureItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.area_record.engagement)
     area = item.area_record
     item.procedure_text = request.form.get("procedure_text", item.procedure_text).strip() or item.procedure_text
     item.status = request.form.get("status", item.status)
@@ -1900,6 +1995,7 @@ def update_substantive_procedure_item(item_id):
 @login_required
 def delete_substantive_procedure_item(item_id):
     item = SubstantiveProcedureItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.area_record.engagement)
     area = item.area_record
     engagement_id = area.engagement_id
     db.session.delete(item)
@@ -1912,6 +2008,7 @@ def delete_substantive_procedure_item(item_id):
 @login_required
 def save_substantive_area_notes(area_id):
     area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    _ensure_engagement_access(area.engagement)
     area.notes = request.form.get("notes", "").strip()
     _touch_substantive_area(area)
     db.session.commit()
@@ -1923,6 +2020,7 @@ def save_substantive_area_notes(area_id):
 @login_required
 def review_substantive_area(area_id):
     area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    _ensure_engagement_access(area.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     if not area.is_complete:
@@ -1942,6 +2040,7 @@ def review_substantive_area(area_id):
 @login_required
 def unreview_substantive_area(area_id):
     area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    _ensure_engagement_access(area.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     area.reviewed_by_id = None
@@ -1955,6 +2054,7 @@ def unreview_substantive_area(area_id):
 @login_required
 def partner_sign_substantive_area(area_id):
     area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    _ensure_engagement_access(area.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if not area.is_complete:
@@ -1974,6 +2074,7 @@ def partner_sign_substantive_area(area_id):
 @login_required
 def partner_unsign_substantive_area(area_id):
     area = SubstantiveProcedureArea.query.get_or_404(area_id)
+    _ensure_engagement_access(area.engagement)
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     area.partner_signed_by_id = None
@@ -1995,7 +2096,8 @@ def _query_redirect(query):
 @engagements_bp.route("/<int:engagement_id>/queries/raise", methods=["POST"])
 @login_required
 def raise_query(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
 
@@ -2031,6 +2133,7 @@ def raise_query(engagement_id):
 @login_required
 def reply_to_query(query_id):
     query = EngagementQuery.query.get_or_404(query_id)
+    _ensure_engagement_access(query.engagement)
     message = request.form.get("message", "").strip()
     if not message:
         flash("Please enter a reply.", "danger")
@@ -2045,6 +2148,7 @@ def reply_to_query(query_id):
 @login_required
 def resolve_query(query_id):
     query = EngagementQuery.query.get_or_404(query_id)
+    _ensure_engagement_access(query.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     query.status = "Resolved"
@@ -2059,6 +2163,7 @@ def resolve_query(query_id):
 @login_required
 def reopen_query(query_id):
     query = EngagementQuery.query.get_or_404(query_id)
+    _ensure_engagement_access(query.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
     query.status = "Open"
@@ -2081,6 +2186,11 @@ def queries_board():
     if status_filter in ("Open", "Resolved"):
         query = query.filter_by(status=status_filter)
     all_queries = query.order_by(EngagementQuery.raised_at.desc()).all()
+    if current_user.role != "admin":
+        # Don't leak the existence of, or activity on, an engagement this
+        # user isn't assigned to - same confidentiality rule as everywhere
+        # else, applied per-query via its parent engagement.
+        all_queries = [q for q in all_queries if user_can_access_engagement(current_user, q.engagement)]
     return render_template(
         "engagements/queries_board.html", queries=all_queries, status_filter=status_filter,
     )

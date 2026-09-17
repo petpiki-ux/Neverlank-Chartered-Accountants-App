@@ -1,0 +1,188 @@
+{% extends "base.html" %}
+{% block title %}Call with {{ other.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Call with {{ other.name }}</h1>
+    <div class="subtitle" id="call-status">Starting...</div>
+  </div>
+  <a href="{{ url_for('messages.inbox') }}" class="btn secondary">Back to Messages</a>
+</div>
+
+<div class="card">
+  <div style="display:flex;gap:16px;flex-wrap:wrap;">
+    <div style="flex:1;min-width:260px;">
+      <div class="muted" style="font-size:11.5px;margin-bottom:4px;">{{ other.name }}</div>
+      <video id="remote-video" autoplay playsinline style="width:100%;max-width:480px;background:#111;border-radius:8px;"></video>
+    </div>
+    <div style="flex:1;min-width:260px;">
+      <div class="muted" style="font-size:11.5px;margin-bottom:4px;">You</div>
+      <video id="local-video" autoplay playsinline muted style="width:100%;max-width:480px;background:#111;border-radius:8px;"></video>
+    </div>
+  </div>
+
+  <div style="margin-top:16px;">
+    <button type="button" id="btn-mute" class="btn secondary small">Mute</button>
+    <button type="button" id="btn-camera" class="btn secondary small">Camera off</button>
+    <button type="button" id="btn-hangup" class="btn danger small">Hang up</button>
+  </div>
+
+  <p class="muted" style="font-size:11px;margin-top:14px;">
+    Calls connect directly, browser-to-browser. If you're on a very restrictive office network or VPN, the
+    connection can occasionally fail to establish - if that happens, try again on a regular home/office
+    connection.
+  </p>
+</div>
+
+<script>
+(function () {
+  const callId = {{ call_id|tojson }};
+  const role = {{ role|tojson }};
+  const otherId = {{ other.id|tojson }};
+  const statusEl = document.getElementById("call-status");
+  const localVideo = document.getElementById("local-video");
+  const remoteVideo = document.getElementById("remote-video");
+
+  const ICE_SERVERS = [{ urls: "stun:stun.l.google.com:19302" }];
+
+  let socket = window.__neverlankSocket || io();
+  window.__neverlankSocket = socket;
+  let pc = null;
+  let localStream = null;
+  let ended = false;
+
+  function setStatus(text) { statusEl.textContent = text; }
+
+  async function getMedia() {
+    try {
+      localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: true });
+    } catch (e) {
+      try {
+        localStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+        setStatus("Camera unavailable - joined with audio only.");
+      } catch (e2) {
+        setStatus("Couldn't access your microphone/camera: " + e2.message);
+        throw e2;
+      }
+    }
+    localVideo.srcObject = localStream;
+  }
+
+  function createPeerConnection() {
+    pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    localStream.getTracks().forEach((track) => pc.addTrack(track, localStream));
+    pc.ontrack = (event) => {
+      remoteVideo.srcObject = event.streams[0];
+      setStatus("Connected");
+    };
+    pc.onicecandidate = (event) => {
+      if (event.candidate) {
+        socket.emit("call:ice-candidate", { call_id: callId, candidate: event.candidate });
+      }
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed" || pc.connectionState === "disconnected") {
+        setStatus("Connection lost.");
+      }
+    };
+  }
+
+  async function startOffer() {
+    createPeerConnection();
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    socket.emit("call:offer", { call_id: callId, sdp: offer });
+  }
+
+  function endCall(message) {
+    if (ended) return;
+    ended = true;
+    setStatus(message || "Call ended");
+    if (pc) { pc.close(); pc = null; }
+    if (localStream) { localStream.getTracks().forEach((t) => t.stop()); }
+  }
+
+  document.getElementById("btn-hangup").addEventListener("click", () => {
+    socket.emit("call:hangup", { call_id: callId });
+    endCall("You ended the call");
+  });
+
+  document.getElementById("btn-mute").addEventListener("click", (e) => {
+    if (!localStream) return;
+    localStream.getAudioTracks().forEach((t) => { t.enabled = !t.enabled; e.target.textContent = t.enabled ? "Mute" : "Unmute"; });
+  });
+
+  document.getElementById("btn-camera").addEventListener("click", (e) => {
+    if (!localStream) return;
+    localStream.getVideoTracks().forEach((t) => { t.enabled = !t.enabled; e.target.textContent = t.enabled ? "Camera off" : "Camera on"; });
+  });
+
+  window.addEventListener("beforeunload", () => {
+    if (!ended) socket.emit("call:hangup", { call_id: callId });
+  });
+
+  socket.on("call:waiting", (data) => {
+    if (data.call_id !== callId) return;
+    setStatus(role === "caller" ? "Calling {{ other.name|e }}..." : "Waiting to connect...");
+  });
+
+  socket.on("call:start-offer", async (data) => {
+    if (data.call_id !== callId) return;
+    await startOffer();
+  });
+
+  socket.on("call:offer", async (data) => {
+    if (data.call_id !== callId) return;
+    if (!pc) createPeerConnection();
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+    const answer = await pc.createAnswer();
+    await pc.setLocalDescription(answer);
+    socket.emit("call:answer", { call_id: callId, sdp: answer });
+  });
+
+  socket.on("call:answer", async (data) => {
+    if (data.call_id !== callId || !pc) return;
+    await pc.setRemoteDescription(new RTCSessionDescription(data.sdp));
+  });
+
+  socket.on("call:ice-candidate", async (data) => {
+    if (data.call_id !== callId || !pc || !data.candidate) return;
+    try { await pc.addIceCandidate(new RTCIceCandidate(data.candidate)); } catch (e) { /* ignore */ }
+  });
+
+  socket.on("call:unavailable", (data) => {
+    if (data.call_id !== callId) return;
+    setStatus("{{ other.name|e }} isn't online right now.");
+  });
+
+  socket.on("call:declined", (data) => {
+    if (data.call_id !== callId) return;
+    endCall("{{ other.name|e }} declined the call.");
+  });
+
+  socket.on("call:cancelled", (data) => {
+    if (data.call_id !== callId) return;
+    endCall("Call cancelled.");
+  });
+
+  socket.on("call:ended", (data) => {
+    if (data.call_id !== callId) return;
+    endCall("{{ other.name|e }} ended the call");
+  });
+
+  (async function init() {
+    setStatus("Requesting camera/microphone access...");
+    try {
+      await getMedia();
+    } catch (e) {
+      return;
+    }
+    if (role === "caller") {
+      setStatus("Calling {{ other.name|e }}...");
+      socket.emit("call:invite", { call_id: callId, to: otherId });
+    }
+    socket.emit("call:join", { call_id: callId });
+  })();
+})();
+</script>
+{% endblock %}

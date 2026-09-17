@@ -530,6 +530,12 @@ class Client(db.Model):
     phone = db.Column(db.String(50))
     address = db.Column(db.String(255))
     industry = db.Column(db.String(120))
+    # Company registration number (e.g. a companies-office registration
+    # number). Optional - not every client is a registered company - but
+    # when it IS given, clients.py checks it against every other client's
+    # company_number before saving, so the same company can't accidentally
+    # be onboarded twice under two different client records.
+    company_number = db.Column(db.String(80))
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -579,6 +585,20 @@ class Engagement(db.Model):
 
     def __repr__(self):
         return f"<Engagement {self.title}>"
+
+
+def user_can_access_engagement(user, engagement):
+    """Confidentiality gate: everyone except Admin can only open an
+    engagement (any tab, its documents, its workpapers) if they're actually
+    on it - its Partner, its Manager, or listed in its Team. Admin always
+    sees everything, same as user_has_permission's own admin bypass.
+    Engagements a user can't access also don't appear in their dashboard,
+    engagements list, or the firm-wide Queries board."""
+    if user.role == "admin":
+        return True
+    if engagement.partner_id == user.id or engagement.manager_id == user.id:
+        return True
+    return user in engagement.team_members
 
 
 class ChecklistTemplate(db.Model):
@@ -1552,6 +1572,12 @@ class MessageRecipient(db.Model):
     message_id = db.Column(db.Integer, db.ForeignKey("message.id"), nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
     read_at = db.Column(db.DateTime)
+    # Set only when the sender recalls the message WHILE this recipient
+    # still hadn't read it (see messages.py recall_message) - once set, this
+    # recipient can no longer see the message content, but a recipient who
+    # already had read_at set before the recall keeps full access, so
+    # recalled_at and read_at are never both set on the same row.
+    recalled_at = db.Column(db.DateTime)
 
     user = db.relationship("User")
 
@@ -1560,6 +1586,10 @@ class MessageRecipient(db.Model):
     @property
     def is_read(self):
         return self.read_at is not None
+
+    @property
+    def is_recalled(self):
+        return self.recalled_at is not None
 
     def __repr__(self):
         return f"<MessageRecipient message={self.message_id} user={self.user_id}>"

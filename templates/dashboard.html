@@ -16,7 +16,7 @@
   </div>
   <div class="stat-card">
     <div class="num">{{ total_engagements }}</div>
-    <div class="label">Total Engagements</div>
+    <div class="label">{% if current_user.role == 'admin' %}Total Engagements{% else %}My Engagements{% endif %}</div>
   </div>
   <div class="stat-card">
     <div class="num">{{ active|length }}</div>
