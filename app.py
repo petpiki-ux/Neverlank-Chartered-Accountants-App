@@ -105,6 +105,122 @@ def _fix_forensic_template_type():
         db.session.commit()
 
 
+# The Forensic Audit Client Acceptance Questionnaire's four sections were
+# renamed after some engagements had already had it seeded (Independence /
+# Regulatory / AML / Engagement letter / Competence -> Conflict of Interest
+# & Threat Assessment / Enhanced Due Diligence (EDD) / Legal Framework &
+# Evidence Control / Competence & Scope Realism), and it was later expanded
+# from 3 to 6 questions per section. seed_acceptance_checklist() only ever
+# seeds a checklist that's still empty, so anyone who'd already clicked
+# "Add the firm's default checklist" before either change would otherwise
+# be stuck: their already-seeded items carry the OLD section label, which
+# no longer matches any of the four current headings, so those items
+# silently fall into "Other checklist items" and every section shows "No
+# checklist questions yet" - with the seed button hidden too, since the
+# checklist isn't empty. This exact (old section, old wording) map lets the
+# fix below relabel only genuinely-drifted items (never a custom item a
+# team member typed in themselves) and then top up any of the current
+# questions that are still missing, without disturbing responses/comments
+# already recorded on anything.
+_OLD_FORENSIC_CHECKLIST_SECTION_RENAMES = {
+    ("Independence", "Have we screened all suspects, target entities, key witnesses, and related parties against our firm's active and past client database?"): "Conflict of Interest & Threat Assessment",
+    ("Independence", "Have we previously provided any services (like bookkeeping or standard audits) to this client or target that could create a self-review or advocacy threat in court?"): "Conflict of Interest & Threat Assessment",
+    ("Independence", "Does this investigation involve high-risk individuals, corporate retaliation, or hostile environments that require specialised physical or cybersecurity measures for our staff?"): "Conflict of Interest & Threat Assessment",
+    ("Regulatory / AML", "Have we fully verified the identity of the engaging entity and its directors through standard KYC and AML protocols?"): "Enhanced Due Diligence (EDD)",
+    ("Regulatory / AML", "Have we identified the Ultimate Beneficial Owners (UBOs) of both the client and the target to rule out hidden conflicts?"): "Enhanced Due Diligence (EDD)",
+    ("Regulatory / AML", "Do background checks in court registries, regulatory databases, and media reports reveal a history of bad faith, fraud, or vexatious litigation by any key player?"): "Enhanced Due Diligence (EDD)",
+    ("Engagement letter", "Does the client have the absolute legal authority to grant us access to the target's emails, personal devices, and financial records without breaching privacy laws (e.g., GDPR)?"): "Legal Framework & Evidence Control",
+    ("Engagement letter", "Has the client or a third party already altered, deleted, or mismanaged the data, potentially damaging its admissibility in court?"): "Legal Framework & Evidence Control",
+    ("Engagement letter", "Should we be retained directly by the client, or hired through their external legal counsel to shield our work under attorney-client privilege?"): "Legal Framework & Evidence Control",
+    ("Competence", "Do we have available Certified Fraud Examiners (CFEs), digital forensics specialists, or industry experts required for this specific type of fraud?"): "Competence & Scope Realism",
+    ("Competence", "Is the scope clearly defined (e.g., quantifying an insurance loss, tracing stolen assets, or preparing for criminal prosecution), or is the client asking for a vague \"fishing expedition\"?"): "Competence & Scope Realism",
+    ("Competence", "Does the client understand that building legally sound evidence takes time, and are they willing to pay an upfront retainer to mitigate our non-payment risk?"): "Competence & Scope Realism",
+}
+
+
+def _fix_forensic_checklist_items():
+    """One-time+idempotent startup fix - see the comment above
+    _OLD_FORENSIC_CHECKLIST_SECTION_RENAMES for why this is needed. Only
+    touches Client Acceptance checklists on engagements of type
+    "Investigative Engagement", and only ever acts on items whose (section,
+    exact wording) matches the old forensic question set or the current
+    one - never a custom item a team member typed in themselves, and never
+    a checklist that hasn't been started at all (an empty one is left for
+    the normal "Add the firm's default checklist" button).
+
+    The old question set's wording was also reworded (not just moved to a
+    new section) when it was expanded from 3 to 6 questions per section, so
+    this doesn't just relabel an old item's section and leave its old
+    wording sitting there duplicating the fresh canonical question - it
+    upgrades each drifted item's own text in place (by its position within
+    its section, best-effort - good enough since these are advisory
+    prompts, not identifiers) so any response/comment already recorded on
+    it carries forward onto the closest current question, and only deletes
+    it outright if that would collide with a canonical question already on
+    the checklist. Whatever's still missing afterwards is added fresh.
+    """
+    from models import ClientAcceptance, ClientAcceptanceChecklistItem, FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS, Engagement
+
+    investigative_ids = [e.id for e in Engagement.query.filter_by(type="Investigative Engagement").with_entities(Engagement.id).all()]
+    if not investigative_ids:
+        return
+
+    canonical_by_section = {}
+    for section, text_ in FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS:
+        canonical_by_section.setdefault(section, []).append(text_)
+    canonical_texts = {text_ for _section, text_ in FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS}
+
+    changed = False
+    records = ClientAcceptance.query.filter(ClientAcceptance.engagement_id.in_(investigative_ids)).all()
+    for record in records:
+        current_items = list(record.checklist_items)  # already ordered by .order
+        if not current_items:
+            continue  # never seeded - leave the normal "Add default checklist" button in place
+
+        drifted = [i for i in current_items if (i.section, i.item_text) in _OLD_FORENSIC_CHECKLIST_SECTION_RENAMES]
+        if not drifted and not any(i.item_text in canonical_texts for i in current_items):
+            continue  # doesn't look like it was seeded from our list - don't touch it
+
+        live_texts = {i.item_text for i in current_items}
+
+        if drifted:
+            by_new_section = {}
+            for old_item in drifted:
+                new_section = _OLD_FORENSIC_CHECKLIST_SECTION_RENAMES[(old_item.section, old_item.item_text)]
+                by_new_section.setdefault(new_section, []).append(old_item)
+
+            for new_section, old_items_in_section in by_new_section.items():
+                canonical_list = canonical_by_section.get(new_section, [])
+                for position, old_item in enumerate(old_items_in_section):
+                    target_text = canonical_list[position] if position < len(canonical_list) else None
+                    if target_text and target_text not in live_texts:
+                        old_item.section = new_section
+                        old_item.item_text = target_text
+                        live_texts.add(target_text)
+                    else:
+                        current_items.remove(old_item)
+                        db.session.delete(old_item)
+                    changed = True
+
+        live_texts = {i.item_text for i in current_items}
+        max_order = max((i.order for i in current_items), default=0)
+        for section, text_ in FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS:
+            if text_ in live_texts:
+                continue
+            max_order += 1
+            db.session.add(ClientAcceptanceChecklistItem(
+                client_acceptance_id=record.id,
+                section=section,
+                item_text=text_,
+                order=max_order,
+            ))
+            live_texts.add(text_)
+            changed = True
+
+    if changed:
+        db.session.commit()
+
+
 def create_app():
     app = Flask(
         __name__,
@@ -191,6 +307,7 @@ def create_app():
             from seed import seed_permissions
             seed_permissions()
         _fix_forensic_template_type()
+        _fix_forensic_checklist_items()
 
     register_cli(app)
 
