@@ -225,7 +225,7 @@ TEMPLATES = [
     ),
     (
         "Forensic Audit / Investigation",
-        "Audit",
+        "Investigative Engagement",
         "Checklist for forensic audit and fraud investigation engagements.",
         FORENSIC_PROGRAM,
     ),

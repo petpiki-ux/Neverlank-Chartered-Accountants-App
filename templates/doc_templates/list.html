@@ -13,7 +13,7 @@
 
 {% for eng_type, items in library.items() %}
 <div class="card">
-  <h3 class="mt-0"><span class="badge type-{{ eng_type }}">{{ eng_type }}</span></h3>
+  <h3 class="mt-0"><span class="badge type-{{ eng_type|replace(' ', '') }}">{{ eng_type }}</span></h3>
   <table>
     <thead><tr><th>Ref</th><th>Template</th><th>Description</th><th>Format</th><th></th></tr></thead>
     <tbody>

@@ -73,6 +73,22 @@ def _add_missing_columns():
                     conn.commit()
 
 
+def _fix_forensic_template_type():
+    """One-time data fix, safe to run on every startup: the "Forensic Audit /
+    Investigation" checklist template was originally seeded tagged as type
+    "Assurance" (there was no dedicated type for investigative work yet).
+    Now that "Investigative Engagement" is its own Engagement Type, retag
+    that existing template row to match - seeding alone can't do this,
+    since run_seed() only ever creates a template that doesn't already
+    exist by name, it never updates one that's already there.
+    """
+    from models import ChecklistTemplate
+    template = ChecklistTemplate.query.filter_by(name="Forensic Audit / Investigation").first()
+    if template and template.type != "Investigative Engagement":
+        template.type = "Investigative Engagement"
+        db.session.commit()
+
+
 def create_app():
     app = Flask(
         __name__,
@@ -158,6 +174,7 @@ def create_app():
             # this is a no-op there and only does real work on an upgrade.
             from seed import seed_permissions
             seed_permissions()
+        _fix_forensic_template_type()
 
     register_cli(app)
 

@@ -7,7 +7,7 @@
     <h1>{{ engagement.title }}</h1>
     <div class="subtitle">
       <a href="{{ url_for('clients.view_client', client_id=engagement.client.id) }}">{{ engagement.client.name }}</a>
-      &middot; <span class="badge type-{{ engagement.type }}">{{ engagement.type }}</span>{% if engagement.subdivision %} <span class="badge">{{ engagement.subdivision }}</span>{% endif %}
+      &middot; <span class="badge type-{{ engagement.type|replace(' ', '') }}">{{ engagement.type }}</span>{% if engagement.subdivision %} <span class="badge">{{ engagement.subdivision }}</span>{% endif %}
       &middot; <span class="badge status-{{ engagement.status|replace(' ', '') }}">{{ engagement.status }}</span>
       {% if engagement.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}
       {% if open_query_count %}<span class="badge overdue">{{ open_query_count }} open quer{{ 'y' if open_query_count == 1 else 'ies' }}</span>{% endif %}
@@ -851,7 +851,7 @@
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
 {% else %}
   <div class="card">
-    <h3 class="mt-0">Templates for this engagement <span class="badge type-{{ engagement.type }}">{{ engagement.type }}</span></h3>
+    <h3 class="mt-0">Templates for this engagement <span class="badge type-{{ engagement.type|replace(' ', '') }}">{{ engagement.type }}</span></h3>
     {% if matching_templates %}
     <p class="muted" style="font-size:12.5px;">Automatically matched to this engagement's type. Download, fill in, then upload the completed file below to keep it with the engagement.</p>
     <table>

@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>{{ template.name }}</h1>
-    <div class="subtitle"><span class="badge type-{{ template.type }}">{{ template.type }}</span>{% if template.description %} &middot; {{ template.description }}{% endif %}</div>
+    <div class="subtitle"><span class="badge type-{{ template.type|replace(' ', '') }}">{{ template.type }}</span>{% if template.description %} &middot; {{ template.description }}{% endif %}</div>
   </div>
 </div>
 

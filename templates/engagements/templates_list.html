@@ -18,7 +18,7 @@
       {% for t in templates %}
       <tr>
         <td><a href="{{ url_for('engagements.view_template', template_id=t.id) }}">{{ t.name }}</a></td>
-        <td><span class="badge type-{{ t.type }}">{{ t.type }}</span></td>
+        <td><span class="badge type-{{ t.type|replace(' ', '') }}">{{ t.type }}</span></td>
         <td>{{ t.items|length }}</td>
         <td class="text-right">
           {% if user_has_permission(current_user, 'manage_checklist_templates') %}

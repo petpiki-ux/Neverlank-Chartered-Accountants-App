@@ -5,7 +5,7 @@ from flask_login import UserMixin
 from extensions import db
 
 
-ENGAGEMENT_TYPES = ["Audit", "Assurance", "Consulting", "Secretarial"]
+ENGAGEMENT_TYPES = ["Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement"]
 SECRETARIAL_SUBDIVISIONS = ["Company Registrations", "Trusts", "PVOs"]
 ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"]
 TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]

@@ -20,7 +20,7 @@
       <tr>
         <td><a href="{{ url_for('engagements.view_engagement', engagement_id=e.id) }}">{{ e.title }}</a></td>
         <td>{{ e.client.name }}</td>
-        <td><span class="badge type-{{ e.type }}">{{ e.type }}</span></td>
+        <td><span class="badge type-{{ e.type|replace(' ', '') }}">{{ e.type }}</span></td>
         <td>{{ e.start_date.strftime('%d %b %Y') if e.start_date else '—' }}</td>
         <td>{{ e.period_end.strftime('%d %b %Y') if e.period_end else '—' }}</td>
         <td>

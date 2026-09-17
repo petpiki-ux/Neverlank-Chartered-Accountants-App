@@ -37,7 +37,7 @@
       <tr>
         <td><a href="{{ url_for('engagements.view_engagement', engagement_id=e.id) }}">{{ e.title }}</a></td>
         <td><a href="{{ url_for('clients.view_client', client_id=e.client.id) }}">{{ e.client.name }}</a></td>
-        <td><span class="badge type-{{ e.type }}">{{ e.type }}</span>{% if e.subdivision %}<div class="muted" style="font-size:11px;">{{ e.subdivision }}</div>{% endif %}</td>
+        <td><span class="badge type-{{ e.type|replace(' ', '') }}">{{ e.type }}</span>{% if e.subdivision %}<div class="muted" style="font-size:11px;">{{ e.subdivision }}</div>{% endif %}</td>
         <td><span class="badge status-{{ e.status|replace(' ', '') }}">{{ e.status }}</span></td>
         <td>{{ e.deadline.strftime('%d %b %Y') if e.deadline else '—' }} {% if e.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
         <td>{{ e.partner.name if e.partner else '—' }}</td>

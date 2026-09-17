@@ -38,7 +38,7 @@
       <tr>
         <td><a href="{{ url_for('engagements.view_engagement', engagement_id=e.id) }}">{{ e.title }}</a></td>
         <td>{{ e.client.name }}</td>
-        <td><span class="badge type-{{ e.type }}">{{ e.type }}</span></td>
+        <td><span class="badge type-{{ e.type|replace(' ', '') }}">{{ e.type }}</span></td>
         <td><span class="badge status-{{ e.status|replace(' ', '') }}">{{ e.status }}</span></td>
         <td>
           {% if e.deadline %}{{ e.deadline.strftime('%d %b %Y') }}{% else %}&mdash;{% endif %}
