@@ -110,6 +110,7 @@ INDUSTRY_OPTIONS = [
     "Agriculture & Agro-processing",
     "Manufacturing",
     "Mining & Extractives",
+    "Petroleum & Fuel Distribution",
     "Retail & Wholesale Trade",
     "Construction & Real Estate",
     "Banking & Financial Services",
@@ -228,6 +229,93 @@ RISK_IMPACT_QUESTIONS = [
         "Moderate",
         "Serious",
         "Severe",
+    ]),
+]
+
+# Forensic-specific Risk Assessment questionnaire, used in place of
+# RISK_LIKELIHOOD_QUESTIONS/RISK_IMPACT_QUESTIONS above for engagements of
+# type "Investigative Engagement" (see RiskAssessment.likelihood_answers/
+# impact_answers below, which branch on engagement.type). Same 1-5 scoring
+# and Low/Medium/High banding, but built around the Fraud Triangle
+# (Incentive/Pressure, Opportunity, Rationalisation) rather than ordinary
+# audit risk of material misstatement - a financial statement audit asks
+# "how likely is an honest error", a forensic engagement asks "how likely
+# is someone here committing, and getting away with, fraud". Deliberately
+# does not apply standard materiality thresholds to the "significance"
+# question - a small number can still indicate a systemic fraud scheme.
+FORENSIC_RISK_LIKELIHOOD_QUESTIONS = [
+    ("q_fraud_incentive", "Incentive/Pressure - how strong is the incentive or pressure to commit fraud (financial distress, unrealistic performance targets, personal greed)?", [
+        "No evident pressure - financially stable, targets are realistic",
+        "Minor pressure - some ambitious targets or mild financial strain",
+        "Moderate pressure - noticeable financial strain or aggressive targets on certain individuals/units",
+        "Significant pressure - clear financial distress, unrealistic targets, or known personal financial difficulty on key individuals",
+        "Severe pressure - the entity or key individuals face acute financial distress, personal ruin, or extreme performance pressure",
+    ]),
+    ("q_fraud_opportunity", "Opportunity - how much opportunity exists to commit and conceal fraud (weak internal controls, poor segregation of duties, management override capability)?", [
+        "Strong controls, clear segregation of duties, no realistic override capability",
+        "Generally sound controls with only minor gaps",
+        "Noticeable control weaknesses or overlapping duties in some areas",
+        "Significant control weaknesses, poor segregation of duties, or meaningful override capability",
+        "Weak or absent controls, duties concentrated in one person, and management can override controls unchecked",
+    ]),
+    ("q_fraud_rationalization", "Rationalisation - how tolerant is the culture of cutting corners, and are there disgruntled or underpaid employees who might feel justified?", [
+        "Strong ethical culture and clear tone at the top; no known grievances",
+        "Generally sound culture; isolated, minor grumbling",
+        "Some tolerance of cutting corners, or a few known grievances",
+        "A noticeable \"everyone does it\" culture, or several disgruntled/underpaid employees",
+        "Widespread tolerance of cutting corners and significant, well-known grievances among staff",
+    ]),
+    ("q_fraud_override", "Management override - how easily could executives or supervisors bypass existing system controls to perpetrate or conceal fraud?", [
+        "No override capability - controls and approvals apply equally at every level",
+        "Limited override capability, subject to independent review",
+        "Some override capability with inconsistent independent review",
+        "Considerable override capability with little independent oversight",
+        "Unchecked override capability - management can bypass controls with no independent oversight at all",
+    ]),
+    ("q_fraud_intel", "Prior intelligence - what do whistleblower/hotline tips, past audit findings, or industry-specific fraud trends suggest about this engagement?", [
+        "No tips, findings or trends suggesting a heightened risk here",
+        "Isolated, unsubstantiated chatter with no supporting detail",
+        "A specific tip or finding exists but is vague or unconfirmed",
+        "A credible tip, finding, or well-known industry trend directly points to this area",
+        "Multiple credible tips/findings, or this exact scheme is a known, active trend in this industry",
+    ]),
+]
+
+FORENSIC_RISK_IMPACT_QUESTIONS = [
+    ("q_scheme_revenue_gl", "Revenue & journal entries - how significant is the exposure to revenue recognition fraud or general ledger manipulation (channel stuffing, bill-and-hold, fictitious sales, manual/backdated/rounded-dollar entries)?", [
+        "No plausible exposure identified",
+        "Minor exposure - isolated, low-value transactions only",
+        "Some exposure in a defined area or period",
+        "Considerable exposure across multiple accounts/periods",
+        "Severe exposure - pervasive, high-value, or long-running",
+    ]),
+    ("q_scheme_asset_misappropriation", "Asset misappropriation - how significant is the exposure to theft or misuse of assets (inventory shrinkage, unauthorised write-offs, missing scrap, cash theft)?", [
+        "No plausible exposure identified",
+        "Minor exposure - isolated, low-value items only",
+        "Some exposure in a defined area or period",
+        "Considerable exposure across multiple assets/locations",
+        "Severe exposure - pervasive, high-value, or long-running",
+    ]),
+    ("q_scheme_procurement_vendor", "Procurement & vendor management - how significant is the exposure to shell companies, bid rigging/kickbacks, or duplicate payments?", [
+        "No plausible exposure identified",
+        "Minor exposure - a small number of vendors/contracts",
+        "Some exposure across a defined category of spend",
+        "Considerable exposure across multiple vendors/contracts",
+        "Severe exposure - pervasive across procurement, or very high-value contracts involved",
+    ]),
+    ("q_scheme_payroll_expenses", "Payroll & expenses - how significant is the exposure to ghost employees or travel & entertainment fraud?", [
+        "No plausible exposure identified",
+        "Minor exposure - isolated, low-value items only",
+        "Some exposure in a defined department or period",
+        "Considerable exposure across multiple departments/individuals",
+        "Severe exposure - pervasive, high-value, or long-running",
+    ]),
+    ("q_scheme_significance", "Overall significance - if any of the above were substantiated, how significant would the financial or reputational impact be? (Do not apply standard materiality thresholds here - a small amount can still indicate a systemic fraud scheme.)", [
+        "Minor - immaterial financial impact, no reputational exposure",
+        "Limited - modest financial impact, low reputational exposure",
+        "Moderate - noticeable financial impact and/or reputational exposure",
+        "Serious - significant financial impact and/or public/regulatory reputational exposure",
+        "Severe - potential for criminal referral, major financial loss, or serious reputational damage",
     ]),
 ]
 
@@ -483,6 +571,11 @@ INDUSTRY_EXTRA_PROCEDURES = {
         "Property, Plant and Equipment": ["Assess the reasonableness of mine/asset useful lives against reserve estimates and life-of-mine plans, and consider the need for an expert."],
         "Going Concern": ["Evaluate commodity price assumptions and reserve/resource estimates used in going concern and impairment assessments."],
     },
+    "Petroleum & Fuel Distribution": {
+        "Inventories": ["Test fuel stock reconciliations (dip/meter readings vs. book stock) and assess the adequacy of provisions for evaporation, temperature variance and shrinkage losses."],
+        "Revenue": ["Test compliance with regulated fuel pricing (where applicable) and reconcile pump/meter sales data to recorded revenue for a sample of days."],
+        "Property, Plant and Equipment": ["Assess the condition and remaining useful life of storage tanks, pipelines and dispensing equipment, and consider environmental decommissioning/rehabilitation obligations."],
+    },
     "Retail & Wholesale Trade": {
         "Inventories": ["Consider shrinkage/theft risk in inventory valuation and review the adequacy of the shrinkage provision."],
         "Revenue": ["Test point-of-sale system controls and reconcile daily takings to bank deposits for a sample of days."],
@@ -524,6 +617,51 @@ INDUSTRY_EXTRA_PROCEDURES = {
     "Public Sector & Parastatals": {
         "Trade Payables and Accruals": ["Confirm compliance with public procurement regulations for a sample of significant payables/commitments."],
     },
+}
+
+# Forensic equivalent of AUDIT_AREAS/BASELINE_SUBSTANTIVE_PROCEDURES above,
+# used for the Substantive Procedures tab on an Investigative Engagement
+# instead of the financial-statement-line-item areas, which don't apply to
+# a fraud investigation. Grouped into the four buckets investigative
+# procedures are generally organised into, by the type of evidence
+# required, rather than by balance sheet/income statement caption.
+# HIGH_RISK_EXTRA_PROCEDURES / INDUSTRY_EXTRA_PROCEDURES above are
+# deliberately not applied on top of these - they're keyed to AUDIT_AREAS
+# captions and don't map onto these categories - so an Investigative
+# Engagement's suggested procedures are always just this baseline list.
+FORENSIC_SUBSTANTIVE_AREAS = [
+    "Advanced Data Analytics & Forensic Technology",
+    "Asset Tracing & Financial Reconstruction",
+    "Document Examination & Verification",
+    "Physical & Observational Procedures",
+]
+
+FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES = {
+    "Advanced Data Analytics & Forensic Technology": [
+        "Perform a Benford's Law analysis on transaction data (e.g. invoice amounts, journal entries) to identify anomalies in number patterns consistent with manufactured or fabricated figures.",
+        "Search emails, chat logs and deleted/recovered files for red-flag keywords (e.g. \"override\", \"off-books\", \"hide\", \"urgent wire\", \"don't tell\", \"cash only\").",
+        "Run gap and duplicate-testing scripts to identify missing cheque/invoice number sequences, duplicate invoice numbers, and identical payment amounts made to different vendors.",
+        "Extract and review document/file metadata (creation and modification dates, authorship, last-saved-by) on key records to identify backdating or after-the-fact alteration.",
+        "Use fuzzy/similarity matching on vendor and employee master data to identify near-duplicate names that may indicate a shell company or a ghost employee.",
+    ],
+    "Asset Tracing & Financial Reconstruction": [
+        "Apply the net worth method: reconstruct an individual's financial profile from changes in assets and liabilities over the period to identify unexplained wealth.",
+        "Trace the exact path of funds from the entity's operating account(s) through to ultimate beneficiaries, including any shell companies or offshore accounts identified.",
+        "Perform a lifestyle audit comparing an individual's known legal income against their actual spending, real estate purchases, vehicles and other high-value assets.",
+        "Reconstruct incomplete, deleted or destroyed accounting records from surviving source documents and third-party data where the general ledger itself cannot be relied upon.",
+    ],
+    "Document Examination & Verification": [
+        "Vouch and trace a sample of specific suspicious transactions back to physical source documents (contracts, purchase orders, shipping/delivery receipts) to verify they actually occurred.",
+        "Submit external confirmation requests directly to independent third parties (banks, suppliers, customers) to confirm balances and transaction terms, bypassing internal staff entirely.",
+        "Search public/corporate registries for undisclosed related parties or conflicts of interest, such as an employee or a family member secretly owning a vendor or customer.",
+        "Examine questioned documents for signs of forgery, alteration, or inconsistent fonts, ink or signatures, engaging a qualified document examiner where warranted.",
+    ],
+    "Physical & Observational Procedures": [
+        "Perform surprise (unannounced) cash counts and/or inventory counts of high-value stock or cash drawers to identify misappropriation before records can be altered.",
+        "Conduct site visitations to physically verify that a vendor genuinely exists and is not a \"ghost vendor\" operating out of a P.O. Box or residential address.",
+        "Physically observe and photograph key locations, assets or processes relevant to the allegations, maintaining a clear chain of custody for anything collected as evidence.",
+        "Where relevant and legally permissible, conduct discreet observation of a subject's day-to-day activities to corroborate (or contradict) their stated role, access and conduct.",
+    ],
 }
 
 
@@ -956,12 +1094,15 @@ class StaffAllocation(db.Model):
 
 class RiskAssessment(db.Model):
     """The system-based Risk Assessment for one engagement: answer the
-    questionnaire (RISK_LIKELIHOOD_QUESTIONS / RISK_IMPACT_QUESTIONS above,
-    each 1-5) and the app computes likelihood, impact, score and an overall
-    Low/Medium/High rating - no manual likelihood/impact picking. One row
-    per engagement; re-answering the questionnaire updates it in place
-    rather than creating a new one, since risk should be kept current
-    rather than accumulated as a history.
+    questionnaire (RISK_LIKELIHOOD_QUESTIONS / RISK_IMPACT_QUESTIONS above
+    for most engagement types, or FORENSIC_RISK_LIKELIHOOD_QUESTIONS /
+    FORENSIC_RISK_IMPACT_QUESTIONS above for an Investigative Engagement -
+    see likelihood_answers/impact_answers below - each 1-5) and the app
+    computes likelihood, impact, score and an overall Low/Medium/High
+    rating - no manual likelihood/impact picking. One row per engagement;
+    re-answering the questionnaire updates it in place rather than creating
+    a new one, since risk should be kept current rather than accumulated as
+    a history.
     """
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
@@ -980,6 +1121,24 @@ class RiskAssessment(db.Model):
     q_related_party = db.Column(db.Integer)
     q_consequences = db.Column(db.Integer)
 
+    # Forensic-specific answers (1-5 each), used instead of the ten fields
+    # above on an Investigative Engagement - see FORENSIC_RISK_LIKELIHOOD_
+    # QUESTIONS / FORENSIC_RISK_IMPACT_QUESTIONS above. Kept as separate
+    # columns (rather than reusing q_complexity etc. under a different
+    # meaning) so a completed audit-style assessment and a completed
+    # forensic assessment can never be confused with each other.
+    q_fraud_incentive = db.Column(db.Integer)
+    q_fraud_opportunity = db.Column(db.Integer)
+    q_fraud_rationalization = db.Column(db.Integer)
+    q_fraud_override = db.Column(db.Integer)
+    q_fraud_intel = db.Column(db.Integer)
+
+    q_scheme_revenue_gl = db.Column(db.Integer)
+    q_scheme_asset_misappropriation = db.Column(db.Integer)
+    q_scheme_procurement_vendor = db.Column(db.Integer)
+    q_scheme_payroll_expenses = db.Column(db.Integer)
+    q_scheme_significance = db.Column(db.Integer)
+
     notes = db.Column(db.Text)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -995,12 +1154,29 @@ class RiskAssessment(db.Model):
     partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
 
     @property
+    def _is_forensic(self):
+        return bool(self.engagement and self.engagement.type == "Investigative Engagement")
+
+    @property
+    def likelihood_questions(self):
+        """The question set actually in play for this record - the Fraud
+        Triangle questionnaire on an Investigative Engagement, the ordinary
+        audit questionnaire otherwise. Everything below (likelihood_answers,
+        is_complete, likelihood/impact/score/rating) is driven from this and
+        impact_questions, so the two engagement flavours never mix."""
+        return FORENSIC_RISK_LIKELIHOOD_QUESTIONS if self._is_forensic else RISK_LIKELIHOOD_QUESTIONS
+
+    @property
+    def impact_questions(self):
+        return FORENSIC_RISK_IMPACT_QUESTIONS if self._is_forensic else RISK_IMPACT_QUESTIONS
+
+    @property
     def likelihood_answers(self):
-        return [getattr(self, field) for field, _, _ in RISK_LIKELIHOOD_QUESTIONS]
+        return [getattr(self, field) for field, _, _ in self.likelihood_questions]
 
     @property
     def impact_answers(self):
-        return [getattr(self, field) for field, _, _ in RISK_IMPACT_QUESTIONS]
+        return [getattr(self, field) for field, _, _ in self.impact_questions]
 
     @property
     def is_complete(self):

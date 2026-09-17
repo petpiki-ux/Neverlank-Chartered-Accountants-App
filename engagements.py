@@ -22,9 +22,11 @@ from models import (
     EngagementQuery, QueryReply,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
-    RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
+    RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS,
+    FORENSIC_RISK_LIKELIHOOD_QUESTIONS, FORENSIC_RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
     ENTITY_UNDERSTANDING_FIELDS, EntityUnderstandingChecklistItem, FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
+    FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
 )
@@ -258,6 +260,13 @@ def view_engagement(engagement_id):
         .all()
     )
     risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
+    # An Investigative Engagement gets the Fraud Triangle-based forensic
+    # questionnaire instead of the ordinary audit risk-of-material-
+    # misstatement one - see RiskAssessment.likelihood_questions/
+    # impact_questions, which the save route below mirrors.
+    is_forensic_risk = engagement.type == "Investigative Engagement"
+    likelihood_questions = FORENSIC_RISK_LIKELIHOOD_QUESTIONS if is_forensic_risk else RISK_LIKELIHOOD_QUESTIONS
+    impact_questions = FORENSIC_RISK_IMPACT_QUESTIONS if is_forensic_risk else RISK_IMPACT_QUESTIONS
     materiality = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
     entity_understanding = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
     analytical_review = AnalyticalReview.query.filter_by(engagement_id=engagement_id).first()
@@ -273,6 +282,11 @@ def view_engagement(engagement_id):
         fin.build_all_statements(trial_balance.lines, trial_balance.adjustments)
         if trial_balance and trial_balance.lines else None
     )
+
+    # On an Investigative Engagement, Substantive Procedures uses the four
+    # forensic evidence-type categories instead of the financial-statement
+    # audit areas - see FORENSIC_SUBSTANTIVE_AREAS above.
+    substantive_area_names = FORENSIC_SUBSTANTIVE_AREAS if is_forensic_risk else AUDIT_AREAS
 
     substantive_areas_by_name = {
         a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).all()
@@ -306,8 +320,9 @@ def view_engagement(engagement_id):
         task_statuses=TASK_STATUSES,
         matching_templates=matching_templates,
         risk_assessment=risk_assessment,
-        likelihood_questions=RISK_LIKELIHOOD_QUESTIONS,
-        impact_questions=RISK_IMPACT_QUESTIONS,
+        likelihood_questions=likelihood_questions,
+        impact_questions=impact_questions,
+        is_forensic_risk=is_forensic_risk,
         materiality=materiality,
         scope_suggestion=scope_suggestion,
         entity_understanding=entity_understanding,
@@ -318,7 +333,7 @@ def view_engagement(engagement_id):
         statements=statements,
         category_choices=fin.category_choices(),
         category_label=fin.category_label,
-        audit_areas=AUDIT_AREAS,
+        audit_areas=substantive_area_names,
         substantive_areas=substantive_areas_by_name,
         queries_by_section=queries_by_section,
         queries_by_area=queries_by_area,
@@ -884,7 +899,17 @@ def save_risk_assessment(engagement_id):
         assessment = RiskAssessment(engagement_id=engagement_id)
         db.session.add(assessment)
 
-    for field, _, options in RISK_LIKELIHOOD_QUESTIONS + RISK_IMPACT_QUESTIONS:
+    # An Investigative Engagement is answered against the Fraud Triangle
+    # questionnaire (FORENSIC_RISK_LIKELIHOOD_QUESTIONS/_IMPACT_QUESTIONS) -
+    # every other type keeps the ordinary audit questionnaire. Must match
+    # view_engagement's likelihood_questions/impact_questions above exactly,
+    # or a submitted form's fields wouldn't line up with what gets saved.
+    if engagement.type == "Investigative Engagement":
+        questions = FORENSIC_RISK_LIKELIHOOD_QUESTIONS + FORENSIC_RISK_IMPACT_QUESTIONS
+    else:
+        questions = RISK_LIKELIHOOD_QUESTIONS + RISK_IMPACT_QUESTIONS
+
+    for field, _, options in questions:
         raw = request.form.get(field)
         try:
             value = int(raw)
@@ -1077,7 +1102,8 @@ def upload_substantive_area_document(engagement_id, area_name):
     the general Documents list too."""
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
-    if area_name not in AUDIT_AREAS:
+    valid_areas = FORENSIC_SUBSTANTIVE_AREAS if engagement.type == "Investigative Engagement" else AUDIT_AREAS
+    if area_name not in valid_areas:
         abort(404)
 
     file = request.files.get("file")
@@ -2080,13 +2106,17 @@ def partner_unsign_financial_statements(fs_id):
 # ---------- Substantive Procedures (system-based: by audit area, driven by risk + industry) ----------
 
 def sync_substantive_procedures(engagement):
-    """Additive top-up of suggested procedures across every audit area,
-    driven by the engagement's CURRENT Risk Assessment rating and the
-    client's CURRENT industry (see AUDIT_AREAS / BASELINE_SUBSTANTIVE_
-    PROCEDURES / HIGH_RISK_EXTRA_PROCEDURES / INDUSTRY_EXTRA_PROCEDURES
-    above). This is the shared engine behind both the manual "Generate
-    suggested procedures" button and the automatic re-sync fired whenever
-    the risk rating or the client's industry changes (see
+    """Additive top-up of suggested procedures across every area, driven by
+    the engagement's CURRENT Risk Assessment rating and the client's
+    CURRENT industry (see AUDIT_AREAS / BASELINE_SUBSTANTIVE_PROCEDURES /
+    HIGH_RISK_EXTRA_PROCEDURES / INDUSTRY_EXTRA_PROCEDURES above) - or, on
+    an Investigative Engagement, the four forensic evidence-type categories
+    instead (see FORENSIC_SUBSTANTIVE_AREAS / FORENSIC_BASELINE_
+    SUBSTANTIVE_PROCEDURES above; the risk/industry extras are audit-area
+    captions and don't apply there, so a forensic engagement only ever gets
+    its baseline list). This is the shared engine behind both the manual
+    "Generate suggested procedures" button and the automatic re-sync fired
+    whenever the risk rating or the client's industry changes (see
     sync_substantive_procedures_if_started, save_risk_assessment, and
     clients.edit_client) - so the suggested-procedures checklist keeps
     itself current instead of only ever reflecting whatever the risk
@@ -2096,19 +2126,28 @@ def sync_substantive_procedures(engagement):
     removes an existing item (ticked-off work, sign-offs and manually added
     procedures are never touched), so it's safe to call as often as
     needed. Returns how many procedures were added."""
-    risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement.id).first()
-    high_risk = bool(risk_assessment and risk_assessment.rating == "High")
-    industry_map = INDUSTRY_EXTRA_PROCEDURES.get(engagement.client.industry, {})
+    is_forensic = engagement.type == "Investigative Engagement"
+    if is_forensic:
+        areas = FORENSIC_SUBSTANTIVE_AREAS
+        baseline = FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES
+        high_risk = False
+        industry_map = {}
+    else:
+        areas = AUDIT_AREAS
+        baseline = BASELINE_SUBSTANTIVE_PROCEDURES
+        risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement.id).first()
+        high_risk = bool(risk_assessment and risk_assessment.rating == "High")
+        industry_map = INDUSTRY_EXTRA_PROCEDURES.get(engagement.client.industry, {})
 
     added_count = 0
-    for area_name in AUDIT_AREAS:
+    for area_name in areas:
         area = SubstantiveProcedureArea.query.filter_by(engagement_id=engagement.id, area=area_name).first()
         if not area:
             area = SubstantiveProcedureArea(engagement_id=engagement.id, area=area_name)
             db.session.add(area)
             db.session.flush()
 
-        desired = [(t, "baseline") for t in BASELINE_SUBSTANTIVE_PROCEDURES.get(area_name, [])]
+        desired = [(t, "baseline") for t in baseline.get(area_name, [])]
         if high_risk:
             desired += [(t, "risk") for t in HIGH_RISK_EXTRA_PROCEDURES.get(area_name, [])]
         desired += [(t, "industry") for t in industry_map.get(area_name, [])]
@@ -2155,14 +2194,20 @@ def sync_substantive_procedures_if_started(engagement_id):
 def generate_substantive_procedures(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
-    risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
-    high_risk = bool(risk_assessment and risk_assessment.rating == "High")
     added_count = sync_substantive_procedures(engagement)
     db.session.commit()
-    if added_count:
-        flash(f"Generated {added_count} suggested procedure(s) across the audit areas, based on the current risk rating{' (High)' if high_risk else ''} and the client's industry.", "success")
+    if engagement.type == "Investigative Engagement":
+        if added_count:
+            flash(f"Generated {added_count} suggested forensic procedure(s) across the four investigative categories.", "success")
+        else:
+            flash("No new suggested procedures to add - the full forensic procedure list is already there below.", "info")
     else:
-        flash("No new suggested procedures to add - everything suggested for the current risk rating and industry is already listed below.", "info")
+        risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
+        high_risk = bool(risk_assessment and risk_assessment.rating == "High")
+        if added_count:
+            flash(f"Generated {added_count} suggested procedure(s) across the audit areas, based on the current risk rating{' (High)' if high_risk else ''} and the client's industry.", "success")
+        else:
+            flash("No new suggested procedures to add - everything suggested for the current risk rating and industry is already listed below.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
 
 
@@ -2344,8 +2389,10 @@ def raise_query(engagement_id):
     area_name = request.form.get("area_name", "").strip() or None
     if section != "substantive":
         area_name = None
-    elif area_name and area_name not in AUDIT_AREAS:
-        abort(400)
+    elif area_name:
+        valid_areas = FORENSIC_SUBSTANTIVE_AREAS if engagement.type == "Investigative Engagement" else AUDIT_AREAS
+        if area_name not in valid_areas:
+            abort(400)
 
     query = EngagementQuery(
         engagement_id=engagement_id, section=section, area_name=area_name,
