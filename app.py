@@ -63,6 +63,14 @@ def _add_missing_columns():
         "analytical_review": list(partner_signoff_cols),
         "trial_balance": list(partner_signoff_cols),
         "financial_statements": list(partner_signoff_cols),
+        "client_acceptance": [
+            ("risk_conflicts_score", "INTEGER"),
+            ("risk_security_score", "INTEGER"),
+            ("risk_integrity_edd_score", "INTEGER"),
+            ("risk_evidence_legal_score", "INTEGER"),
+            ("risk_scope_capabilities_score", "INTEGER"),
+            ("risk_scoring_notes", "TEXT"),
+        ],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():

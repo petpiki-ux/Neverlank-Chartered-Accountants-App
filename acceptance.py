@@ -27,7 +27,8 @@ from extensions import db
 from models import (
     Engagement, Document, ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS,
     ClientAcceptanceChecklistItem, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
-    DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS,
+    DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS,
+    RISK_CATEGORIES,
     REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES, user_can_access_engagement,
 )
 
@@ -195,6 +196,35 @@ def save_acceptance_decision(engagement_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 
+@acceptance_bp.route("/<int:engagement_id>/acceptance/risk-matrix/save", methods=["POST"])
+@login_required
+def save_acceptance_risk_matrix(engagement_id):
+    """Save the Forensic Audit Risk Evaluation Matrix scores (Investigative
+    Engagement type only, but not enforced here - the field is simply blank/
+    unused on other engagement types). Each score is stored as 1-5, or left
+    unset (None) if left blank/invalid, since risk_total_score/risk_assessment
+    on the model already treat "not every category scored" as its own state."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    for field, *_rest in RISK_CATEGORIES:
+        raw = request.form.get(field, "").strip()
+        value = None
+        if raw:
+            try:
+                parsed = int(raw)
+            except ValueError:
+                parsed = None
+            if parsed is not None and 1 <= parsed <= 5:
+                value = parsed
+        setattr(record, field, value)
+    record.risk_scoring_notes = request.form.get("risk_scoring_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Risk evaluation matrix saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
 @acceptance_bp.route("/<int:engagement_id>/acceptance/engagement-letter/upload", methods=["POST"])
 @login_required
 def upload_engagement_letter(engagement_id):
@@ -319,7 +349,11 @@ def seed_acceptance_checklist(engagement_id):
     if record.checklist_items:
         flash("The checklist already has items on it.", "info")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
-    for order, (section, item_text) in enumerate(DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, start=1):
+    default_items = (
+        FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS if engagement.type == "Investigative Engagement"
+        else DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS
+    )
+    for order, (section, item_text) in enumerate(default_items, start=1):
         db.session.add(ClientAcceptanceChecklistItem(
             client_acceptance_id=record.id,
             section=section,

@@ -1632,6 +1632,50 @@ class MessageRecipient(db.Model):
 
 CLIENT_ACCEPTANCE_DECISIONS = ["Pending", "Accepted", "Declined"]
 
+# Forensic Audit Risk Evaluation Matrix - used only on engagements of type
+# "Investigative Engagement" (see ClientAcceptance.risk_* fields/properties
+# below). Each tuple is (field_name, category_label, low_description,
+# medium_description, high_description); score each category 1 (low) to 5
+# (high) against these descriptions, then sum all five (range 5-25) to get
+# the risk tier via ClientAcceptance.risk_assessment.
+RISK_CATEGORIES = [
+    (
+        "risk_conflicts_score",
+        "Conflicts & Objectivity",
+        "No matches found in the database. Firm has never serviced the target. No court testimony threats.",
+        "Minor past relationship with a witness/subsidiary, but completely mitigated by separate teams.",
+        "Direct conflict identified. Firm previously audited the target or the exact system under investigation.",
+    ),
+    (
+        "risk_security_score",
+        "Physical & Cyber Security",
+        "Standard office environment. No threat of physical retaliation or complex cyber-attacks.",
+        "Target may be uncooperative or defensive, but there is no history of violence or severe cyber threats.",
+        "Hostile environment, organized crime links, high threat of physical retaliation, or advanced cyber warfare.",
+    ),
+    (
+        "risk_integrity_edd_score",
+        "Client Integrity & EDD",
+        "Established client or reputable entity. Clean background checks and clear corporate structure.",
+        "New client with minor regulatory friction in the past, or slightly complex corporate structure.",
+        "History of bad faith/lawsuits, hidden beneficial owners, or suspected involvement in the fraud themselves.",
+    ),
+    (
+        "risk_evidence_legal_score",
+        "Evidence & Legal Risk",
+        "Client owns all data. Evidence is untouched. Retained via external counsel under privilege.",
+        "Data ownership is mostly clear, but evidence may have been partially handled or looked at by internal IT.",
+        "High risk of privacy law breaches. Evidence is already corrupted/wiped. Client refuses to use outside legal counsel.",
+    ),
+    (
+        "risk_scope_capabilities_score",
+        "Scope & Capabilities",
+        "Exact objectives defined (e.g. specific asset tracing). In-house CFEs and digital experts available immediately.",
+        "Scope is slightly broad but manageable. May need to contract a niche external specialist for a short time.",
+        "Vague \"fishing expedition\" requested. Firm lacks the necessary forensic tools or certified experts for this industry.",
+    ),
+]
+
 
 class ClientAcceptance(db.Model):
     """One per engagement (for engagements where Engagement.acceptance_required
@@ -1679,6 +1723,17 @@ class ClientAcceptance(db.Model):
     engagement_letter_sent_at = db.Column(db.DateTime)
     engagement_letter_signed_at = db.Column(db.DateTime)
     engagement_letter_document_id = db.Column(db.Integer, db.ForeignKey("document.id"))
+
+    # Forensic Audit Risk Evaluation Matrix - only shown/used on engagements
+    # of type "Investigative Engagement" (see RISK_CATEGORIES below and the
+    # risk_total_score/risk_tier properties). Each is 1 (low) to 5 (high);
+    # None means that category hasn't been scored yet.
+    risk_conflicts_score = db.Column(db.Integer)
+    risk_security_score = db.Column(db.Integer)
+    risk_integrity_edd_score = db.Column(db.Integer)
+    risk_evidence_legal_score = db.Column(db.Integer)
+    risk_scope_capabilities_score = db.Column(db.Integer)
+    risk_scoring_notes = db.Column(db.Text)
 
     # The decision itself - this plus the partner sign-off below is what
     # actually clears (or permanently blocks) the gate.
@@ -1748,6 +1803,59 @@ class ClientAcceptance(db.Model):
             level = "success"
         return {"label": label, "level": level, "flagged": flagged, "outstanding": outstanding, "total": total}
 
+    @property
+    def risk_scores(self):
+        """The five Forensic Audit Risk Evaluation Matrix scores, in a
+        fixed order matching RISK_CATEGORIES, as (field_name, value)
+        pairs - value is None where that category hasn't been scored."""
+        return [(field, getattr(self, field)) for field, *_ in RISK_CATEGORIES]
+
+    @property
+    def risk_total_score(self):
+        """Sum of the five category scores, or None until every category
+        has been scored (a partial sum would be misleading against the
+        5-25 scale the risk tiers below are calibrated to)."""
+        scores = [v for _, v in self.risk_scores]
+        if any(v is None for v in scores):
+            return None
+        return sum(scores)
+
+    @property
+    def risk_assessment(self):
+        """The risk tier (Low/Medium/High) implied by risk_total_score,
+        with its decision guidance and recommended action, exactly as set
+        out in the firm's Forensic Audit Risk Evaluation Matrix. Purely
+        advisory, like checklist_assessment above - it never sets the
+        `decision` field itself."""
+        total = self.risk_total_score
+        if total is None:
+            scored = sum(1 for _, v in self.risk_scores if v is not None)
+            return {
+                "total": None, "tier": None, "level": "muted",
+                "label": f"{scored} of {len(RISK_CATEGORIES)} risk categories scored so far.",
+                "decision": None, "action": None,
+            }
+        if total <= 10:
+            return {
+                "total": total, "tier": "Low Risk", "level": "success",
+                "label": f"Total score {total}/25 - Low Risk (Fast-Track Acceptance).",
+                "decision": "Accept. Standard engagement setup.",
+                "action": "Draft the engagement letter and assign the team.",
+            }
+        if total <= 17:
+            return {
+                "total": total, "tier": "Medium Risk", "level": "warning",
+                "label": f"Total score {total}/25 - Medium Risk (Conditional Acceptance).",
+                "decision": "Review. Requires approval from the Managing Partner or Risk Committee.",
+                "action": "Put safeguards in place (e.g. a higher upfront retainer, strict information barriers, or mandating outside counsel).",
+            }
+        return {
+            "total": total, "tier": "High Risk", "level": "danger",
+            "label": f"Total score {total}/25 - High Risk (Decline or Heavy Mitigation).",
+            "decision": "High Alert. Recommend declining the engagement unless extraordinary risk mitigations are implemented.",
+            "action": "If accepted, requires formal sign-off from the Board/Global Risk Head, specialised insurance riders, and independent third-party oversight.",
+        }
+
     def __repr__(self):
         return f"<ClientAcceptance engagement={self.engagement_id} decision={self.decision}>"
 
@@ -1785,6 +1893,30 @@ DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS = [
     ("Regulatory / AML", "Has management provided verified primary identification documents and corporate registration certificates?"),
     ("Fee & quality", "The expected fee is commensurate with the work required, without compromising the quality of the engagement."),
     ("Engagement letter", "The client has agreed to the scope, timeline, responsibilities, and fee basis set out in the engagement letter."),
+]
+
+# Seeded instead of DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS when the engagement's
+# type is "Investigative Engagement" (see acceptance.seed_acceptance_checklist)
+# - forensic/fraud investigation work raises acceptance considerations a
+# standard audit/assurance checklist doesn't cover (evidence chain of
+# custody, legal privilege, adversarial parties). Mapped onto the same
+# section names as the general list above (Independence, Regulatory / AML,
+# Engagement letter, Competence) so each question still groups under the
+# matching numbered section on the Client Acceptance tab with no template
+# changes needed.
+FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS = [
+    ("Independence", "Have we screened all suspects, target entities, key witnesses, and related parties against our firm's active and past client database?"),
+    ("Independence", "Have we previously provided any services (like bookkeeping or standard audits) to this client or target that could create a self-review or advocacy threat in court?"),
+    ("Independence", "Does this investigation involve high-risk individuals, corporate retaliation, or hostile environments that require specialised physical or cybersecurity measures for our staff?"),
+    ("Regulatory / AML", "Have we fully verified the identity of the engaging entity and its directors through standard KYC and AML protocols?"),
+    ("Regulatory / AML", "Have we identified the Ultimate Beneficial Owners (UBOs) of both the client and the target to rule out hidden conflicts?"),
+    ("Regulatory / AML", "Do background checks in court registries, regulatory databases, and media reports reveal a history of bad faith, fraud, or vexatious litigation by any key player?"),
+    ("Engagement letter", "Does the client have the absolute legal authority to grant us access to the target's emails, personal devices, and financial records without breaching privacy laws (e.g., GDPR)?"),
+    ("Engagement letter", "Has the client or a third party already altered, deleted, or mismanaged the data, potentially damaging its admissibility in court?"),
+    ("Engagement letter", "Should we be retained directly by the client, or hired through their external legal counsel to shield our work under attorney-client privilege?"),
+    ("Competence", "Do we have available Certified Fraud Examiners (CFEs), digital forensics specialists, or industry experts required for this specific type of fraud?"),
+    ("Competence", "Is the scope clearly defined (e.g., quantifying an insurance loss, tracing stolen assets, or preparing for criminal prosecution), or is the client asking for a vague \"fishing expedition\"?"),
+    ("Competence", "Does the client understand that building legally sound evidence takes time, and are they willing to pay an upfront retainer to mitigate our non-payment risk?"),
 ]
 
 

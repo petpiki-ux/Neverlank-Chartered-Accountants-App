@@ -276,6 +276,52 @@
 
   {% if client_acceptance %}{{ checklist_other(client_acceptance.checklist_items, known_prefixes, acceptance_checklist_responses) }}{% endif %}
 
+  {% if engagement.type == 'Investigative Engagement' %}
+  <div class="card">
+    <h3 class="mt-0">Forensic Audit Risk Evaluation Matrix</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Score each category from 1 (Low Risk) to 5 (High Risk) against the criteria below, then save - the total
+      (5-25) determines the acceptance path. Purely advisory, like the checklist assessment above: it never
+      sets the Decision for you.
+    </p>
+    <table style="font-size:12px;margin-bottom:14px;">
+      <thead><tr><th>Risk Category</th><th>🟢 Low (1-2)</th><th>🟡 Medium (3)</th><th>🔴 High (4-5)</th></tr></thead>
+      <tbody>
+        {% for field, label, low, medium, high in risk_categories %}
+        <tr><td><strong>{{ loop.index }}. {{ label }}</strong></td><td>{{ low }}</td><td>{{ medium }}</td><td>{{ high }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if client_acceptance %}
+    <div class="flash {{ client_acceptance.risk_assessment.level }}" style="margin-bottom:12px;">
+      <strong>{% if client_acceptance.risk_assessment.tier %}{{ client_acceptance.risk_assessment.tier }}:{% endif %}</strong>
+      {{ client_acceptance.risk_assessment.label }}
+      {% if client_acceptance.risk_assessment.decision %}
+      <br><strong>Decision guidance:</strong> {{ client_acceptance.risk_assessment.decision }}
+      <br><strong>Action:</strong> {{ client_acceptance.risk_assessment.action }}
+      {% endif %}
+    </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('acceptance.save_acceptance_risk_matrix', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        {% set scores = dict(client_acceptance.risk_scores) if client_acceptance else {} %}
+        {% for field, label, low, medium, high in risk_categories %}
+        <div>
+          <label for="{{ field }}">{{ loop.index }}. {{ label }}</label>
+          <select id="{{ field }}" name="{{ field }}">
+            <option value="" {% if not scores.get(field) %}selected{% endif %}>—</option>
+            {% for n in [1, 2, 3, 4, 5] %}<option value="{{ n }}" {% if scores.get(field)==n %}selected{% endif %}>{{ n }}</option>{% endfor %}
+          </select>
+        </div>
+        {% endfor %}
+      </div>
+      <label for="risk_scoring_notes">Risk scoring notes</label>
+      <textarea id="risk_scoring_notes" name="risk_scoring_notes" rows="2">{{ client_acceptance.risk_scoring_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary" style="margin-top:8px;">Save risk evaluation matrix</button>
+    </form>
+  </div>
+  {% endif %}
+
   <form method="post" action="{{ url_for('acceptance.save_acceptance_decision', engagement_id=engagement.id) }}">
     <div class="card">
       <h3 class="mt-0">Decision</h3>
