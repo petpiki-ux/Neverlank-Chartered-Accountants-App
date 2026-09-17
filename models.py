@@ -1759,8 +1759,17 @@ CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES = ["Yes", "No", "N/A"]
 # same six areas above at a finer grain, editable/deletable/extendable like
 # any other item.
 DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS = [
-    ("Background & integrity", "Management/owners have no known history of fraud, serious litigation, or regulatory sanctions."),
-    ("Background & integrity", "The client's public reputation and financial stability are acceptable for the firm to be associated with."),
+    ("Background check - Management integrity", "Has the individual faced any regulatory or disciplinary actions?"),
+    ("Background check - Management integrity", "Are there past records of professional misconduct or fraud?"),
+    ("Background check - Management integrity", "Have previous employers confirmed a transparent, ethical track record?"),
+    ("Background check - Management integrity", "Do leadership reference interviews highlight consistent honesty and accountability?"),
+    ("Background check - Reputation & public standing", "Are there negative media reports, litigations, or public controversies?"),
+    ("Background check - Reputation & public standing", "Does the subject maintain active, credible standing in professional associations?"),
+    ("Background check - Reputation & public standing", "What do peer reviews and direct-source industry feedback reveal about their business conduct?"),
+    ("Background check - Reputation & public standing", "Are there hidden associations with sanctioned entities or watchlists?"),
+    ("Background check - Financial stability", "Does the credit and adverse financial report show unmanaged debt or bankruptcies?"),
+    ("Background check - Financial stability", "Has the entity or individual experienced recent tax liens or major financial judgments?"),
+    ("Background check - Financial stability", "Is there a history of reliable financial management in prior executive roles?"),
     ("Independence", "No partner or staff member on the proposed team has a financial interest, family tie, or other relationship with the client that would impair independence."),
     ("Independence", "The firm does not provide any other service to this client that would create a self-review, advocacy, or management-participation threat."),
     ("Predecessor auditor", "The predecessor auditor (if any) was contacted, with the client's permission, and raised no matters affecting acceptance."),
