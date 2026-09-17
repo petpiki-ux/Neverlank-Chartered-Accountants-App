@@ -24,7 +24,7 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='entity') }}" class="{% if tab=='entity' %}active{% endif %}">Understanding the Entity{% if entity_understanding and entity_understanding.is_complete %} &#10003;{% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='analytical') }}" class="{% if tab=='analytical' %}active{% endif %}">Analytical Review{% if analytical_review and analytical_review.significant_lines %} ({{ analytical_review.significant_lines|length }} flagged){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}" class="{% if tab=='risks' %}active{% endif %}">Risk Assessment{% if risk_assessment and risk_assessment.rating %} ({{ risk_assessment.rating }}){% else %} (Not started){% endif %}</a>
-  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}" class="{% if tab=='planning' %}active{% endif %}">Planning</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}" class="{% if tab=='planning' %}active{% endif %}">{% if engagement.type == 'Investigative Engagement' %}Audit Strategy{% else %}Planning{% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
@@ -849,6 +849,149 @@
   </div>
   {% endif %}
 
+  {% if engagement.type == 'Investigative Engagement' %}
+  <div class="card">
+    <h3 class="mt-0">Assessment summary</h3>
+    <p class="muted" style="font-size:12.5px;">Pulled live from the assessments already done on this engagement, so the strategy below is built on top of them rather than retyping them.</p>
+
+    {% if client_acceptance %}
+    <p style="font-size:12.5px;margin-bottom:4px;"><strong>Client Acceptance:</strong> {{ client_acceptance.decision or 'Not yet decided' }}{% if client_acceptance.legal_evidence_satisfactory %} - legal framework &amp; evidence control confirmed satisfactory{% endif %}{% if client_acceptance.legal_evidence_notes %}<br><span class="muted">{{ client_acceptance.legal_evidence_notes }}</span>{% endif %}</p>
+    {% endif %}
+
+    {% if risk_assessment and risk_assessment.rating %}
+    <p style="font-size:12.5px;margin-bottom:4px;"><strong>Fraud risk rating:</strong> <span class="badge risk-{{ risk_assessment.rating }}">{{ risk_assessment.rating }}</span> ({{ risk_assessment.score }}/25) - see the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}">Risk Assessment</a> tab for the full Fraud Triangle questionnaire.</p>
+    <table>
+      <thead><tr><th>High-risk scheme</th><th>Significance (1-5)</th></tr></thead>
+      <tbody>
+      {% for field, question, options in impact_questions %}
+        <tr><td>{{ question.split(' - ')[0] }}</td><td>{{ risk_assessment[field] or '—' }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">Complete the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}">Risk Assessment</a> questionnaire to see the Fraud Triangle rating and scheme significance here.</div>
+    {% endif %}
+
+    {% if entity_understanding and entity_understanding.checklist_items %}
+    {% set scope_items = [] %}
+    {% for item in entity_understanding.checklist_items %}{% if item.section and item.section.startswith('Objectives & Scope of the Engagement') %}{{ scope_items.append(item) or "" }}{% endif %}{% endfor %}
+    {% if scope_items %}
+    <p style="font-size:12.5px;margin:10px 0 4px;"><strong>Objectives &amp; Scope (from Understanding the Business/Assignment):</strong></p>
+    <table>
+      <thead><tr><th>Question</th><th>Answer</th></tr></thead>
+      <tbody>
+      {% for item in scope_items %}
+        <tr><td style="max-width:320px;">{{ item.item_text }}</td><td>{{ item.response or '—' }}{% if item.comment %}<div class="muted" style="font-size:11.5px;">{{ item.comment }}</div>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% else %}
+    <div class="empty-state">Complete the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='entity') }}">Understanding the Business/Assignment</a> checklist to see the Objectives &amp; Scope answers here.</div>
+    {% endif %}
+  </div>
+
+  <form method="post" action="{{ url_for('engagements.save_audit_strategy', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">Audit strategy</h3>
+      <p class="muted" style="font-size:12.5px;">Replaces the standard audit Planning tools for an Investigative Engagement - a forensic engagement is driven by a fraud hypothesis and an evidence-gathering plan, not materiality or a suggested audit approach.</p>
+
+      <p class="section-title">1. Scope, Objectives &amp; Legal Framework</p>
+      <label for="objective_statement">Objective statement - clearly state what is being investigated</label>
+      <textarea id="objective_statement" name="objective_statement" rows="2" placeholder="e.g. To investigate alleged procurement fraud involving Vendor X and the Procurement Manager between 2024 and 2026.">{{ audit_strategy.objective_statement if audit_strategy else '' }}</textarea>
+      <label for="chain_of_custody_notes">Legal privilege &amp; chain of custody protocol</label>
+      <textarea id="chain_of_custody_notes" name="chain_of_custody_notes" rows="2" placeholder="Basis for attorney-client privilege (if any), and how physical/digital evidence will be preserved and its chain of custody maintained.">{{ audit_strategy.chain_of_custody_notes if audit_strategy else '' }}</textarea>
+      <label for="reporting_destination">Reporting destination - who is the ultimate audience</label>
+      <input type="text" id="reporting_destination" name="reporting_destination" placeholder="e.g. Audit Committee, then Board of Directors; potential referral to law enforcement" value="{{ audit_strategy.reporting_destination if audit_strategy else '' }}">
+
+      <p class="section-title">2. Preliminary Fraud Theory</p>
+      <label for="potential_perpetrators">Potential perpetrators - internal employees (access/opportunity) and external colluders</label>
+      <textarea id="potential_perpetrators" name="potential_perpetrators" rows="2">{{ audit_strategy.potential_perpetrators if audit_strategy else '' }}</textarea>
+      <label for="fraud_vulnerability">Fraud vulnerability - the control breakdown that allowed the suspected scheme</label>
+      <textarea id="fraud_vulnerability" name="fraud_vulnerability" rows="2">{{ audit_strategy.fraud_vulnerability if audit_strategy else '' }}</textarea>
+      <label for="evidentiary_red_flags">Evidentiary red flags expected (e.g. missing invoices, unusual weekend wire transfers, unapproved vendor creation)</label>
+      <textarea id="evidentiary_red_flags" name="evidentiary_red_flags" rows="2">{{ audit_strategy.evidentiary_red_flags if audit_strategy else '' }}</textarea>
+
+      <p class="section-title">3. Resource Allocation &amp; Specialised Skills</p>
+      <div class="form-row">
+        <div>
+          <label><input type="checkbox" name="resource_forensic_tech_available" style="width:auto;" {% if audit_strategy and audit_strategy.resource_forensic_tech_available %}checked{% endif %}> Forensic technology / digital forensics available</label>
+          <input type="text" name="resource_forensic_tech_notes" placeholder="Notes" value="{{ audit_strategy.resource_forensic_tech_notes if audit_strategy else '' }}">
+        </div>
+        <div>
+          <label><input type="checkbox" name="resource_data_analysts_available" style="width:auto;" {% if audit_strategy and audit_strategy.resource_data_analysts_available %}checked{% endif %}> Data analysts (SQL/Python) available</label>
+          <input type="text" name="resource_data_analysts_notes" placeholder="Notes" value="{{ audit_strategy.resource_data_analysts_notes if audit_strategy else '' }}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label><input type="checkbox" name="resource_interviewers_available" style="width:auto;" {% if audit_strategy and audit_strategy.resource_interviewers_available %}checked{% endif %}> Trained forensic interviewers / behavioural analysts available</label>
+          <input type="text" name="resource_interviewers_notes" placeholder="Notes" value="{{ audit_strategy.resource_interviewers_notes if audit_strategy else '' }}">
+        </div>
+        <div>
+          <label><input type="checkbox" name="resource_legal_counsel_available" style="width:auto;" {% if audit_strategy and audit_strategy.resource_legal_counsel_available %}checked{% endif %}> Legal counsel engaged (employment/privacy/jurisdiction advice)</label>
+          <input type="text" name="resource_legal_counsel_notes" placeholder="Notes" value="{{ audit_strategy.resource_legal_counsel_notes if audit_strategy else '' }}">
+        </div>
+      </div>
+
+      <p class="section-title">4. Evidence Gathering Strategy (periphery-to-centre sequencing)</p>
+      <div class="form-row">
+        <div>
+          <label for="phase1_status">Phase 1: Digital &amp; data evidence - secure emails, system logs, ERP transaction histories</label>
+          <select id="phase1_status" name="phase1_status">
+            {% for s in audit_strategy_phase_statuses %}<option value="{{ s }}" {% if audit_strategy and audit_strategy.phase1_status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+          <input type="text" name="phase1_notes" placeholder="Notes" value="{{ audit_strategy.phase1_notes if audit_strategy else '' }}">
+        </div>
+        <div>
+          <label for="phase2_status">Phase 2: Third-party &amp; public records - bank records, corporate registries, vendor-side records</label>
+          <select id="phase2_status" name="phase2_status">
+            {% for s in audit_strategy_phase_statuses %}<option value="{{ s }}" {% if audit_strategy and audit_strategy.phase2_status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+          <input type="text" name="phase2_notes" placeholder="Notes" value="{{ audit_strategy.phase2_notes if audit_strategy else '' }}">
+        </div>
+        <div>
+          <label for="phase3_status">Phase 3: Interviews - clean witnesses first, moving gradually to the target</label>
+          <select id="phase3_status" name="phase3_status">
+            {% for s in audit_strategy_phase_statuses %}<option value="{{ s }}" {% if audit_strategy and audit_strategy.phase3_status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+          <input type="text" name="phase3_notes" placeholder="Notes" value="{{ audit_strategy.phase3_notes if audit_strategy else '' }}">
+        </div>
+      </div>
+
+      <button type="submit" class="btn gold">{% if audit_strategy %}Save / update strategy{% else %}Save audit strategy{% endif %}</button>
+    </div>
+  </form>
+
+  {% if audit_strategy and audit_strategy.is_complete %}
+  <div class="card">
+    <h3 class="mt-0">Sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ audit_strategy.completed_by.name if audit_strategy.completed_by else '—' }} on {{ audit_strategy.completed_at.strftime('%d %b %Y') if audit_strategy.completed_at else '—' }}.
+      {% if audit_strategy.is_reviewed %}Reviewed by {{ audit_strategy.reviewed_by.name }} on {{ audit_strategy.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+      {% if audit_strategy.is_partner_signed %}Partner sign-off by {{ audit_strategy.partner_signed_by.name }} on {{ audit_strategy.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if audit_strategy.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_audit_strategy', strategy_id=audit_strategy.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif audit_strategy.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_audit_strategy', strategy_id=audit_strategy.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if audit_strategy.is_partner_signed %}
+      <form method="post" action="{{ url_for('engagements.partner_unsign_audit_strategy', strategy_id=audit_strategy.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif audit_strategy.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_audit_strategy', strategy_id=audit_strategy.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+  {% endif %}
 
   <div class="card">
     <h3 class="mt-0">Trial Balance</h3>

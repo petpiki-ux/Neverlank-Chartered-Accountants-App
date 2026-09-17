@@ -1757,6 +1757,103 @@ class SubstantiveProcedureItem(db.Model):
         return f"<SubstantiveProcedureItem area={self.area_id}>"
 
 
+# Evidence-gathering phase statuses for AuditStrategy below - reuses the
+# same vocabulary as CHECKLIST_STATUSES so the UI stays consistent, but
+# named separately since the two lists are conceptually different things
+# and CHECKLIST_STATUSES may not always evolve in lockstep with this one.
+AUDIT_STRATEGY_PHASE_STATUSES = CHECKLIST_STATUSES
+
+
+class AuditStrategy(db.Model):
+    """The forensic Audit Strategy for one Investigative Engagement - what
+    the "Planning" tab is replaced with for that engagement type (every
+    other type keeps the ordinary Materiality/Suggested-approach/Trial
+    Balance Planning tab untouched). One row per engagement.
+
+    Built around the four pillars of a forensic engagement plan: (1) Scope,
+    Objectives & Legal Framework, (2) a Preliminary Fraud Theory - the
+    working hypothesis of how the fraud was committed, by whom, and where
+    the evidence is - (3) Resource Allocation & Specialised Skills, and
+    (4) an Evidence Gathering Strategy sequenced periphery-to-centre
+    (digital/data evidence, then third-party/public records, then
+    interviews - saving direct confrontation of the target for last). The
+    "Assessment summary" shown alongside this on the tab isn't stored here
+    at all - it's read live off EntityUnderstanding's Objectives & Scope
+    checklist answers, ClientAcceptance's legal/evidence conclusion, and
+    RiskAssessment's Fraud Triangle rating, so this strategy is always
+    built on top of (never duplicating) what was already captured earlier
+    in the engagement.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    # 1. Scope, Objectives & Legal Framework
+    objective_statement = db.Column(db.Text)
+    chain_of_custody_notes = db.Column(db.Text)
+    reporting_destination = db.Column(db.Text)
+
+    # 2. Preliminary Fraud Theory
+    potential_perpetrators = db.Column(db.Text)
+    fraud_vulnerability = db.Column(db.Text)
+    evidentiary_red_flags = db.Column(db.Text)
+
+    # 3. Resource Allocation & Specialised Skills - one available/not toggle
+    # plus notes per specialist role.
+    resource_forensic_tech_available = db.Column(db.Boolean, default=False)
+    resource_forensic_tech_notes = db.Column(db.Text)
+    resource_data_analysts_available = db.Column(db.Boolean, default=False)
+    resource_data_analysts_notes = db.Column(db.Text)
+    resource_interviewers_available = db.Column(db.Boolean, default=False)
+    resource_interviewers_notes = db.Column(db.Text)
+    resource_legal_counsel_available = db.Column(db.Boolean, default=False)
+    resource_legal_counsel_notes = db.Column(db.Text)
+
+    # 4. Evidence Gathering Strategy - sequenced Phase 1 (digital & data) ->
+    # Phase 2 (third-party & public records) -> Phase 3 (interviews).
+    phase1_status = db.Column(db.String(20), default="Not Started")
+    phase1_notes = db.Column(db.Text)
+    phase2_status = db.Column(db.String(20), default="Not Started")
+    phase2_notes = db.Column(db.Text)
+    phase3_status = db.Column(db.String(20), default="Not Started")
+    phase3_notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("audit_strategy", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def is_complete(self):
+        """The strategy is considered documented once its six core
+        narrative fields are filled in - the two operational checklists
+        (resource availability, evidence-gathering phase status) are
+        expected to keep evolving as fieldwork proceeds even after
+        sign-off, so they aren't part of this gate."""
+        core_fields = [
+            self.objective_statement, self.chain_of_custody_notes, self.reporting_destination,
+            self.potential_perpetrators, self.fraud_vulnerability, self.evidentiary_red_flags,
+        ]
+        return all((v or "").strip() for v in core_fields)
+
+    def __repr__(self):
+        return f"<AuditStrategy engagement={self.engagement_id}>"
+
+
 class Permission(db.Model):
     """One (role, permission_key) toggle - see PERMISSIONS/user_has_permission
     above. Seeded with defaults on first install/upgrade (see seed.py); an

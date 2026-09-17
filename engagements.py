@@ -13,7 +13,7 @@ from extensions import db
 from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation,
-    RiskAssessment, MaterialityCalculation, EntityUnderstanding,
+    RiskAssessment, MaterialityCalculation, EntityUnderstanding, AuditStrategy, AUDIT_STRATEGY_PHASE_STATUSES,
     AnalyticalReview, AnalyticalReviewLine,
     ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     RISK_CATEGORIES,
@@ -268,6 +268,7 @@ def view_engagement(engagement_id):
     likelihood_questions = FORENSIC_RISK_LIKELIHOOD_QUESTIONS if is_forensic_risk else RISK_LIKELIHOOD_QUESTIONS
     impact_questions = FORENSIC_RISK_IMPACT_QUESTIONS if is_forensic_risk else RISK_IMPACT_QUESTIONS
     materiality = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
+    audit_strategy = AuditStrategy.query.filter_by(engagement_id=engagement_id).first() if is_forensic_risk else None
     entity_understanding = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
     analytical_review = AnalyticalReview.query.filter_by(engagement_id=engagement_id).first()
     scope_suggestion = SCOPE_SUGGESTIONS.get(risk_assessment.rating) if risk_assessment and risk_assessment.rating else None
@@ -324,6 +325,8 @@ def view_engagement(engagement_id):
         impact_questions=impact_questions,
         is_forensic_risk=is_forensic_risk,
         materiality=materiality,
+        audit_strategy=audit_strategy,
+        audit_strategy_phase_statuses=AUDIT_STRATEGY_PHASE_STATUSES,
         scope_suggestion=scope_suggestion,
         entity_understanding=entity_understanding,
         entity_fields=ENTITY_UNDERSTANDING_FIELDS,
@@ -1530,6 +1533,126 @@ def partner_unsign_materiality(calc_id):
     db.session.commit()
     flash("Partner sign-off removed.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
+
+
+# ---------- Audit Strategy (Investigative Engagements only - replaces the ordinary Planning tab content) ----------
+
+@engagements_bp.route("/<int:engagement_id>/audit-strategy/save", methods=["POST"])
+@login_required
+def save_audit_strategy(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    strategy = AuditStrategy.query.filter_by(engagement_id=engagement_id).first()
+    if not strategy:
+        strategy = AuditStrategy(engagement_id=engagement_id)
+        db.session.add(strategy)
+
+    strategy.objective_statement = request.form.get("objective_statement", "").strip()
+    strategy.chain_of_custody_notes = request.form.get("chain_of_custody_notes", "").strip()
+    strategy.reporting_destination = request.form.get("reporting_destination", "").strip()
+
+    strategy.potential_perpetrators = request.form.get("potential_perpetrators", "").strip()
+    strategy.fraud_vulnerability = request.form.get("fraud_vulnerability", "").strip()
+    strategy.evidentiary_red_flags = request.form.get("evidentiary_red_flags", "").strip()
+
+    strategy.resource_forensic_tech_available = request.form.get("resource_forensic_tech_available") == "on"
+    strategy.resource_forensic_tech_notes = request.form.get("resource_forensic_tech_notes", "").strip()
+    strategy.resource_data_analysts_available = request.form.get("resource_data_analysts_available") == "on"
+    strategy.resource_data_analysts_notes = request.form.get("resource_data_analysts_notes", "").strip()
+    strategy.resource_interviewers_available = request.form.get("resource_interviewers_available") == "on"
+    strategy.resource_interviewers_notes = request.form.get("resource_interviewers_notes", "").strip()
+    strategy.resource_legal_counsel_available = request.form.get("resource_legal_counsel_available") == "on"
+    strategy.resource_legal_counsel_notes = request.form.get("resource_legal_counsel_notes", "").strip()
+
+    phase1_status = request.form.get("phase1_status", "Not Started")
+    strategy.phase1_status = phase1_status if phase1_status in AUDIT_STRATEGY_PHASE_STATUSES else "Not Started"
+    strategy.phase1_notes = request.form.get("phase1_notes", "").strip()
+    phase2_status = request.form.get("phase2_status", "Not Started")
+    strategy.phase2_status = phase2_status if phase2_status in AUDIT_STRATEGY_PHASE_STATUSES else "Not Started"
+    strategy.phase2_notes = request.form.get("phase2_notes", "").strip()
+    phase3_status = request.form.get("phase3_status", "Not Started")
+    strategy.phase3_status = phase3_status if phase3_status in AUDIT_STRATEGY_PHASE_STATUSES else "Not Started"
+    strategy.phase3_notes = request.form.get("phase3_notes", "").strip()
+
+    strategy.completed_by_id = current_user.id
+    strategy.completed_at = datetime.utcnow()
+    # Re-saving the strategy invalidates any earlier review/partner sign-off.
+    strategy.reviewed_by_id = None
+    strategy.reviewed_at = None
+    strategy.partner_signed_by_id = None
+    strategy.partner_signed_at = None
+
+    db.session.commit()
+    flash("Audit strategy saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/audit-strategy/<int:strategy_id>/review", methods=["POST"])
+@login_required
+def review_audit_strategy(strategy_id):
+    strategy = AuditStrategy.query.get_or_404(strategy_id)
+    _ensure_engagement_access(strategy.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if not strategy.is_complete:
+        flash("Fill in the Scope, Fraud Theory and Legal Framework fields before this can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
+    if strategy.completed_by_id == current_user.id:
+        flash("You can't review an audit strategy you prepared yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
+    strategy.reviewed_by_id = current_user.id
+    strategy.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Audit strategy marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/audit-strategy/<int:strategy_id>/unreview", methods=["POST"])
+@login_required
+def unreview_audit_strategy(strategy_id):
+    strategy = AuditStrategy.query.get_or_404(strategy_id)
+    _ensure_engagement_access(strategy.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    strategy.reviewed_by_id = None
+    strategy.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/audit-strategy/<int:strategy_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_audit_strategy(strategy_id):
+    strategy = AuditStrategy.query.get_or_404(strategy_id)
+    _ensure_engagement_access(strategy.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if not strategy.is_complete:
+        flash("Fill in the Scope, Fraud Theory and Legal Framework fields before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
+    if strategy.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a strategy you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
+    strategy.partner_signed_by_id = current_user.id
+    strategy.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/audit-strategy/<int:strategy_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_audit_strategy(strategy_id):
+    strategy = AuditStrategy.query.get_or_404(strategy_id)
+    _ensure_engagement_access(strategy.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    strategy.partner_signed_by_id = None
+    strategy.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
 
 
 # ---------- Audit Finalisation: Trial Balance import + IAS 1 Financial Statements ----------
