@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Review Queries - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Review Queries</h1>
+    <div class="subtitle">Every review query raised by a Partner or Reviewer, across all engagements, in one place.</div>
+  </div>
+</div>
+
+<div class="card">
+  <form method="get" style="margin-bottom:0;" class="form-row">
+    <div>
+      <label for="status">Status</label>
+      <select name="status" id="status" onchange="this.form.submit()">
+        <option value="Open" {% if status_filter=='Open' %}selected{% endif %}>Open</option>
+        <option value="Resolved" {% if status_filter=='Resolved' %}selected{% endif %}>Resolved</option>
+        <option value="" {% if status_filter=='' %}selected{% endif %}>All</option>
+      </select>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  {% if queries %}
+  <table>
+    <thead><tr><th>Subject</th><th>Engagement</th><th>Section</th><th>Raised by</th><th>Date</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for q in queries %}
+      <tr>
+        <td>{{ q.subject }}<div class="muted" style="font-size:11.5px;">{{ q.message }}</div></td>
+        <td><a href="{{ url_for('engagements.view_engagement', engagement_id=q.engagement_id, tab=q.section) }}">{{ q.engagement.client.name }} - {{ q.engagement.title }}</a></td>
+        <td>{{ q.section_label }}{% if q.area_name %} &middot; {{ q.area_name }}{% endif %}</td>
+        <td>{{ q.raised_by.name if q.raised_by else '—' }}</td>
+        <td>{{ q.raised_at.strftime('%d %b %Y') if q.raised_at else '—' }}</td>
+        <td><span class="badge {% if q.is_resolved %}status-Completed{% else %}status-Review{% endif %}">{{ q.status }}</span></td>
+        <td>
+          {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+            {% if q.is_resolved %}
+            <form method="post" action="{{ url_for('engagements.reopen_query', query_id=q.id) }}" class="inline"><button type="submit" class="btn small secondary">Reopen</button></form>
+            {% else %}
+            <form method="post" action="{{ url_for('engagements.resolve_query', query_id=q.id) }}" class="inline"><button type="submit" class="btn small gold">Resolve</button></form>
+            {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No queries match this filter.</div>
+  {% endif %}
+</div>
+{% endblock %}

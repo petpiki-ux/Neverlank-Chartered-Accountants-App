@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Messages - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Messages</h1>
+    <div class="subtitle">Internal messages sent to you by other members of the firm.</div>
+  </div>
+  <div>
+    <a href="{{ url_for('messages.sent') }}" class="btn secondary">Sent</a>
+    <a href="{{ url_for('messages.compose') }}" class="btn gold">New message</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if recipient_rows %}
+  <table>
+    <thead><tr><th>From</th><th>Subject</th><th>Date</th><th></th></tr></thead>
+    <tbody>
+      {% for row in recipient_rows %}
+      <tr {% if not row.is_read %}style="font-weight:600;"{% endif %}>
+        <td>{{ row.message.sender.name if row.message.sender else '—' }}</td>
+        <td>
+          <a href="{{ url_for('messages.view_message', message_id=row.message_id) }}">{{ row.message.subject }}</a>
+          {% if not row.is_read %}<span class="badge overdue">New</span>{% endif %}
+        </td>
+        <td>{{ row.message.created_at.strftime('%d %b %Y %H:%M') if row.message.created_at else '—' }}</td>
+        <td><a href="{{ url_for('messages.view_message', message_id=row.message_id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">Your inbox is empty.</div>
+  {% endif %}
+</div>
+{% endblock %}

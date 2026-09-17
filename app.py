@@ -90,6 +90,7 @@ def create_app():
     from users import users_bp
     from doc_templates import doc_templates_bp
     from hr import hr_bp
+    from messages import messages_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -97,6 +98,7 @@ def create_app():
     app.register_blueprint(users_bp)
     app.register_blueprint(doc_templates_bp)
     app.register_blueprint(hr_bp)
+    app.register_blueprint(messages_bp)
 
     @app.route("/")
     def index():
@@ -106,8 +108,17 @@ def create_app():
 
     @app.context_processor
     def inject_globals():
-        from models import user_has_permission
-        return {"firm_name": "Neverlank Chartered Accountants", "user_has_permission": user_has_permission}
+        from models import user_has_permission, MessageRecipient
+        unread = (
+            MessageRecipient.query.filter_by(user_id=current_user.id, read_at=None).count()
+            if current_user.is_authenticated
+            else 0
+        )
+        return {
+            "firm_name": "Neverlank Chartered Accountants",
+            "user_has_permission": user_has_permission,
+            "unread_message_count": unread,
+        }
 
     with app.app_context():
         db.create_all()

@@ -24,6 +24,26 @@ REVIEWER_ROLES = ("supervisor", "partner", "admin")
 # their own work.
 PARTNER_SIGNOFF_ROLES = ("partner", "admin")
 
+# The engagement workpaper sections a Partner/Reviewer can raise a review
+# Query against (see EngagementQuery below) - every substantive tab on the
+# engagement detail page from Planning onward. "Overview" (plain engagement
+# fields) and "Documents" (a file list, not itself a workpaper) are
+# deliberately excluded. For "substantive", a query is further scoped to one
+# audit area (EngagementQuery.area_name) since Substantive Procedures has one
+# sign-off per area rather than one for the whole tab.
+QUERY_SECTIONS = [
+    ("entity", "Understanding the Entity"),
+    ("risks", "Risk Assessment"),
+    ("planning", "Planning (Materiality)"),
+    ("analytical", "Analytical Review"),
+    ("checklist", "Checklist"),
+    ("substantive", "Substantive Procedures"),
+    ("tasks", "Tasks"),
+    ("finalisation", "Finalisation (Trial Balance / Financial Statements)"),
+]
+QUERY_SECTION_KEYS = {key for key, _ in QUERY_SECTIONS}
+QUERY_SECTION_LABELS = dict(QUERY_SECTIONS)
+
 # Configurable role permissions: a small set of firm-administration actions
 # (managing shared libraries, deleting whole clients/engagements/documents,
 # managing team members) that an admin can allow or deny per role from the
@@ -1431,3 +1451,115 @@ class Permission(db.Model):
 
     def __repr__(self):
         return f"<Permission {self.role}:{self.permission_key}={self.allowed}>"
+
+
+# ---------- Review Queries ----------
+
+class EngagementQuery(db.Model):
+    """A review query/point raised by a Partner or other Reviewer against
+    one workpaper section of an engagement (see QUERY_SECTIONS) - the audit
+    equivalent of a reviewer's review note, e.g. "please clarify the
+    variance in Revenue" or "confirm the bank confirmation has been
+    obtained". Distinct from the Preparer/Reviewer/Partner sign-off used
+    elsewhere in the app: raising or resolving a query never blocks or
+    clears a sign-off, it's a lightweight, visible way for a reviewer to
+    flag something and for the team to discuss and close it out.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    section = db.Column(db.String(20), nullable=False)  # one of QUERY_SECTION_KEYS
+    area_name = db.Column(db.String(80))  # only meaningful when section == "substantive"
+    subject = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="Open")  # "Open" | "Resolved"
+
+    raised_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    raised_at = db.Column(db.DateTime, default=datetime.utcnow)
+    resolved_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    resolved_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("queries", lazy=True, cascade="all, delete-orphan"))
+    raised_by = db.relationship("User", foreign_keys=[raised_by_id])
+    resolved_by = db.relationship("User", foreign_keys=[resolved_by_id])
+    replies = db.relationship(
+        "QueryReply", backref="parent_query", lazy=True,
+        # NOTE: backref must not be named "query" - that would shadow
+        # Flask-SQLAlchemy's own QueryReply.query class attribute (the
+        # Model.query convenience property used everywhere else in the
+        # app, e.g. QueryReply.query.filter_by(...)).
+        cascade="all, delete-orphan", order_by="QueryReply.created_at",
+    )
+
+    @property
+    def is_resolved(self):
+        return self.status == "Resolved"
+
+    @property
+    def section_label(self):
+        return QUERY_SECTION_LABELS.get(self.section, self.section)
+
+    def __repr__(self):
+        return f"<EngagementQuery {self.id} {self.section} engagement={self.engagement_id}>"
+
+
+class QueryReply(db.Model):
+    """One reply in a query's discussion thread - deliberately flat (no
+    nested replies-to-replies) to keep clearing a query simple: read the
+    thread top to bottom, then Resolve."""
+    id = db.Column(db.Integer, primary_key=True)
+    query_id = db.Column(db.Integer, db.ForeignKey("engagement_query.id"), nullable=False)
+    author_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    author = db.relationship("User")
+
+    def __repr__(self):
+        return f"<QueryReply {self.id} query={self.query_id}>"
+
+
+# ---------- Internal Messaging (intranet) ----------
+
+class Message(db.Model):
+    """One internal message from one sender to one or more recipients (see
+    MessageRecipient) - a simple firm intranet inbox, separate from the
+    per-engagement review Queries above. Not threaded server-side: a
+    "Reply" is just a new Message with the same subject prefixed "Re:" and
+    the original sender/recipients swapped, which keeps the data model
+    simple while still reading like a conversation in the UI.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    subject = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    sender = db.relationship("User")
+    recipients = db.relationship(
+        "MessageRecipient", backref="message", lazy=True,
+        cascade="all, delete-orphan", order_by="MessageRecipient.id",
+    )
+
+    def __repr__(self):
+        return f"<Message {self.id} {self.subject!r} from={self.sender_id}>"
+
+
+class MessageRecipient(db.Model):
+    """One recipient of a Message, and whether/when they've read it - a
+    message with several recipients (e.g. a "send to all staff" broadcast)
+    gets one row per recipient here, each tracked as read independently."""
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey("message.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    read_at = db.Column(db.DateTime)
+
+    user = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("message_id", "user_id", name="uq_message_recipient"),)
+
+    @property
+    def is_read(self):
+        return self.read_at is not None
+
+    def __repr__(self):
+        return f"<MessageRecipient message={self.message_id} user={self.user_id}>"

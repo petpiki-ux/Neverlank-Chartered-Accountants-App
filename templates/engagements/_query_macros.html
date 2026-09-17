@@ -1,0 +1,65 @@
+{# Shared "Queries" box for one section (or, for Substantive Procedures, one
+   audit area within that section) of an engagement. A query is a review
+   point raised by a Partner/Reviewer against that section - separate from
+   the Preparer/Reviewer/Partner sign-off used elsewhere in the app, and
+   doesn't gate it. Included from engagements/detail.html for every
+   workpaper tab from Planning onward. #}
+{% macro render_queries(engagement, section, section_queries, area_name=none) %}
+{% set open_count = section_queries|selectattr('status', 'equalto', 'Open')|list|length %}
+<div class="card" style="border-left:3px solid var(--gold, #c9a24b);">
+  <h4 class="mt-0" style="margin-bottom:8px;">
+    Queries{% if area_name %} - {{ area_name }}{% endif %}
+    {% if open_count %}<span class="badge overdue">{{ open_count }} open</span>{% endif %}
+  </h4>
+
+  {% if section_queries %}
+    {% for q in section_queries %}
+    <div style="padding:10px 0;border-bottom:1px solid #eee;">
+      <div>
+        <strong>{{ q.subject }}</strong>
+        <span class="badge {% if q.is_resolved %}status-Completed{% else %}status-Review{% endif %}">{{ q.status }}</span>
+      </div>
+      <p style="margin:4px 0;">{{ q.message }}</p>
+      <p class="muted" style="font-size:11.5px;">
+        Raised by {{ q.raised_by.name if q.raised_by else '—' }} on {{ q.raised_at.strftime('%d %b %Y %H:%M') if q.raised_at else '—' }}
+        {% if q.is_resolved %} &middot; Resolved by {{ q.resolved_by.name if q.resolved_by else '—' }} on {{ q.resolved_at.strftime('%d %b %Y') if q.resolved_at else '—' }}{% endif %}
+      </p>
+
+      {% if q.replies %}
+      <div style="margin:6px 0 6px 14px;border-left:2px solid #eee;padding-left:10px;">
+        {% for r in q.replies %}
+        <p style="font-size:12.5px;margin:4px 0;"><strong>{{ r.author.name if r.author else '—' }}:</strong> {{ r.message }} <span class="muted" style="font-size:11px;">({{ r.created_at.strftime('%d %b %Y %H:%M') if r.created_at else '—' }})</span></p>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      <form method="post" action="{{ url_for('engagements.reply_to_query', query_id=q.id) }}" class="inline" style="margin-top:6px;">
+        <input type="text" name="message" placeholder="Reply..." style="width:260px;display:inline-block;margin-bottom:0;" required>
+        <button type="submit" class="btn small secondary">Reply</button>
+      </form>
+      {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+        {% if q.is_resolved %}
+        <form method="post" action="{{ url_for('engagements.reopen_query', query_id=q.id) }}" class="inline"><button type="submit" class="btn small secondary">Reopen</button></form>
+        {% else %}
+        <form method="post" action="{{ url_for('engagements.resolve_query', query_id=q.id) }}" class="inline"><button type="submit" class="btn small gold">Mark resolved</button></form>
+        {% endif %}
+      {% endif %}
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="empty-state">No queries raised on this section.</div>
+  {% endif %}
+
+  {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+  <form method="post" action="{{ url_for('engagements.raise_query', engagement_id=engagement.id) }}" style="margin-top:10px;">
+    <input type="hidden" name="section" value="{{ section }}">
+    {% if area_name %}<input type="hidden" name="area_name" value="{{ area_name }}">{% endif %}
+    <div class="form-row">
+      <div><label>Subject</label><input type="text" name="subject" placeholder="e.g. Missing bank confirmation" required></div>
+      <div style="grid-column: span 2;"><label>Query</label><input type="text" name="message" placeholder="Describe the query" required></div>
+    </div>
+    <button type="submit" class="btn small gold" style="margin-top:6px;">Raise query</button>
+  </form>
+  {% endif %}
+</div>
+{% endmacro %}

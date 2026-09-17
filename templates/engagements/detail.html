@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% import "engagements/_query_macros.html" as qmacros with context %}
 {% block title %}{{ engagement.title }} - {{ firm_name }}{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -9,6 +10,7 @@
       &middot; <span class="badge type-{{ engagement.type }}">{{ engagement.type }}</span>{% if engagement.subdivision %} <span class="badge">{{ engagement.subdivision }}</span>{% endif %}
       &middot; <span class="badge status-{{ engagement.status|replace(' ', '') }}">{{ engagement.status }}</span>
       {% if engagement.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}
+      {% if open_query_count %}<span class="badge overdue">{{ open_query_count }} open quer{{ 'y' if open_query_count == 1 else 'ies' }}</span>{% endif %}
     </div>
   </div>
   <div>
@@ -137,6 +139,8 @@
   <div class="card"><div class="empty-state">Fill in all sections above before this can be signed off.</div></div>
   {% endif %}
 
+  {{ qmacros.render_queries(engagement, 'entity', queries_by_section.get('entity', [])) }}
+
 {% elif tab == 'analytical' %}
   <div class="card">
     <h3 class="mt-0">Significance threshold</h3>
@@ -214,6 +218,8 @@
     {% endif %}
   </div>
   {% endif %}
+
+  {{ qmacros.render_queries(engagement, 'analytical', queries_by_section.get('analytical', [])) }}
 
 {% elif tab == 'risks' %}
   {% if risk_assessment and risk_assessment.rating %}
@@ -310,6 +316,8 @@
   </div>
   {% endif %}
 
+  {{ qmacros.render_queries(engagement, 'risks', queries_by_section.get('risks', [])) }}
+
 {% elif tab == 'planning' %}
   <div class="card">
     <h3 class="mt-0">Materiality calculator</h3>
@@ -395,6 +403,8 @@
     {% endif %}
   </div>
 
+  {{ qmacros.render_queries(engagement, 'planning', queries_by_section.get('planning', [])) }}
+
 {% elif tab == 'checklist' %}
   <div class="card">
     <h3 class="mt-0">Add checklist item</h3>
@@ -451,6 +461,8 @@
       <div class="empty-state">No checklist items yet. Add one above, or start the engagement from a template next time.</div>
     {% endif %}
   </div>
+
+  {{ qmacros.render_queries(engagement, 'checklist', queries_by_section.get('checklist', [])) }}
 
 {% elif tab == 'documents' %}
   <div class="card">
@@ -611,6 +623,8 @@
     <div class="empty-state">No tasks assigned yet.</div>
     {% endif %}
   </div>
+
+  {{ qmacros.render_queries(engagement, 'tasks', queries_by_section.get('tasks', [])) }}
 
 {% elif tab == 'finalisation' %}
   <div class="card">
@@ -972,6 +986,8 @@
   <div class="card"><div class="empty-state">Import or add trial balance accounts above, then map each to an IAS 1 category, to generate the financial statements here.</div></div>
   {% endif %}
 
+  {{ qmacros.render_queries(engagement, 'finalisation', queries_by_section.get('finalisation', [])) }}
+
 {% elif tab == 'substantive' %}
   <div class="card">
     <h3 class="mt-0">Substantive procedures</h3>
@@ -1088,6 +1104,8 @@
     {% endif %}
     {% endif %}
   </div>
+
+  {{ qmacros.render_queries(engagement, 'substantive', queries_by_area.get(area_name, []), area_name=area_name) }}
   {% endfor %}
 {% endif %}
 {% endblock %}

@@ -17,11 +17,13 @@ from models import (
     AnalyticalReview, AnalyticalReviewLine,
     COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
+    EngagementQuery, QueryReply,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
     ENTITY_UNDERSTANDING_FIELDS,
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
+    QUERY_SECTIONS, QUERY_SECTION_KEYS,
     user_has_permission,
 )
 import financials as fin
@@ -228,6 +230,24 @@ def view_engagement(engagement_id):
         a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).all()
     }
 
+    # Review Queries, grouped for the template: by section for every plain
+    # section, and separately by audit area for "substantive" (which has one
+    # query list per area rather than one for the whole tab). Newest first
+    # within each group.
+    all_queries = (
+        EngagementQuery.query.filter_by(engagement_id=engagement_id)
+        .order_by(EngagementQuery.raised_at.desc())
+        .all()
+    )
+    queries_by_section = {}
+    queries_by_area = {}
+    for q in all_queries:
+        if q.section == "substantive" and q.area_name:
+            queries_by_area.setdefault(q.area_name, []).append(q)
+        else:
+            queries_by_section.setdefault(q.section, []).append(q)
+    open_query_count = sum(1 for q in all_queries if q.status == "Open")
+
     return render_template(
         "engagements/detail.html",
         engagement=engagement,
@@ -252,6 +272,9 @@ def view_engagement(engagement_id):
         category_label=fin.category_label,
         audit_areas=AUDIT_AREAS,
         substantive_areas=substantive_areas_by_name,
+        queries_by_section=queries_by_section,
+        queries_by_area=queries_by_area,
+        open_query_count=open_query_count,
     )
 
 
@@ -1958,3 +1981,106 @@ def partner_unsign_substantive_area(area_id):
     db.session.commit()
     flash("Partner sign-off removed.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
+
+
+# ---------- Review Queries (Partner/Reviewer review points on any section) ----------
+
+def _query_redirect(query):
+    """A query always sends you back to the section it was raised on - the
+    Substantive Procedures tab for an area-scoped query, otherwise the tab
+    named by the query's own section key (they're the same names)."""
+    return redirect(url_for("engagements.view_engagement", engagement_id=query.engagement_id, tab=query.section))
+
+
+@engagements_bp.route("/<int:engagement_id>/queries/raise", methods=["POST"])
+@login_required
+def raise_query(engagement_id):
+    Engagement.query.get_or_404(engagement_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+
+    section = request.form.get("section", "")
+    if section not in QUERY_SECTION_KEYS:
+        abort(400)
+
+    subject = request.form.get("subject", "").strip()
+    message = request.form.get("message", "").strip()
+    if not subject or not message:
+        flash("Please give the query a subject and a message.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=section))
+
+    # area_name only makes sense (and is only trusted) for "substantive" -
+    # for every other section it's dropped even if somehow submitted.
+    area_name = request.form.get("area_name", "").strip() or None
+    if section != "substantive":
+        area_name = None
+    elif area_name and area_name not in AUDIT_AREAS:
+        abort(400)
+
+    query = EngagementQuery(
+        engagement_id=engagement_id, section=section, area_name=area_name,
+        subject=subject, message=message, raised_by_id=current_user.id,
+    )
+    db.session.add(query)
+    db.session.commit()
+    flash("Query raised.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=section))
+
+
+@engagements_bp.route("/queries/<int:query_id>/reply", methods=["POST"])
+@login_required
+def reply_to_query(query_id):
+    query = EngagementQuery.query.get_or_404(query_id)
+    message = request.form.get("message", "").strip()
+    if not message:
+        flash("Please enter a reply.", "danger")
+        return _query_redirect(query)
+    db.session.add(QueryReply(query_id=query.id, author_id=current_user.id, message=message))
+    db.session.commit()
+    flash("Reply added.", "success")
+    return _query_redirect(query)
+
+
+@engagements_bp.route("/queries/<int:query_id>/resolve", methods=["POST"])
+@login_required
+def resolve_query(query_id):
+    query = EngagementQuery.query.get_or_404(query_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    query.status = "Resolved"
+    query.resolved_by_id = current_user.id
+    query.resolved_at = datetime.utcnow()
+    db.session.commit()
+    flash("Query marked as resolved.", "success")
+    return _query_redirect(query)
+
+
+@engagements_bp.route("/queries/<int:query_id>/reopen", methods=["POST"])
+@login_required
+def reopen_query(query_id):
+    query = EngagementQuery.query.get_or_404(query_id)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    query.status = "Open"
+    query.resolved_by_id = None
+    query.resolved_at = None
+    db.session.commit()
+    flash("Query reopened.", "info")
+    return _query_redirect(query)
+
+
+@engagements_bp.route("/queries")
+@login_required
+def queries_board():
+    """Firm-wide list of review queries across every engagement, so a
+    Partner/Reviewer can track what they've raised (and staff can see
+    what's outstanding against their work) without opening each engagement
+    in turn."""
+    status_filter = request.args.get("status", "Open")
+    query = EngagementQuery.query
+    if status_filter in ("Open", "Resolved"):
+        query = query.filter_by(status=status_filter)
+    all_queries = query.order_by(EngagementQuery.raised_at.desc()).all()
+    return render_template(
+        "engagements/queries_board.html", queries=all_queries, status_filter=status_filter,
+    )

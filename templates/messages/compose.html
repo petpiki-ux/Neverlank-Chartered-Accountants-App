@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}New Message - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>New Message</h1>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <form method="post" id="compose-form">
+    <label for="subject">Subject *</label>
+    <input type="text" id="subject" name="subject" value="{{ prefill_subject }}" required>
+
+    <label for="body">Message *</label>
+    <textarea id="body" name="body" rows="6" required>{{ prefill_body }}</textarea>
+
+    <label style="margin-top:14px;">
+      <input type="checkbox" name="broadcast_all" id="broadcast_all" style="width:auto;" {% if prefill_broadcast %}checked{% endif %}
+        onchange="document.getElementById('recipients_wrap').style.display = this.checked ? 'none' : 'block';">
+      Send to all active staff
+    </label>
+
+    <div id="recipients_wrap" style="display:{% if prefill_broadcast %}none{% else %}block{% endif %};margin-top:10px;">
+      <label>Recipients *</label>
+      <div style="max-height:260px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:10px;">
+        {% for person in people %}
+        <label style="display:block;font-weight:400;margin-bottom:6px;">
+          <input type="checkbox" name="recipient_ids" value="{{ person.id }}" style="width:auto;"
+            {% if person.id|string in prefill_to %}checked{% endif %}>
+          {{ person.name }} <span class="muted" style="font-size:11.5px;">({{ person.role|capitalize }})</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <button type="submit" class="btn gold" style="margin-top:14px;">Send message</button>
+    <a href="{{ url_for('messages.inbox') }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}

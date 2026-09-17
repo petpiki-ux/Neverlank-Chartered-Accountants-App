@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Sent Messages - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Sent Messages</h1>
+    <div class="subtitle">Messages you have sent to other members of the firm.</div>
+  </div>
+  <div>
+    <a href="{{ url_for('messages.inbox') }}" class="btn secondary">Inbox</a>
+    <a href="{{ url_for('messages.compose') }}" class="btn gold">New message</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if sent_messages %}
+  <table>
+    <thead><tr><th>Subject</th><th>Recipients</th><th>Date</th><th></th></tr></thead>
+    <tbody>
+      {% for message in sent_messages %}
+      <tr>
+        <td><a href="{{ url_for('messages.view_message', message_id=message.id) }}">{{ message.subject }}</a></td>
+        <td>
+          {% if message.recipients|length > 3 %}
+            {{ message.recipients|length }} recipients
+          {% else %}
+            {{ message.recipients|map(attribute='user.name')|join(', ') }}
+          {% endif %}
+        </td>
+        <td>{{ message.created_at.strftime('%d %b %Y %H:%M') if message.created_at else '—' }}</td>
+        <td><a href="{{ url_for('messages.view_message', message_id=message.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">You haven't sent any messages yet.</div>
+  {% endif %}
+</div>
+{% endblock %}

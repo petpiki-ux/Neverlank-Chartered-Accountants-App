@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ message.subject }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ message.subject }}</h1>
+    <div class="subtitle">
+      From {{ message.sender.name if message.sender else '—' }}
+      &middot; {{ message.created_at.strftime('%d %b %Y %H:%M') if message.created_at else '—' }}
+    </div>
+  </div>
+  <a href="{{ url_for('messages.inbox') }}" class="btn secondary">Back to Messages</a>
+</div>
+
+<div class="card" style="max-width:720px;">
+  <div style="white-space:pre-wrap;line-height:1.5;">{{ message.body }}</div>
+</div>
+
+<div class="card" style="max-width:720px;">
+  <strong>Recipients</strong>
+  <div class="muted" style="font-size:12.5px;margin-top:6px;">
+    {% for r in message.recipients %}
+      {{ r.user.name if r.user else '—' }}{% if not loop.last %}, {% endif %}
+    {% else %}
+      —
+    {% endfor %}
+  </div>
+</div>
+
+{% if message.sender_id == current_user.id %}
+<div class="card" style="max-width:720px;">
+  <strong>Read status</strong>
+  <table style="margin-top:8px;">
+    <thead><tr><th>Recipient</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for r in message.recipients %}
+      <tr>
+        <td>{{ r.user.name if r.user else '—' }}</td>
+        <td>
+          {% if r.is_read %}
+          <span class="badge status-Completed">Read {{ r.read_at.strftime('%d %b %Y %H:%M') }}</span>
+          {% else %}
+          <span class="badge status-Review">Unread</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
