@@ -1936,19 +1936,38 @@ DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS = [
 # four Forensic Audit Client Acceptance Questionnaire sections that REPLACE
 # the five generic narrative sections for this engagement type (see
 # ClientAcceptance.conflict_threat_clear etc. and items_complete above).
+# Grounded in the Zimbabwean legal/regulatory environment the firm
+# operates in - the Money Laundering and Proceeds of Crime Act [Chapter
+# 9:24], the Companies and Other Business Entities Act [Chapter 24:31],
+# the Cyber and Data Protection Act [Chapter 11:12], the Exchange Control
+# Act [Chapter 22:05], FIU Zimbabwe, RBZ, ZIMRA, ZACC, PAAB/ICAZ, and the
+# multicurrency (ZWG/USD) operating environment - rather than generic or
+# foreign-law references.
 FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS = [
-    ("Conflict of Interest & Threat Assessment", "Have we screened all suspects, target entities, key witnesses, and related parties against our firm's active and past client database?"),
-    ("Conflict of Interest & Threat Assessment", "Have we previously provided any services (like bookkeeping or standard audits) to this client or target that could create a self-review or advocacy threat in court?"),
-    ("Conflict of Interest & Threat Assessment", "Does this investigation involve high-risk individuals, corporate retaliation, or hostile environments that require specialised physical or cybersecurity measures for our staff?"),
-    ("Enhanced Due Diligence (EDD)", "Have we fully verified the identity of the engaging entity and its directors through standard KYC and AML protocols?"),
-    ("Enhanced Due Diligence (EDD)", "Have we identified the Ultimate Beneficial Owners (UBOs) of both the client and the target to rule out hidden conflicts?"),
-    ("Enhanced Due Diligence (EDD)", "Do background checks in court registries, regulatory databases, and media reports reveal a history of bad faith, fraud, or vexatious litigation by any key player?"),
-    ("Legal Framework & Evidence Control", "Does the client have the absolute legal authority to grant us access to the target's emails, personal devices, and financial records without breaching privacy laws (e.g., GDPR)?"),
-    ("Legal Framework & Evidence Control", "Has the client or a third party already altered, deleted, or mismanaged the data, potentially damaging its admissibility in court?"),
-    ("Legal Framework & Evidence Control", "Should we be retained directly by the client, or hired through their external legal counsel to shield our work under attorney-client privilege?"),
-    ("Competence & Scope Realism", "Do we have available Certified Fraud Examiners (CFEs), digital forensics specialists, or industry experts required for this specific type of fraud?"),
-    ("Competence & Scope Realism", "Is the scope clearly defined (e.g., quantifying an insurance loss, tracing stolen assets, or preparing for criminal prosecution), or is the client asking for a vague \"fishing expedition\"?"),
-    ("Competence & Scope Realism", "Does the client understand that building legally sound evidence takes time, and are they willing to pay an upfront retainer to mitigate our non-payment risk?"),
+    ("Conflict of Interest & Threat Assessment", "Have we screened all suspects, target entities, key witnesses, and related parties against our firm's active and past client database, including engagements handled by associated offices?"),
+    ("Conflict of Interest & Threat Assessment", "Have we previously provided audit, accounting, tax, or advisory services to this client or target that could create a self-review or advocacy threat, having regard to the ICAZ Code of Professional Conduct and PAAB independence requirements?"),
+    ("Conflict of Interest & Threat Assessment", "Is any partner, manager, or staff member on the proposed team a former employee, director, or close family member of the client, the target, or a related party, within the cooling-off period required by PAAB/ICAZ?"),
+    ("Conflict of Interest & Threat Assessment", "Does the investigation touch on a politically exposed person (PEP), a state enterprise, or an individual/entity connected to ZACC or other politically sensitive networks, requiring heightened partner-level oversight?"),
+    ("Conflict of Interest & Threat Assessment", "Does this investigation involve organised crime, cross-border smuggling (e.g. gold, chrome, tobacco), corporate retaliation, or a hostile environment in a high-risk part of the country, requiring specialised physical security for our staff?"),
+    ("Conflict of Interest & Threat Assessment", "Have we assessed cyber-security threats common in Zimbabwe (SIM-swap fraud, mobile money hijacking, compromised email accounts) that could expose our staff, systems, or evidence to interference?"),
+    ("Enhanced Due Diligence (EDD)", "Have we verified the identity of the engaging entity and its directors through the Companies and Other Business Entities Act [Chapter 24:31] register (Deeds and Companies Office), applying standard KYC/AML protocols under the Money Laundering and Proceeds of Crime Act [Chapter 9:24] and FIU Zimbabwe guidance?"),
+    ("Enhanced Due Diligence (EDD)", "Have we identified the Ultimate Beneficial Owners (UBOs) of both the client and the target, cross-checked against the COBE Act's beneficial ownership register requirements, to rule out hidden conflicts or nominee arrangements?"),
+    ("Enhanced Due Diligence (EDD)", "Have we screened all key individuals against the UN, OFAC and EU sanctions lists, and against any adverse notices issued by the Reserve Bank of Zimbabwe (RBZ) or the Financial Intelligence Unit (FIU)?"),
+    ("Enhanced Due Diligence (EDD)", "Does the source of funds or the transactions under review involve externalisation of foreign currency or RTGS/ZWG-to-USD conversions that may raise issues under the Exchange Control Act [Chapter 22:05] or RBZ exchange control directives?"),
+    ("Enhanced Due Diligence (EDD)", "Do background checks with the High Court of Zimbabwe civil register, the Master of the High Court, ZIMRA (tax clearance status), and media reports reveal a history of bad faith, fraud, tax evasion, or vexatious litigation by any key player?"),
+    ("Enhanced Due Diligence (EDD)", "Has the client itself been the subject of an investigation, freezing order, or adverse finding by ZACC, the ZRP Fraud Section, or a sector regulator (RBZ, IPEC, SECZim, POTRAZ, ZERA) with a bearing on this engagement?"),
+    ("Legal Framework & Evidence Control", "Does the client have the legal authority to grant us access to the target's emails, mobile devices, and financial records without breaching the Cyber and Data Protection Act [Chapter 11:12], the Interception of Communications Act [Chapter 11:20], or the target's constitutional right to privacy?"),
+    ("Legal Framework & Evidence Control", "Has the client or a third party already accessed, copied, altered, or deleted data before engaging us, in a way that could compromise the chain of custody or its admissibility under the Evidence Act [Chapter 8:01] and Zimbabwean court practice?"),
+    ("Legal Framework & Evidence Control", "Will evidence, device images, or personal data need to leave Zimbabwe for analysis, and if so, have we considered the cross-border data transfer restrictions under the Cyber and Data Protection Act and any Data Protection Authority notification requirements?"),
+    ("Legal Framework & Evidence Control", "Should we be retained directly by the client, or engaged through a legal practitioner registered with the Law Society of Zimbabwe, so our work product is shielded, where possible, by legal professional privilege?"),
+    ("Legal Framework & Evidence Control", "If the matter may proceed to the ZRP, the National Prosecuting Authority, ZACC, or the High Court, have we agreed evidence-handling and reporting protocols with the client and their lawyers that will meet those bodies' standards?"),
+    ("Legal Framework & Evidence Control", "Are there Labour Act [Chapter 28:01] considerations around interviewing or suspending implicated employees that need to be cleared with the client's legal counsel before we proceed?"),
+    ("Competence & Scope Realism", "Do we have Certified Fraud Examiners (CFEs), digital forensics specialists, and staff registered with ICAZ/PAAB with genuine experience in this type of fraud and in the relevant Zimbabwean industry?"),
+    ("Competence & Scope Realism", "Is the engagement team familiar with the reporting expectations of the specific Zimbabwean regulator involved (RBZ, IPEC, SECZim, POTRAZ, ZERA, or the Minerals Marketing Corporation of Zimbabwe), where relevant?"),
+    ("Competence & Scope Realism", "Is the scope clearly defined (e.g. quantifying a specific loss, tracing assets domestically or externalised abroad, or preparing a report for possible criminal referral), or is the client asking for an open-ended \"fishing expedition\" our resourcing cannot support?"),
+    ("Competence & Scope Realism", "Given Zimbabwe's multicurrency environment (ZWG, USD, and residual RTGS balances) and exchange rate volatility, can we realistically trace and value the transactions, and have we agreed which currency our findings and fee will be expressed in?"),
+    ("Competence & Scope Realism", "Does the client understand that building court-ready evidence in Zimbabwe takes time (bank statements, court orders, ZIMRA records), and are they willing to pay an upfront retainer - ideally in hard currency - to mitigate non-payment and currency risk?"),
+    ("Competence & Scope Realism", "Will the investigation require statements or affidavits from Shona- or Ndebele-speaking witnesses, and have we budgeted for qualified translation/interpretation so the evidence stays accurate and admissible?"),
 ]
 
 
