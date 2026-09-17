@@ -120,26 +120,91 @@
   {% endif %}
 
 {% elif tab == 'acceptance' %}
+  {% macro checklist_row(item, responses) %}
+    <form method="post" action="{{ url_for('acceptance.update_acceptance_checklist_item', item_id=item.id) }}" class="checklist-row">
+      <span class="item-text">{{ item.item_text }}</span>
+      <select name="response">
+        <option value="" {% if not item.response %}selected{% endif %}>—</option>
+        {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+      </select>
+      <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Save</button>
+      <button type="submit" formaction="{{ url_for('acceptance.delete_acceptance_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+    </form>
+  {% endmacro %}
+
+  {% macro checklist_section(items, prefix, engagement, responses) %}
+    {% set matched = [] %}
+    {% for item in items %}{% if item.section and item.section.startswith(prefix) %}{{ matched.append(item) or "" }}{% endif %}{% endfor %}
+    <div class="card">
+      <h3 class="mt-0" style="font-size:14px;">Detailed checklist</h3>
+      <p class="muted" style="font-size:11.5px;">Tick Yes / No / N/A on each question and add a comment - these feed the system assessment next to the Decision below.</p>
+      {% if matched %}
+        {% set ns = namespace(sub='') %}
+        {% for item in matched %}
+          {% set sub = item.section.split(' - ', 1)[1] if ' - ' in item.section else '' %}
+          {% if sub and sub != ns.sub %}
+            <div class="muted" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin:10px 0 2px;">{{ sub }}</div>
+            {% set ns.sub = sub %}
+          {% endif %}
+          {{ checklist_row(item, responses) }}
+        {% endfor %}
+      {% else %}
+      <div class="empty-state" style="padding:16px 0;">No checklist questions for this section yet - add one below, or load the firm's default checklist at the top of this tab.</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('acceptance.add_acceptance_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+        <input type="hidden" name="section" value="{{ prefix }}">
+        <div style="flex:2;"><input type="text" name="item_text" placeholder="Add a checklist question for this section" required></div>
+        <div><button type="submit" class="btn small secondary" style="margin-bottom:0;">Add item</button></div>
+      </form>
+    </div>
+  {% endmacro %}
+
+  {% set known_prefixes = ['Background check', 'Independence', 'Predecessor', 'Competence', 'Regulatory', 'Engagement letter'] %}
+  {% macro checklist_other(items, prefixes, responses) %}
+    {% set leftover = [] %}
+    {% for item in items %}
+      {% set ns2 = namespace(known=false) %}
+      {% for p in prefixes %}{% if item.section and item.section.startswith(p) %}{% set ns2.known = true %}{% endif %}{% endfor %}
+      {% if not ns2.known %}{{ leftover.append(item) or "" }}{% endif %}
+    {% endfor %}
+    {% if leftover %}
+    <div class="card">
+      <h3 class="mt-0">Other checklist items</h3>
+      <p class="muted" style="font-size:11.5px;">Items that don't belong to one of the sections above (e.g. fee/quality considerations, or a custom section you typed in).</p>
+      {% for item in leftover %}{{ checklist_row(item, responses) }}{% endfor %}
+    </div>
+    {% endif %}
+  {% endmacro %}
+
   <div class="card">
     <h3 class="mt-0">Client Acceptance &amp; Continuance</h3>
     <p class="muted" style="font-size:12.5px;">
       Before any audit work starts, the firm works through these six items and the Engagement Partner records an accept/decline decision.
+      Each section below has its own detailed checklist - tick and comment on each question, and save that section on its own.
       {% if engagement.acceptance_required %}Until a Partner signs off an "Accepted" decision below, every other tab on this engagement stays locked (Admin can still access them).{% endif %}
     </p>
     {% if not engagement.acceptance_required %}
     <div class="empty-state">This engagement was created before this feature existed, so it isn't gated on acceptance - fill this in if useful, or leave it blank.</div>
     {% endif %}
+    {% if client_acceptance and not client_acceptance.checklist_items %}
+    <form method="post" action="{{ url_for('acceptance.seed_acceptance_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist to every section below</button></form>
+    {% endif %}
   </div>
 
-  <form method="post" action="{{ url_for('acceptance.save_client_acceptance', engagement_id=engagement.id) }}">
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_background', engagement_id=engagement.id) }}">
     <div class="card">
       <h3 class="mt-0">1. Background check</h3>
       <p class="muted" style="font-size:12px;">Evaluate management integrity, reputation, and financial stability.</p>
       <label><input type="checkbox" name="background_check_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.background_check_satisfactory %}checked{% endif %}> Satisfactory - no concerns identified</label>
       <label for="background_check_notes">Notes</label>
       <textarea id="background_check_notes" name="background_check_notes" rows="2">{{ client_acceptance.background_check_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save background check</button>
     </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Background check', engagement, acceptance_checklist_responses) }}{% endif %}
 
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_independence', engagement_id=engagement.id) }}">
     <div class="card">
       <h3 class="mt-0">2. Independence assessment</h3>
       <p class="muted" style="font-size:12px;">Confirm no conflicts of interest or ethical threats exist that compromise objectivity.</p>
@@ -148,8 +213,12 @@
       <textarea id="independence_notes" name="independence_notes" rows="2">{{ client_acceptance.independence_notes if client_acceptance else '' }}</textarea>
       <label for="independence_safeguards">Safeguards applied (if a threat was identified)</label>
       <textarea id="independence_safeguards" name="independence_safeguards" rows="2">{{ client_acceptance.independence_safeguards if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save independence assessment</button>
     </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Independence', engagement, acceptance_checklist_responses) }}{% endif %}
 
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_predecessor', engagement_id=engagement.id) }}">
     <div class="card">
       <h3 class="mt-0">3. Predecessor communication</h3>
       <p class="muted" style="font-size:12px;">Contact the previous auditor (with client permission) to check for past disagreements or reasons for leaving.</p>
@@ -161,83 +230,34 @@
       </div>
       <label for="predecessor_response_notes">What they said (or note that permission was declined / no response)</label>
       <textarea id="predecessor_response_notes" name="predecessor_response_notes" rows="2">{{ client_acceptance.predecessor_response_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save predecessor communication</button>
     </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Predecessor', engagement, acceptance_checklist_responses) }}{% endif %}
 
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_competence', engagement_id=engagement.id) }}">
     <div class="card">
       <h3 class="mt-0">4. Competence check</h3>
       <p class="muted" style="font-size:12px;">Ensure the audit team has the industry expertise and time required for the job.</p>
       <label><input type="checkbox" name="competence_confirmed" style="width:auto;" {% if client_acceptance and client_acceptance.competence_confirmed %}checked{% endif %}> Confirmed - the assigned team has the expertise and capacity</label>
       <label for="competence_notes">Notes</label>
       <textarea id="competence_notes" name="competence_notes" rows="2">{{ client_acceptance.competence_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save competence check</button>
     </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Competence', engagement, acceptance_checklist_responses) }}{% endif %}
 
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_regulatory', engagement_id=engagement.id) }}">
     <div class="card">
       <h3 class="mt-0">5. Regulatory checks (AML / KYC)</h3>
       <p class="muted" style="font-size:12px;">Complete required anti-money laundering (AML) and Know Your Customer (KYC) steps.</p>
       <label><input type="checkbox" name="aml_kyc_completed" style="width:auto;" {% if client_acceptance and client_acceptance.aml_kyc_completed %}checked{% endif %}> AML / KYC steps completed</label>
       <label for="aml_kyc_notes">Notes</label>
       <textarea id="aml_kyc_notes" name="aml_kyc_notes" rows="2">{{ client_acceptance.aml_kyc_notes if client_acceptance else '' }}</textarea>
-    </div>
-
-    <div class="card">
-      <h3 class="mt-0">Decision</h3>
-      {% if client_acceptance %}
-      <div class="flash {{ client_acceptance.checklist_assessment.level }}" style="margin-bottom:12px;">
-        <strong>System assessment:</strong> {{ client_acceptance.checklist_assessment.label }}
-        <span class="muted" style="font-size:11.5px;">(from the detailed checklist below - advisory only, the decision is always yours)</span>
-      </div>
-      {% endif %}
-      <div class="form-row">
-        <div>
-          <label for="decision">Acceptance decision</label>
-          <select id="decision" name="decision">
-            {% for d in acceptance_decisions %}<option value="{{ d }}" {% if client_acceptance and client_acceptance.decision==d %}selected{% endif %}>{{ d }}</option>{% endfor %}
-          </select>
-        </div>
-      </div>
-      <label for="decision_notes">Decision notes</label>
-      <textarea id="decision_notes" name="decision_notes" rows="2">{{ client_acceptance.decision_notes if client_acceptance else '' }}</textarea>
-      <button type="submit" class="btn gold" style="margin-top:8px;">Save Client Acceptance &amp; Continuance</button>
+      <button type="submit" class="btn secondary">Save regulatory checks</button>
     </div>
   </form>
-
-  <div class="card">
-    <h3 class="mt-0">Detailed acceptance checklist</h3>
-    <p class="muted" style="font-size:12px;">
-      Work through as many specific considerations as you like, tick Yes / No / N/A on each, and add a comment.
-      The system uses these ticks to build the assessment shown next to the Decision above - it flags any "No" as a
-      concern worth a closer look; it never accepts or declines an engagement on its own.
-    </p>
-    {% if client_acceptance and client_acceptance.checklist_items %}
-      {% set ns = namespace(section='') %}
-      {% for item in client_acceptance.checklist_items %}
-        {% if item.section and item.section != ns.section %}
-          <div class="section-title">{{ item.section }}</div>
-          {% set ns.section = item.section %}
-        {% endif %}
-        <form method="post" action="{{ url_for('acceptance.update_acceptance_checklist_item', item_id=item.id) }}" class="checklist-row">
-          <span class="item-text">{{ item.item_text }}</span>
-          <select name="response">
-            <option value="" {% if not item.response %}selected{% endif %}>—</option>
-            {% for r in acceptance_checklist_responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
-          </select>
-          <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:220px;margin-bottom:0;">
-          <button type="submit" class="btn small secondary">Save</button>
-          <button type="submit" formaction="{{ url_for('acceptance.delete_acceptance_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
-        </form>
-      {% endfor %}
-    {% else %}
-    <div class="empty-state">
-      No checklist items yet.
-      {% if client_acceptance %}<form method="post" action="{{ url_for('acceptance.seed_acceptance_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist</button></form>{% endif %}
-    </div>
-    {% endif %}
-    <form method="post" action="{{ url_for('acceptance.add_acceptance_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:12px;">
-      <div><label for="checklist_section">Section (optional)</label><input type="text" id="checklist_section" name="section" placeholder="e.g. Independence"></div>
-      <div style="flex:2;"><label for="checklist_item_text">New checklist item</label><input type="text" id="checklist_item_text" name="item_text" placeholder="e.g. Client's ultimate beneficial owners have been identified" required></div>
-      <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Add item</button></div>
-    </form>
-  </div>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Regulatory', engagement, acceptance_checklist_responses) }}{% endif %}
 
   <div class="card">
     <h3 class="mt-0">6. Engagement letter</h3>
@@ -252,6 +272,32 @@
       <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Upload as signed</button></div>
     </form>
   </div>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Engagement letter', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  {% if client_acceptance %}{{ checklist_other(client_acceptance.checklist_items, known_prefixes, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_decision', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">Decision</h3>
+      {% if client_acceptance %}
+      <div class="flash {{ client_acceptance.checklist_assessment.level }}" style="margin-bottom:12px;">
+        <strong>System assessment:</strong> {{ client_acceptance.checklist_assessment.label }}
+        <span class="muted" style="font-size:11.5px;">(from the detailed checklists on each section above - advisory only, the decision is always yours)</span>
+      </div>
+      {% endif %}
+      <div class="form-row">
+        <div>
+          <label for="decision">Acceptance decision</label>
+          <select id="decision" name="decision">
+            {% for d in acceptance_decisions %}<option value="{{ d }}" {% if client_acceptance and client_acceptance.decision==d %}selected{% endif %}>{{ d }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <label for="decision_notes">Decision notes</label>
+      <textarea id="decision_notes" name="decision_notes" rows="2">{{ client_acceptance.decision_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn gold" style="margin-top:8px;">Save decision</button>
+    </div>
+  </form>
 
   {% if client_acceptance %}
   <div class="card">

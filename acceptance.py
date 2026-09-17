@@ -98,6 +98,103 @@ def save_client_acceptance(engagement_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 
+# ---------- Per-section saves ----------
+# save_client_acceptance above saves all six narrative sections + the
+# decision together in one POST - it's kept for backward compatibility, but
+# the Client Acceptance tab's own UI now uses these narrower routes instead,
+# one per section, so each section (and its detailed checklist right below
+# it) can be worked on and saved independently without a single shared
+# <form> spanning the whole tab.
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/background/save", methods=["POST"])
+@login_required
+def save_acceptance_background(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.background_check_satisfactory = _bool("background_check_satisfactory")
+    record.background_check_notes = request.form.get("background_check_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Background check saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/independence/save", methods=["POST"])
+@login_required
+def save_acceptance_independence(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.independence_threats_identified = _bool("independence_threats_identified")
+    record.independence_notes = request.form.get("independence_notes", "").strip()
+    record.independence_safeguards = request.form.get("independence_safeguards", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Independence assessment saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/predecessor/save", methods=["POST"])
+@login_required
+def save_acceptance_predecessor(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.predecessor_not_applicable = _bool("predecessor_not_applicable")
+    record.predecessor_auditor_name = request.form.get("predecessor_auditor_name", "").strip()
+    record.client_permission_obtained = _bool("client_permission_obtained")
+    record.predecessor_contacted = _bool("predecessor_contacted")
+    record.predecessor_response_notes = request.form.get("predecessor_response_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Predecessor communication saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/competence/save", methods=["POST"])
+@login_required
+def save_acceptance_competence(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.competence_confirmed = _bool("competence_confirmed")
+    record.competence_notes = request.form.get("competence_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Competence check saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/regulatory/save", methods=["POST"])
+@login_required
+def save_acceptance_regulatory(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.aml_kyc_completed = _bool("aml_kyc_completed")
+    record.aml_kyc_notes = request.form.get("aml_kyc_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Regulatory checks saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/decision/save", methods=["POST"])
+@login_required
+def save_acceptance_decision(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    decision = request.form.get("decision", "Pending").strip()
+    record.decision = decision if decision in CLIENT_ACCEPTANCE_DECISIONS else "Pending"
+    record.decision_notes = request.form.get("decision_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Decision saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
 @acceptance_bp.route("/<int:engagement_id>/acceptance/engagement-letter/upload", methods=["POST"])
 @login_required
 def upload_engagement_letter(engagement_id):
