@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <title>Invoice {{ invoice.invoice_number }} - {{ firm_name }}</title>
+  <style>
+    body { font-family: Georgia, 'Times New Roman', serif; color: #222; max-width: 800px; margin: 40px auto; padding: 0 20px; }
+    h1 { font-size: 22px; margin-bottom: 0; }
+    .muted { color: #666; font-size: 12.5px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 18px; }
+    th, td { padding: 6px 8px; border-bottom: 1px solid #ddd; text-align: left; }
+    th { font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; color: #555; }
+    .text-right { text-align: right; }
+    .header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 24px; }
+    .totals { width: 280px; margin-left: auto; margin-top: 10px; }
+    .totals div { display: flex; justify-content: space-between; padding: 3px 0; }
+    .totals .total { font-weight: bold; border-top: 1px solid #333; margin-top: 4px; padding-top: 6px; }
+    .notes { margin-top: 30px; white-space: pre-wrap; font-size: 13px; }
+    @media print {
+      .no-print { display: none; }
+      body { margin: 0; }
+    }
+  </style>
+</head>
+<body>
+  <div class="no-print" style="text-align:right;margin-bottom:12px;">
+    <button onclick="window.print()">Print / Save as PDF</button>
+  </div>
+
+  <div class="header-row">
+    <div>
+      <h1>{{ firm_name }}</h1>
+      <div class="muted">Invoice</div>
+    </div>
+    <div class="text-right">
+      <div><strong>{{ invoice.invoice_number }}</strong></div>
+      <div class="muted">Issue date: {{ invoice.issue_date.strftime('%d %b %Y') if invoice.issue_date else '—' }}</div>
+      <div class="muted">Due date: {{ invoice.due_date.strftime('%d %b %Y') if invoice.due_date else '—' }}</div>
+    </div>
+  </div>
+
+  <div><strong>Bill to</strong><br>{{ (invoice.bill_to or invoice.client.name)|replace('\n', '<br>')|safe }}</div>
+  {% if invoice.engagement %}<div class="muted" style="margin-top:6px;">Re: {{ invoice.engagement.title }}</div>{% endif %}
+
+  <table>
+    <thead><tr><th>Description</th><th class="text-right">Qty</th><th class="text-right">Unit price</th><th class="text-right">Amount</th></tr></thead>
+    <tbody>
+      {% for line in invoice.lines %}
+      <tr>
+        <td>{{ line.description }}</td>
+        <td class="text-right">{{ line.quantity }}</td>
+        <td class="text-right">{{ '%.2f'|format(line.unit_price) }}</td>
+        <td class="text-right">{{ '%.2f'|format(line.line_total) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  <div class="totals">
+    <div><span>Subtotal</span><span>{{ invoice.currency }} {{ '%.2f'|format(invoice.subtotal) }}</span></div>
+    <div><span>VAT ({{ invoice.vat_pct }}%)</span><span>{{ invoice.currency }} {{ '%.2f'|format(invoice.vat_amount) }}</span></div>
+    <div class="total"><span>Total due</span><span>{{ invoice.currency }} {{ '%.2f'|format(invoice.total) }}</span></div>
+  </div>
+
+  {% if invoice.notes %}
+  <div class="notes">{{ invoice.notes }}</div>
+  {% endif %}
+</body>
+</html>

@@ -42,7 +42,8 @@ def _add_missing_columns():
         "document": [("reference", "VARCHAR(100)"), ("substantive_area_id", "INTEGER")],
         "client": [("company_number", "VARCHAR(80)")],
         "message_recipient": [("recalled_at", "DATETIME")],
-        "engagement": [("subdivision", "VARCHAR(50)")],
+        "engagement": [("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0")],
+        "analytical_review_line": [("source", "VARCHAR(10) DEFAULT 'manual'")],
         "engagement_checklist_item": [
             ("reviewed_by_id", "INTEGER"),
             ("reviewed_at", "DATETIME"),
@@ -96,6 +97,8 @@ def create_app():
     from messages import messages_bp
     import calls  # noqa: F401 - registers the @socketio.on(...) handlers as a side effect
     from calls import calls_bp
+    from acceptance import acceptance_bp
+    from invoicing import invoicing_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -105,6 +108,8 @@ def create_app():
     app.register_blueprint(hr_bp)
     app.register_blueprint(messages_bp)
     app.register_blueprint(calls_bp)
+    app.register_blueprint(acceptance_bp)
+    app.register_blueprint(invoicing_bp)
 
     @app.route("/")
     def index():

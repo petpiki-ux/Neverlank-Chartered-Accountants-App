@@ -560,6 +560,15 @@ class Engagement(db.Model):
     partner_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     manager_id = db.Column(db.Integer, db.ForeignKey("user.id"))
 
+    # Whether this engagement must clear Client Acceptance & Continuance
+    # (see ClientAcceptance below) before Understanding the Entity and every
+    # later tab can be opened. Defaults True for every engagement created
+    # from here on. Existing engagements from before this feature shipped
+    # are migrated to False (see _add_missing_columns in app.py) so they are
+    # completely unaffected - nobody has to retroactively fill in an
+    # acceptance record for work already under way.
+    acceptance_required = db.Column(db.Boolean, default=True, nullable=False)
+
     partner = db.relationship("User", foreign_keys=[partner_id])
     manager = db.relationship("User", foreign_keys=[manager_id])
     team_members = db.relationship("User", secondary=engagement_team, backref="engagements")
@@ -599,6 +608,22 @@ def user_can_access_engagement(user, engagement):
     if engagement.partner_id == user.id or engagement.manager_id == user.id:
         return True
     return user in engagement.team_members
+
+
+def engagement_acceptance_cleared(engagement):
+    """Whether this engagement's Client Acceptance & Continuance gate (see
+    ClientAcceptance below) has been cleared, i.e. whether Understanding the
+    Entity and every later tab may be opened. An engagement that doesn't
+    require acceptance at all (every engagement created before this feature
+    shipped - see Engagement.acceptance_required) is always cleared. A
+    engagement that does require it is only cleared once its
+    ClientAcceptance record has an Engagement Partner sign-off AND the
+    recorded decision is "Accepted" (a declined acceptance, or one still
+    awaiting the partner, keeps the gate shut)."""
+    if not engagement.acceptance_required:
+        return True
+    ca = engagement.client_acceptance
+    return bool(ca and ca.partner_signed_at and ca.decision == "Accepted")
 
 
 class ChecklistTemplate(db.Model):
@@ -1160,6 +1185,14 @@ class AnalyticalReviewLine(db.Model):
     prior_amount = db.Column(db.Float)
     current_amount = db.Column(db.Float)
     explanation = db.Column(db.Text)
+    # "manual" (typed in by hand, the only option before this column existed)
+    # or "auto" (last written by "Generate from Trial Balance" - see
+    # generate_analytical_review_from_trial_balance in engagements.py).
+    # Regenerating only overwrites the amounts on "auto" lines that share a
+    # label with a freshly computed figure, so a manually-typed line, and
+    # any explanation already typed against an auto line, both survive a
+    # re-generate.
+    source = db.Column(db.String(10), default="manual")
 
     @property
     def variance_amount(self):
@@ -1593,3 +1626,182 @@ class MessageRecipient(db.Model):
 
     def __repr__(self):
         return f"<MessageRecipient message={self.message_id} user={self.user_id}>"
+
+
+# ---------- Client Acceptance & Continuance (pre-engagement gate) ----------
+
+CLIENT_ACCEPTANCE_DECISIONS = ["Pending", "Accepted", "Declined"]
+
+
+class ClientAcceptance(db.Model):
+    """One per engagement (for engagements where Engagement.acceptance_required
+    is True) - the pre-engagement work a firm is expected to do before
+    starting an audit/assurance/consulting engagement (ISQM 1 / ISA 220):
+    a background check, an independence assessment, contacting the
+    predecessor auditor, confirming the team's competence, AML/KYC checks,
+    and a signed engagement letter - ending in an Engagement Partner
+    accept/decline decision. See engagement_acceptance_cleared() above for
+    exactly what "cleared" means, and _ensure_engagement_access /
+    _ensure_acceptance_route_access in engagements.py / acceptance.py for
+    how the gate is actually enforced."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    # 1. Background check - management integrity, reputation, financial stability.
+    background_check_notes = db.Column(db.Text)
+    background_check_satisfactory = db.Column(db.Boolean)  # None = not yet assessed
+
+    # 2. Independence assessment - conflicts of interest / ethical threats.
+    independence_notes = db.Column(db.Text)
+    independence_threats_identified = db.Column(db.Boolean)
+    independence_safeguards = db.Column(db.Text)  # only meaningful if threats were identified
+
+    # 3. Predecessor communication - with the CLIENT's permission, contact
+    # the previous auditor for any disagreements / reasons for leaving.
+    predecessor_not_applicable = db.Column(db.Boolean, default=False)  # first audit / no predecessor
+    predecessor_auditor_name = db.Column(db.String(200))
+    client_permission_obtained = db.Column(db.Boolean)
+    predecessor_contacted = db.Column(db.Boolean)
+    predecessor_response_notes = db.Column(db.Text)
+
+    # 4. Competence check - the team has the industry expertise and time.
+    competence_notes = db.Column(db.Text)
+    competence_confirmed = db.Column(db.Boolean)
+
+    # 5. Regulatory checks - AML / KYC.
+    aml_kyc_notes = db.Column(db.Text)
+    aml_kyc_completed = db.Column(db.Boolean)
+
+    # 6. Engagement letter - scope/timeline/responsibilities/fees, signed by
+    # the client. The signed copy is filed as an ordinary Document (see
+    # acceptance.py's upload route) and linked here.
+    engagement_letter_notes = db.Column(db.Text)
+    engagement_letter_sent_at = db.Column(db.DateTime)
+    engagement_letter_signed_at = db.Column(db.DateTime)
+    engagement_letter_document_id = db.Column(db.Integer, db.ForeignKey("document.id"))
+
+    # The decision itself - this plus the partner sign-off below is what
+    # actually clears (or permanently blocks) the gate.
+    decision = db.Column(db.String(20), default="Pending", nullable=False)
+    decision_notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("client_acceptance", uselist=False, cascade="all, delete-orphan"))
+    engagement_letter_document = db.relationship("Document")
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def items_complete(self):
+        """All six items have at least been assessed (not necessarily
+        favourably - an unfavourable background check is a reason to
+        decline, not a reason the form is "incomplete"). Required before a
+        Partner can record the decision as sign-off."""
+        predecessor_done = self.predecessor_not_applicable or self.predecessor_contacted is not None
+        return all([
+            self.background_check_satisfactory is not None,
+            self.independence_threats_identified is not None,
+            predecessor_done,
+            self.competence_confirmed is not None,
+            self.aml_kyc_completed is not None,
+            self.engagement_letter_signed_at is not None,
+        ])
+
+    def __repr__(self):
+        return f"<ClientAcceptance engagement={self.engagement_id} decision={self.decision}>"
+
+
+# ---------- Native Invoicing ----------
+
+INVOICE_STATUSES = ["Draft", "Sent", "Paid", "Cancelled"]
+INVOICE_CURRENCIES = ["USD", "ZWG"]
+
+
+class Invoice(db.Model):
+    """A client invoice. Line items are manual (see InvoiceLineItem) rather
+    than generated from logged time in this first version. Always billed to
+    a Client; the link to a specific Engagement is optional (a firm may
+    invoice a client for something not tied to one particular engagement,
+    e.g. a combined fee note)."""
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+
+    currency = db.Column(db.String(10), default="USD", nullable=False)
+    # Percentage, e.g. 15.0 - 0 is a valid, explicit choice (zero-rated /
+    # exempt supply), distinct from VAT simply not having been set.
+    vat_pct = db.Column(db.Float, default=15.0, nullable=False)
+    status = db.Column(db.String(20), default="Draft", nullable=False)
+
+    issue_date = db.Column(db.Date, default=date.today)
+    due_date = db.Column(db.Date)
+    bill_to = db.Column(db.Text)  # snapshot of the billing name/address at issue time
+    notes = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    paid_at = db.Column(db.DateTime)
+
+    # client_id is required (NOT NULL), so deleting a Client must cascade to
+    # its invoices too (same convention as Client.engagements below) -
+    # there's no valid "orphaned" invoice with no client. engagement_id is
+    # optional, so deleting an Engagement instead just detaches its
+    # invoices (no cascade) - the invoice, a financial record, survives
+    # with engagement_id set back to NULL.
+    client = db.relationship("Client", backref=db.backref("invoices", lazy=True, cascade="all, delete-orphan", order_by="Invoice.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("invoices", lazy=True, order_by="Invoice.id.desc()"))
+    created_by = db.relationship("User")
+    lines = db.relationship(
+        "InvoiceLineItem", backref="invoice", lazy=True,
+        cascade="all, delete-orphan", order_by="InvoiceLineItem.id",
+    )
+
+    @property
+    def subtotal(self):
+        return sum((l.quantity or 0) * (l.unit_price or 0) for l in self.lines)
+
+    @property
+    def vat_amount(self):
+        return self.subtotal * (self.vat_pct or 0) / 100.0
+
+    @property
+    def total(self):
+        return self.subtotal + self.vat_amount
+
+    @property
+    def is_overdue(self):
+        return bool(self.due_date and self.due_date < date.today() and self.status not in ("Paid", "Cancelled"))
+
+    def __repr__(self):
+        return f"<Invoice {self.invoice_number}>"
+
+
+class InvoiceLineItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    description = db.Column(db.String(300), nullable=False)
+    quantity = db.Column(db.Float, default=1.0)
+    unit_price = db.Column(db.Float, default=0.0)
+
+    @property
+    def line_total(self):
+        return (self.quantity or 0) * (self.unit_price or 0)
+
+    def __repr__(self):
+        return f"<InvoiceLineItem {self.description!r}>"

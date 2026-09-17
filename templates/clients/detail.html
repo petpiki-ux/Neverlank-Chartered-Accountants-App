@@ -48,6 +48,30 @@
   {% endif %}
 </div>
 
+<div class="card">
+  <div class="page-header" style="margin-bottom:10px;">
+    <h3 class="mt-0">Invoices</h3>
+    <a href="{{ url_for('invoicing.new_invoice', client_id=client.id) }}" class="btn small gold">+ New Invoice</a>
+  </div>
+  {% if client.invoices %}
+  <table>
+    <thead><tr><th>Invoice #</th><th>Issue date</th><th class="text-right">Total</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for inv in client.invoices %}
+      <tr{% if inv.is_overdue %} class="danger"{% endif %}>
+        <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a></td>
+        <td>{{ inv.issue_date.strftime('%d %b %Y') if inv.issue_date else '—' }}</td>
+        <td class="text-right">{{ inv.currency }} {{ '%.2f'|format(inv.total) }}</td>
+        <td><span class="badge status-{{ inv.status }}">{{ inv.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No invoices for this client yet.</div>
+  {% endif %}
+</div>
+
 {% if user_has_permission(current_user, 'delete_clients') %}
 <form method="post" action="{{ url_for('clients.delete_client', client_id=client.id) }}" onsubmit="return confirm('Delete this client and ALL its engagements? This cannot be undone.');">
   <button type="submit" class="btn danger small">Delete client</button>

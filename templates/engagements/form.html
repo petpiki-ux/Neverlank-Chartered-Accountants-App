@@ -103,6 +103,12 @@
     <label for="description">Scope / description</label>
     <textarea id="description" name="description">{{ engagement.description if engagement else '' }}</textarea>
 
+    <label style="margin-top:10px;">
+      <input type="checkbox" name="acceptance_required" style="width:auto;" {% if not engagement or engagement.acceptance_required %}checked{% endif %}>
+      Requires Client Acceptance &amp; Continuance sign-off before Understanding the Entity and other tabs can be opened
+    </label>
+    <p class="muted" style="font-size:11.5px;margin-top:-4px;">On by default for every new engagement. Untick only for something that genuinely doesn't need the full pre-engagement process (e.g. an informal internal job) - a Partner can still record it later even if unticked.</p>
+
     <button type="submit" class="btn gold">{% if engagement %}Save changes{% else %}Create engagement{% endif %}</button>
     <a href="{{ url_for('engagements.list_engagements') }}" class="btn secondary">Cancel</a>
   </form>

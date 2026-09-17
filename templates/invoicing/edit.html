@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ invoice.invoice_number }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Edit {{ invoice.invoice_number }}</h1>
+</div>
+<div class="card" style="max-width:640px;">
+  <form method="post">
+    <div class="form-row">
+      <div>
+        <label for="currency">Currency</label>
+        <select id="currency" name="currency">
+          {% for c in currencies %}<option value="{{ c }}" {% if invoice.currency==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="vat_pct">VAT %</label>
+        <input type="number" step="0.1" min="0" id="vat_pct" name="vat_pct" value="{{ invoice.vat_pct }}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="issue_date">Issue date</label>
+        <input type="date" id="issue_date" name="issue_date" value="{{ invoice.issue_date.isoformat() if invoice.issue_date else '' }}">
+      </div>
+      <div>
+        <label for="due_date">Due date</label>
+        <input type="date" id="due_date" name="due_date" value="{{ invoice.due_date.isoformat() if invoice.due_date else '' }}">
+      </div>
+    </div>
+    <label for="bill_to">Bill to</label>
+    <textarea id="bill_to" name="bill_to" rows="3">{{ invoice.bill_to or '' }}</textarea>
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="3">{{ invoice.notes or '' }}</textarea>
+    <button type="submit" class="btn gold">Save changes</button>
+    <a href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}

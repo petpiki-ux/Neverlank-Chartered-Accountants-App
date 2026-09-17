@@ -20,6 +20,9 @@
 
 <div class="tabs">
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='overview') }}" class="{% if tab=='overview' %}active{% endif %}">Overview</a>
+  {% if engagement.acceptance_required %}
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}" class="{% if tab=='acceptance' %}active{% endif %}">Client Acceptance{% if acceptance_cleared %} &#10003;{% elif client_acceptance and client_acceptance.decision == 'Declined' %} (Declined){% else %} &#128274;{% endif %}</a>
+  {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='entity') }}" class="{% if tab=='entity' %}active{% endif %}">Understanding the Entity{% if entity_understanding and entity_understanding.is_complete %} &#10003;{% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='analytical') }}" class="{% if tab=='analytical' %}active{% endif %}">Analytical Review{% if analytical_review and analytical_review.significant_lines %} ({{ analytical_review.significant_lines|length }} flagged){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}" class="{% if tab=='risks' %}active{% endif %}">Risk Assessment{% if risk_assessment and risk_assessment.rating %} ({{ risk_assessment.rating }}){% else %} (Not started){% endif %}</a>
@@ -88,13 +91,162 @@
     {% endif %}
   </div>
 
+  <div class="card">
+    <div class="page-header" style="margin-bottom:10px;">
+      <h3 class="mt-0">Invoices</h3>
+      <a href="{{ url_for('invoicing.new_invoice', client_id=engagement.client_id, engagement_id=engagement.id) }}" class="btn small gold">+ New Invoice</a>
+    </div>
+    {% if engagement.invoices %}
+    <table>
+      <thead><tr><th>Invoice #</th><th>Issue date</th><th class="text-right">Total</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for inv in engagement.invoices %}
+        <tr{% if inv.is_overdue %} class="danger"{% endif %}>
+          <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a></td>
+          <td>{{ inv.issue_date.strftime('%d %b %Y') if inv.issue_date else '—' }}</td>
+          <td class="text-right">{{ inv.currency }} {{ '%.2f'|format(inv.total) }}</td>
+          <td><span class="badge status-{{ inv.status }}">{{ inv.status }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No invoices for this engagement yet.</div>
+    {% endif %}
+  </div>
+
   {% if user_has_permission(current_user, 'delete_engagements') %}
   <form method="post" action="{{ url_for('engagements.delete_engagement', engagement_id=engagement.id) }}" onsubmit="return confirm('Delete this engagement and all its checklist items, risks, documents and tasks? This cannot be undone.');">
     <button type="submit" class="btn danger small">Delete engagement</button>
   </form>
   {% endif %}
 
+{% elif tab == 'acceptance' %}
+  <div class="card">
+    <h3 class="mt-0">Client Acceptance &amp; Continuance</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Before any audit work starts, the firm works through these six items and the Engagement Partner records an accept/decline decision.
+      {% if engagement.acceptance_required %}Until a Partner signs off an "Accepted" decision below, every other tab on this engagement stays locked (Admin can still access them).{% endif %}
+    </p>
+    {% if not engagement.acceptance_required %}
+    <div class="empty-state">This engagement was created before this feature existed, so it isn't gated on acceptance - fill this in if useful, or leave it blank.</div>
+    {% endif %}
+  </div>
+
+  <form method="post" action="{{ url_for('acceptance.save_client_acceptance', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">1. Background check</h3>
+      <p class="muted" style="font-size:12px;">Evaluate management integrity, reputation, and financial stability.</p>
+      <label><input type="checkbox" name="background_check_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.background_check_satisfactory %}checked{% endif %}> Satisfactory - no concerns identified</label>
+      <label for="background_check_notes">Notes</label>
+      <textarea id="background_check_notes" name="background_check_notes" rows="2">{{ client_acceptance.background_check_notes if client_acceptance else '' }}</textarea>
+    </div>
+
+    <div class="card">
+      <h3 class="mt-0">2. Independence assessment</h3>
+      <p class="muted" style="font-size:12px;">Confirm no conflicts of interest or ethical threats exist that compromise objectivity.</p>
+      <label><input type="checkbox" name="independence_threats_identified" style="width:auto;" {% if client_acceptance and client_acceptance.independence_threats_identified %}checked{% endif %}> A threat was identified (describe safeguards below)</label>
+      <label for="independence_notes">Notes</label>
+      <textarea id="independence_notes" name="independence_notes" rows="2">{{ client_acceptance.independence_notes if client_acceptance else '' }}</textarea>
+      <label for="independence_safeguards">Safeguards applied (if a threat was identified)</label>
+      <textarea id="independence_safeguards" name="independence_safeguards" rows="2">{{ client_acceptance.independence_safeguards if client_acceptance else '' }}</textarea>
+    </div>
+
+    <div class="card">
+      <h3 class="mt-0">3. Predecessor communication</h3>
+      <p class="muted" style="font-size:12px;">Contact the previous auditor (with client permission) to check for past disagreements or reasons for leaving.</p>
+      <label><input type="checkbox" name="predecessor_not_applicable" style="width:auto;" {% if client_acceptance and client_acceptance.predecessor_not_applicable %}checked{% endif %}> Not applicable - first audit / no predecessor auditor</label>
+      <div class="form-row">
+        <div><label for="predecessor_auditor_name">Predecessor auditor</label><input type="text" id="predecessor_auditor_name" name="predecessor_auditor_name" value="{{ client_acceptance.predecessor_auditor_name if client_acceptance else '' }}"></div>
+        <div><label><input type="checkbox" name="client_permission_obtained" style="width:auto;" {% if client_acceptance and client_acceptance.client_permission_obtained %}checked{% endif %}> Client's permission obtained to contact them</label></div>
+        <div><label><input type="checkbox" name="predecessor_contacted" style="width:auto;" {% if client_acceptance and client_acceptance.predecessor_contacted %}checked{% endif %}> Predecessor contacted / responded</label></div>
+      </div>
+      <label for="predecessor_response_notes">What they said (or note that permission was declined / no response)</label>
+      <textarea id="predecessor_response_notes" name="predecessor_response_notes" rows="2">{{ client_acceptance.predecessor_response_notes if client_acceptance else '' }}</textarea>
+    </div>
+
+    <div class="card">
+      <h3 class="mt-0">4. Competence check</h3>
+      <p class="muted" style="font-size:12px;">Ensure the audit team has the industry expertise and time required for the job.</p>
+      <label><input type="checkbox" name="competence_confirmed" style="width:auto;" {% if client_acceptance and client_acceptance.competence_confirmed %}checked{% endif %}> Confirmed - the assigned team has the expertise and capacity</label>
+      <label for="competence_notes">Notes</label>
+      <textarea id="competence_notes" name="competence_notes" rows="2">{{ client_acceptance.competence_notes if client_acceptance else '' }}</textarea>
+    </div>
+
+    <div class="card">
+      <h3 class="mt-0">5. Regulatory checks (AML / KYC)</h3>
+      <p class="muted" style="font-size:12px;">Complete required anti-money laundering (AML) and Know Your Customer (KYC) steps.</p>
+      <label><input type="checkbox" name="aml_kyc_completed" style="width:auto;" {% if client_acceptance and client_acceptance.aml_kyc_completed %}checked{% endif %}> AML / KYC steps completed</label>
+      <label for="aml_kyc_notes">Notes</label>
+      <textarea id="aml_kyc_notes" name="aml_kyc_notes" rows="2">{{ client_acceptance.aml_kyc_notes if client_acceptance else '' }}</textarea>
+    </div>
+
+    <div class="card">
+      <h3 class="mt-0">Decision</h3>
+      <div class="form-row">
+        <div>
+          <label for="decision">Acceptance decision</label>
+          <select id="decision" name="decision">
+            {% for d in acceptance_decisions %}<option value="{{ d }}" {% if client_acceptance and client_acceptance.decision==d %}selected{% endif %}>{{ d }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <label for="decision_notes">Decision notes</label>
+      <textarea id="decision_notes" name="decision_notes" rows="2">{{ client_acceptance.decision_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn gold" style="margin-top:8px;">Save Client Acceptance &amp; Continuance</button>
+    </div>
+  </form>
+
+  <div class="card">
+    <h3 class="mt-0">6. Engagement letter</h3>
+    <p class="muted" style="font-size:12px;">Send a formal contract outlining the audit scope, timeline, responsibilities, and fee structure, then secure client sign-off.</p>
+    {% if client_acceptance and client_acceptance.engagement_letter_document %}
+    <p style="font-size:13px;">Signed copy on file: <a href="{{ url_for('engagements.download_document', doc_id=client_acceptance.engagement_letter_document_id) }}">{{ client_acceptance.engagement_letter_document.original_filename }}</a>{% if client_acceptance.engagement_letter_signed_at %} - signed {{ client_acceptance.engagement_letter_signed_at.strftime('%d %b %Y') }}{% endif %}.</p>
+    {% else %}
+    <div class="empty-state">No signed engagement letter on file yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('acceptance.upload_engagement_letter', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
+      <div><label for="letter_file">Upload signed engagement letter</label><input type="file" id="letter_file" name="file" required></div>
+      <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Upload as signed</button></div>
+    </form>
+  </div>
+
+  {% if client_acceptance %}
+  <div class="card">
+    <h3 class="mt-0">Sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ client_acceptance.completed_by.name if client_acceptance.completed_by else '—' }} on {{ client_acceptance.completed_at.strftime('%d %b %Y') if client_acceptance.completed_at else '—' }}.
+      {% if client_acceptance.is_reviewed %}Reviewed by {{ client_acceptance.reviewed_by.name }} on {{ client_acceptance.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+      {% if client_acceptance.is_partner_signed %}Partner sign-off by {{ client_acceptance.partner_signed_by.name }} on {{ client_acceptance.partner_signed_at.strftime('%d %b %Y') }} - decision: <strong>{{ client_acceptance.decision }}</strong>.{% endif %}
+    </p>
+    {% if not client_acceptance.items_complete %}
+    <p class="muted" style="font-size:11.5px;color:#b02a2a;">All six items above (including the signed engagement letter) need to be filled in before a Partner can sign off the decision.</p>
+    {% endif %}
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if client_acceptance.is_reviewed %}
+      <form method="post" action="{{ url_for('acceptance.unreview_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif client_acceptance.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('acceptance.review_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if client_acceptance.is_partner_signed %}
+      <form method="post" action="{{ url_for('acceptance.partner_unsign_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif client_acceptance.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('acceptance.partner_sign_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off (locks in the decision)</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
 {% elif tab == 'entity' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
   <div class="card">
     <h3 class="mt-0">Understanding the entity's business and industry</h3>
     <p class="muted" style="font-size:12.5px;">Work through each section below to build a structured understanding of the client before assessing risk or planning the engagement. This is a general-purpose starting structure covering the areas practitioners typically consider - review and adjust the prompts to your own methodology.</p>
@@ -141,7 +293,11 @@
 
   {{ qmacros.render_queries(engagement, 'entity', queries_by_section.get('entity', [])) }}
 
+{% endif %}
 {% elif tab == 'analytical' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
   <div class="card">
     <h3 class="mt-0">Significance threshold</h3>
     <p class="muted" style="font-size:12.5px;">Any line item whose year-on-year variance is at or above this percentage is automatically flagged as significant and worth an explanation. 10% is a common general starting point - adjust per engagement.</p>
@@ -149,6 +305,18 @@
       <div><label for="threshold_pct">Flag variances of at least (%)</label><input type="number" step="0.1" min="0.1" id="threshold_pct" name="threshold_pct" value="{{ analytical_review.threshold_pct if analytical_review else 10.0 }}"></div>
       <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Update threshold</button></div>
     </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Generate from Trial Balance</h3>
+    {% if trial_balance and trial_balance.lines %}
+    <p class="muted" style="font-size:12.5px;">Fills in Revenue, Gross profit, Operating profit, Total assets and the rest of the key figures below automatically from the preliminary trial balance ({{ trial_balance.lines|length }} accounts, entered on the Planning tab) - no manual typing needed. Safe to run again after the trial balance changes; it only overwrites the lines it generated last time, never anything added or edited by hand.</p>
+    <form method="post" action="{{ url_for('engagements.generate_analytical_review_from_trial_balance', engagement_id=engagement.id) }}" class="inline">
+      <button type="submit" class="btn gold">Generate from Trial Balance</button>
+    </form>
+    {% else %}
+    <div class="empty-state">No preliminary trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}">enter or import it on the Planning tab</a> to generate these figures automatically instead of typing them in below.</div>
+    {% endif %}
   </div>
 
   <div class="card">
@@ -170,7 +338,7 @@
       {% for line in analytical_review.lines %}
         <tr{% if line.is_significant %} class="danger"{% endif %}>
           <form method="post" action="{{ url_for('engagements.update_analytical_review_line', line_id=line.id) }}" class="inline">
-          <td><input type="text" name="label" value="{{ line.label }}" style="width:140px;margin-bottom:0;"></td>
+          <td><input type="text" name="label" value="{{ line.label }}" style="width:140px;margin-bottom:0;">{% if line.source == 'auto' %} <span class="badge" style="font-size:10px;" title="Generated from the Trial Balance - editing and saving this line keeps your change on the next Generate">Auto</span>{% endif %}</td>
           <td><input type="number" step="0.01" name="prior_amount" value="{{ line.prior_amount if line.prior_amount is not none else '' }}" style="width:110px;margin-bottom:0;"></td>
           <td><input type="number" step="0.01" name="current_amount" value="{{ line.current_amount if line.current_amount is not none else '' }}" style="width:110px;margin-bottom:0;"></td>
           <td>{{ '%.2f'|format(line.variance_amount) if line.variance_amount is not none else '—' }}</td>
@@ -221,7 +389,11 @@
 
   {{ qmacros.render_queries(engagement, 'analytical', queries_by_section.get('analytical', [])) }}
 
+{% endif %}
 {% elif tab == 'risks' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
   {% if risk_assessment and risk_assessment.rating %}
   <div class="stat-grid">
     <div class="stat-card"><div class="num">{{ risk_assessment.likelihood }}</div><div class="label">Likelihood (1-5)</div></div>
@@ -318,7 +490,11 @@
 
   {{ qmacros.render_queries(engagement, 'risks', queries_by_section.get('risks', [])) }}
 
+{% endif %}
 {% elif tab == 'planning' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
   <div class="card">
     <h3 class="mt-0">Materiality calculator</h3>
     <p class="muted" style="font-size:12.5px;">Enter the client's key figures for the period - the system calculates suggested overall materiality, performance materiality and a "clearly trivial" threshold from them. The % benchmarks are common starting points in practice, not a fixed rule - adjust them and apply professional judgement for this specific engagement.</p>
@@ -403,233 +579,10 @@
     {% endif %}
   </div>
 
-  {{ qmacros.render_queries(engagement, 'planning', queries_by_section.get('planning', [])) }}
 
-{% elif tab == 'checklist' %}
-  <div class="card">
-    <h3 class="mt-0">Add checklist item</h3>
-    <form method="post" action="{{ url_for('engagements.add_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
-      <div><label for="section">Section</label><input type="text" id="section" name="section" placeholder="e.g. Cash & Bank"></div>
-      <div style="grid-column: span 2;"><label for="item_text">Procedure *</label><input type="text" id="item_text" name="item_text" required></div>
-      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add item</button></div>
-    </form>
-  </div>
-
-  <div class="card">
-    {% if engagement.checklist_items %}
-      {% set ns = namespace(section='') %}
-      {% for item in engagement.checklist_items %}
-        {% if item.section and item.section != ns.section %}
-          <div class="section-title">{{ item.section }}</div>
-          {% set ns.section = item.section %}
-        {% endif %}
-        <form method="post" action="{{ url_for('engagements.update_checklist_item', item_id=item.id) }}" class="checklist-row">
-          <span class="item-text">{{ item.item_text }}
-            {% if item.completed_by %}<div class="muted" style="font-size:11px;">Prepared by {{ item.completed_by.name }} on {{ item.completed_at.strftime('%d %b %Y') }}</div>{% endif %}
-            {% if item.is_reviewed %}<div class="muted" style="font-size:11px;">Reviewed by {{ item.reviewed_by.name }} on {{ item.reviewed_at.strftime('%d %b %Y') }} <span class="badge status-Completed">Reviewed</span></div>{% endif %}
-            {% if item.is_partner_signed %}<div class="muted" style="font-size:11px;">Partner sign-off by {{ item.partner_signed_by.name }} on {{ item.partner_signed_at.strftime('%d %b %Y') }} <span class="badge status-Completed">Partner signed</span></div>{% endif %}
-          </span>
-          <input type="text" name="notes" value="{{ item.notes or '' }}" placeholder="Notes" style="width:180px;margin-bottom:0;">
-          <select name="status" onchange="this.form.submit()">
-            {% for s in checklist_statuses %}<option value="{{ s }}" {% if item.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
-          </select>
-          <button type="submit" class="btn small secondary">Save</button>
-          <button type="submit" formaction="{{ url_for('engagements.delete_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
-        </form>
-        {% if current_user.role in ('supervisor', 'partner', 'admin') %}
-        <form method="post" action="{{ item.is_reviewed and url_for('engagements.unreview_checklist_item', item_id=item.id) or url_for('engagements.review_checklist_item', item_id=item.id) }}" class="inline" style="margin: -6px 0 8px 0;">
-          {% if item.is_reviewed %}
-          <button type="submit" class="btn small secondary">Remove review sign-off</button>
-          {% elif item.status in ('Done', 'N/A') and item.completed_by_id != current_user.id %}
-          <button type="submit" class="btn small gold">Mark as reviewed</button>
-          {% elif item.status in ('Done', 'N/A') %}
-          <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
-          {% endif %}
-        </form>
-        {% endif %}
-        {% if current_user.role in ('partner', 'admin') %}
-        <form method="post" action="{{ item.is_partner_signed and url_for('engagements.partner_unsign_checklist_item', item_id=item.id) or url_for('engagements.partner_sign_checklist_item', item_id=item.id) }}" class="inline" style="margin: -6px 0 8px 0;">
-          {% if item.is_partner_signed %}
-          <button type="submit" class="btn small secondary">Remove partner sign-off</button>
-          {% elif item.status in ('Done', 'N/A') and item.completed_by_id != current_user.id %}
-          <button type="submit" class="btn small gold">Partner sign-off</button>
-          {% endif %}
-        </form>
-        {% endif %}
-      {% endfor %}
-    {% else %}
-      <div class="empty-state">No checklist items yet. Add one above, or start the engagement from a template next time.</div>
-    {% endif %}
-  </div>
-
-  {{ qmacros.render_queries(engagement, 'checklist', queries_by_section.get('checklist', [])) }}
-
-{% elif tab == 'documents' %}
-  <div class="card">
-    <h3 class="mt-0">Templates for this engagement <span class="badge type-{{ engagement.type }}">{{ engagement.type }}</span></h3>
-    {% if matching_templates %}
-    <p class="muted" style="font-size:12.5px;">Automatically matched to this engagement's type. Download, fill in, then upload the completed file below to keep it with the engagement.</p>
-    <table>
-      <thead><tr><th>Ref</th><th>Template</th><th>Format</th><th></th></tr></thead>
-      <tbody>
-      {% for tpl in matching_templates %}
-        <tr>
-          <td class="muted">{{ tpl.ref_code }}</td>
-          <td>{{ tpl.title }}{% if tpl.description %}<div class="muted" style="font-size:11.5px;">{{ tpl.description }}</div>{% endif %}</td>
-          <td>{{ 'Excel' if tpl.file_ext == 'xlsx' else 'Word' }}</td>
-          <td class="text-right"><a href="{{ url_for('doc_templates.download_template', template_id=tpl.id) }}" class="btn small secondary">Download</a></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">No {{ engagement.type }} templates in the library yet. Add some from the <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a> page.</div>
-    {% endif %}
-  </div>
-
-  <div class="card">
-    <h3 class="mt-0">Upload working paper / document</h3>
-    <form method="post" action="{{ url_for('engagements.upload_document', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
-      <div><label for="file">File *</label><input type="file" id="file" name="file" required></div>
-      <div><label for="category">Category</label><input type="text" id="category" name="category" placeholder="e.g. Working Papers" value="General"></div>
-      <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" placeholder="e.g. A-1"></div>
-      <div><label for="notes">Notes</label><input type="text" id="notes" name="notes"></div>
-      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
-    </form>
-    <p class="muted" style="font-size:12px;">Re-uploading a file with the same name and category creates a new version automatically. Reference is optional - use it for your own filing/working-paper index (e.g. "A-1").</p>
-  </div>
-
-  <div class="card">
-    {% if engagement.documents %}
-    <table>
-      <thead><tr><th>File</th><th>Reference</th><th>Category</th><th>Substantive area</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
-      <tbody>
-      {% for d in engagement.documents|sort(attribute='uploaded_at', reverse=True) %}
-        <tr>
-          <td>{{ d.original_filename }}{% if d.notes %}<div class="muted" style="font-size:11.5px;">{{ d.notes }}</div>{% endif %}</td>
-          <td class="muted">{{ d.reference or '—' }}</td>
-          <td>{{ d.category }}</td>
-          <td class="muted">{{ d.substantive_area.area if d.substantive_area else '—' }}</td>
-          <td>v{{ d.version }}</td>
-          <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
-          <td>{{ d.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
-          <td>
-            <a href="{{ url_for('engagements.download_document', doc_id=d.id) }}" class="btn small secondary">Download</a>
-            {% if user_has_permission(current_user, 'delete_documents') %}
-            <form method="post" action="{{ url_for('engagements.delete_document', doc_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
-            {% endif %}
-          </td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">No documents uploaded yet.</div>
-    {% endif %}
-  </div>
-
-{% elif tab == 'tasks' %}
-  <div class="card">
-    <h3 class="mt-0">Assign a task</h3>
-    <form method="post" action="{{ url_for('engagements.add_task', engagement_id=engagement.id) }}">
-      <div class="form-row">
-        <div style="grid-column: span 2;"><label for="title">Task *</label><input type="text" id="title" name="title" required></div>
-        <div>
-          <label for="assigned_to_id">Assign to</label>
-          <select id="assigned_to_id" name="assigned_to_id">
-            <option value="">Unassigned</option>
-            {% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div><label for="due_date">Due date</label><input type="date" id="due_date" name="due_date"></div>
-        <div>
-          <label for="priority">Priority</label>
-          <select id="priority" name="priority">
-            <option>Low</option><option selected>Normal</option><option>High</option>
-          </select>
-        </div>
-        <div>
-          <label for="status">Status</label>
-          <select id="status" name="status">
-            {% for s in task_statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
-          </select>
-        </div>
-      </div>
-      <label for="description">Notes</label>
-      <textarea id="description" name="description"></textarea>
-      <button type="submit" class="btn gold">Assign task</button>
-    </form>
-  </div>
-
-  <div class="card">
-    {% if engagement.tasks %}
-    <table>
-      <thead><tr><th>Task</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th>Review</th><th>Partner sign-off</th><th></th></tr></thead>
-      <tbody>
-      {% for t in engagement.tasks|sort(attribute='due_date') %}
-        <tr>
-          <td>{{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
-          <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>
-          <td>{{ t.due_date.strftime('%d %b %Y') if t.due_date else '—' }} {% if t.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
-          <td>{{ t.priority }}</td>
-          <td>
-            <form method="post" action="{{ url_for('engagements.update_task', task_id=t.id) }}" class="inline">
-              <input type="hidden" name="title" value="{{ t.title }}">
-              <input type="hidden" name="assigned_to_id" value="{{ t.assigned_to_id or '' }}">
-              <input type="hidden" name="due_date" value="{{ t.due_date.isoformat() if t.due_date else '' }}">
-              <input type="hidden" name="priority" value="{{ t.priority }}">
-              <select name="status" onchange="this.form.submit()">
-                {% for s in task_statuses %}<option value="{{ s }}" {% if t.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
-              </select>
-            </form>
-            {% if t.completed_by %}<div class="muted" style="font-size:11px;">Prepared by {{ t.completed_by.name }}</div>{% endif %}
-          </td>
-          <td>
-            {% if t.is_reviewed %}
-              <div class="muted" style="font-size:11px;">Reviewed by {{ t.reviewed_by.name }} on {{ t.reviewed_at.strftime('%d %b %Y') }}</div>
-              {% if current_user.role in ('supervisor', 'partner', 'admin') %}
-              <form method="post" action="{{ url_for('engagements.unreview_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove</button></form>
-              {% endif %}
-            {% elif current_user.role in ('supervisor', 'partner', 'admin') and t.status == 'Done' and t.completed_by_id != current_user.id %}
-              <form method="post" action="{{ url_for('engagements.review_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small gold">Mark reviewed</button></form>
-            {% elif t.status == 'Done' %}
-              <span class="muted" style="font-size:11px;">Awaiting review</span>
-            {% else %}
-              <span class="muted" style="font-size:11px;">—</span>
-            {% endif %}
-          </td>
-          <td>
-            {% if t.is_partner_signed %}
-              <div class="muted" style="font-size:11px;">Signed by {{ t.partner_signed_by.name }} on {{ t.partner_signed_at.strftime('%d %b %Y') }}</div>
-              {% if current_user.role in ('partner', 'admin') %}
-              <form method="post" action="{{ url_for('engagements.partner_unsign_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove</button></form>
-              {% endif %}
-            {% elif current_user.role in ('partner', 'admin') and t.status == 'Done' and t.completed_by_id != current_user.id %}
-              <form method="post" action="{{ url_for('engagements.partner_sign_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
-            {% elif t.status == 'Done' %}
-              <span class="muted" style="font-size:11px;">Awaiting partner sign-off</span>
-            {% else %}
-              <span class="muted" style="font-size:11px;">—</span>
-            {% endif %}
-          </td>
-          <td><form method="post" action="{{ url_for('engagements.delete_task', task_id=t.id) }}" onsubmit="return confirm('Delete this task?')"><button type="submit" class="btn small danger">Delete</button></form></td>
-        </tr>
-      {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">No tasks assigned yet.</div>
-    {% endif %}
-  </div>
-
-  {{ qmacros.render_queries(engagement, 'tasks', queries_by_section.get('tasks', [])) }}
-
-{% elif tab == 'finalisation' %}
   <div class="card">
     <h3 class="mt-0">Trial Balance</h3>
-    <p class="muted" style="font-size:12.5px;">Import the period's trial balance - current year and prior year comparative columns - to drive the financial statements below. Map each account to an IAS 1 category once and it's remembered for this client's future periods.</p>
+    <p class="muted" style="font-size:12.5px;">Import the period's PRELIMINARY trial balance here at planning - current year and prior year comparative columns - so Analytical Review below can be generated from real figures instead of typed in by hand. Map each account to an IAS 1 category once and it's remembered for this client's future periods. Audit adjustments and the financial statements built from this trial balance are on the Finalisation tab.</p>
     <div class="form-row" style="align-items:flex-end;">
       <form method="post" action="{{ url_for('engagements.upload_trial_balance', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end; grid-column: span 2;">
         <div><label for="tb_file">Upload .xlsx / .csv</label><input type="file" id="tb_file" name="file" accept=".xlsx,.xls,.csv" required></div>
@@ -737,7 +690,259 @@
       {% endif %}
     {% endif %}
   </div>
+  {% endif %}
 
+  {{ qmacros.render_queries(engagement, 'planning', queries_by_section.get('planning', [])) }}
+
+{% endif %}
+{% elif tab == 'checklist' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Add checklist item</h3>
+    <form method="post" action="{{ url_for('engagements.add_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div><label for="section">Section</label><input type="text" id="section" name="section" placeholder="e.g. Cash & Bank"></div>
+      <div style="grid-column: span 2;"><label for="item_text">Procedure *</label><input type="text" id="item_text" name="item_text" required></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add item</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    {% if engagement.checklist_items %}
+      {% set ns = namespace(section='') %}
+      {% for item in engagement.checklist_items %}
+        {% if item.section and item.section != ns.section %}
+          <div class="section-title">{{ item.section }}</div>
+          {% set ns.section = item.section %}
+        {% endif %}
+        <form method="post" action="{{ url_for('engagements.update_checklist_item', item_id=item.id) }}" class="checklist-row">
+          <span class="item-text">{{ item.item_text }}
+            {% if item.completed_by %}<div class="muted" style="font-size:11px;">Prepared by {{ item.completed_by.name }} on {{ item.completed_at.strftime('%d %b %Y') }}</div>{% endif %}
+            {% if item.is_reviewed %}<div class="muted" style="font-size:11px;">Reviewed by {{ item.reviewed_by.name }} on {{ item.reviewed_at.strftime('%d %b %Y') }} <span class="badge status-Completed">Reviewed</span></div>{% endif %}
+            {% if item.is_partner_signed %}<div class="muted" style="font-size:11px;">Partner sign-off by {{ item.partner_signed_by.name }} on {{ item.partner_signed_at.strftime('%d %b %Y') }} <span class="badge status-Completed">Partner signed</span></div>{% endif %}
+          </span>
+          <input type="text" name="notes" value="{{ item.notes or '' }}" placeholder="Notes" style="width:180px;margin-bottom:0;">
+          <select name="status" onchange="this.form.submit()">
+            {% for s in checklist_statuses %}<option value="{{ s }}" {% if item.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+          <button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" formaction="{{ url_for('engagements.delete_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+        </form>
+        {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+        <form method="post" action="{{ item.is_reviewed and url_for('engagements.unreview_checklist_item', item_id=item.id) or url_for('engagements.review_checklist_item', item_id=item.id) }}" class="inline" style="margin: -6px 0 8px 0;">
+          {% if item.is_reviewed %}
+          <button type="submit" class="btn small secondary">Remove review sign-off</button>
+          {% elif item.status in ('Done', 'N/A') and item.completed_by_id != current_user.id %}
+          <button type="submit" class="btn small gold">Mark as reviewed</button>
+          {% elif item.status in ('Done', 'N/A') %}
+          <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+          {% endif %}
+        </form>
+        {% endif %}
+        {% if current_user.role in ('partner', 'admin') %}
+        <form method="post" action="{{ item.is_partner_signed and url_for('engagements.partner_unsign_checklist_item', item_id=item.id) or url_for('engagements.partner_sign_checklist_item', item_id=item.id) }}" class="inline" style="margin: -6px 0 8px 0;">
+          {% if item.is_partner_signed %}
+          <button type="submit" class="btn small secondary">Remove partner sign-off</button>
+          {% elif item.status in ('Done', 'N/A') and item.completed_by_id != current_user.id %}
+          <button type="submit" class="btn small gold">Partner sign-off</button>
+          {% endif %}
+        </form>
+        {% endif %}
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">No checklist items yet. Add one above, or start the engagement from a template next time.</div>
+    {% endif %}
+  </div>
+
+  {{ qmacros.render_queries(engagement, 'checklist', queries_by_section.get('checklist', [])) }}
+
+{% endif %}
+{% elif tab == 'documents' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Templates for this engagement <span class="badge type-{{ engagement.type }}">{{ engagement.type }}</span></h3>
+    {% if matching_templates %}
+    <p class="muted" style="font-size:12.5px;">Automatically matched to this engagement's type. Download, fill in, then upload the completed file below to keep it with the engagement.</p>
+    <table>
+      <thead><tr><th>Ref</th><th>Template</th><th>Format</th><th></th></tr></thead>
+      <tbody>
+      {% for tpl in matching_templates %}
+        <tr>
+          <td class="muted">{{ tpl.ref_code }}</td>
+          <td>{{ tpl.title }}{% if tpl.description %}<div class="muted" style="font-size:11.5px;">{{ tpl.description }}</div>{% endif %}</td>
+          <td>{{ 'Excel' if tpl.file_ext == 'xlsx' else 'Word' }}</td>
+          <td class="text-right"><a href="{{ url_for('doc_templates.download_template', template_id=tpl.id) }}" class="btn small secondary">Download</a></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No {{ engagement.type }} templates in the library yet. Add some from the <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a> page.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Upload working paper / document</h3>
+    <form method="post" action="{{ url_for('engagements.upload_document', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
+      <div><label for="file">File *</label><input type="file" id="file" name="file" required></div>
+      <div><label for="category">Category</label><input type="text" id="category" name="category" placeholder="e.g. Working Papers" value="General"></div>
+      <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" placeholder="e.g. A-1"></div>
+      <div><label for="notes">Notes</label><input type="text" id="notes" name="notes"></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
+    </form>
+    <p class="muted" style="font-size:12px;">Re-uploading a file with the same name and category creates a new version automatically. Reference is optional - use it for your own filing/working-paper index (e.g. "A-1").</p>
+  </div>
+
+  <div class="card">
+    {% if engagement.documents %}
+    <table>
+      <thead><tr><th>File</th><th>Reference</th><th>Category</th><th>Substantive area</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+      <tbody>
+      {% for d in engagement.documents|sort(attribute='uploaded_at', reverse=True) %}
+        <tr>
+          <td>{{ d.original_filename }}{% if d.notes %}<div class="muted" style="font-size:11.5px;">{{ d.notes }}</div>{% endif %}</td>
+          <td class="muted">{{ d.reference or '—' }}</td>
+          <td>{{ d.category }}</td>
+          <td class="muted">{{ d.substantive_area.area if d.substantive_area else '—' }}</td>
+          <td>v{{ d.version }}</td>
+          <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
+          <td>{{ d.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td>
+            <a href="{{ url_for('engagements.download_document', doc_id=d.id) }}" class="btn small secondary">Download</a>
+            {% if user_has_permission(current_user, 'delete_documents') %}
+            <form method="post" action="{{ url_for('engagements.delete_document', doc_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No documents uploaded yet.</div>
+    {% endif %}
+  </div>
+
+{% endif %}
+{% elif tab == 'tasks' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Assign a task</h3>
+    <form method="post" action="{{ url_for('engagements.add_task', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        <div style="grid-column: span 2;"><label for="title">Task *</label><input type="text" id="title" name="title" required></div>
+        <div>
+          <label for="assigned_to_id">Assign to</label>
+          <select id="assigned_to_id" name="assigned_to_id">
+            <option value="">Unassigned</option>
+            {% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div><label for="due_date">Due date</label><input type="date" id="due_date" name="due_date"></div>
+        <div>
+          <label for="priority">Priority</label>
+          <select id="priority" name="priority">
+            <option>Low</option><option selected>Normal</option><option>High</option>
+          </select>
+        </div>
+        <div>
+          <label for="status">Status</label>
+          <select id="status" name="status">
+            {% for s in task_statuses %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+          </select>
+        </div>
+      </div>
+      <label for="description">Notes</label>
+      <textarea id="description" name="description"></textarea>
+      <button type="submit" class="btn gold">Assign task</button>
+    </form>
+  </div>
+
+  <div class="card">
+    {% if engagement.tasks %}
+    <table>
+      <thead><tr><th>Task</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th>Review</th><th>Partner sign-off</th><th></th></tr></thead>
+      <tbody>
+      {% for t in engagement.tasks|sort(attribute='due_date') %}
+        <tr>
+          <td>{{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
+          <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>
+          <td>{{ t.due_date.strftime('%d %b %Y') if t.due_date else '—' }} {% if t.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
+          <td>{{ t.priority }}</td>
+          <td>
+            <form method="post" action="{{ url_for('engagements.update_task', task_id=t.id) }}" class="inline">
+              <input type="hidden" name="title" value="{{ t.title }}">
+              <input type="hidden" name="assigned_to_id" value="{{ t.assigned_to_id or '' }}">
+              <input type="hidden" name="due_date" value="{{ t.due_date.isoformat() if t.due_date else '' }}">
+              <input type="hidden" name="priority" value="{{ t.priority }}">
+              <select name="status" onchange="this.form.submit()">
+                {% for s in task_statuses %}<option value="{{ s }}" {% if t.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+              </select>
+            </form>
+            {% if t.completed_by %}<div class="muted" style="font-size:11px;">Prepared by {{ t.completed_by.name }}</div>{% endif %}
+          </td>
+          <td>
+            {% if t.is_reviewed %}
+              <div class="muted" style="font-size:11px;">Reviewed by {{ t.reviewed_by.name }} on {{ t.reviewed_at.strftime('%d %b %Y') }}</div>
+              {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+              <form method="post" action="{{ url_for('engagements.unreview_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove</button></form>
+              {% endif %}
+            {% elif current_user.role in ('supervisor', 'partner', 'admin') and t.status == 'Done' and t.completed_by_id != current_user.id %}
+              <form method="post" action="{{ url_for('engagements.review_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small gold">Mark reviewed</button></form>
+            {% elif t.status == 'Done' %}
+              <span class="muted" style="font-size:11px;">Awaiting review</span>
+            {% else %}
+              <span class="muted" style="font-size:11px;">—</span>
+            {% endif %}
+          </td>
+          <td>
+            {% if t.is_partner_signed %}
+              <div class="muted" style="font-size:11px;">Signed by {{ t.partner_signed_by.name }} on {{ t.partner_signed_at.strftime('%d %b %Y') }}</div>
+              {% if current_user.role in ('partner', 'admin') %}
+              <form method="post" action="{{ url_for('engagements.partner_unsign_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove</button></form>
+              {% endif %}
+            {% elif current_user.role in ('partner', 'admin') and t.status == 'Done' and t.completed_by_id != current_user.id %}
+              <form method="post" action="{{ url_for('engagements.partner_sign_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+            {% elif t.status == 'Done' %}
+              <span class="muted" style="font-size:11px;">Awaiting partner sign-off</span>
+            {% else %}
+              <span class="muted" style="font-size:11px;">—</span>
+            {% endif %}
+          </td>
+          <td><form method="post" action="{{ url_for('engagements.delete_task', task_id=t.id) }}" onsubmit="return confirm('Delete this task?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No tasks assigned yet.</div>
+    {% endif %}
+  </div>
+
+  {{ qmacros.render_queries(engagement, 'tasks', queries_by_section.get('tasks', [])) }}
+
+{% endif %}
+{% elif tab == 'finalisation' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Trial Balance</h3>
+    <p class="muted" style="font-size:12.5px;">The preliminary trial balance is now entered on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}">Planning</a> tab (so it can drive Analytical Review earlier in the engagement) - come back here once it exists to propose audit adjustments and generate the financial statements below.</p>
+    {% if not trial_balance or not trial_balance.lines %}
+    <div class="empty-state">No trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}">enter or import it on the Planning tab</a> first.</div>
+    {% else %}
+    <p class="muted" style="font-size:11.5px;">{{ trial_balance.lines|length }} account(s){% if trial_balance.completed_by %}, last updated by {{ trial_balance.completed_by.name }} on {{ trial_balance.completed_at.strftime('%d %b %Y') }}{% endif %}. {{ trial_balance.unmapped_count }} unmapped.</p>
+    {% endif %}
+  </div>
+
+  {% if trial_balance %}
   <div class="card">
     <h3 class="mt-0">Audit adjustments</h3>
     <p class="muted" style="font-size:12.5px;">Journal entries proposed against the preliminary trial balance above - the Financial Statements below are computed from the preliminary trial balance PLUS these adjustments (current year only; the prior year comparative is never adjusted). Each adjustment carries its own Preparer/Reviewer/Partner sign-off, same as any other workpaper.</p>
@@ -983,12 +1188,16 @@
     {% endif %}
   </div>
   {% elif trial_balance %}
-  <div class="card"><div class="empty-state">Import or add trial balance accounts above, then map each to an IAS 1 category, to generate the financial statements here.</div></div>
+  <div class="card"><div class="empty-state">Map every account on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}">Planning tab's trial balance</a> to an IAS 1 category to generate the financial statements here.</div></div>
   {% endif %}
 
   {{ qmacros.render_queries(engagement, 'finalisation', queries_by_section.get('finalisation', [])) }}
 
+{% endif %}
 {% elif tab == 'substantive' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
   <div class="card">
     <h3 class="mt-0">Substantive procedures</h3>
     <p class="muted" style="font-size:12.5px;">
@@ -1107,5 +1316,6 @@
 
   {{ qmacros.render_queries(engagement, 'substantive', queries_by_area.get(area_name, []), area_name=area_name) }}
   {% endfor %}
+{% endif %}
 {% endif %}
 {% endblock %}

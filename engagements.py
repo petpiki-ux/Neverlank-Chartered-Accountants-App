@@ -15,6 +15,7 @@ from models import (
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation,
     RiskAssessment, MaterialityCalculation, EntityUnderstanding,
     AnalyticalReview, AnalyticalReviewLine,
+    ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS,
     COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
     EngagementQuery, QueryReply,
@@ -24,18 +25,31 @@ from models import (
     ENTITY_UNDERSTANDING_FIELDS,
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
-    user_has_permission, user_can_access_engagement,
+    user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
 )
 import financials as fin
 
 engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
 
 
-def _ensure_engagement_access(engagement):
-    """Confidentiality gate for every engagement-scoped route below: aborts
-    403 unless current_user is that engagement's Partner/Manager/Team (or
-    Admin, who always passes). See models.user_can_access_engagement."""
+def _ensure_engagement_access(engagement, require_accepted=True):
+    """Confidentiality + acceptance gate for every engagement-scoped route
+    below: aborts 403 unless current_user is that engagement's
+    Partner/Manager/Team (or Admin, who always passes). See
+    models.user_can_access_engagement.
+
+    require_accepted additionally blocks non-Admins from every route that
+    passes it as True (the default - i.e. every existing call site below,
+    unchanged) until the engagement's Client Acceptance & Continuance gate
+    is cleared (models.engagement_acceptance_cleared) - which is always
+    True for engagements that don't require it in the first place, so this
+    is a no-op for every engagement that predates the feature. Only
+    view_engagement itself (so the page - including its own Acceptance tab
+    - can render at all) and every route inside acceptance.py (so the gate
+    can actually be worked on) pass require_accepted=False."""
     if not user_can_access_engagement(current_user, engagement):
+        abort(403)
+    if require_accepted and current_user.role != "admin" and not engagement_acceptance_cleared(engagement):
         abort(403)
 
 
@@ -131,6 +145,7 @@ def new_engagement():
             description=request.form.get("description", "").strip(),
             partner_id=request.form.get("partner_id") or None,
             manager_id=request.form.get("manager_id") or None,
+            acceptance_required=request.form.get("acceptance_required") == "on",
         )
         start_date = request.form.get("start_date")
         deadline = request.form.get("deadline")
@@ -171,7 +186,7 @@ def new_engagement():
 @login_required
 def edit_engagement(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
-    _ensure_engagement_access(engagement)
+    _ensure_engagement_access(engagement, require_accepted=False)
     clients = Client.query.order_by(Client.name).all()
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
 
@@ -184,6 +199,7 @@ def edit_engagement(engagement_id):
         engagement.description = request.form.get("description", "").strip()
         engagement.partner_id = request.form.get("partner_id") or None
         engagement.manager_id = request.form.get("manager_id") or None
+        engagement.acceptance_required = request.form.get("acceptance_required") == "on"
 
         start_date = request.form.get("start_date")
         deadline = request.form.get("deadline")
@@ -210,7 +226,7 @@ def delete_engagement(engagement_id):
     if not user_has_permission(current_user, "delete_engagements"):
         abort(403)
     engagement = Engagement.query.get_or_404(engagement_id)
-    _ensure_engagement_access(engagement)
+    _ensure_engagement_access(engagement, require_accepted=False)
     client_id = engagement.client_id
     db.session.delete(engagement)
     db.session.commit()
@@ -222,7 +238,13 @@ def delete_engagement(engagement_id):
 @login_required
 def view_engagement(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
-    _ensure_engagement_access(engagement)
+    # require_accepted=False: the page itself (including its own Acceptance
+    # tab) must always render for anyone with confidentiality access, even
+    # before the gate clears - the gate below only decides which tabs' real
+    # content vs. a "locked" placeholder the template shows.
+    _ensure_engagement_access(engagement, require_accepted=False)
+    client_acceptance = ClientAcceptance.query.filter_by(engagement_id=engagement_id).first()
+    acceptance_cleared = engagement_acceptance_cleared(engagement)
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
     tab = request.args.get("tab", "overview")
     # Document Templates matching this engagement's type (Audit/Assurance/
@@ -300,6 +322,9 @@ def view_engagement(engagement_id):
         queries_by_section=queries_by_section,
         queries_by_area=queries_by_area,
         open_query_count=open_query_count,
+        client_acceptance=client_acceptance,
+        acceptance_cleared=acceptance_cleared,
+        acceptance_decisions=CLIENT_ACCEPTANCE_DECISIONS,
     )
 
 
@@ -545,6 +570,59 @@ def _touch_analytical_review(review):
     review.partner_signed_at = None
 
 
+@engagements_bp.route("/<int:engagement_id>/analytical-review/generate-from-tb", methods=["POST"])
+@login_required
+def generate_analytical_review_from_trial_balance(engagement_id):
+    """Fills in Analytical Review line items automatically from the
+    engagement's preliminary Trial Balance (entered/imported on the
+    Planning tab), instead of the auditor having to type in every current
+    vs prior year figure by hand. Reuses financials.build_all_statements()
+    - the same maths behind the Finalisation tab's financial statements -
+    on the trial balance's PRELIMINARY (unadjusted) figures, since
+    Analytical Review is a risk-assessment/planning procedure that happens
+    before audit adjustments exist.
+
+    Only ever touches lines it generated last time (source="auto"),
+    matched by label - a manually-added line with the same label as a
+    generated one, or an explanation already typed against a generated
+    line, is left alone. Safe to run again after the trial balance changes."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
+    if not trial_balance or not trial_balance.lines:
+        flash("Enter or import the preliminary trial balance (Planning tab) before generating analytical review figures from it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
+    review = _get_or_create_analytical_review(engagement_id)
+    statements = fin.build_all_statements(trial_balance.lines)
+    sfp = statements["sfp"]
+    total_liabilities_current = sfp["ncl_total"]["current"] + sfp["cl_total"]["current"]
+    total_liabilities_prior = sfp["ncl_total"]["prior"] + sfp["cl_total"]["prior"]
+
+    generated = [(r["label"], r["current"], r["prior"]) for r in statements["pl"]["rows"]]
+    generated += [
+        ("Total assets", sfp["total_assets"]["current"], sfp["total_assets"]["prior"]),
+        ("Total liabilities", total_liabilities_current, total_liabilities_prior),
+        ("Total equity", sfp["total_equity"]["current"], sfp["total_equity"]["prior"]),
+    ]
+
+    existing_auto = {l.label: l for l in review.lines if l.source == "auto"}
+    for label, current, prior in generated:
+        line = existing_auto.get(label)
+        if line:
+            line.current_amount = current
+            line.prior_amount = prior
+        else:
+            db.session.add(AnalyticalReviewLine(
+                analytical_review_id=review.id, label=label,
+                current_amount=current, prior_amount=prior, source="auto",
+            ))
+    _touch_analytical_review(review)
+    db.session.commit()
+    flash("Analytical review figures generated from the preliminary trial balance.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
+
 @engagements_bp.route("/<int:engagement_id>/analytical-review/threshold", methods=["POST"])
 @login_required
 def save_analytical_review_threshold(engagement_id):
@@ -618,6 +696,9 @@ def update_analytical_review_line(line_id):
     line.prior_amount = _float_or_none("prior_amount", line.prior_amount)
     line.current_amount = _float_or_none("current_amount", line.current_amount)
     line.explanation = request.form.get("explanation", line.explanation or "").strip()
+    # A hand-edit "claims" this line from Generate from Trial Balance - it
+    # will no longer be silently overwritten by a later regenerate.
+    line.source = "manual"
     _touch_analytical_review(review)
     db.session.commit()
     flash("Line updated.", "success")
@@ -921,7 +1002,11 @@ def upload_substantive_area_document(engagement_id, area_name):
 @login_required
 def download_document(doc_id):
     doc = Document.query.get_or_404(doc_id)
-    _ensure_engagement_access(doc.engagement)
+    # require_accepted=False: the signed engagement letter (uploaded via the
+    # Client Acceptance tab, itself an ordinary Document) has to be
+    # downloadable/viewable WHILE acceptance is still pending, otherwise
+    # nobody could ever check it before signing off the decision.
+    _ensure_engagement_access(doc.engagement, require_accepted=False)
     return send_from_directory(
         current_app.config["UPLOAD_FOLDER"], doc.stored_filename, as_attachment=True,
         download_name=doc.original_filename,

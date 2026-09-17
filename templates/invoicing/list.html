@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Invoices - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Invoices</h1>
+    <div class="subtitle">{{ invoices|length }} invoice(s)</div>
+  </div>
+  <a href="{{ url_for('invoicing.new_invoice') }}" class="btn gold">+ New Invoice</a>
+</div>
+
+<div class="card">
+  <form method="get" class="form-row" style="align-items:flex-end;margin-bottom:0;">
+    <div>
+      <label for="status">Status</label>
+      <select id="status" name="status" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for s in statuses %}<option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="client_id">Client</label>
+      <select id="client_id" name="client_id" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for c in clients %}<option value="{{ c.id }}" {% if client_filter==c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  {% if invoices %}
+  <table>
+    <thead><tr><th>Invoice #</th><th>Client</th><th>Engagement</th><th>Issue date</th><th>Due date</th><th class="text-right">Total</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for inv in invoices %}
+      <tr{% if inv.is_overdue %} class="danger"{% endif %}>
+        <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a></td>
+        <td>{{ inv.client.name }}</td>
+        <td>{{ inv.engagement.title if inv.engagement else '—' }}</td>
+        <td>{{ inv.issue_date.strftime('%d %b %Y') if inv.issue_date else '—' }}</td>
+        <td>{{ inv.due_date.strftime('%d %b %Y') if inv.due_date else '—' }}{% if inv.is_overdue %} <span class="badge overdue">Overdue</span>{% endif %}</td>
+        <td class="text-right">{{ inv.currency }} {{ '%.2f'|format(inv.total) }}</td>
+        <td><span class="badge status-{{ inv.status }}">{{ inv.status }}</span></td>
+        <td class="text-right"><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No invoices yet. <a href="{{ url_for('invoicing.new_invoice') }}">Create your first invoice</a>.</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block title %}{{ invoice.invoice_number }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ invoice.invoice_number }}</h1>
+    <div class="subtitle">
+      <a href="{{ url_for('clients.view_client', client_id=invoice.client.id) }}">{{ invoice.client.name }}</a>
+      {% if invoice.engagement %} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=invoice.engagement.id) }}">{{ invoice.engagement.title }}</a>{% endif %}
+      &middot; <span class="badge status-{{ invoice.status }}">{{ invoice.status }}</span>
+      {% if invoice.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}
+    </div>
+  </div>
+  <div>
+    <a href="{{ url_for('invoicing.print_invoice', invoice_id=invoice.id) }}" class="btn secondary" target="_blank">Print / Save as PDF</a>
+    <a href="{{ url_for('invoicing.edit_invoice', invoice_id=invoice.id) }}" class="btn secondary">Edit details</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="form-row">
+    <div><strong>Bill to:</strong><br>{{ invoice.bill_to or invoice.client.name }}</div>
+    <div><strong>Issue date:</strong> {{ invoice.issue_date.strftime('%d %b %Y') if invoice.issue_date else '—' }}</div>
+    <div><strong>Due date:</strong> {{ invoice.due_date.strftime('%d %b %Y') if invoice.due_date else '—' }}</div>
+    <div><strong>Currency:</strong> {{ invoice.currency }} &middot; <strong>VAT:</strong> {{ invoice.vat_pct }}%</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Line items</h3>
+  {% if invoice.lines %}
+  <table>
+    <thead><tr><th>Description</th><th class="text-right">Qty</th><th class="text-right">Unit price</th><th class="text-right">Line total</th><th></th></tr></thead>
+    <tbody>
+      {% for line in invoice.lines %}
+      <tr>
+        <form method="post" action="{{ url_for('invoicing.update_invoice_line', line_id=line.id) }}" class="inline">
+        <td><input type="text" name="description" value="{{ line.description }}" style="margin-bottom:0;"></td>
+        <td><input type="number" step="0.01" name="quantity" value="{{ line.quantity }}" style="width:80px;margin-bottom:0;text-align:right;"></td>
+        <td><input type="number" step="0.01" name="unit_price" value="{{ line.unit_price }}" style="width:110px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right">{{ '%.2f'|format(line.line_total) }}</td>
+        <td>
+          <button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" formaction="{{ url_for('invoicing.delete_invoice_line', line_id=line.id) }}" class="btn small danger" onclick="return confirm('Delete this line?')">Delete</button>
+        </td>
+        </form>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No line items yet - add one below.</div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('invoicing.add_invoice_line', invoice_id=invoice.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div style="grid-column: span 2;"><label for="description">Description *</label><input type="text" id="description" name="description" placeholder="e.g. Statutory audit fee - FY2026" required></div>
+    <div><label for="quantity">Qty</label><input type="number" step="0.01" id="quantity" name="quantity" value="1"></div>
+    <div><label for="unit_price">Unit price</label><input type="number" step="0.01" id="unit_price" name="unit_price" value="0.00"></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add line</button></div>
+  </form>
+</div>
+
+<div class="card" style="max-width:360px;margin-left:auto;">
+  <div class="form-row"><div>Subtotal</div><div class="text-right">{{ invoice.currency }} {{ '%.2f'|format(invoice.subtotal) }}</div></div>
+  <div class="form-row"><div>VAT ({{ invoice.vat_pct }}%)</div><div class="text-right">{{ invoice.currency }} {{ '%.2f'|format(invoice.vat_amount) }}</div></div>
+  <div class="form-row"><div><strong>Total</strong></div><div class="text-right"><strong>{{ invoice.currency }} {{ '%.2f'|format(invoice.total) }}</strong></div></div>
+</div>
+
+{% if invoice.notes %}
+<div class="card">
+  <h3 class="mt-0">Notes</h3>
+  <div style="white-space:pre-wrap;">{{ invoice.notes }}</div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Status</h3>
+  <form method="post" action="{{ url_for('invoicing.update_invoice_status', invoice_id=invoice.id) }}" class="form-row" style="align-items:flex-end;">
+    <div>
+      <label for="status">Set status</label>
+      <select id="status" name="status">
+        {% for s in statuses %}<option value="{{ s }}" {% if invoice.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Update</button></div>
+  </form>
+  {% if invoice.paid_at %}<p class="muted" style="font-size:12px;">Marked paid on {{ invoice.paid_at.strftime('%d %b %Y') }}.</p>{% endif %}
+  <p class="muted" style="font-size:11.5px;">Created by {{ invoice.created_by.name if invoice.created_by else '—' }} on {{ invoice.created_at.strftime('%d %b %Y') if invoice.created_at else '—' }}.</p>
+  <form method="post" action="{{ url_for('invoicing.delete_invoice', invoice_id=invoice.id) }}" onsubmit="return confirm('Delete this invoice? This cannot be undone.');" class="inline">
+    <button type="submit" class="btn small danger">Delete invoice</button>
+  </form>
+</div>
+{% endblock %}

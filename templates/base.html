@@ -25,6 +25,7 @@
       <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a>
       <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
       <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
+      <a href="{{ url_for('invoicing.list_invoices') }}">Invoices</a>
       {% if user_has_permission(current_user, 'manage_users') %}
       <a href="{{ url_for('users.list_users') }}">Team</a>
       {% endif %}
