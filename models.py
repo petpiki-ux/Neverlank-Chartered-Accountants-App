@@ -94,6 +94,7 @@ INDUSTRY_OPTIONS = [
     "Construction & Real Estate",
     "Banking & Financial Services",
     "Insurance",
+    "Insurance Brokers",
     "Microfinance & Savings/Credit Cooperatives",
     "NGOs & Non-Profit Organisations",
     "Hospitality & Tourism",
@@ -438,6 +439,12 @@ INDUSTRY_EXTRA_PROCEDURES = {
         "Trade Payables and Accruals": ["Test the adequacy of insurance/claims reserves (outstanding claims, IBNR) with reference to actuarial valuations."],
         "Revenue": ["Test premium recognition and unearned premium reserve calculations."],
     },
+    "Insurance Brokers": {
+        "Cash and Bank": ["Confirm that client/premium monies are held in a segregated trust or premium bank account separate from the firm's own funds, and reconcile the trust account to the underlying client/policy listing."],
+        "Trade Receivables": ["Test premiums due from clients and brokerage/commission income due from insurers for recoverability and correct ageing."],
+        "Revenue": ["Test the recognition of brokerage/commission income (including any profit or contingent commissions) against underlying policy placements and insurer statements."],
+        "Trade Payables and Accruals": ["Test amounts held/due to insurers for premiums collected on their behalf but not yet remitted, and confirm timely remittance after year end."],
+    },
     "Microfinance & Savings/Credit Cooperatives": {
         "Trade Receivables": ["Test loan portfolio at risk (PAR) classification and provisioning against the entity's credit policy and regulatory guidelines."],
     },
@@ -638,8 +645,15 @@ class Document(db.Model):
     notes = db.Column(db.Text)
     uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Optional link to the Substantive Procedures section this working paper
+    # was filed under (e.g. "Cash and Bank") - lets evidence supporting a
+    # section's procedures be filed and found alongside them, rather than
+    # only in the engagement's general Documents tab. Nullable: a document
+    # doesn't have to belong to any particular audit area.
+    substantive_area_id = db.Column(db.Integer, db.ForeignKey("substantive_procedure_area.id"))
 
     uploaded_by = db.relationship("User")
+    substantive_area = db.relationship("SubstantiveProcedureArea", backref=db.backref("documents", lazy=True, order_by="Document.uploaded_at.desc()"))
 
 
 class DocumentTemplate(db.Model):

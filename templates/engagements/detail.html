@@ -490,13 +490,14 @@
   <div class="card">
     {% if engagement.documents %}
     <table>
-      <thead><tr><th>File</th><th>Reference</th><th>Category</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+      <thead><tr><th>File</th><th>Reference</th><th>Category</th><th>Substantive area</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
       <tbody>
       {% for d in engagement.documents|sort(attribute='uploaded_at', reverse=True) %}
         <tr>
           <td>{{ d.original_filename }}{% if d.notes %}<div class="muted" style="font-size:11.5px;">{{ d.notes }}</div>{% endif %}</td>
           <td class="muted">{{ d.reference or '—' }}</td>
           <td>{{ d.category }}</td>
+          <td class="muted">{{ d.substantive_area.area if d.substantive_area else '—' }}</td>
           <td>v{{ d.version }}</td>
           <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
           <td>{{ d.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
@@ -1018,6 +1019,40 @@
       <div style="grid-column: span 3;"><label>Add a procedure</label><input type="text" name="procedure_text" placeholder="Describe the procedure" required></div>
       <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add</button></div>
     </form>
+
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e5e5e5;">
+      <h4 class="mt-0" style="margin-bottom:8px;">Working papers filed under {{ area_name }}</h4>
+      {% if area and area.documents %}
+      <table>
+        <thead><tr><th>File</th><th>Reference</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+        <tbody>
+        {% for d in area.documents %}
+          <tr>
+            <td>{{ d.original_filename }}{% if d.notes %}<div class="muted" style="font-size:11.5px;">{{ d.notes }}</div>{% endif %}</td>
+            <td class="muted">{{ d.reference or '—' }}</td>
+            <td>v{{ d.version }}</td>
+            <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
+            <td>{{ d.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
+            <td>
+              <a href="{{ url_for('engagements.download_document', doc_id=d.id) }}" class="btn small secondary">Download</a>
+              {% if user_has_permission(current_user, 'delete_documents') %}
+              <form method="post" action="{{ url_for('engagements.delete_document', doc_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">No working papers filed under this section yet.</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('engagements.upload_substantive_area_document', engagement_id=engagement.id, area_name=area_name) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;margin-top:8px;">
+        <div><label for="subfile_{{ loop.index }}">File *</label><input type="file" id="subfile_{{ loop.index }}" name="file" required></div>
+        <div><label for="subref_{{ loop.index }}">Reference</label><input type="text" id="subref_{{ loop.index }}" name="reference" placeholder="e.g. B-1"></div>
+        <div><label for="subnotes_{{ loop.index }}">Notes</label><input type="text" id="subnotes_{{ loop.index }}" name="notes"></div>
+        <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">File under {{ area_name }}</button></div>
+      </form>
+    </div>
 
     {% if area %}
     <form method="post" action="{{ url_for('engagements.save_substantive_area_notes', area_id=area.id) }}" style="margin-top:8px;">

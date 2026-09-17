@@ -39,7 +39,7 @@ def _add_missing_columns():
         return  # only SQLite is supported/expected; skip silently otherwise
     partner_signoff_cols = [("partner_signed_by_id", "INTEGER"), ("partner_signed_at", "DATETIME")]
     additions = {
-        "document": [("reference", "VARCHAR(100)")],
+        "document": [("reference", "VARCHAR(100)"), ("substantive_area_id", "INTEGER")],
         "engagement": [("subdivision", "VARCHAR(50)")],
         "engagement_checklist_item": [
             ("reviewed_by_id", "INTEGER"),

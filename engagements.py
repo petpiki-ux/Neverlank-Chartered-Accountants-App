@@ -753,22 +753,14 @@ def _allowed_file(filename):
     return ext in current_app.config["ALLOWED_EXTENSIONS"]
 
 
-@engagements_bp.route("/<int:engagement_id>/documents/upload", methods=["POST"])
-@login_required
-def upload_document(engagement_id):
-    Engagement.query.get_or_404(engagement_id)
-    file = request.files.get("file")
-    if not file or file.filename == "":
-        flash("Please choose a file to upload.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="documents"))
-
-    if not _allowed_file(file.filename):
-        flash("File type not allowed.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="documents"))
-
+def _save_engagement_document(engagement_id, file, category, reference, notes, substantive_area_id=None):
+    """Shared save logic for an engagement working paper/document - used by
+    both the general Documents tab upload and by filing a working paper
+    directly under a Substantive Procedures area. Saves the file to disk,
+    works out its version number (same name+category counts as a new
+    version), and returns the new (uncommitted) Document row; the caller is
+    responsible for db.session.commit()."""
     original_name = secure_filename(file.filename)
-    category = request.form.get("category", "General").strip() or "General"
-    reference = request.form.get("reference", "").strip()
 
     # simple versioning: count existing docs with same original name+category in this engagement
     existing = Document.query.filter_by(
@@ -786,13 +778,67 @@ def upload_document(engagement_id):
         category=category,
         reference=reference,
         version=version,
-        notes=request.form.get("notes", "").strip(),
+        notes=notes,
         uploaded_by_id=current_user.id,
+        substantive_area_id=substantive_area_id,
     )
     db.session.add(doc)
+    return doc, version
+
+
+@engagements_bp.route("/<int:engagement_id>/documents/upload", methods=["POST"])
+@login_required
+def upload_document(engagement_id):
+    Engagement.query.get_or_404(engagement_id)
+    file = request.files.get("file")
+    if not file or file.filename == "":
+        flash("Please choose a file to upload.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="documents"))
+
+    if not _allowed_file(file.filename):
+        flash("File type not allowed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="documents"))
+
+    category = request.form.get("category", "General").strip() or "General"
+    reference = request.form.get("reference", "").strip()
+    doc, version = _save_engagement_document(
+        engagement_id, file, category, reference, request.form.get("notes", "").strip()
+    )
     db.session.commit()
-    flash(f"Uploaded '{original_name}' (v{version}).", "success")
+    flash(f"Uploaded '{doc.original_filename}' (v{version}).", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="documents"))
+
+
+@engagements_bp.route("/<int:engagement_id>/substantive-procedures/areas/<area_name>/documents/upload", methods=["POST"])
+@login_required
+def upload_substantive_area_document(engagement_id, area_name):
+    """File a working paper directly under one Substantive Procedures
+    section (e.g. "Cash and Bank") - the same underlying Document as the
+    Documents tab, just tagged with which audit area it supports, and
+    filed under a category named after that area so it's easy to spot in
+    the general Documents list too."""
+    Engagement.query.get_or_404(engagement_id)
+    if area_name not in AUDIT_AREAS:
+        abort(404)
+
+    file = request.files.get("file")
+    if not file or file.filename == "":
+        flash("Please choose a file to upload.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+
+    if not _allowed_file(file.filename):
+        flash("File type not allowed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+
+    area = _get_or_create_substantive_area(engagement_id, area_name)
+    reference = request.form.get("reference", "").strip()
+    doc, version = _save_engagement_document(
+        engagement_id, file, area_name, reference, request.form.get("notes", "").strip(),
+        substantive_area_id=area.id,
+    )
+    db.session.commit()
+    flash(f"Filed '{doc.original_filename}' (v{version}) under {area_name}.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
 
 
 @engagements_bp.route("/documents/<int:doc_id>/download")
@@ -812,13 +858,14 @@ def delete_document(doc_id):
         abort(403)
     doc = Document.query.get_or_404(doc_id)
     engagement_id = doc.engagement_id
+    return_tab = "substantive" if doc.substantive_area_id else "documents"
     try:
         os.remove(os.path.join(current_app.config["UPLOAD_FOLDER"], doc.stored_filename))
     except OSError:
         pass
     db.session.delete(doc)
     db.session.commit()
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="documents"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=return_tab))
 
 
 # ---------- Tasks ----------
