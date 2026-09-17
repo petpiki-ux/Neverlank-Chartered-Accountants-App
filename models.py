@@ -1716,6 +1716,27 @@ class ClientAcceptance(db.Model):
     aml_kyc_notes = db.Column(db.Text)
     aml_kyc_completed = db.Column(db.Boolean)
 
+    # Forensic Audit Client Acceptance Questionnaire - on engagements of type
+    # "Investigative Engagement" these four sections REPLACE sections 1-5
+    # above (Background check / Independence / Predecessor / Competence /
+    # Regulatory) in the Client Acceptance tab - the underlying questions
+    # are different enough (conflicts & threats, enhanced due diligence,
+    # evidence/legal control, scope realism) that reusing the generic
+    # fields above would mean showing fields like "predecessor auditor
+    # name" under a heading about evidence control, which doesn't make
+    # sense. Both sets of columns exist side by side; only one set is shown
+    # (and required for items_complete, below) depending on the engagement's
+    # type, so switching an engagement's type never loses whichever set was
+    # already filled in.
+    conflict_threat_clear = db.Column(db.Boolean)  # 1. Conflict of Interest & Threat Assessment
+    conflict_threat_notes = db.Column(db.Text)
+    edd_completed = db.Column(db.Boolean)  # 2. Enhanced Due Diligence (EDD)
+    edd_notes = db.Column(db.Text)
+    legal_evidence_satisfactory = db.Column(db.Boolean)  # 3. Legal Framework & Evidence Control
+    legal_evidence_notes = db.Column(db.Text)
+    competence_scope_confirmed = db.Column(db.Boolean)  # 4. Competence & Scope Realism
+    competence_scope_notes = db.Column(db.Text)
+
     # 6. Engagement letter - scope/timeline/responsibilities/fees, signed by
     # the client. The signed copy is filed as an ordinary Document (see
     # acceptance.py's upload route) and linked here.
@@ -1763,10 +1784,22 @@ class ClientAcceptance(db.Model):
 
     @property
     def items_complete(self):
-        """All six items have at least been assessed (not necessarily
+        """All items have at least been assessed (not necessarily
         favourably - an unfavourable background check is a reason to
         decline, not a reason the form is "incomplete"). Required before a
-        Partner can record the decision as sign-off."""
+        Partner can record the decision as sign-off. Investigative
+        Engagements use the four Forensic Audit Client Acceptance
+        Questionnaire sections instead of the five generic ones (see the
+        columns above) - every other engagement type keeps the original
+        six-item check."""
+        if self.engagement and self.engagement.type == "Investigative Engagement":
+            return all([
+                self.conflict_threat_clear is not None,
+                self.edd_completed is not None,
+                self.legal_evidence_satisfactory is not None,
+                self.competence_scope_confirmed is not None,
+                self.engagement_letter_signed_at is not None,
+            ])
         predecessor_done = self.predecessor_not_applicable or self.predecessor_contacted is not None
         return all([
             self.background_check_satisfactory is not None,
@@ -1899,24 +1932,23 @@ DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS = [
 # type is "Investigative Engagement" (see acceptance.seed_acceptance_checklist)
 # - forensic/fraud investigation work raises acceptance considerations a
 # standard audit/assurance checklist doesn't cover (evidence chain of
-# custody, legal privilege, adversarial parties). Mapped onto the same
-# section names as the general list above (Independence, Regulatory / AML,
-# Engagement letter, Competence) so each question still groups under the
-# matching numbered section on the Client Acceptance tab with no template
-# changes needed.
+# custody, legal privilege, adversarial parties). Section names match the
+# four Forensic Audit Client Acceptance Questionnaire sections that REPLACE
+# the five generic narrative sections for this engagement type (see
+# ClientAcceptance.conflict_threat_clear etc. and items_complete above).
 FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS = [
-    ("Independence", "Have we screened all suspects, target entities, key witnesses, and related parties against our firm's active and past client database?"),
-    ("Independence", "Have we previously provided any services (like bookkeeping or standard audits) to this client or target that could create a self-review or advocacy threat in court?"),
-    ("Independence", "Does this investigation involve high-risk individuals, corporate retaliation, or hostile environments that require specialised physical or cybersecurity measures for our staff?"),
-    ("Regulatory / AML", "Have we fully verified the identity of the engaging entity and its directors through standard KYC and AML protocols?"),
-    ("Regulatory / AML", "Have we identified the Ultimate Beneficial Owners (UBOs) of both the client and the target to rule out hidden conflicts?"),
-    ("Regulatory / AML", "Do background checks in court registries, regulatory databases, and media reports reveal a history of bad faith, fraud, or vexatious litigation by any key player?"),
-    ("Engagement letter", "Does the client have the absolute legal authority to grant us access to the target's emails, personal devices, and financial records without breaching privacy laws (e.g., GDPR)?"),
-    ("Engagement letter", "Has the client or a third party already altered, deleted, or mismanaged the data, potentially damaging its admissibility in court?"),
-    ("Engagement letter", "Should we be retained directly by the client, or hired through their external legal counsel to shield our work under attorney-client privilege?"),
-    ("Competence", "Do we have available Certified Fraud Examiners (CFEs), digital forensics specialists, or industry experts required for this specific type of fraud?"),
-    ("Competence", "Is the scope clearly defined (e.g., quantifying an insurance loss, tracing stolen assets, or preparing for criminal prosecution), or is the client asking for a vague \"fishing expedition\"?"),
-    ("Competence", "Does the client understand that building legally sound evidence takes time, and are they willing to pay an upfront retainer to mitigate our non-payment risk?"),
+    ("Conflict of Interest & Threat Assessment", "Have we screened all suspects, target entities, key witnesses, and related parties against our firm's active and past client database?"),
+    ("Conflict of Interest & Threat Assessment", "Have we previously provided any services (like bookkeeping or standard audits) to this client or target that could create a self-review or advocacy threat in court?"),
+    ("Conflict of Interest & Threat Assessment", "Does this investigation involve high-risk individuals, corporate retaliation, or hostile environments that require specialised physical or cybersecurity measures for our staff?"),
+    ("Enhanced Due Diligence (EDD)", "Have we fully verified the identity of the engaging entity and its directors through standard KYC and AML protocols?"),
+    ("Enhanced Due Diligence (EDD)", "Have we identified the Ultimate Beneficial Owners (UBOs) of both the client and the target to rule out hidden conflicts?"),
+    ("Enhanced Due Diligence (EDD)", "Do background checks in court registries, regulatory databases, and media reports reveal a history of bad faith, fraud, or vexatious litigation by any key player?"),
+    ("Legal Framework & Evidence Control", "Does the client have the absolute legal authority to grant us access to the target's emails, personal devices, and financial records without breaching privacy laws (e.g., GDPR)?"),
+    ("Legal Framework & Evidence Control", "Has the client or a third party already altered, deleted, or mismanaged the data, potentially damaging its admissibility in court?"),
+    ("Legal Framework & Evidence Control", "Should we be retained directly by the client, or hired through their external legal counsel to shield our work under attorney-client privilege?"),
+    ("Competence & Scope Realism", "Do we have available Certified Fraud Examiners (CFEs), digital forensics specialists, or industry experts required for this specific type of fraud?"),
+    ("Competence & Scope Realism", "Is the scope clearly defined (e.g., quantifying an insurance loss, tracing stolen assets, or preparing for criminal prosecution), or is the client asking for a vague \"fishing expedition\"?"),
+    ("Competence & Scope Realism", "Does the client understand that building legally sound evidence takes time, and are they willing to pay an upfront retainer to mitigate our non-payment risk?"),
 ]
 
 

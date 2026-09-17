@@ -160,7 +160,7 @@
     </div>
   {% endmacro %}
 
-  {% set known_prefixes = ['Background check', 'Independence', 'Predecessor', 'Competence', 'Regulatory', 'Engagement letter'] %}
+  {% set known_prefixes = ['Conflict of Interest & Threat Assessment', 'Enhanced Due Diligence (EDD)', 'Legal Framework & Evidence Control', 'Competence & Scope Realism', 'Engagement letter'] if engagement.type == 'Investigative Engagement' else ['Background check', 'Independence', 'Predecessor', 'Competence', 'Regulatory', 'Engagement letter'] %}
   {% macro checklist_other(items, prefixes, responses) %}
     {% set leftover = [] %}
     {% for item in items %}
@@ -180,7 +180,11 @@
   <div class="card">
     <h3 class="mt-0">Client Acceptance &amp; Continuance</h3>
     <p class="muted" style="font-size:12.5px;">
+      {% if engagement.type == 'Investigative Engagement' %}
+      Before forensic work starts, the firm works through the Forensic Audit Client Acceptance Questionnaire below and the Engagement Partner records an accept/decline decision.
+      {% else %}
       Before any audit work starts, the firm works through these six items and the Engagement Partner records an accept/decline decision.
+      {% endif %}
       Each section below has its own detailed checklist - tick and comment on each question, and save that section on its own.
       {% if engagement.acceptance_required %}Until a Partner signs off an "Accepted" decision below, every other tab on this engagement stays locked (Admin can still access them).{% endif %}
     </p>
@@ -191,6 +195,56 @@
     <form method="post" action="{{ url_for('acceptance.seed_acceptance_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist to every section below</button></form>
     {% endif %}
   </div>
+
+  {% if engagement.type == 'Investigative Engagement' %}
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_conflict_threat', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">1. Conflict of Interest &amp; Threat Assessment</h3>
+      <p class="muted" style="font-size:12px;">Screen the targets, check our own objectivity, and assess whether our staff need special safety measures.</p>
+      <label><input type="checkbox" name="conflict_threat_clear" style="width:auto;" {% if client_acceptance and client_acceptance.conflict_threat_clear %}checked{% endif %}> Clear - no conflicts or unmitigated threats identified</label>
+      <label for="conflict_threat_notes">Notes</label>
+      <textarea id="conflict_threat_notes" name="conflict_threat_notes" rows="2">{{ client_acceptance.conflict_threat_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save conflict of interest &amp; threat assessment</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Conflict of Interest & Threat Assessment', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_edd', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">2. Enhanced Due Diligence (EDD)</h3>
+      <p class="muted" style="font-size:12px;">Verify the engaging entity, identify beneficial owners, and check for a history of bad faith or vexatious litigation.</p>
+      <label><input type="checkbox" name="edd_completed" style="width:auto;" {% if client_acceptance and client_acceptance.edd_completed %}checked{% endif %}> Completed - no concerns identified</label>
+      <label for="edd_notes">Notes</label>
+      <textarea id="edd_notes" name="edd_notes" rows="2">{{ client_acceptance.edd_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save enhanced due diligence</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Enhanced Due Diligence (EDD)', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_legal_evidence', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">3. Legal Framework &amp; Evidence Control</h3>
+      <p class="muted" style="font-size:12px;">Confirm the client's legal authority over the data, the evidence's integrity, and how we should be contracted.</p>
+      <label><input type="checkbox" name="legal_evidence_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.legal_evidence_satisfactory %}checked{% endif %}> Satisfactory - legal authority and evidence chain confirmed</label>
+      <label for="legal_evidence_notes">Notes</label>
+      <textarea id="legal_evidence_notes" name="legal_evidence_notes" rows="2">{{ client_acceptance.legal_evidence_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save legal framework &amp; evidence control</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Legal Framework & Evidence Control', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_competence_scope', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">4. Competence &amp; Scope Realism</h3>
+      <p class="muted" style="font-size:12px;">Confirm we have the right forensic experts, a clearly defined end goal, and a realistic budget/timeline.</p>
+      <label><input type="checkbox" name="competence_scope_confirmed" style="width:auto;" {% if client_acceptance and client_acceptance.competence_scope_confirmed %}checked{% endif %}> Confirmed - expertise, scope and budget/timeline are realistic</label>
+      <label for="competence_scope_notes">Notes</label>
+      <textarea id="competence_scope_notes" name="competence_scope_notes" rows="2">{{ client_acceptance.competence_scope_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save competence &amp; scope realism</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Competence & Scope Realism', engagement, acceptance_checklist_responses) }}{% endif %}
+  {% else %}
 
   <form method="post" action="{{ url_for('acceptance.save_acceptance_background', engagement_id=engagement.id) }}">
     <div class="card">
@@ -258,9 +312,10 @@
     </div>
   </form>
   {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Regulatory', engagement, acceptance_checklist_responses) }}{% endif %}
+  {% endif %}
 
   <div class="card">
-    <h3 class="mt-0">6. Engagement letter</h3>
+    <h3 class="mt-0">{% if engagement.type == 'Investigative Engagement' %}5{% else %}6{% endif %}. Engagement letter</h3>
     <p class="muted" style="font-size:12px;">Send a formal contract outlining the audit scope, timeline, responsibilities, and fee structure, then secure client sign-off.</p>
     {% if client_acceptance and client_acceptance.engagement_letter_document %}
     <p style="font-size:13px;">Signed copy on file: <a href="{{ url_for('engagements.download_document', doc_id=client_acceptance.engagement_letter_document_id) }}">{{ client_acceptance.engagement_letter_document.original_filename }}</a>{% if client_acceptance.engagement_letter_signed_at %} - signed {{ client_acceptance.engagement_letter_signed_at.strftime('%d %b %Y') }}{% endif %}.</p>

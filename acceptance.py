@@ -181,6 +181,62 @@ def save_acceptance_regulatory(engagement_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 
+@acceptance_bp.route("/<int:engagement_id>/acceptance/conflict-threat/save", methods=["POST"])
+@login_required
+def save_acceptance_conflict_threat(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.conflict_threat_clear = _bool("conflict_threat_clear")
+    record.conflict_threat_notes = request.form.get("conflict_threat_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Conflict of Interest & Threat Assessment saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/edd/save", methods=["POST"])
+@login_required
+def save_acceptance_edd(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.edd_completed = _bool("edd_completed")
+    record.edd_notes = request.form.get("edd_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Enhanced Due Diligence saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/legal-evidence/save", methods=["POST"])
+@login_required
+def save_acceptance_legal_evidence(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.legal_evidence_satisfactory = _bool("legal_evidence_satisfactory")
+    record.legal_evidence_notes = request.form.get("legal_evidence_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Legal Framework & Evidence Control saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/competence-scope/save", methods=["POST"])
+@login_required
+def save_acceptance_competence_scope(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.competence_scope_confirmed = _bool("competence_scope_confirmed")
+    record.competence_scope_notes = request.form.get("competence_scope_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Competence & Scope Realism saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
 @acceptance_bp.route("/<int:engagement_id>/acceptance/decision/save", methods=["POST"])
 @login_required
 def save_acceptance_decision(engagement_id):

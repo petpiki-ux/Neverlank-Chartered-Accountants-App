@@ -70,6 +70,14 @@ def _add_missing_columns():
             ("risk_evidence_legal_score", "INTEGER"),
             ("risk_scope_capabilities_score", "INTEGER"),
             ("risk_scoring_notes", "TEXT"),
+            ("conflict_threat_clear", "BOOLEAN"),
+            ("conflict_threat_notes", "TEXT"),
+            ("edd_completed", "BOOLEAN"),
+            ("edd_notes", "TEXT"),
+            ("legal_evidence_satisfactory", "BOOLEAN"),
+            ("legal_evidence_notes", "TEXT"),
+            ("competence_scope_confirmed", "BOOLEAN"),
+            ("competence_scope_notes", "TEXT"),
         ],
     }
     with db.engine.connect() as conn:
