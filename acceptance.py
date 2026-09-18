@@ -31,6 +31,7 @@ from models import (
     RISK_CATEGORIES,
     SanctionsScreening, SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, RegulatoryNotice,
+    ClientKeyPerson,
     REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES, user_can_access_engagement, user_has_permission,
 )
 import sanctions_data
@@ -500,6 +501,44 @@ def add_sanctions_screening(engagement_id):
     ))
     db.session.commit()
     flash("Individual added for sanctions/adverse notice screening.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/screening/add-from-key-person", methods=["POST"])
+@login_required
+def add_screening_from_key_person(engagement_id):
+    """Pull a Director/Shareholder/etc already on file for this client (see
+    models.ClientKeyPerson, company_documents.py) into THIS engagement's own
+    Sanctions & Adverse Notice Screening list, instead of retyping their
+    name - the whole point of that list living on the Client rather than
+    the engagement (see models.py's "Company documents & key people"
+    section). Only a Confirmed person can be added this way - an
+    AI-suggested one hasn't been checked by a person yet, so pulling it
+    into a compliance screening list unreviewed would defeat the point of
+    the Suggested/Confirmed distinction."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    person = ClientKeyPerson.query.get_or_404(request.form.get("key_person_id", type=int))
+    if person.client_id != engagement.client_id:
+        abort(403)
+    if person.status != "Confirmed":
+        flash(f"{person.full_name} hasn't been confirmed yet on the client's Directors & Shareholders list - review and confirm them there first.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+    record = _get_or_create(engagement_id)
+    already = next((s for s in record.screenings if s.individual_name == person.full_name), None)
+    if already:
+        flash(f"{person.full_name} is already on this engagement's screening list.", "info")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+    max_order = max([s.order for s in record.screenings], default=0)
+    db.session.add(SanctionsScreening(
+        client_acceptance_id=record.id,
+        individual_name=person.full_name,
+        role_description=person.role,
+        order=max_order + 1,
+        created_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash(f"{person.full_name} added for screening on this engagement.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 

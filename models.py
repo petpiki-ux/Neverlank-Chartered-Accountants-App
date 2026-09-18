@@ -68,6 +68,9 @@ PERMISSIONS = [
     ("manage_sanctions_lists", "Refresh Sanctions Lists",
      "Trigger a manual refresh of the cached UN, OFAC and EU sanctions lists used by automated screening.",
      ("partner", "admin")),
+    ("manage_company_documents", "Manage Company Documents",
+     "Upload or delete a client's company documents (incorporation certificate, CR14, share register, etc.) and confirm/edit/delete the Directors & Shareholders picked up from them.",
+     tuple(USER_ROLES)),
     ("manage_checklist_templates", "Manage Checklist Templates",
      "Create, edit or delete the checklist templates used to start new engagements (previously unrestricted).",
      tuple(USER_ROLES)),
@@ -2417,6 +2420,105 @@ class ClientAcceptanceChecklistItem(db.Model):
 
     def __repr__(self):
         return f"<ClientAcceptanceChecklistItem {self.item_text!r} response={self.response!r}>"
+
+
+# ---------- Company documents & key people (directors/shareholders) ----------
+# Lives on the Client itself, not on any one Engagement, so it's filled in
+# once per client and reused by every engagement that client ever has -
+# unlike Sanctions & Adverse Notice Screening below, which is per-engagement
+# (an engagement's own record of who was screened and when for THAT
+# engagement's acceptance decision). See company_documents.py and
+# entity_extraction.py for the upload/AI-extraction routes and logic.
+
+COMPANY_DOCUMENT_TYPES = [
+    "Certificate of Incorporation",
+    "Memorandum & Articles of Association",
+    "CR14 - Return of Directors",
+    "CR6 - Notice of Situation of Registered Office",
+    "Share Register / Share Certificates",
+    "Beneficial Ownership Declaration",
+    "Director/Shareholder ID Documents",
+    "Other",
+]
+
+PERSON_ROLES = ["Director", "Shareholder", "Beneficial Owner", "Company Secretary", "Other"]
+PERSON_STATUSES = ["Suggested", "Confirmed"]
+
+
+class CompanyDocument(db.Model):
+    """One company registration document (certificate of incorporation,
+    CR14, share register, etc.) uploaded once against a Client and reused
+    across every one of that client's engagements. Text is extracted on
+    upload the same way as RegulatoryNotice (see sanctions_data.
+    extract_pdf_text); an image upload (a photographed/scanned page saved
+    directly as a JPG/PNG rather than a PDF) skips straight to the AI
+    extraction step below since there's no PDF text layer to try first.
+    Directors/Shareholders/etc are then extracted from that document by
+    entity_extraction.extract_people (see ClientKeyPerson) - ai_status
+    records whether that step itself succeeded, separately from whether any
+    people were actually found in a document that genuinely doesn't list
+    any (e.g. a certificate of incorporation with no director names on it)."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    document_type = db.Column(db.String(60), nullable=False, default="Other")
+    title = db.Column(db.String(300), nullable=False)
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))
+    extracted_text = db.Column(db.Text)
+    extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error" - PDF uploads only
+    page_count = db.Column(db.Integer)
+
+    ai_status = db.Column(db.String(20))  # "done", "not_configured", "error"
+    ai_error = db.Column(db.Text)
+    ai_processed_at = db.Column(db.DateTime)
+
+    notes = db.Column(db.Text)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("company_documents", lazy=True, cascade="all, delete-orphan", order_by="CompanyDocument.uploaded_at.desc()"))
+    uploaded_by = db.relationship("User")
+
+    @property
+    def file_ext(self):
+        return self.original_filename.rsplit(".", 1)[-1].lower() if self.original_filename and "." in self.original_filename else ""
+
+    def __repr__(self):
+        return f"<CompanyDocument {self.document_type} {self.title!r}>"
+
+
+class ClientKeyPerson(db.Model):
+    """One director/shareholder/beneficial owner/company secretary
+    associated with a Client - either suggested automatically by AI
+    extraction from an uploaded CompanyDocument (status "Suggested",
+    source_document set) or added/edited by a person directly (status
+    "Confirmed", source_document None, or a Suggested row a reviewer has
+    since confirmed). An AI suggestion is never treated as fact on its own -
+    the same conservative principle as automated sanctions matching
+    (SanctionsScreening/sanctions_data.py): it's surfaced for a person to
+    review, correct if needed, and confirm. Feeds Sanctions & Adverse Notice
+    Screening (see acceptance.py's add-to-screening action) so the people
+    found here don't have to be retyped into that per-engagement list."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    full_name = db.Column(db.String(200), nullable=False)
+    role = db.Column(db.String(30), nullable=False, default="Other")
+    details = db.Column(db.Text)  # shareholding %, ID/passport number, nationality, address, etc - whatever was found/entered
+    status = db.Column(db.String(20), nullable=False, default="Confirmed")  # "Suggested" or "Confirmed" - see PERSON_STATUSES
+
+    source_document_id = db.Column(db.Integer, db.ForeignKey("company_document.id"))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # null for an AI-suggested row until confirmed
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    confirmed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    confirmed_at = db.Column(db.DateTime)
+
+    client = db.relationship("Client", backref=db.backref("key_people", lazy=True, cascade="all, delete-orphan", order_by="ClientKeyPerson.full_name"))
+    source_document = db.relationship("CompanyDocument", backref=db.backref("extracted_people", lazy=True))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    confirmed_by = db.relationship("User", foreign_keys=[confirmed_by_id])
+
+    def __repr__(self):
+        return f"<ClientKeyPerson {self.full_name!r} role={self.role!r} status={self.status!r}>"
 
 
 # ---------- Sanctions & adverse notice screening ----------

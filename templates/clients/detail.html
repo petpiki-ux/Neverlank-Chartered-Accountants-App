@@ -49,6 +49,146 @@
 </div>
 
 <div class="card">
+  <h3 class="mt-0">Company Documents</h3>
+  <p class="muted" style="font-size:12px;">
+    Upload this client's incorporation documents, CR14, share register, etc. once here - every engagement's Client
+    Acceptance tab reuses the same Directors &amp; Shareholders list below, rather than re-entering it each time. The
+    app reads the text out of each document automatically, including scanned/photographed pages (via the Claude API),
+    and suggests every Director/Shareholder/Beneficial Owner/Company Secretary it finds for review below.
+  </p>
+  {% if client.company_documents %}
+  <table>
+    <thead><tr><th>Type</th><th>Title</th><th>Uploaded</th><th>Reading status</th><th></th></tr></thead>
+    <tbody>
+      {% for doc in client.company_documents %}
+      <tr>
+        <td><span class="badge">{{ doc.document_type }}</span></td>
+        <td>{{ doc.title }}{% if doc.notes %}<div class="muted" style="font-size:12px;">{{ doc.notes }}</div>{% endif %}</td>
+        <td class="muted">{{ doc.uploaded_at.strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
+        <td>
+          {% if doc.ai_status == 'done' %}
+          <span class="badge risk-Low">Read - {{ doc.extracted_people|length }} suggested</span>
+          {% elif doc.ai_status == 'not_configured' %}
+          <span class="badge risk-Medium">Automatic reading not set up</span>
+          {% elif doc.ai_status == 'error' %}
+          <span class="badge risk-High" title="{{ doc.ai_error or '' }}">Reading failed</span>
+          {% else %}
+          <span class="badge">Not yet processed</span>
+          {% endif %}
+        </td>
+        <td class="text-right">
+          <a href="{{ url_for('company_documents.download_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
+          {% if can_manage_company_documents %}
+          {% if doc.ai_status != 'done' %}
+          <form method="post" action="{{ url_for('company_documents.reprocess_document', doc_id=doc.id) }}" style="display:inline;"><button type="submit" class="btn small secondary">Reprocess</button></form>
+          {% endif %}
+          <form method="post" action="{{ url_for('company_documents.delete_document', doc_id=doc.id) }}" style="display:inline;" onsubmit="return confirm('Delete this document? This cannot be undone.');">
+            <button type="submit" class="btn small danger">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No company documents uploaded yet.</div>
+  {% endif %}
+  {% if can_manage_company_documents %}
+  <form method="post" action="{{ url_for('company_documents.upload_document', client_id=client.id) }}" enctype="multipart/form-data" style="margin-top:10px;">
+    <div class="form-row" style="align-items:flex-end;">
+      <div>
+        <label for="doc_type">Document type</label>
+        <select id="doc_type" name="document_type" required>
+          {% for t in company_document_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="doc_title">Title (optional)</label><input type="text" id="doc_title" name="title" placeholder="Defaults to the document type"></div>
+      <div><label for="doc_file">File (PDF, JPG or PNG)</label><input type="file" id="doc_file" name="file" accept=".pdf,.png,.jpg,.jpeg" required></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
+    </div>
+    <label for="doc_notes">Notes (optional)</label>
+    <textarea id="doc_notes" name="notes" rows="2"></textarea>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Directors &amp; Shareholders</h3>
+  {% if suggested_people %}
+  <p class="muted" style="font-size:12px;">Suggested from an uploaded document below - review each one against the source document, correct anything needed, then Confirm before it's used for screening.</p>
+  <table>
+    <thead><tr><th>Name</th><th>Role</th><th>Details</th><th>Source document</th><th></th></tr></thead>
+    <tbody>
+      {% for p in suggested_people %}
+        <form method="post" action="{{ url_for('company_documents.update_key_person', person_id=p.id) }}" class="inline">
+        <tr>
+          <td><input type="text" name="full_name" value="{{ p.full_name }}" style="min-width:150px;margin-bottom:0;"></td>
+          <td>
+            <select name="role" style="margin-bottom:0;">
+              {% for r in person_roles %}<option value="{{ r }}" {% if p.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </td>
+          <td><input type="text" name="details" value="{{ p.details or '' }}" style="min-width:180px;margin-bottom:0;" placeholder="Shareholding %, ID number, etc."></td>
+          <td class="muted">{{ p.source_document.title if p.source_document else '—' }}</td>
+          <td>
+            <button type="submit" class="btn small secondary">Save edits</button>
+            <button type="submit" formaction="{{ url_for('company_documents.confirm_key_person', person_id=p.id) }}" class="btn small gold">Confirm</button>
+            <button type="submit" formaction="{{ url_for('company_documents.delete_key_person', person_id=p.id) }}" class="btn small danger" onclick="return confirm('Remove this suggestion?')">Remove</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if confirmed_people %}
+  <table style="margin-top:{% if suggested_people %}14px{% else %}0{% endif %};">
+    <thead><tr><th>Name</th><th>Role</th><th>Details</th><th></th></tr></thead>
+    <tbody>
+      {% for p in confirmed_people %}
+        <form method="post" action="{{ url_for('company_documents.update_key_person', person_id=p.id) }}" class="inline">
+        <tr>
+          <td><input type="text" name="full_name" value="{{ p.full_name }}" style="min-width:150px;margin-bottom:0;"></td>
+          <td>
+            <select name="role" style="margin-bottom:0;">
+              {% for r in person_roles %}<option value="{{ r }}" {% if p.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </td>
+          <td><input type="text" name="details" value="{{ p.details or '' }}" style="min-width:180px;margin-bottom:0;" placeholder="Shareholding %, ID number, etc."></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('company_documents.delete_key_person', person_id=p.id) }}" class="btn small danger" onclick="return confirm('Delete this person?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif not suggested_people %}
+  <div class="empty-state">No directors/shareholders on file yet - upload a company document above, or add one manually below.</div>
+  {% endif %}
+
+  {% if can_manage_company_documents %}
+  <form method="post" action="{{ url_for('company_documents.add_key_person', client_id=client.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div><label for="kp_name">Name</label><input type="text" id="kp_name" name="full_name" placeholder="Full name" required></div>
+    <div>
+      <label for="kp_role">Role</label>
+      <select id="kp_role" name="role">
+        {% for r in person_roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label for="kp_details">Details (optional)</label><input type="text" id="kp_details" name="details" placeholder="Shareholding %, ID number, etc."></div>
+    <div><button type="submit" class="btn small gold" style="margin-bottom:0;">Add</button></div>
+  </form>
+  {% endif %}
+  <p class="muted" style="font-size:11.5px;margin-top:8px;margin-bottom:0;">
+    A confirmed person here can be pulled straight into any engagement's Sanctions &amp; Adverse Notice Screening list from that engagement's Client Acceptance tab.
+  </p>
+</div>
+
+<div class="card">
   <div class="page-header" style="margin-bottom:10px;">
     <h3 class="mt-0">Invoices</h3>
     <a href="{{ url_for('invoicing.new_invoice', client_id=client.id) }}" class="btn small gold">+ New Invoice</a>

@@ -53,6 +53,13 @@ POLICIES_DATA_DIR = os.path.join(DATA_DIR, "policies_data")
 # app, and the extracted text of each PDF is what Sanctions & Adverse
 # Notice Screening searches during an auto-screen.
 REGULATORY_NOTICES_DATA_DIR = os.path.join(DATA_DIR, "regulatory_notices_data")
+# Writable folder for company registration documents uploaded against a
+# Client (certificate of incorporation, CR14, share register, etc - see
+# models.CompanyDocument and company_documents.py) - same idea as
+# POLICIES_DATA_DIR/REGULATORY_NOTICES_DATA_DIR above: starts empty, any
+# team member with the "Manage Company Documents" permission adds files
+# from the app.
+COMPANY_DOCUMENTS_DATA_DIR = os.path.join(DATA_DIR, "company_documents_data")
 
 
 class Config:
@@ -73,3 +80,4 @@ class Config:
     DOCUMENT_TEMPLATES_DIR = DOCUMENT_TEMPLATES_DIR
     POLICIES_DATA_DIR = POLICIES_DATA_DIR
     REGULATORY_NOTICES_DATA_DIR = REGULATORY_NOTICES_DATA_DIR
+    COMPANY_DOCUMENTS_DATA_DIR = COMPANY_DOCUMENTS_DATA_DIR

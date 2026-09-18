@@ -19,7 +19,7 @@ from models import (
     RISK_CATEGORIES,
     SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, REGULATORY_NOTICE_SOURCE_LABELS,
-    SanctionsListStatus, RegulatoryNotice,
+    SanctionsListStatus, RegulatoryNotice, ClientKeyPerson,
     COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
     FinalisationChecklist, FinalisationChecklistItem, DEFAULT_FINALISATION_CHECKLIST_ITEMS, FORENSIC_FINALISATION_CHECKLIST_ITEMS,
@@ -267,6 +267,13 @@ def view_engagement(engagement_id):
             "total": len(notices),
             "searchable": sum(1 for n in notices if n.extraction_status == "extracted"),
         }
+    # Confirmed Directors/Shareholders/etc already on file for this client
+    # (see models.ClientKeyPerson, company_documents.py) - offered as a
+    # quick-pick on the Sanctions & Adverse Notice Screening card so they
+    # don't have to be retyped for every engagement. An unconfirmed
+    # (AI-suggested) person isn't offered here - see
+    # acceptance.add_screening_from_key_person.
+    client_key_people = ClientKeyPerson.query.filter_by(client_id=engagement.client_id, status="Confirmed").order_by(ClientKeyPerson.full_name).all()
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
     tab = request.args.get("tab", "overview")
     # Document Templates matching this engagement's type (Audit/Assurance/
@@ -379,6 +386,7 @@ def view_engagement(engagement_id):
         regulatory_notice_sources=REGULATORY_NOTICE_SOURCES,
         regulatory_notice_source_labels=REGULATORY_NOTICE_SOURCE_LABELS,
         regulatory_notice_counts=regulatory_notice_counts,
+        client_key_people=client_key_people,
         finalisation_checklist=finalisation_checklist,
         finalisation_checklist_responses=CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     )

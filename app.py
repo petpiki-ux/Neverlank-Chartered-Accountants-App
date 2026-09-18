@@ -268,6 +268,7 @@ def create_app():
     from acceptance import acceptance_bp
     from invoicing import invoicing_bp
     from regulatory_notices import regulatory_notices_bp
+    from company_documents import company_documents_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -280,6 +281,7 @@ def create_app():
     app.register_blueprint(acceptance_bp)
     app.register_blueprint(invoicing_bp)
     app.register_blueprint(regulatory_notices_bp)
+    app.register_blueprint(company_documents_bp)
 
     @app.route("/")
     def index():

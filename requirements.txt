@@ -12,3 +12,4 @@ python-engineio==4.9.0
 simple-websocket==1.1.0
 requests==2.33.1
 pdfplumber==0.11.9
+anthropic==1.7.0

@@ -410,11 +410,26 @@
     {% else %}
     <div class="empty-state">No key individuals added yet - add each director, beneficial owner, authorised signatory{% if engagement.type == 'Investigative Engagement' %}, or investigation target/witness{% endif %} below.</div>
     {% endif %}
+    {% if client_key_people %}
+    <form method="post" action="{{ url_for('acceptance.add_screening_from_key_person', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+      <div>
+        <label for="key_person_id">Add from the client's Directors &amp; Shareholders</label>
+        <select id="key_person_id" name="key_person_id" style="min-width:260px;">
+          {% for p in client_key_people %}<option value="{{ p.id }}">{{ p.full_name }} ({{ p.role }})</option>{% endfor %}
+        </select>
+      </div>
+      <div><button type="submit" class="btn small secondary" style="margin-bottom:0;">Add for screening</button></div>
+    </form>
+    {% endif %}
     <form method="post" action="{{ url_for('acceptance.add_sanctions_screening', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
-      <div><label for="screening_name">Individual's name</label><input type="text" id="screening_name" name="individual_name" placeholder="Full name" required></div>
+      <div><label for="screening_name">Or add an individual's name directly</label><input type="text" id="screening_name" name="individual_name" placeholder="Full name" required></div>
       <div><label for="screening_role">Role</label><input type="text" id="screening_role" name="role_description" placeholder="e.g. Director, Beneficial Owner"></div>
       <div><button type="submit" class="btn small gold" style="margin-bottom:0;">Add individual</button></div>
     </form>
+    <p class="muted" style="font-size:11.5px;margin-top:6px;margin-bottom:0;">
+      Manage the client's own Directors &amp; Shareholders list (from uploaded company documents, read automatically - including scanned ones) on the
+      <a href="{{ url_for('clients.view_client', client_id=engagement.client_id) }}">client's page</a>.
+    </p>
   </div>
 
   {% if engagement.type == 'Investigative Engagement' %}
