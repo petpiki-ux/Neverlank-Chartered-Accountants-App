@@ -2221,6 +2221,36 @@ class ClientAcceptance(db.Model):
         return {"label": label, "level": level, "flagged": flagged, "outstanding": outstanding, "total": total}
 
     @property
+    def screening_assessment(self):
+        """A plain-language, advisory-only read of the Sanctions & Adverse
+        Notice Screening list below (see SanctionsScreening) - same pattern
+        as checklist_assessment above: it never sets or overrides the
+        `decision` field, it just surfaces what still needs attention or
+        escalation. A "Confirmed Hit" on even one list, for even one
+        individual, is treated as the most severe outcome regardless of how
+        many others are clear."""
+        individuals = list(self.screenings)
+        total = len(individuals)
+        if total == 0:
+            return {"label": "No key individuals added for sanctions screening yet.", "level": "muted", "hits": 0, "potential": 0, "outstanding": 0, "total": 0}
+        hits = sum(1 for i in individuals if i.overall_status == "Confirmed Hit")
+        potential = sum(1 for i in individuals if i.overall_status == "Potential Match")
+        outstanding = sum(1 for i in individuals if not i.is_screened)
+        if hits:
+            label = f"{hits} of {total} individual{'s' if total != 1 else ''} returned a confirmed hit - escalate to the Partner/MLRO before proceeding."
+            level = "danger"
+        elif potential:
+            label = f"{potential} of {total} individual{'s' if total != 1 else ''} returned a potential match - resolve before proceeding."
+            level = "warning"
+        elif outstanding:
+            label = f"{outstanding} of {total} individual{'s' if total != 1 else ''} not yet screened against all five lists."
+            level = "warning"
+        else:
+            label = f"All {total} individual{'s' if total != 1 else ''} screened clear against the UN, OFAC, EU, RBZ and FIU lists."
+            level = "success"
+        return {"label": label, "level": level, "hits": hits, "potential": potential, "outstanding": outstanding, "total": total}
+
+    @property
     def risk_scores(self):
         """The five Forensic Audit Risk Evaluation Matrix scores, in a
         fixed order matching RISK_CATEGORIES, as (field_name, value)
@@ -2381,6 +2411,83 @@ class ClientAcceptanceChecklistItem(db.Model):
 
     def __repr__(self):
         return f"<ClientAcceptanceChecklistItem {self.item_text!r} response={self.response!r}>"
+
+
+# ---------- Sanctions & adverse notice screening ----------
+
+# The five lists/registers every key individual is screened against, in
+# display order - the three international sanctions lists first, then the
+# two Zimbabwean regulators. Each is its own column/field on
+# SanctionsScreening below (un_result, ofac_result, eu_result, rbz_result,
+# fiu_result) rather than one combined result, since a hit on one list but
+# not another is itself a meaningful finding worth recording separately.
+SANCTIONS_SCREENING_SOURCES = [
+    ("un_result", "UN Sanctions List"),
+    ("ofac_result", "OFAC (US Treasury)"),
+    ("eu_result", "EU Sanctions List"),
+    ("rbz_result", "Reserve Bank of Zimbabwe (RBZ) adverse notices"),
+    ("fiu_result", "Financial Intelligence Unit (FIU) adverse notices"),
+]
+
+SANCTIONS_SCREENING_RESULTS = ["Not Checked", "Clear", "Potential Match", "Confirmed Hit"]
+
+
+class SanctionsScreening(db.Model):
+    """One row per key individual (director, beneficial owner, authorised
+    signatory, or - on an Investigative Engagement - a suspect/target/key
+    witness) screened against the UN, OFAC and EU sanctions lists and
+    against adverse notices from the Reserve Bank of Zimbabwe (RBZ) and the
+    Financial Intelligence Unit (FIU), as part of Client Acceptance's
+    regulatory/AML checks (ordinary engagements) or Enhanced Due Diligence
+    (Investigative Engagements) - see ClientAcceptance.screening_assessment
+    for the aggregate, advisory-only read of this list. Each of the five
+    lists gets its own result rather than one combined field, since a hit
+    on one list but a clear result on the others is itself worth recording."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_acceptance_id = db.Column(db.Integer, db.ForeignKey("client_acceptance.id"), nullable=False)
+    individual_name = db.Column(db.String(200), nullable=False)
+    role_description = db.Column(db.String(150))  # e.g. "Director", "Beneficial Owner (30%)", "Authorised Signatory", "Investigation target"
+
+    un_result = db.Column(db.String(20), default="Not Checked")
+    ofac_result = db.Column(db.String(20), default="Not Checked")
+    eu_result = db.Column(db.String(20), default="Not Checked")
+    rbz_result = db.Column(db.String(20), default="Not Checked")
+    fiu_result = db.Column(db.String(20), default="Not Checked")
+
+    notes = db.Column(db.Text)  # match details, reference/search numbers, follow-up/escalation actions
+    order = db.Column(db.Integer, default=0)
+
+    screened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    screened_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client_acceptance = db.relationship(
+        "ClientAcceptance",
+        backref=db.backref("screenings", lazy=True, cascade="all, delete-orphan", order_by="SanctionsScreening.order"),
+    )
+    screened_by = db.relationship("User", foreign_keys=[screened_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    @property
+    def is_screened(self):
+        """Whether every one of the five lists has actually been checked
+        (as opposed to left at its "Not Checked" default)."""
+        return all(getattr(self, field) != "Not Checked" for field, _ in SANCTIONS_SCREENING_SOURCES)
+
+    @property
+    def overall_status(self):
+        results = [getattr(self, field) for field, _ in SANCTIONS_SCREENING_SOURCES]
+        if "Confirmed Hit" in results:
+            return "Confirmed Hit"
+        if "Potential Match" in results:
+            return "Potential Match"
+        if self.is_screened:
+            return "Clear"
+        return "Not Checked"
+
+    def __repr__(self):
+        return f"<SanctionsScreening {self.individual_name!r} status={self.overall_status!r}>"
 
 
 # ---------- Finalisation checklist ("what's left to close this engagement") ----------

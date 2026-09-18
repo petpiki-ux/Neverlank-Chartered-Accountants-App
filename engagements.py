@@ -17,6 +17,7 @@ from models import (
     AnalyticalReview, AnalyticalReviewLine,
     ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     RISK_CATEGORIES,
+    SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
     FinalisationChecklist, FinalisationChecklistItem, DEFAULT_FINALISATION_CHECKLIST_ITEMS, FORENSIC_FINALISATION_CHECKLIST_ITEMS,
@@ -355,6 +356,8 @@ def view_engagement(engagement_id):
         acceptance_decisions=CLIENT_ACCEPTANCE_DECISIONS,
         acceptance_checklist_responses=CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
         risk_categories=RISK_CATEGORIES,
+        sanctions_screening_sources=SANCTIONS_SCREENING_SOURCES,
+        sanctions_screening_results=SANCTIONS_SCREENING_RESULTS,
         finalisation_checklist=finalisation_checklist,
         finalisation_checklist_responses=CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     )

@@ -331,6 +331,51 @@
 
   {% if client_acceptance %}{{ checklist_other(client_acceptance.checklist_items, known_prefixes, acceptance_checklist_responses) }}{% endif %}
 
+  <div class="card">
+    <h3 class="mt-0">Sanctions &amp; Adverse Notice Screening</h3>
+    <p class="muted" style="font-size:12px;">
+      Screen every key individual associated with this client - directors, beneficial owners, authorised signatories{% if engagement.type == 'Investigative Engagement' %}, and any suspect, target or key witness{% endif %} - against the UN Sanctions List, OFAC (US Treasury), the EU Sanctions List, and adverse notices issued by the Reserve Bank of Zimbabwe (RBZ) or the Financial Intelligence Unit (FIU). Purely advisory, like the checklist assessment above: a confirmed hit doesn't block anything here automatically - escalate it through the Decision below.
+    </p>
+    {% if client_acceptance and client_acceptance.screening_assessment %}
+    <div class="flash {{ client_acceptance.screening_assessment.level }}" style="margin-bottom:10px;">{{ client_acceptance.screening_assessment.label }}</div>
+    {% endif %}
+    {% if client_acceptance and client_acceptance.screenings %}
+    <table>
+      <thead><tr><th>Individual</th><th>Role</th>{% for field, label in sanctions_screening_sources %}<th>{{ label }}</th>{% endfor %}<th>Notes</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+      {% for s in client_acceptance.screenings %}
+        <form method="post" action="{{ url_for('acceptance.update_sanctions_screening', screening_id=s.id) }}" class="inline">
+        <tr>
+          <td><strong>{{ s.individual_name }}</strong></td>
+          <td><input type="text" name="role_description" value="{{ s.role_description or '' }}" style="width:130px;margin-bottom:0;" placeholder="e.g. Director"></td>
+          {% for field, label in sanctions_screening_sources %}
+          <td>
+            <select name="{{ field }}" style="margin-bottom:0;min-width:120px;">
+              {% for r in sanctions_screening_results %}<option value="{{ r }}" {% if s[field]==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </td>
+          {% endfor %}
+          <td><input type="text" name="notes" value="{{ s.notes or '' }}" placeholder="Match details / reference" style="width:150px;margin-bottom:0;"></td>
+          <td><span class="badge {% if s.overall_status == 'Confirmed Hit' %}risk-High{% elif s.overall_status == 'Potential Match' %}risk-Medium{% elif s.overall_status == 'Clear' %}risk-Low{% endif %}">{{ s.overall_status }}</span></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('acceptance.delete_sanctions_screening', screening_id=s.id) }}" class="btn small danger" onclick="return confirm('Delete this individual\'s screening record?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No key individuals added yet - add each director, beneficial owner, authorised signatory{% if engagement.type == 'Investigative Engagement' %}, or investigation target/witness{% endif %} below.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('acceptance.add_sanctions_screening', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+      <div><label for="screening_name">Individual's name</label><input type="text" id="screening_name" name="individual_name" placeholder="Full name" required></div>
+      <div><label for="screening_role">Role</label><input type="text" id="screening_role" name="role_description" placeholder="e.g. Director, Beneficial Owner"></div>
+      <div><button type="submit" class="btn small gold" style="margin-bottom:0;">Add individual</button></div>
+    </form>
+  </div>
+
   {% if engagement.type == 'Investigative Engagement' %}
   <div class="card">
     <h3 class="mt-0">Forensic Audit Risk Evaluation Matrix</h3>

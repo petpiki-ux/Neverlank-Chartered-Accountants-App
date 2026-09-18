@@ -29,6 +29,7 @@ from models import (
     ClientAcceptanceChecklistItem, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS,
     RISK_CATEGORIES,
+    SanctionsScreening, SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES, user_can_access_engagement,
 )
 
@@ -464,5 +465,65 @@ def delete_acceptance_checklist_item(item_id):
     _ensure_access(item.client_acceptance.engagement)
     engagement_id = item.client_acceptance.engagement_id
     db.session.delete(item)
+    db.session.commit()
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+# ---------- Sanctions & adverse notice screening ----------
+# Screens each key individual (directors, beneficial owners, authorised
+# signatories, and - on an Investigative Engagement - suspects/targets/key
+# witnesses) against the UN, OFAC and EU sanctions lists, and against
+# adverse notices from the RBZ and the FIU. See models.SanctionsScreening
+# and ClientAcceptance.screening_assessment - purely advisory, like the
+# acceptance checklist above, so it never blocks the decision/sign-off
+# workflow on its own; a confirmed hit is surfaced for the Partner to act on.
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/screening/add", methods=["POST"])
+@login_required
+def add_sanctions_screening(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    individual_name = request.form.get("individual_name", "").strip()
+    if not individual_name:
+        flash("Enter the individual's name before adding them for screening.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+    max_order = max([s.order for s in record.screenings], default=0)
+    db.session.add(SanctionsScreening(
+        client_acceptance_id=record.id,
+        individual_name=individual_name,
+        role_description=request.form.get("role_description", "").strip(),
+        order=max_order + 1,
+        created_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash("Individual added for sanctions/adverse notice screening.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/acceptance/screening/<int:screening_id>/update", methods=["POST"])
+@login_required
+def update_sanctions_screening(screening_id):
+    screening = SanctionsScreening.query.get_or_404(screening_id)
+    _ensure_access(screening.client_acceptance.engagement)
+    for field, _label in SANCTIONS_SCREENING_SOURCES:
+        value = request.form.get(field, "Not Checked").strip()
+        setattr(screening, field, value if value in SANCTIONS_SCREENING_RESULTS else "Not Checked")
+    screening.notes = request.form.get("notes", "").strip()
+    screening.role_description = request.form.get("role_description", screening.role_description or "").strip()
+    screening.screened_by_id = current_user.id
+    screening.screened_at = datetime.utcnow()
+    db.session.commit()
+    flash("Screening result saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=screening.client_acceptance.engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/acceptance/screening/<int:screening_id>/delete", methods=["POST"])
+@login_required
+def delete_sanctions_screening(screening_id):
+    screening = SanctionsScreening.query.get_or_404(screening_id)
+    _ensure_access(screening.client_acceptance.engagement)
+    engagement_id = screening.client_acceptance.engagement_id
+    db.session.delete(screening)
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
