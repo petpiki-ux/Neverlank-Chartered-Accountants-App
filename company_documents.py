@@ -29,13 +29,14 @@ from werkzeug.utils import secure_filename
 
 from extensions import db
 from models import (
-    Client, CompanyDocument, ClientKeyPerson,
-    COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PERSON_STATUSES,
+    Client, CompanyDocument, ClientKeyPerson, EntityPublicResearch,
+    COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PERSON_STATUSES, PUBLIC_RESEARCH_SCOPES,
     user_has_permission,
 )
 from config import Config
 import sanctions_data
 import entity_extraction
+import entity_research
 
 company_documents_bp = Blueprint("company_documents", __name__, url_prefix="/clients")
 
@@ -132,6 +133,10 @@ def upload_document(client_id):
             client_id=client_id,
             full_name=p["full_name"],
             role=p["role"],
+            shareholding_percentage=p.get("shareholding_percentage") or None,
+            id_number=p.get("id_number") or None,
+            nationality=p.get("nationality") or None,
+            address=p.get("address") or None,
             details=p["details"] or None,
             status="Suggested",
             source_document_id=doc.id,
@@ -175,6 +180,10 @@ def reprocess_document(doc_id):
             client_id=doc.client_id,
             full_name=p["full_name"],
             role=p["role"],
+            shareholding_percentage=p.get("shareholding_percentage") or None,
+            id_number=p.get("id_number") or None,
+            nationality=p.get("nationality") or None,
+            address=p.get("address") or None,
             details=p["details"] or None,
             status="Suggested",
             source_document_id=doc.id,
@@ -234,6 +243,10 @@ def add_key_person(client_id):
         client_id=client_id,
         full_name=full_name,
         role=role if role in PERSON_ROLES else "Other",
+        shareholding_percentage=request.form.get("shareholding_percentage", "").strip() or None,
+        id_number=request.form.get("id_number", "").strip() or None,
+        nationality=request.form.get("nationality", "").strip() or None,
+        address=request.form.get("address", "").strip() or None,
         details=request.form.get("details", "").strip() or None,
         status="Confirmed",  # a person typing this in directly is already vouching for it
         created_by_id=current_user.id,
@@ -257,9 +270,108 @@ def update_key_person(person_id):
     person.full_name = full_name
     role = request.form.get("role", person.role).strip()
     person.role = role if role in PERSON_ROLES else person.role
+    person.shareholding_percentage = request.form.get("shareholding_percentage", "").strip() or None
+    person.id_number = request.form.get("id_number", "").strip() or None
+    person.nationality = request.form.get("nationality", "").strip() or None
+    person.address = request.form.get("address", "").strip() or None
     person.details = request.form.get("details", "").strip() or None
     db.session.commit()
     return redirect(url_for("clients.view_client", client_id=person.client_id))
+
+
+@company_documents_bp.route("/key-people/<int:person_id>/confirm-detail-review", methods=["POST"])
+@login_required
+@editor_required
+def confirm_detail_review(person_id):
+    """A person's identity (status) may already be Confirmed - this instead
+    clears needs_detail_review, i.e. "I checked the AI-split fields below
+    (edit them first via update_key_person above if anything needs fixing)
+    against what we actually know". It never touches `status`."""
+    person = ClientKeyPerson.query.get_or_404(person_id)
+    person.needs_detail_review = False
+    db.session.commit()
+    flash(f"{person.full_name}'s split details marked as checked.", "success")
+    return redirect(url_for("clients.view_client", client_id=person.client_id))
+
+
+@company_documents_bp.route("/<int:client_id>/key-people/split-legacy-details", methods=["POST"])
+@login_required
+@editor_required
+def split_legacy_details_for_client(client_id):
+    """One-off backfill button: for every one of this client's directors/
+    shareholders added before Shareholding %/ID/Nationality/Address existed
+    as their own fields (i.e. they still only have the old free-text
+    "details" note, and none of the four newer fields), ask Claude to split
+    that note into them. Each split is flagged needs_detail_review=True -
+    never trusted automatically, and never changes the person's existing
+    Suggested/Confirmed status - see ClientKeyPerson.needs_detail_review."""
+    client = Client.query.get_or_404(client_id)
+    candidates = [
+        p for p in client.key_people
+        if (p.details or "").strip()
+        and not p.needs_detail_review
+        and not (p.shareholding_percentage or p.id_number or p.nationality or p.address)
+    ]
+    if not candidates:
+        flash("Nothing to split - every director/shareholder already has separate fields (or no notes to split).", "info")
+        return redirect(url_for("clients.view_client", client_id=client_id))
+
+    split_count = 0
+    for person in candidates:
+        fields, status, error = entity_extraction.split_legacy_details(person.details)
+        if status == "not_configured":
+            flash(f"Couldn't split existing notes: {error}", "warning")
+            break
+        if status != "done":
+            continue  # skip this one, leave their note untouched, carry on with the rest
+        person.shareholding_percentage = fields["shareholding_percentage"] or None
+        person.id_number = fields["id_number"] or None
+        person.nationality = fields["nationality"] or None
+        person.address = fields["address"] or None
+        person.details = fields["details"] or None
+        person.needs_detail_review = True
+        split_count += 1
+    db.session.commit()
+    if split_count:
+        flash(f"{split_count} existing note(s) split into separate fields below - review each one under Directors & Shareholders and confirm it's correct.", "success")
+    return redirect(url_for("clients.view_client", client_id=client_id))
+
+
+# ---------- Understanding the Entity's Business - public information scan ----------
+
+@company_documents_bp.route("/<int:client_id>/public-research/run", methods=["POST"])
+@login_required
+@editor_required
+def run_public_research(client_id):
+    client = Client.query.get_or_404(client_id)
+    scope = request.form.get("scope", "both").strip()
+    if scope not in dict(PUBLIC_RESEARCH_SCOPES):
+        scope = "both"
+    confirmed_names = [p.full_name for p in client.key_people if p.status == "Confirmed"]
+
+    result, status, error = entity_research.research_entity_public_info(
+        company_name=client.name, people=confirmed_names, industry=client.industry, scope=scope,
+    )
+    run = EntityPublicResearch(
+        client_id=client_id, scope=scope, status=status,
+        requested_by_id=current_user.id,
+    )
+    if status == "done":
+        run.business_profile = result["business_profile"] or None
+        run.risk_findings = result["risk_findings"] or None
+        run.set_sources(result["sources"])
+    else:
+        run.error_message = error
+    db.session.add(run)
+    db.session.commit()
+
+    if status == "done":
+        flash("Public information scan complete - see Understanding the Entity's Business below.", "success")
+    elif status == "not_configured":
+        flash(f"Couldn't run the scan: {error}", "warning")
+    else:
+        flash(f"The scan failed: {error}", "danger")
+    return redirect(url_for("clients.view_client", client_id=client_id))
 
 
 @company_documents_bp.route("/key-people/<int:person_id>/confirm", methods=["POST"])

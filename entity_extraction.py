@@ -47,9 +47,25 @@ PEOPLE_TOOL = {
                     "properties": {
                         "full_name": {"type": "string", "description": "The person's full name, exactly as written in the document."},
                         "role": {"type": "string", "enum": PERSON_ROLES, "description": "Their role. Use 'Other' if none of the listed roles fit."},
-                        "details": {
+                        "shareholding_percentage": {
                             "type": "string",
-                            "description": "Any other relevant detail actually stated in the document for this person - e.g. shareholding percentage/number of shares, ID or passport number, nationality, address, date of appointment. Leave blank rather than guessing if nothing else is stated.",
+                            "description": "Their shareholding, exactly as stated (a percentage or a number of shares). Leave blank if not stated or not applicable to their role.",
+                        },
+                        "id_number": {
+                            "type": "string",
+                            "description": "National ID or passport number, exactly as stated. Leave blank if not stated.",
+                        },
+                        "nationality": {
+                            "type": "string",
+                            "description": "Nationality, exactly as stated. Leave blank if not stated.",
+                        },
+                        "address": {
+                            "type": "string",
+                            "description": "Residential or registered address, exactly as stated. Leave blank if not stated.",
+                        },
+                        "other_notes": {
+                            "type": "string",
+                            "description": "Any other relevant detail actually stated for this person that doesn't fit the fields above - e.g. date of appointment, or another role they also hold. Leave blank rather than guessing.",
                         },
                     },
                     "required": ["full_name", "role"],
@@ -69,10 +85,38 @@ SYSTEM_PROMPT = (
     "Company Secretary. Use each person's full name exactly as written. If a person holds more "
     "than one of these roles, list them once under the most senior role that applies "
     "(Director > Beneficial Owner > Shareholder > Company Secretary) and note their other "
-    "role(s) in details. Do NOT invent people, roles, or details that are not actually stated "
-    "in the document - if you are not sure a name refers to a real person holding one of these "
-    "roles, leave them out. If the document names no such people at all, call the tool with an "
-    "empty people list rather than not calling it."
+    "role(s) in other_notes. Fill in shareholding_percentage, id_number, nationality and address "
+    "only when the document actually states them for that person - leave a field blank rather "
+    "than guessing. Do NOT invent people, roles, or details that are not actually stated in the "
+    "document - if you are not sure a name refers to a real person holding one of these roles, "
+    "leave them out. If the document names no such people at all, call the tool with an empty "
+    "people list rather than not calling it."
+)
+
+SPLIT_TOOL = {
+    "name": "record_split_details",
+    "description": "Split a free-text note about a company director/shareholder into its component fields.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "shareholding_percentage": {"type": "string", "description": "Their shareholding, exactly as stated (a percentage or a number of shares). Leave blank if the note doesn't state one."},
+            "id_number": {"type": "string", "description": "National ID or passport number, exactly as stated. Leave blank if the note doesn't state one."},
+            "nationality": {"type": "string", "description": "Nationality, exactly as stated. Leave blank if the note doesn't state one."},
+            "address": {"type": "string", "description": "Residential or registered address, exactly as stated. Leave blank if the note doesn't state one."},
+            "other_notes": {"type": "string", "description": "Anything left over in the note that doesn't fit one of the fields above, preserved in its original wording. Leave blank if the note is fully covered by the fields above."},
+        },
+        "required": [],
+    },
+}
+
+SPLIT_SYSTEM_PROMPT = (
+    "You are tidying up an existing free-text note about a company director/shareholder into "
+    "separate fields, so it matches records created since this app started asking for shareholding "
+    "percentage, ID number, nationality and address as their own fields instead of one note. Call "
+    "record_split_details with whatever the note actually states for each field. Never invent a "
+    "value: leave a field blank if the note doesn't state it. Put anything left over that doesn't "
+    "fit one of those fields into other_notes, preserving its original wording - if the whole note "
+    "is already fully covered by the four fields, leave other_notes blank."
 )
 
 
@@ -110,8 +154,9 @@ def extract_people(text=None, page_images=None):
     photographed page uploaded directly as an image file).
 
     Returns (people, status, error):
-      - status "done": people is a list of {"full_name", "role", "details"}
-        dicts (possibly empty, if the document genuinely names no one)
+      - status "done": people is a list of {"full_name", "role",
+        "shareholding_percentage", "id_number", "nationality", "address",
+        "details"} dicts (possibly empty, if the document genuinely names no one)
       - status "not_configured": no ANTHROPIC_API_KEY is set
       - status "error": the request failed or returned something unusable
         (error holds a short message either way)
@@ -161,10 +206,63 @@ def extract_people(text=None, page_images=None):
                 cleaned.append({
                     "full_name": name[:200],
                     "role": role,
-                    "details": (p.get("details") or "").strip()[:500],
+                    "shareholding_percentage": (p.get("shareholding_percentage") or "").strip()[:50],
+                    "id_number": (p.get("id_number") or "").strip()[:100],
+                    "nationality": (p.get("nationality") or "").strip()[:100],
+                    "address": (p.get("address") or "").strip()[:300],
+                    "details": (p.get("other_notes") or "").strip()[:500],
                 })
             return cleaned, "done", None
     return [], "error", "The model didn't return a structured result - try again, or add the people manually."
+
+
+def split_legacy_details(details_text):
+    """One-off backfill for a person who already existed before this app had
+    separate Shareholding %/ID/Nationality/Address fields: take their old
+    free-text 'details' note and split it into those fields via Claude, so
+    older records end up with the same structure as newly-extracted ones.
+
+    Returns (fields, status, error):
+      - status "done": fields is a {"shareholding_percentage", "id_number",
+        "nationality", "address", "details"} dict (any of which may be blank)
+      - status "not_configured": no ANTHROPIC_API_KEY is set
+      - status "error": the request failed, or there was nothing to split
+    Never raises - see models.ClientKeyPerson.needs_detail_review, which is
+    what marks a split result as still needing a person's check."""
+    if os.environ.get("ANTHROPIC_API_KEY") is None:
+        return None, "not_configured", "ANTHROPIC_API_KEY is not set - see the README for how to add it on Render."
+    text = (details_text or "").strip()
+    if not text:
+        return None, "error", "Nothing to split - the existing note is blank."
+
+    try:
+        client = _client()
+        response = client.messages.create(
+            model=DEFAULT_MODEL,
+            max_tokens=512,
+            system=SPLIT_SYSTEM_PROMPT,
+            tools=[SPLIT_TOOL],
+            tool_choice={"type": "tool", "name": "record_split_details"},
+            messages=[{"role": "user", "content": f"Note to split:\n\n{text[:2000]}"}],
+        )
+    except Exception as exc:
+        return None, "error", str(exc)[:2000]
+
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "record_split_details":
+            data = block.input or {}
+            return (
+                {
+                    "shareholding_percentage": (data.get("shareholding_percentage") or "").strip()[:50],
+                    "id_number": (data.get("id_number") or "").strip()[:100],
+                    "nationality": (data.get("nationality") or "").strip()[:100],
+                    "address": (data.get("address") or "").strip()[:300],
+                    "details": (data.get("other_notes") or "").strip()[:500],
+                },
+                "done",
+                None,
+            )
+    return None, "error", "The model didn't return a structured result - try again, or edit the fields manually."
 
 
 def extract_people_from_document(filepath, is_image, extracted_text, extraction_status):

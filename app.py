@@ -99,6 +99,13 @@ def _add_missing_columns():
             ("auto_screened_at", "DATETIME"),
             ("auto_screened_by_id", "INTEGER"),
         ],
+        "client_key_person": [
+            ("shareholding_percentage", "VARCHAR(50)"),
+            ("id_number", "VARCHAR(100)"),
+            ("nationality", "VARCHAR(100)"),
+            ("address", "VARCHAR(300)"),
+            ("needs_detail_review", "BOOLEAN DEFAULT 0"),
+        ],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():

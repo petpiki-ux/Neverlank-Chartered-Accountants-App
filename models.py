@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, date
 from werkzeug.security import generate_password_hash, check_password_hash
 from flask_login import UserMixin
@@ -69,7 +70,7 @@ PERMISSIONS = [
      "Trigger a manual refresh of the cached UN, OFAC and EU sanctions lists used by automated screening.",
      ("partner", "admin")),
     ("manage_company_documents", "Manage Company Documents",
-     "Upload or delete a client's company documents (incorporation certificate, CR14, share register, etc.) and confirm/edit/delete the Directors & Shareholders picked up from them.",
+     "Upload or delete a client's company documents (incorporation certificate, CR14, share register, etc.), confirm/edit/delete the Directors & Shareholders picked up from them, and run the public-information scan on a client's business.",
      tuple(USER_ROLES)),
     ("manage_checklist_templates", "Manage Checklist Templates",
      "Create, edit or delete the checklist templates used to start new engagements (previously unrestricted).",
@@ -2503,8 +2504,26 @@ class ClientKeyPerson(db.Model):
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
     full_name = db.Column(db.String(200), nullable=False)
     role = db.Column(db.String(30), nullable=False, default="Other")
-    details = db.Column(db.Text)  # shareholding %, ID/passport number, nationality, address, etc - whatever was found/entered
+    # Shareholding %, ID/passport number, nationality and address each get
+    # their own field (previously all four were jumbled into one free-text
+    # "details" box) so they can be read, sorted and reused individually -
+    # e.g. nationality feeding a future PEP/adverse-media check without
+    # having to re-parse a sentence. "details" is kept for anything else
+    # stated that doesn't fit one of those four (date of appointment, a
+    # second role also held, etc).
+    shareholding_percentage = db.Column(db.String(50))
+    id_number = db.Column(db.String(100))
+    nationality = db.Column(db.String(100))
+    address = db.Column(db.String(300))
+    details = db.Column(db.Text)  # other notes not covered by the fields above
     status = db.Column(db.String(20), nullable=False, default="Confirmed")  # "Suggested" or "Confirmed" - see PERSON_STATUSES
+    # True only for a person who already existed before the four fields
+    # above did, whose old free-text "details" note was AI-split into them -
+    # a separate, narrower review flag from `status` above: it never flips
+    # an already-Confirmed identity back to Suggested, it just marks that
+    # the *split itself* (not the person's identity) hasn't been checked by
+    # a human yet. See entity_extraction.split_legacy_details.
+    needs_detail_review = db.Column(db.Boolean, nullable=False, default=False)
 
     source_document_id = db.Column(db.Integer, db.ForeignKey("company_document.id"))
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # null for an AI-suggested row until confirmed
@@ -2519,6 +2538,68 @@ class ClientKeyPerson(db.Model):
 
     def __repr__(self):
         return f"<ClientKeyPerson {self.full_name!r} role={self.role!r} status={self.status!r}>"
+
+
+# ---------- Understanding the Entity's Business - public information scan ----------
+# A manual, on-demand check of what's publicly available (news, social media,
+# etc.) about a client's business, directors/shareholders and products - see
+# entity_research.py and company_documents.py's run_public_research. Lives on
+# the Client, same reasoning as company documents/key people above: the
+# firm's understanding of a client's business doesn't reset between
+# engagements, so it's run and kept once per client rather than once per
+# engagement. Never triggered automatically (each run is a billed AI web
+# search) and never overwritten - each run adds a new dated row, the same
+# keep-a-record philosophy as SanctionsScreening's auto_* notes.
+
+PUBLIC_RESEARCH_SCOPES = [
+    ("profile", "Business profile only"),
+    ("risk", "Risk / adverse-media check only"),
+    ("both", "Both"),
+]
+
+
+class EntityPublicResearch(db.Model):
+    """One run of the public-information scan against a Client - purely
+    informational, like every other AI-assisted feature in this app it never
+    marks anything Confirmed or decides anything on its own; a person reads
+    the findings (and the sources listed) and judges them."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    scope = db.Column(db.String(10), nullable=False, default="both")  # "profile" | "risk" | "both" - see PUBLIC_RESEARCH_SCOPES
+    status = db.Column(db.String(20), nullable=False, default="done")  # "done", "not_configured", "error"
+    business_profile = db.Column(db.Text)
+    risk_findings = db.Column(db.Text)
+    sources_json = db.Column(db.Text)  # JSON-encoded list of {"title", "url"}
+    error_message = db.Column(db.Text)
+
+    requested_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    requested_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship(
+        "Client",
+        backref=db.backref(
+            "public_research_runs", lazy=True, cascade="all, delete-orphan",
+            order_by="EntityPublicResearch.requested_at.desc()",
+        ),
+    )
+    requested_by = db.relationship("User")
+
+    @property
+    def sources(self):
+        try:
+            return json.loads(self.sources_json) if self.sources_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_sources(self, value):
+        self.sources_json = json.dumps(value or [])
+
+    @property
+    def scope_label(self):
+        return dict(PUBLIC_RESEARCH_SCOPES).get(self.scope, self.scope)
+
+    def __repr__(self):
+        return f"<EntityPublicResearch client={self.client_id} scope={self.scope!r} status={self.status!r}>"
 
 
 # ---------- Sanctions & adverse notice screening ----------

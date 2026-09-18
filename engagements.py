@@ -296,6 +296,13 @@ def view_engagement(engagement_id):
     materiality = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
     audit_strategy = AuditStrategy.query.filter_by(engagement_id=engagement_id).first() if is_forensic_risk else None
     entity_understanding = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
+    # Public-information scans live on the Client (see models.
+    # EntityPublicResearch/company_documents.run_public_research) since the
+    # firm's understanding of a client's business doesn't reset between
+    # engagements - only the most recent run is shown here, as a pointer
+    # back to the client's page where the full history lives and new scans
+    # are run from.
+    latest_public_research = engagement.client.public_research_runs[0] if engagement.client.public_research_runs else None
     analytical_review = AnalyticalReview.query.filter_by(engagement_id=engagement_id).first()
     scope_suggestion = SCOPE_SUGGESTIONS.get(risk_assessment.rating) if risk_assessment and risk_assessment.rating else None
 
@@ -361,6 +368,7 @@ def view_engagement(engagement_id):
         scope_suggestion=scope_suggestion,
         entity_understanding=entity_understanding,
         entity_fields=ENTITY_UNDERSTANDING_FIELDS,
+        latest_public_research=latest_public_research,
         analytical_review=analytical_review,
         trial_balance=trial_balance,
         financial_statements=financial_statements,

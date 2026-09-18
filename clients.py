@@ -4,7 +4,7 @@ from flask_login import login_required, current_user
 from extensions import db
 from models import (
     Client, INDUSTRY_OPTIONS, user_has_permission, user_can_access_engagement,
-    COMPANY_DOCUMENT_TYPES, PERSON_ROLES,
+    COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES,
 )
 from engagements import sync_substantive_procedures_if_started
 
@@ -98,10 +98,18 @@ def view_client(client_id):
     )
     suggested_people = [p for p in client.key_people if p.status == "Suggested"]
     confirmed_people = [p for p in client.key_people if p.status == "Confirmed"]
+    has_legacy_details = any(
+        (p.details or "").strip() and not p.needs_detail_review
+        and not (p.shareholding_percentage or p.id_number or p.nationality or p.address)
+        for p in client.key_people
+    )
     return render_template(
         "clients/detail.html", client=client, visible_engagements=visible_engagements,
         suggested_people=suggested_people, confirmed_people=confirmed_people,
+        has_legacy_details=has_legacy_details,
         company_document_types=COMPANY_DOCUMENT_TYPES, person_roles=PERSON_ROLES,
+        public_research_scopes=PUBLIC_RESEARCH_SCOPES,
+        public_research_runs=client.public_research_runs,
         can_manage_company_documents=user_has_permission(current_user, "manage_company_documents"),
     )
 
