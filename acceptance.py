@@ -31,7 +31,7 @@ from models import (
     RISK_CATEGORIES,
     SanctionsScreening, SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, RegulatoryNotice,
-    ClientKeyPerson,
+    ClientKeyPerson, AcceptanceFlagReview, ACCEPTANCE_FLAG_STATUSES,
     REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES, user_can_access_engagement, user_has_permission,
 )
 import sanctions_data
@@ -253,6 +253,47 @@ def save_acceptance_decision(engagement_id):
     _touch(record)
     db.session.commit()
     flash("Decision saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/acceptance/<int:record_id>/flag/review", methods=["POST"])
+@login_required
+def review_acceptance_flag(record_id):
+    """Record a Disregard/Consider call on one specific issue in the
+    Decision section's flagged-issues summary (see ClientAcceptance.
+    flagged_issues / AcceptanceFlagReview). Purely a record for the file -
+    it never touches `decision` and never gates the partner sign-off."""
+    record = ClientAcceptance.query.get_or_404(record_id)
+    _ensure_access(record.engagement)
+    flag_key = request.form.get("flag_key", "").strip()
+    status = request.form.get("status", "").strip()
+    if not flag_key or status not in ACCEPTANCE_FLAG_STATUSES:
+        flash("Couldn't record that review - try again.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
+    review = AcceptanceFlagReview.query.filter_by(client_acceptance_id=record.id, flag_key=flag_key).first()
+    if not review:
+        review = AcceptanceFlagReview(client_acceptance_id=record.id, flag_key=flag_key)
+        db.session.add(review)
+    review.status = status
+    review.note = request.form.get("note", "").strip()
+    review.reviewed_by_id = current_user.id
+    review.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash(f"Marked \"{status}\".", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/acceptance/flag/<int:review_id>/clear", methods=["POST"])
+@login_required
+def clear_acceptance_flag_review(review_id):
+    """Undo a Disregard/Consider call, putting the issue back to "not yet
+    reviewed" - e.g. after a mis-click."""
+    review = AcceptanceFlagReview.query.get_or_404(review_id)
+    _ensure_access(review.client_acceptance.engagement)
+    engagement_id = review.client_acceptance.engagement_id
+    db.session.delete(review)
+    db.session.commit()
+    flash("Review cleared.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 

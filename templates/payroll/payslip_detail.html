@@ -1,0 +1,147 @@
+{% extends "base.html" %}
+{% block title %}Payslip - {{ payslip.employee.full_name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set locked = payslip.period.status == 'Finalized' %}
+<div class="page-header">
+  <div>
+    <h1>Payslip - {{ payslip.employee.full_name }}</h1>
+    <div class="subtitle">
+      {{ payslip.period.name }}
+      {% if payslip.period.scope == 'client' and payslip.period.client %} &middot; {{ payslip.period.client.name }}{% endif %}
+      &middot; <span class="badge status-{{ payslip.period.status }}">{{ payslip.period.status }}</span>
+      {% if not payslip.is_auto_calculated %} &middot; <span class="badge status-OnHold">Manually edited</span>{% endif %}
+    </div>
+  </div>
+  <div>
+    <a href="{{ url_for('payroll.view_period', period_id=payslip.period_id) }}" class="btn secondary">Back to period</a>
+    <a href="{{ url_for('payroll.download_payslip_docx', payslip_id=payslip.id) }}" class="btn secondary">Download Word</a>
+    <a href="{{ url_for('payroll.download_payslip_pdf', payslip_id=payslip.id) }}" class="btn secondary">Download PDF</a>
+  </div>
+</div>
+
+<div class="flash muted" style="font-size:12px;">
+  Tax figures are calculated from this firm's own editable Payroll Tax Settings and may need verifying against
+  current ZIMRA/NSSA rates - see <a href="{{ url_for('payroll.tax_settings') }}">Payroll Tax Settings</a>.
+</div>
+
+{% if locked %}
+<div class="flash info">This payslip's period is Finalized, so it's read-only. Reopen the period to make changes.</div>
+{% endif %}
+
+<div class="card" style="max-width:520px;">
+  <h2 style="margin-top:0;font-size:16px;">Allowances &amp; Deductions</h2>
+  <table>
+    <thead><tr><th>Category</th><th>Label</th><th class="text-right">Amount</th><th>Taxable</th><th></th></tr></thead>
+    <tbody>
+      {% for item in payslip.items %}
+      <tr>
+        <td>{{ item.category }}</td>
+        <td>{{ item.label }}</td>
+        <td class="text-right">{{ '%.2f'|format(item.amount or 0) }}</td>
+        <td>{% if item.category == 'Allowance' %}{{ 'Yes' if item.taxable else 'No' }}{% else %}—{% endif %}</td>
+        <td class="text-right">
+          {% if not locked %}
+          <form method="post" action="{{ url_for('payroll.delete_payslip_item', item_id=item.id) }}" class="inline">
+            <button type="submit" class="btn small danger">Remove</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not payslip.items %}
+      <tr><td colspan="5" class="empty-state">No allowances/deductions added - only basic salary and statutory deductions apply.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+
+  {% if not locked %}
+  <form method="post" action="{{ url_for('payroll.add_payslip_item', payslip_id=payslip.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div>
+      <label for="category">Category</label>
+      <select id="category" name="category">
+        {% for c in item_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="label">Label</label>
+      <input type="text" id="label" name="label" placeholder="e.g. Housing allowance" required>
+    </div>
+    <div>
+      <label for="amount">Amount</label>
+      <input type="number" step="0.01" min="0" id="amount" name="amount" required>
+    </div>
+    <div>
+      <label for="taxable">Taxable? (allowances only)</label>
+      <select id="taxable" name="taxable">
+        <option value="1">Yes</option>
+        <option value="">No</option>
+      </select>
+    </div>
+    <div><button type="submit" class="btn secondary">+ Add</button></div>
+  </form>
+  <form method="post" action="{{ url_for('payroll.recalculate_payslip', payslip_id=payslip.id) }}" style="margin-top:10px;">
+    <button type="submit" class="btn gold">Recalculate from salary, items &amp; tax settings</button>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:520px;">
+  <h2 style="margin-top:0;font-size:16px;">Payslip figures {% if not locked %}<span class="muted" style="font-size:12px;font-weight:normal;">(editable)</span>{% endif %}</h2>
+  <form method="post" action="{{ url_for('payroll.update_payslip', payslip_id=payslip.id) }}">
+    <div class="form-row">
+      <div>
+        <label for="basic_salary">Basic salary</label>
+        <input type="number" step="0.01" id="basic_salary" name="basic_salary" value="{{ payslip.basic_salary }}" {% if locked %}disabled{% endif %}>
+      </div>
+      <div>
+        <label for="gross_pay">Gross pay</label>
+        <input type="number" step="0.01" id="gross_pay" name="gross_pay" value="{{ payslip.gross_pay }}" {% if locked %}disabled{% endif %}>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="taxable_income">Taxable income</label>
+        <input type="number" step="0.01" id="taxable_income" name="taxable_income" value="{{ payslip.taxable_income }}" {% if locked %}disabled{% endif %}>
+      </div>
+      <div>
+        <label for="paye_tax">PAYE (income tax)</label>
+        <input type="number" step="0.01" id="paye_tax" name="paye_tax" value="{{ payslip.paye_tax }}" {% if locked %}disabled{% endif %}>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="aids_levy">AIDS levy</label>
+        <input type="number" step="0.01" id="aids_levy" name="aids_levy" value="{{ payslip.aids_levy }}" {% if locked %}disabled{% endif %}>
+      </div>
+      <div>
+        <label for="nssa_employee">NSSA - employee</label>
+        <input type="number" step="0.01" id="nssa_employee" name="nssa_employee" value="{{ payslip.nssa_employee }}" {% if locked %}disabled{% endif %}>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="nssa_employer">NSSA - employer (informational)</label>
+        <input type="number" step="0.01" id="nssa_employer" name="nssa_employer" value="{{ payslip.nssa_employer }}" {% if locked %}disabled{% endif %}>
+      </div>
+      <div>
+        <label for="other_deductions_total">Other deductions (from items above)</label>
+        <input type="number" step="0.01" id="other_deductions_total" name="other_deductions_total" value="{{ payslip.other_deductions_total }}" {% if locked %}disabled{% endif %}>
+      </div>
+    </div>
+    <label for="net_pay">Net pay</label>
+    <input type="number" step="0.01" id="net_pay" name="net_pay" value="{{ payslip.net_pay }}" {% if locked %}disabled{% endif %} style="font-weight:bold;">
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="2" {% if locked %}disabled{% endif %}>{{ payslip.notes or '' }}</textarea>
+
+    {% if not locked %}
+    <button type="submit" class="btn gold">Save figures</button>
+    {% endif %}
+  </form>
+  {% if not locked %}
+  <form method="post" action="{{ url_for('payroll.delete_payslip', payslip_id=payslip.id) }}" class="inline" onsubmit="return confirm('Delete this payslip?');">
+    <button type="submit" class="btn danger">Delete payslip</button>
+  </form>
+  {% endif %}
+</div>
+{% endblock %}

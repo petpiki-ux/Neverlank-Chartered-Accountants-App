@@ -100,6 +100,7 @@ def _add_missing_columns():
             ("auto_screened_by_id", "INTEGER"),
         ],
         "client_key_person": [
+            ("number_of_shares", "VARCHAR(50)"),
             ("shareholding_percentage", "VARCHAR(50)"),
             ("id_number", "VARCHAR(100)"),
             ("nationality", "VARCHAR(100)"),
@@ -276,6 +277,7 @@ def create_app():
     from invoicing import invoicing_bp
     from regulatory_notices import regulatory_notices_bp
     from company_documents import company_documents_bp
+    from payroll import payroll_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -289,6 +291,7 @@ def create_app():
     app.register_blueprint(invoicing_bp)
     app.register_blueprint(regulatory_notices_bp)
     app.register_blueprint(company_documents_bp)
+    app.register_blueprint(payroll_bp)
 
     @app.route("/")
     def index():

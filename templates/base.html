@@ -27,6 +27,9 @@
       <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
       <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
       <a href="{{ url_for('invoicing.list_invoices') }}">Invoices</a>
+      {% if user_has_permission(current_user, 'manage_payroll') %}
+      <a href="{{ url_for('payroll.dashboard') }}">Payroll</a>
+      {% endif %}
       {% if user_has_permission(current_user, 'manage_users') %}
       <a href="{{ url_for('users.list_users') }}">Team</a>
       {% endif %}
@@ -97,5 +100,42 @@
     })();
   </script>
   {% endif %}
+
+  <script>
+    // Every "Save"/"Confirm"/etc. button on a card partway down a long page
+    // (Directors & Shareholders, a checklist item, Client Acceptance...) is
+    // an ordinary form POST that redirects back to the same page - which
+    // otherwise always lands back at the very top, losing your place on
+    // anything but a short page. This restores the scroll position you were
+    // at right before you submitted, on the very next page load only - it
+    // never affects a normal link click or typing a URL directly.
+    (function () {
+      var STORAGE_PREFIX = "neverlankScrollPos:";
+      var key = STORAGE_PREFIX + location.pathname + location.search;
+
+      document.addEventListener("submit", function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        try {
+          sessionStorage.setItem(
+            STORAGE_PREFIX + location.pathname + location.search,
+            String(window.scrollY)
+          );
+        } catch (e) { /* sessionStorage unavailable (private mode, etc.) - fall back to default browser behaviour */ }
+      }, true);
+
+      try {
+        var saved = sessionStorage.getItem(key);
+        if (saved !== null) {
+          sessionStorage.removeItem(key);
+          var y = parseInt(saved, 10);
+          if (!isNaN(y)) {
+            // Wait a tick for layout (images/late CSS) to settle before scrolling.
+            window.requestAnimationFrame(function () { window.scrollTo(0, y); });
+          }
+        }
+      } catch (e) { /* ignore - just lands at the top as before */ }
+    })();
+  </script>
 </body>
 </html>

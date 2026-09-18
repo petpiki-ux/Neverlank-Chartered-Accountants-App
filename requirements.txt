@@ -13,3 +13,4 @@ simple-websocket==1.1.0
 requests==2.33.1
 pdfplumber==0.11.9
 anthropic==1.7.0
+reportlab==4.4.10

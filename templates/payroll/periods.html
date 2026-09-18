@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Payroll Periods - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ 'Neverlank Staff Payroll Periods' if scope == 'internal' else 'Client Payroll Periods' }}</h1>
+    <div class="subtitle">{{ periods|length }} period(s){% if selected_client %} - {{ selected_client.name }}{% endif %}</div>
+  </div>
+  <div>
+    <a href="{{ url_for('payroll.dashboard') }}" class="btn secondary">Back to Payroll</a>
+    <a href="{{ url_for('payroll.new_period', scope=scope, client_id=selected_client.id if selected_client else none) }}" class="btn gold">+ New Period</a>
+  </div>
+</div>
+
+{% if scope == 'client' %}
+<div class="card">
+  <form method="get" class="form-row" style="align-items:flex-end;margin-bottom:0;">
+    <input type="hidden" name="scope" value="client">
+    <div>
+      <label for="client_id">Client</label>
+      <select id="client_id" name="client_id" onchange="this.form.submit()">
+        <option value="">All clients</option>
+        {% for c in clients %}<option value="{{ c.id }}" {% if selected_client and selected_client.id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  {% if periods %}
+  <table>
+    <thead><tr>{% if scope=='client' %}<th>Client</th>{% endif %}<th>Period</th><th>Pay date</th><th>Payslips</th><th>Status</th><th class="text-right">Net pay</th><th></th></tr></thead>
+    <tbody>
+      {% for p in periods %}
+      <tr>
+        {% if scope=='client' %}<td>{{ p.client.name if p.client else '—' }}</td>{% endif %}
+        <td><a href="{{ url_for('payroll.view_period', period_id=p.id) }}">{{ p.name }}</a></td>
+        <td>{{ p.pay_date.strftime('%d %b %Y') if p.pay_date else '—' }}</td>
+        <td>{{ p.payslips|length }}</td>
+        <td><span class="badge status-{{ p.status }}">{{ p.status }}</span></td>
+        <td class="text-right">{{ p.currency }} {{ '%.2f'|format(p.total_net_pay) }}</td>
+        <td class="text-right"><a href="{{ url_for('payroll.view_period', period_id=p.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No payroll periods yet. <a href="{{ url_for('payroll.new_period', scope=scope) }}">Create the first one</a>.</div>
+  {% endif %}
+</div>
+{% endblock %}

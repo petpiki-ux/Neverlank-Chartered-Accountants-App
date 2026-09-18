@@ -486,6 +486,41 @@
         <strong>System assessment:</strong> {{ client_acceptance.checklist_assessment.label }}
         <span class="muted" style="font-size:11.5px;">(from the detailed checklists on each section above - advisory only, the decision is always yours)</span>
       </div>
+      {% if client_acceptance.flagged_issues %}
+      <div class="flash {{ client_acceptance.flagged_issues_summary.level }}" style="margin-bottom:4px;">
+        <strong>Flagged issues:</strong> {{ client_acceptance.flagged_issues_summary.label }}
+      </div>
+      <table style="margin-bottom:12px;">
+        <thead><tr><th>Issue</th><th>Detail</th><th>Review</th><th></th></tr></thead>
+        <tbody>
+          {% for issue in client_acceptance.flagged_issues %}
+          <tr>
+            <td>{{ issue.label }}</td>
+            <td style="font-size:12.5px;">{{ issue.detail }}</td>
+            <td>
+              {% if issue.review %}
+              <span class="badge {% if issue.review.status == 'Consider' %}risk-Medium{% else %}risk-Low{% endif %}">{{ issue.review.status }}</span>
+              <div class="muted" style="font-size:11px;">by {{ issue.review.reviewed_by.name if issue.review.reviewed_by else '—' }} on {{ issue.review.reviewed_at.strftime('%d %b %Y') if issue.review.reviewed_at else '—' }}{% if issue.review.note %} — {{ issue.review.note }}{% endif %}</div>
+              {% else %}
+              <span class="muted" style="font-size:11.5px;">Not yet reviewed</span>
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" action="{{ url_for('acceptance.review_acceptance_flag', record_id=client_acceptance.id) }}" class="inline">
+                <input type="hidden" name="flag_key" value="{{ issue.key }}">
+                <input type="text" name="note" placeholder="Note (optional)" style="width:130px;margin-bottom:0;font-size:12px;" value="{{ issue.review.note if issue.review else '' }}">
+                <button type="submit" name="status" value="Disregard" class="btn small secondary">Disregard</button>
+                <button type="submit" name="status" value="Consider" class="btn small gold">Consider</button>
+              </form>
+              {% if issue.review %}
+              <form method="post" action="{{ url_for('acceptance.clear_acceptance_flag_review', review_id=issue.review.id) }}" class="inline"><button type="submit" class="btn small danger" style="margin-top:4px;">Clear</button></form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
       {% endif %}
       <div class="form-row">
         <div>

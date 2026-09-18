@@ -88,6 +88,11 @@ PERMISSIONS = [
     ("delete_documents", "Delete Documents",
      "Delete an uploaded working paper/document from an engagement (previously unrestricted).",
      tuple(USER_ROLES)),
+    ("manage_payroll", "Manage Payroll",
+     "Open the Payroll module: view/add employees (Neverlank staff or client payroll), run payroll periods, "
+     "edit payslips, and change the firm's Payroll Tax Settings. Salary data is sensitive, so this defaults "
+     "to Partner/Admin only.",
+     ("partner", "admin")),
 ]
 PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
 
@@ -2313,8 +2318,129 @@ class ClientAcceptance(db.Model):
             "action": "If accepted, requires formal sign-off from the Board/Global Risk Head, specialised insurance riders, and independent third-party oversight.",
         }
 
+    @property
+    def flagged_issues(self):
+        """Every concern currently flagged anywhere on this tab, pulled
+        together into one list for the Decision section - a "No" checklist
+        response, a sanctions Potential Match/Confirmed Hit, an unfavourable
+        section answer, an unresolved predecessor-communication step, or a
+        Medium/High forensic risk tier. This is computed fresh from the live
+        data every time (not stored), so an issue that's since been fixed
+        (e.g. a checklist response changed from No to Yes) simply stops
+        appearing - it never needs separate cleanup. Each entry carries
+        whichever AcceptanceFlagReview already exists for it (None if it
+        hasn't been looked at yet) - see that model for what reviewing one
+        does (and, just as importantly, doesn't do)."""
+        issues = []
+        for item in self.checklist_items:
+            if item.response == "No":
+                label = f"Checklist - {item.section}" if item.section else "Checklist item"
+                detail = item.item_text + (f" — {item.comment}" if item.comment else "")
+                issues.append({"key": f"checklist:{item.id}", "label": label, "detail": detail})
+
+        for screening in self.screenings:
+            if screening.overall_status in ("Confirmed Hit", "Potential Match"):
+                detail = screening.overall_status + (f" ({screening.role_description})" if screening.role_description else "")
+                issues.append({"key": f"screening:{screening.id}", "label": f"Sanctions screening — {screening.individual_name}", "detail": detail})
+
+        is_forensic = self.engagement and self.engagement.type == "Investigative Engagement"
+        section_checks = (
+            [
+                ("conflict_threat_clear", False, "Conflict of Interest & Threat Assessment", "conflict_threat_notes"),
+                ("edd_completed", False, "Enhanced Due Diligence", "edd_notes"),
+                ("legal_evidence_satisfactory", False, "Legal Framework & Evidence Control", "legal_evidence_notes"),
+                ("competence_scope_confirmed", False, "Competence & Scope Realism", "competence_scope_notes"),
+            ] if is_forensic else [
+                ("background_check_satisfactory", False, "Background check", "background_check_notes"),
+                ("independence_threats_identified", True, "Independence assessment — threats identified", "independence_notes"),
+                ("competence_confirmed", False, "Competence check", "competence_notes"),
+                ("aml_kyc_completed", False, "Regulatory checks (AML/KYC)", "aml_kyc_notes"),
+            ]
+        )
+        for field, flag_value, label, notes_field in section_checks:
+            if getattr(self, field) == flag_value:
+                detail = (getattr(self, notes_field) or "").strip() or "No further notes recorded."
+                issues.append({"key": f"section:{field}", "label": label, "detail": detail})
+
+        if not is_forensic and not self.predecessor_not_applicable:
+            if self.client_permission_obtained is False:
+                issues.append({"key": "section:predecessor_permission", "label": "Predecessor communication", "detail": "Client permission to contact the predecessor auditor was not obtained."})
+            elif self.predecessor_contacted is False:
+                issues.append({"key": "section:predecessor_contacted", "label": "Predecessor communication", "detail": "The predecessor auditor was not (or could not be) contacted."})
+
+        if is_forensic:
+            tier = self.risk_assessment.get("tier")
+            if tier in ("Medium Risk", "High Risk"):
+                issues.append({"key": "risk:total", "label": "Forensic Risk Evaluation Matrix", "detail": self.risk_assessment["label"]})
+
+        reviews_by_key = {r.flag_key: r for r in self.flag_reviews}
+        for issue in issues:
+            issue["review"] = reviews_by_key.get(issue["key"])
+        return issues
+
+    @property
+    def flagged_issues_summary(self):
+        """Plain-language roll-up of flagged_issues above, for the one-line
+        summary at the top of the Decision section - same advisory-only,
+        never-gates-anything pattern as checklist_assessment/
+        screening_assessment/risk_assessment."""
+        issues = self.flagged_issues
+        total = len(issues)
+        if total == 0:
+            return {"label": "No issues currently flagged elsewhere on this tab.", "level": "success", "total": 0, "open": 0, "consider": 0}
+        open_count = sum(1 for i in issues if not i["review"])
+        consider_count = sum(1 for i in issues if i["review"] and i["review"].status == "Consider")
+        if open_count:
+            label = f"{total} issue{'s' if total != 1 else ''} flagged — {open_count} not yet reviewed below."
+            level = "danger"
+        elif consider_count:
+            label = f"{total} issue{'s' if total != 1 else ''} flagged — all reviewed, {consider_count} marked to still Consider."
+            level = "warning"
+        else:
+            label = f"{total} issue{'s' if total != 1 else ''} flagged — all reviewed and Disregarded."
+            level = "success"
+        return {"label": label, "level": level, "total": total, "open": open_count, "consider": consider_count}
+
     def __repr__(self):
         return f"<ClientAcceptance engagement={self.engagement_id} decision={self.decision}>"
+
+
+ACCEPTANCE_FLAG_STATUSES = ["Disregard", "Consider"]
+
+
+class AcceptanceFlagReview(db.Model):
+    """A reviewer's call on one specific issue flagged in
+    ClientAcceptance.flagged_issues, shown in the Decision section's summary.
+    Purely a record for the file of who looked at a flagged concern and what
+    they made of it - "Disregard" it, or still "Consider" it - with an
+    optional note. Like every other advisory signal on this tab
+    (checklist_assessment, screening_assessment, risk_assessment), this
+    NEVER blocks the decision or the partner sign-off; it exists only so the
+    file shows that someone actually looked at each flagged item rather than
+    it just sitting there unaddressed.
+
+    flag_key identifies which specific issue this is about (see
+    ClientAcceptance.flagged_issues for how each key is built - a checklist
+    item, a screening, a named section, or the risk matrix total). If the
+    underlying issue stops applying (e.g. a checklist response changes from
+    No back to Yes) this row is simply no longer shown - it isn't deleted,
+    so if the same concern reappears later its previous review is still
+    here for reference."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_acceptance_id = db.Column(db.Integer, db.ForeignKey("client_acceptance.id"), nullable=False)
+    flag_key = db.Column(db.String(100), nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # "Disregard" or "Consider" - see ACCEPTANCE_FLAG_STATUSES
+    note = db.Column(db.Text)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client_acceptance = db.relationship("ClientAcceptance", backref=db.backref("flag_reviews", lazy=True, cascade="all, delete-orphan"))
+    reviewed_by = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("client_acceptance_id", "flag_key", name="uq_acceptance_flag_review"),)
+
+    def __repr__(self):
+        return f"<AcceptanceFlagReview {self.flag_key!r} status={self.status!r}>"
 
 
 CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES = ["Yes", "No", "N/A"]
@@ -2504,13 +2630,18 @@ class ClientKeyPerson(db.Model):
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
     full_name = db.Column(db.String(200), nullable=False)
     role = db.Column(db.String(30), nullable=False, default="Other")
-    # Shareholding %, ID/passport number, nationality and address each get
-    # their own field (previously all four were jumbled into one free-text
-    # "details" box) so they can be read, sorted and reused individually -
-    # e.g. nationality feeding a future PEP/adverse-media check without
-    # having to re-parse a sentence. "details" is kept for anything else
-    # stated that doesn't fit one of those four (date of appointment, a
-    # second role also held, etc).
+    # Number of shares, shareholding %, ID/passport number, nationality and
+    # address each get their own field (previously all jumbled into one
+    # free-text "details" box) so they can be read, sorted and reused
+    # individually - e.g. nationality feeding a future PEP/adverse-media
+    # check without having to re-parse a sentence. Number of shares and
+    # percentage are kept separate rather than one combined field since a
+    # document/register may state either or both, and they're not always
+    # simple to derive from each other (e.g. the total shares in issue
+    # isn't always stated). "details" is kept for anything else stated that
+    # doesn't fit one of those fields (date of appointment, a second role
+    # also held, etc).
+    number_of_shares = db.Column(db.String(50))
     shareholding_percentage = db.Column(db.String(50))
     id_number = db.Column(db.String(100))
     nationality = db.Column(db.String(100))
@@ -3001,3 +3132,210 @@ class InvoiceLineItem(db.Model):
 
     def __repr__(self):
         return f"<InvoiceLineItem {self.description!r}>"
+
+
+# ---------------------------------------------------------------------------
+# Payroll Management
+#
+# Covers BOTH sides the firm asked for: Neverlank's own staff payroll, and a
+# payroll SERVICE offered to clients (a client's own employees, processed by
+# this firm). One shared set of models/engine drives both - a PayrollEmployee
+# or PayrollPeriod's `scope` ("internal" vs "client") plus an optional
+# client_id is the only thing that distinguishes them; the tax calculation,
+# payslip layout and download formats are identical either way.
+#
+# Zimbabwean PAYE bands, the AIDS levy % and the NSSA employee/employer
+# rate+ceiling could NOT be reliably confirmed from public sources at the
+# time this was built - independent tax-calculator sites returned mutually
+# inconsistent figures for the current bands/credits/NSSA ceiling. Rather
+# than hard-code a number that might be wrong, EVERY rate here lives in the
+# editable PayrollTaxSettings/PayrollTaxBand records below (per the firm's
+# own choice: "auto-calculated but editable") and starts blank/zero except
+# for the one figure that WAS consistently corroborated across sources
+# (AIDS levy = 3% of PAYE payable). The Payroll > Tax Settings screen and
+# every payslip carry a clear caveat to verify current rates against ZIMRA
+# and NSSA directly before relying on the auto-calculation.
+PAYROLL_SCOPES = ["internal", "client"]
+PAYROLL_PAY_FREQUENCIES = ["Monthly", "Fortnightly", "Weekly"]
+PAYROLL_PERIOD_STATUSES = ["Draft", "Finalized"]
+PAYSLIP_ITEM_CATEGORIES = ["Allowance", "Deduction"]
+PAYROLL_TAX_CAVEAT = (
+    "Zimbabwean PAYE bands, the AIDS levy % and NSSA rates/ceiling change from "
+    "time to time and could not be reliably verified from public sources when "
+    "this module was built. Please confirm the figures below against the "
+    "current ZIMRA tax tables and NSSA notice before relying on any "
+    "auto-calculated payslip."
+)
+
+
+class PayrollTaxSettings(db.Model):
+    """A single editable settings record (id=1, created on first use) holding
+    every rate the payroll tax engine needs, other than the PAYE bands
+    themselves (see PayrollTaxBand). Deliberately NOT seeded with specific
+    NSSA figures - see the caveat above."""
+    id = db.Column(db.Integer, primary_key=True)
+    currency = db.Column(db.String(10), default="USD", nullable=False)
+    # Of PAYE payable - the one figure consistently corroborated across the
+    # sources checked, so this is the only rate given a non-zero default.
+    aids_levy_pct = db.Column(db.Float, default=3.0)
+    nssa_employee_pct = db.Column(db.Float, default=0.0)
+    nssa_employer_pct = db.Column(db.Float, default=0.0)
+    nssa_insurable_ceiling = db.Column(db.Float)  # None = no ceiling applied
+    source_notes = db.Column(db.Text)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    updated_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<PayrollTaxSettings {self.currency}>"
+
+
+class PayrollTaxBand(db.Model):
+    """One PAYE bracket, firm-editable: taxable income from `lower` up to
+    (not including) `upper` is taxed at `rate_pct`. `upper` left blank means
+    this is the open-ended top band. Progressive calculation - see
+    payroll_calc.calculate_paye - so bands should be entered as the
+    marginal-rate table exactly as ZIMRA publishes it, not as cumulative
+    amounts."""
+    id = db.Column(db.Integer, primary_key=True)
+    lower = db.Column(db.Float, nullable=False, default=0.0)
+    upper = db.Column(db.Float)
+    rate_pct = db.Column(db.Float, nullable=False, default=0.0)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<PayrollTaxBand {self.lower}-{self.upper} @ {self.rate_pct}%>"
+
+
+class PayrollEmployee(db.Model):
+    """A person on a payroll - either one of Neverlank's own staff (scope
+    'internal', optionally linked to their User login) or an employee of a
+    client the firm processes payroll for (scope 'client', tied to
+    client_id). full_name/job_title/etc. are always stored directly here
+    (rather than only read off the linked User) so a payslip stays a stable
+    historical record even if the underlying User record is later edited."""
+    id = db.Column(db.Integer, primary_key=True)
+    scope = db.Column(db.String(20), nullable=False, default="internal")
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"))
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    full_name = db.Column(db.String(200), nullable=False)
+    employee_number = db.Column(db.String(50))
+    national_id = db.Column(db.String(50))
+    job_title = db.Column(db.String(150))
+    nssa_number = db.Column(db.String(50))
+    bank_name = db.Column(db.String(120))
+    bank_account_number = db.Column(db.String(50))
+    pay_frequency = db.Column(db.String(20), default="Monthly")
+    basic_salary = db.Column(db.Float, default=0.0)
+    date_joined = db.Column(db.Date)
+    date_left = db.Column(db.Date)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    notes = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("payroll_employees", lazy=True, cascade="all, delete-orphan"))
+    user = db.relationship("User", foreign_keys=[user_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    def __repr__(self):
+        return f"<PayrollEmployee {self.full_name!r} ({self.scope})>"
+
+
+class PayrollPeriod(db.Model):
+    """One payroll run - e.g. "September 2026" - scoped the same way as
+    PayrollEmployee. currency is snapshotted from PayrollTaxSettings at
+    creation time so a period's figures stay meaningful even if the firm's
+    default currency setting changes later."""
+    id = db.Column(db.Integer, primary_key=True)
+    scope = db.Column(db.String(20), nullable=False, default="internal")
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"))
+    name = db.Column(db.String(120), nullable=False)
+    period_start = db.Column(db.Date)
+    period_end = db.Column(db.Date)
+    pay_date = db.Column(db.Date)
+    currency = db.Column(db.String(10), default="USD")
+    status = db.Column(db.String(20), default="Draft", nullable=False)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("payroll_periods", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+    payslips = db.relationship("Payslip", backref="period", lazy=True, cascade="all, delete-orphan", order_by="Payslip.id")
+
+    @property
+    def total_net_pay(self):
+        return sum(p.net_pay or 0.0 for p in self.payslips)
+
+    @property
+    def total_gross_pay(self):
+        return sum(p.gross_pay or 0.0 for p in self.payslips)
+
+    def __repr__(self):
+        return f"<PayrollPeriod {self.name!r} ({self.scope})>"
+
+
+class Payslip(db.Model):
+    """One employee's payslip for one period. Every figure is stored
+    (never recomputed on the fly for display) so a payslip a Partner has
+    already looked at - or downloaded - never silently changes; a
+    "Recalculate" action explicitly re-derives these from the employee's
+    current basic salary, this payslip's line items and the current
+    PayrollTaxSettings/PayrollTaxBand rows, matching the firm's own choice
+    of "auto-calculated but editable"."""
+    id = db.Column(db.Integer, primary_key=True)
+    period_id = db.Column(db.Integer, db.ForeignKey("payroll_period.id"), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey("payroll_employee.id"), nullable=False)
+
+    basic_salary = db.Column(db.Float, default=0.0)
+    allowances_total = db.Column(db.Float, default=0.0)
+    taxable_income = db.Column(db.Float, default=0.0)
+    gross_pay = db.Column(db.Float, default=0.0)
+
+    paye_tax = db.Column(db.Float, default=0.0)
+    aids_levy = db.Column(db.Float, default=0.0)
+    nssa_employee = db.Column(db.Float, default=0.0)
+    nssa_employer = db.Column(db.Float, default=0.0)  # employer cost, informational - not deducted from the employee
+    other_deductions_total = db.Column(db.Float, default=0.0)
+
+    net_pay = db.Column(db.Float, default=0.0)
+    # False once anyone has edited a figure by hand since it was last
+    # (re)calculated - so the payslip clearly shows it's no longer a fresh,
+    # untouched auto-calculation.
+    is_auto_calculated = db.Column(db.Boolean, default=True)
+    notes = db.Column(db.Text)
+
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    generated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    employee = db.relationship("PayrollEmployee", backref=db.backref("payslips", lazy=True, cascade="all, delete-orphan"))
+    generated_by = db.relationship("User")
+    items = db.relationship("PayslipItem", backref="payslip", lazy=True, cascade="all, delete-orphan", order_by="PayslipItem.id")
+
+    @property
+    def total_deductions(self):
+        return (self.paye_tax or 0.0) + (self.aids_levy or 0.0) + (self.nssa_employee or 0.0) + (self.other_deductions_total or 0.0)
+
+    def __repr__(self):
+        return f"<Payslip employee={self.employee_id} period={self.period_id}>"
+
+
+class PayslipItem(db.Model):
+    """An ad-hoc allowance or deduction line on one payslip (e.g. a housing
+    allowance, an advance recovery, a union subscription) beyond basic
+    salary and the statutory PAYE/AIDS levy/NSSA lines. `taxable` only
+    matters for an Allowance - whether it is added to taxable income before
+    PAYE is computed, or paid tax-free."""
+    id = db.Column(db.Integer, primary_key=True)
+    payslip_id = db.Column(db.Integer, db.ForeignKey("payslip.id"), nullable=False)
+    category = db.Column(db.String(20), nullable=False, default="Allowance")
+    label = db.Column(db.String(150), nullable=False)
+    amount = db.Column(db.Float, default=0.0)
+    taxable = db.Column(db.Boolean, default=True)
+
+    def __repr__(self):
+        return f"<PayslipItem {self.label!r} {self.category} {self.amount}>"

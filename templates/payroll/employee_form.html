@@ -1,0 +1,138 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if employee else 'Add' }} Payroll Employee - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ 'Edit' if employee else 'Add' }} Payroll Employee</h1>
+</div>
+
+<div class="card" style="max-width:680px;">
+  <form method="post">
+    {% if not employee %}
+    <div class="form-row">
+      <div>
+        <label for="scope">Payroll type *</label>
+        <select id="scope" name="scope" onchange="toggleScopeFields()">
+          <option value="internal" {% if scope=='internal' %}selected{% endif %}>Neverlank staff</option>
+          <option value="client" {% if scope=='client' %}selected{% endif %}>Client employee</option>
+        </select>
+      </div>
+      <div id="client_field" style="{% if scope != 'client' %}display:none;{% endif %}">
+        <label for="client_id">Client *</label>
+        <select id="client_id" name="client_id">
+          <option value="">Select client...</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}" {% if preselect_client_id==c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div id="user_field" style="{% if scope != 'internal' %}display:none;{% endif %}">
+        <label for="user_id">Link to a team member (optional)</label>
+        <select id="user_id" name="user_id" onchange="fillNameFromUser()">
+          <option value="">Not linked to a login</option>
+          {% for u in staff_users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <script>
+      function toggleScopeFields() {
+        var scope = document.getElementById('scope').value;
+        document.getElementById('client_field').style.display = (scope === 'client') ? '' : 'none';
+        document.getElementById('user_field').style.display = (scope === 'internal') ? '' : 'none';
+      }
+      function fillNameFromUser() {
+        var sel = document.getElementById('user_id');
+        var nameField = document.getElementById('full_name');
+        if (sel.value && !nameField.value) { nameField.value = sel.options[sel.selectedIndex].text; }
+      }
+    </script>
+    {% else %}
+    <input type="hidden" name="scope" value="{{ employee.scope }}">
+    {% if employee.scope == 'client' %}
+    <p class="muted">Client: <strong>{{ employee.client.name if employee.client else '—' }}</strong></p>
+    {% else %}
+    <div class="form-row">
+      <div>
+        <label for="user_id">Linked team member (optional)</label>
+        <select id="user_id" name="user_id">
+          <option value="">Not linked to a login</option>
+          {% for u in staff_users %}<option value="{{ u.id }}" {% if employee.user_id==u.id %}selected{% endif %}>{{ u.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="is_active">Status</label>
+        <select id="is_active" name="is_active">
+          <option value="1" {% if employee.is_active %}selected{% endif %}>Active</option>
+          <option value="" {% if not employee.is_active %}selected{% endif %}>Inactive</option>
+        </select>
+      </div>
+    </div>
+    {% endif %}
+    {% endif %}
+
+    <div class="form-row">
+      <div>
+        <label for="full_name">Full name *</label>
+        <input type="text" id="full_name" name="full_name" value="{{ employee.full_name if employee else '' }}" required>
+      </div>
+      <div>
+        <label for="employee_number">Employee number</label>
+        <input type="text" id="employee_number" name="employee_number" value="{{ employee.employee_number if employee else '' }}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="job_title">Job title</label>
+        <input type="text" id="job_title" name="job_title" value="{{ employee.job_title if employee else '' }}">
+      </div>
+      <div>
+        <label for="national_id">National ID</label>
+        <input type="text" id="national_id" name="national_id" value="{{ employee.national_id if employee else '' }}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="nssa_number">NSSA number</label>
+        <input type="text" id="nssa_number" name="nssa_number" value="{{ employee.nssa_number if employee else '' }}">
+      </div>
+      <div>
+        <label for="pay_frequency">Pay frequency</label>
+        <select id="pay_frequency" name="pay_frequency">
+          {% for f in ['Monthly', 'Fortnightly', 'Weekly'] %}
+          <option value="{{ f }}" {% if employee and employee.pay_frequency==f %}selected{% endif %}>{{ f }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="basic_salary">Basic salary</label>
+        <input type="number" step="0.01" min="0" id="basic_salary" name="basic_salary" value="{{ employee.basic_salary if employee else 0 }}">
+      </div>
+      <div>
+        <label for="date_joined">Date joined</label>
+        <input type="date" id="date_joined" name="date_joined" value="{{ employee.date_joined.isoformat() if employee and employee.date_joined else '' }}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="bank_name">Bank name</label>
+        <input type="text" id="bank_name" name="bank_name" value="{{ employee.bank_name if employee else '' }}">
+      </div>
+      <div>
+        <label for="bank_account_number">Bank account number</label>
+        <input type="text" id="bank_account_number" name="bank_account_number" value="{{ employee.bank_account_number if employee else '' }}">
+      </div>
+    </div>
+    {% if employee %}
+    <label for="date_left">Date left (if no longer employed)</label>
+    <input type="date" id="date_left" name="date_left" value="{{ employee.date_left.isoformat() if employee.date_left else '' }}">
+    {% endif %}
+
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="2">{{ employee.notes if employee else '' }}</textarea>
+
+    <button type="submit" class="btn gold">{{ 'Save changes' if employee else 'Add employee' }}</button>
+    <a href="{{ url_for('payroll.list_employees', scope=employee.scope if employee else scope) }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}

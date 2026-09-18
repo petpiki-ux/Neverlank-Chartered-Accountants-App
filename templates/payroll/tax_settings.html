@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Payroll Tax Settings - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Payroll Tax Settings</h1>
+    <div class="subtitle">Drives every payroll calculation - Neverlank staff and client payroll alike</div>
+  </div>
+  <a href="{{ url_for('payroll.dashboard') }}" class="btn secondary">Back to Payroll</a>
+</div>
+
+<div class="flash warning">{{ caveat }}</div>
+
+<div class="card" style="max-width:640px;">
+  <h2 style="margin-top:0;font-size:16px;">General</h2>
+  <form method="post">
+    <div class="form-row">
+      <div>
+        <label for="currency">Currency</label>
+        <input type="text" id="currency" name="currency" value="{{ settings.currency }}" maxlength="10">
+      </div>
+      <div>
+        <label for="aids_levy_pct">AIDS Levy (% of PAYE payable)</label>
+        <input type="number" step="0.01" min="0" id="aids_levy_pct" name="aids_levy_pct" value="{{ settings.aids_levy_pct }}">
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="nssa_employee_pct">NSSA - Employee %</label>
+        <input type="number" step="0.01" min="0" id="nssa_employee_pct" name="nssa_employee_pct" value="{{ settings.nssa_employee_pct }}">
+      </div>
+      <div>
+        <label for="nssa_employer_pct">NSSA - Employer % (informational)</label>
+        <input type="number" step="0.01" min="0" id="nssa_employer_pct" name="nssa_employer_pct" value="{{ settings.nssa_employer_pct }}">
+      </div>
+    </div>
+    <label for="nssa_insurable_ceiling">NSSA insurable earnings ceiling (leave blank for no ceiling)</label>
+    <input type="number" step="0.01" min="0" id="nssa_insurable_ceiling" name="nssa_insurable_ceiling" value="{{ settings.nssa_insurable_ceiling if settings.nssa_insurable_ceiling is not none else '' }}">
+
+    <label for="source_notes">Source / notes (where these rates came from, and when they were last checked)</label>
+    <textarea id="source_notes" name="source_notes" rows="3">{{ settings.source_notes }}</textarea>
+
+    <button type="submit" class="btn gold">Save settings</button>
+  </form>
+  {% if settings.updated_at %}
+  <p class="muted" style="margin-top:10px;font-size:12px;">
+    Last updated {{ settings.updated_at.strftime('%d %b %Y') }}{% if settings.updated_by %} by {{ settings.updated_by.name }}{% endif %}.
+  </p>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h2 style="margin-top:0;font-size:16px;">PAYE Bands</h2>
+  <p class="muted" style="font-size:12.5px;">
+    Enter the marginal-rate table exactly as ZIMRA publishes it - each band taxes only the slice of income
+    within it. Leave "Upper bound" blank for the open-ended top band.
+  </p>
+  {% if bands %}
+  <table>
+    <thead><tr><th>Lower bound</th><th>Upper bound</th><th class="text-right">Rate %</th><th></th></tr></thead>
+    <tbody>
+      {% for b in bands %}
+      <tr>
+        <td>{{ '%.2f'|format(b.lower) }}</td>
+        <td>{{ '%.2f'|format(b.upper) if b.upper is not none else 'No limit' }}</td>
+        <td class="text-right">{{ b.rate_pct }}%</td>
+        <td class="text-right">
+          <form method="post" action="{{ url_for('payroll.delete_tax_band', band_id=b.id) }}" class="inline">
+            <button type="submit" class="btn small danger">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No PAYE bands entered yet - every payslip will show PAYE = 0 until you add some.</div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('payroll.add_tax_band') }}" class="form-row" style="align-items:flex-end;margin-top:12px;">
+    <div>
+      <label for="lower">Lower bound</label>
+      <input type="number" step="0.01" min="0" id="lower" name="lower" required>
+    </div>
+    <div>
+      <label for="upper">Upper bound (blank = no limit)</label>
+      <input type="number" step="0.01" min="0" id="upper" name="upper">
+    </div>
+    <div>
+      <label for="rate_pct">Rate %</label>
+      <input type="number" step="0.01" min="0" id="rate_pct" name="rate_pct" required>
+    </div>
+    <div><button type="submit" class="btn secondary">+ Add band</button></div>
+  </form>
+</div>
+{% endblock %}

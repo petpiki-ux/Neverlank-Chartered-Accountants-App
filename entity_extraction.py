@@ -47,9 +47,13 @@ PEOPLE_TOOL = {
                     "properties": {
                         "full_name": {"type": "string", "description": "The person's full name, exactly as written in the document."},
                         "role": {"type": "string", "enum": PERSON_ROLES, "description": "Their role. Use 'Other' if none of the listed roles fit."},
+                        "number_of_shares": {
+                            "type": "string",
+                            "description": "The number of shares they hold, exactly as stated. Leave blank if not stated or not applicable to their role.",
+                        },
                         "shareholding_percentage": {
                             "type": "string",
-                            "description": "Their shareholding, exactly as stated (a percentage or a number of shares). Leave blank if not stated or not applicable to their role.",
+                            "description": "Their shareholding as a percentage, exactly as stated. Leave blank if not stated or not applicable to their role - do not calculate one yourself from number_of_shares.",
                         },
                         "id_number": {
                             "type": "string",
@@ -85,12 +89,13 @@ SYSTEM_PROMPT = (
     "Company Secretary. Use each person's full name exactly as written. If a person holds more "
     "than one of these roles, list them once under the most senior role that applies "
     "(Director > Beneficial Owner > Shareholder > Company Secretary) and note their other "
-    "role(s) in other_notes. Fill in shareholding_percentage, id_number, nationality and address "
-    "only when the document actually states them for that person - leave a field blank rather "
-    "than guessing. Do NOT invent people, roles, or details that are not actually stated in the "
-    "document - if you are not sure a name refers to a real person holding one of these roles, "
-    "leave them out. If the document names no such people at all, call the tool with an empty "
-    "people list rather than not calling it."
+    "role(s) in other_notes. Fill in number_of_shares, shareholding_percentage, id_number, "
+    "nationality and address only when the document actually states them for that person - "
+    "leave a field blank rather than guessing or calculating one from another (e.g. never "
+    "derive a percentage from a share count yourself). Do NOT invent people, roles, or details "
+    "that are not actually stated in the document - if you are not sure a name refers to a real "
+    "person holding one of these roles, leave them out. If the document names no such people at "
+    "all, call the tool with an empty people list rather than not calling it."
 )
 
 SPLIT_TOOL = {
@@ -99,7 +104,8 @@ SPLIT_TOOL = {
     "input_schema": {
         "type": "object",
         "properties": {
-            "shareholding_percentage": {"type": "string", "description": "Their shareholding, exactly as stated (a percentage or a number of shares). Leave blank if the note doesn't state one."},
+            "number_of_shares": {"type": "string", "description": "The number of shares held, exactly as stated. Leave blank if the note doesn't state one."},
+            "shareholding_percentage": {"type": "string", "description": "The shareholding as a percentage, exactly as stated. Leave blank if the note doesn't state one - do not calculate one from number_of_shares."},
             "id_number": {"type": "string", "description": "National ID or passport number, exactly as stated. Leave blank if the note doesn't state one."},
             "nationality": {"type": "string", "description": "Nationality, exactly as stated. Leave blank if the note doesn't state one."},
             "address": {"type": "string", "description": "Residential or registered address, exactly as stated. Leave blank if the note doesn't state one."},
@@ -111,12 +117,13 @@ SPLIT_TOOL = {
 
 SPLIT_SYSTEM_PROMPT = (
     "You are tidying up an existing free-text note about a company director/shareholder into "
-    "separate fields, so it matches records created since this app started asking for shareholding "
-    "percentage, ID number, nationality and address as their own fields instead of one note. Call "
-    "record_split_details with whatever the note actually states for each field. Never invent a "
-    "value: leave a field blank if the note doesn't state it. Put anything left over that doesn't "
+    "separate fields, so it matches records created since this app started asking for number of "
+    "shares, shareholding percentage, ID number, nationality and address as their own fields "
+    "instead of one note. Call record_split_details with whatever the note actually states for "
+    "each field. Never invent or calculate a value (e.g. never derive a percentage from a share "
+    "count): leave a field blank if the note doesn't state it. Put anything left over that doesn't "
     "fit one of those fields into other_notes, preserving its original wording - if the whole note "
-    "is already fully covered by the four fields, leave other_notes blank."
+    "is already fully covered by the fields above, leave other_notes blank."
 )
 
 
@@ -206,6 +213,7 @@ def extract_people(text=None, page_images=None):
                 cleaned.append({
                     "full_name": name[:200],
                     "role": role,
+                    "number_of_shares": (p.get("number_of_shares") or "").strip()[:50],
                     "shareholding_percentage": (p.get("shareholding_percentage") or "").strip()[:50],
                     "id_number": (p.get("id_number") or "").strip()[:100],
                     "nationality": (p.get("nationality") or "").strip()[:100],
@@ -223,8 +231,8 @@ def split_legacy_details(details_text):
     older records end up with the same structure as newly-extracted ones.
 
     Returns (fields, status, error):
-      - status "done": fields is a {"shareholding_percentage", "id_number",
-        "nationality", "address", "details"} dict (any of which may be blank)
+      - status "done": fields is a {"number_of_shares", "shareholding_percentage",
+        "id_number", "nationality", "address", "details"} dict (any of which may be blank)
       - status "not_configured": no ANTHROPIC_API_KEY is set
       - status "error": the request failed, or there was nothing to split
     Never raises - see models.ClientKeyPerson.needs_detail_review, which is
@@ -253,6 +261,7 @@ def split_legacy_details(details_text):
             data = block.input or {}
             return (
                 {
+                    "number_of_shares": (data.get("number_of_shares") or "").strip()[:50],
                     "shareholding_percentage": (data.get("shareholding_percentage") or "").strip()[:50],
                     "id_number": (data.get("id_number") or "").strip()[:100],
                     "nationality": (data.get("nationality") or "").strip()[:100],

@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}New Payroll Period - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>New Payroll Period</h1>
+</div>
+<div class="card" style="max-width:640px;">
+  <form method="post">
+    <div class="form-row">
+      <div>
+        <label for="scope">Payroll type *</label>
+        <select id="scope" name="scope" onchange="document.getElementById('client_field').style.display = (this.value==='client') ? '' : 'none';">
+          <option value="internal" {% if scope=='internal' %}selected{% endif %}>Neverlank staff</option>
+          <option value="client" {% if scope=='client' %}selected{% endif %}>Client payroll</option>
+        </select>
+      </div>
+      <div id="client_field" style="{% if scope != 'client' %}display:none;{% endif %}">
+        <label for="client_id">Client *</label>
+        <select id="client_id" name="client_id">
+          <option value="">Select client...</option>
+          {% for c in clients %}
+          <option value="{{ c.id }}" {% if preselect_client_id==c.id %}selected{% endif %}>{{ c.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <label for="name">Period name *</label>
+    <input type="text" id="name" name="name" placeholder="e.g. September 2026" required>
+
+    <div class="form-row">
+      <div>
+        <label for="period_start">Period start</label>
+        <input type="date" id="period_start" name="period_start">
+      </div>
+      <div>
+        <label for="period_end">Period end</label>
+        <input type="date" id="period_end" name="period_end">
+      </div>
+      <div>
+        <label for="pay_date">Pay date</label>
+        <input type="date" id="pay_date" name="pay_date">
+      </div>
+    </div>
+
+    <button type="submit" class="btn gold">Create period</button>
+    <a href="{{ url_for('payroll.list_periods', scope=scope) }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}

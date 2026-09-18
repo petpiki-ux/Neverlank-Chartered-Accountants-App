@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ period.name }} - Payroll - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ period.name }}</h1>
+    <div class="subtitle">
+      {{ 'Neverlank Staff Payroll' if period.scope == 'internal' else (period.client.name if period.client else 'Client Payroll') }}
+      &middot; <span class="badge status-{{ period.status }}">{{ period.status }}</span>
+    </div>
+  </div>
+  <div>
+    <a href="{{ url_for('payroll.list_periods', scope=period.scope, client_id=period.client_id) }}" class="btn secondary">Back to periods</a>
+    <form method="post" action="{{ url_for('payroll.finalize_period', period_id=period.id) }}" class="inline">
+      <button type="submit" class="btn {{ 'secondary' if period.status=='Finalized' else 'gold' }}">
+        {{ 'Reopen period' if period.status == 'Finalized' else 'Finalize period' }}
+      </button>
+    </form>
+  </div>
+</div>
+
+<div class="form-row">
+  <div class="stat-card">
+    <div class="num" style="font-size:16px;">{{ period.pay_date.strftime('%d %b %Y') if period.pay_date else '—' }}</div>
+    <div class="label">Pay date</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="font-size:16px;">{{ period.payslips|length }}</div>
+    <div class="label">Payslips</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="font-size:16px;">{{ period.currency }} {{ '%.2f'|format(period.total_gross_pay) }}</div>
+    <div class="label">Total gross pay</div>
+  </div>
+  <div class="stat-card">
+    <div class="num" style="font-size:16px;">{{ period.currency }} {{ '%.2f'|format(period.total_net_pay) }}</div>
+    <div class="label">Total net pay</div>
+  </div>
+</div>
+
+{% if period.status != 'Finalized' and pending_employees %}
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px;">Generate payslips</h2>
+  <form method="post" action="{{ url_for('payroll.generate_payslips', period_id=period.id) }}">
+    <table>
+      <thead><tr><th style="width:30px;"><input type="checkbox" onclick="document.querySelectorAll('.pend-emp').forEach(c=>c.checked=this.checked)"></th><th>Name</th><th>Job title</th><th class="text-right">Basic salary</th></tr></thead>
+      <tbody>
+        {% for e in pending_employees %}
+        <tr>
+          <td><input type="checkbox" class="pend-emp" name="employee_id" value="{{ e.id }}" checked></td>
+          <td>{{ e.full_name }}</td>
+          <td>{{ e.job_title or '—' }}</td>
+          <td class="text-right">{{ '%.2f'|format(e.basic_salary or 0) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <button type="submit" class="btn gold">Generate selected payslips</button>
+  </form>
+</div>
+{% elif period.status != 'Finalized' %}
+<div class="flash info">Every active employee for this scope already has a payslip in this period.</div>
+{% endif %}
+
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px;">Payslips</h2>
+  {% if period.payslips %}
+  <table>
+    <thead><tr><th>Employee</th><th class="text-right">Gross pay</th><th class="text-right">Deductions</th><th class="text-right">Net pay</th><th></th><th></th></tr></thead>
+    <tbody>
+      {% for ps in period.payslips %}
+      <tr>
+        <td><a href="{{ url_for('payroll.view_payslip', payslip_id=ps.id) }}">{{ ps.employee.full_name }}</a>{% if not ps.is_auto_calculated %} <span class="badge status-OnHold" title="Manually edited since last recalculation">Edited</span>{% endif %}</td>
+        <td class="text-right">{{ '%.2f'|format(ps.gross_pay or 0) }}</td>
+        <td class="text-right">{{ '%.2f'|format(ps.total_deductions) }}</td>
+        <td class="text-right"><strong>{{ '%.2f'|format(ps.net_pay or 0) }}</strong></td>
+        <td class="text-right">
+          <a href="{{ url_for('payroll.download_payslip_docx', payslip_id=ps.id) }}" class="btn small secondary">Word</a>
+          <a href="{{ url_for('payroll.download_payslip_pdf', payslip_id=ps.id) }}" class="btn small secondary">PDF</a>
+        </td>
+        <td class="text-right"><a href="{{ url_for('payroll.view_payslip', payslip_id=ps.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No payslips generated yet.</div>
+  {% endif %}
+</div>
+
+{% if period.status != 'Finalized' %}
+<form method="post" action="{{ url_for('payroll.delete_period', period_id=period.id) }}" onsubmit="return confirm('Delete this payroll period and all its payslips? This cannot be undone.');">
+  <button type="submit" class="btn danger small">Delete period</button>
+</form>
+{% endif %}
+{% endblock %}

@@ -100,7 +100,7 @@ def view_client(client_id):
     confirmed_people = [p for p in client.key_people if p.status == "Confirmed"]
     has_legacy_details = any(
         (p.details or "").strip() and not p.needs_detail_review
-        and not (p.shareholding_percentage or p.id_number or p.nationality or p.address)
+        and not (p.number_of_shares or p.shareholding_percentage or p.id_number or p.nationality or p.address)
         for p in client.key_people
     )
     return render_template(

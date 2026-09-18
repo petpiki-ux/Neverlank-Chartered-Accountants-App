@@ -123,13 +123,13 @@
     {% endif %}
   </div>
   <p class="muted" style="font-size:11.5px;margin-top:-6px;">
-    Shareholding %, ID number, nationality and address each have their own field below. Anything else stated (date
-    of appointment, another role also held, etc.) goes under "Other notes".
+    Number of shares, shareholding %, ID number, nationality and address each have their own field below. Anything
+    else stated (date of appointment, another role also held, etc.) goes under "Other notes".
   </p>
   {% if suggested_people %}
   <p class="muted" style="font-size:12px;">Suggested from an uploaded document below - review each one against the source document, correct anything needed, then Confirm before it's used for screening.</p>
   <table>
-    <thead><tr><th>Name</th><th>Role</th><th>Shareholding %</th><th>ID number</th><th>Nationality</th><th>Address</th><th>Other notes</th><th>Source document</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Role</th><th>No. of shares</th><th>Shareholding %</th><th>ID number</th><th>Nationality</th><th>Address</th><th>Other notes</th><th>Source document</th><th></th></tr></thead>
     <tbody>
       {% for p in suggested_people %}
         <form method="post" action="{{ url_for('company_documents.update_key_person', person_id=p.id) }}" class="inline">
@@ -140,7 +140,8 @@
               {% for r in person_roles %}<option value="{{ r }}" {% if p.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
             </select>
           </td>
-          <td><input type="text" name="shareholding_percentage" value="{{ p.shareholding_percentage or '' }}" style="min-width:80px;margin-bottom:0;"></td>
+          <td><input type="text" name="number_of_shares" value="{{ p.number_of_shares or '' }}" style="min-width:80px;margin-bottom:0;"></td>
+          <td><input type="text" name="shareholding_percentage" value="{{ p.shareholding_percentage or '' }}" style="min-width:70px;margin-bottom:0;"></td>
           <td><input type="text" name="id_number" value="{{ p.id_number or '' }}" style="min-width:110px;margin-bottom:0;"></td>
           <td><input type="text" name="nationality" value="{{ p.nationality or '' }}" style="min-width:100px;margin-bottom:0;"></td>
           <td><input type="text" name="address" value="{{ p.address or '' }}" style="min-width:140px;margin-bottom:0;"></td>
@@ -160,7 +161,7 @@
 
   {% if confirmed_people %}
   <table style="margin-top:{% if suggested_people %}14px{% else %}0{% endif %};">
-    <thead><tr><th>Name</th><th>Role</th><th>Shareholding %</th><th>ID number</th><th>Nationality</th><th>Address</th><th>Other notes</th><th></th></tr></thead>
+    <thead><tr><th>Name</th><th>Role</th><th>No. of shares</th><th>Shareholding %</th><th>ID number</th><th>Nationality</th><th>Address</th><th>Other notes</th><th></th></tr></thead>
     <tbody>
       {% for p in confirmed_people %}
         <form method="post" action="{{ url_for('company_documents.update_key_person', person_id=p.id) }}" class="inline">
@@ -174,7 +175,8 @@
               {% for r in person_roles %}<option value="{{ r }}" {% if p.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
             </select>
           </td>
-          <td><input type="text" name="shareholding_percentage" value="{{ p.shareholding_percentage or '' }}" style="min-width:80px;margin-bottom:0;"></td>
+          <td><input type="text" name="number_of_shares" value="{{ p.number_of_shares or '' }}" style="min-width:80px;margin-bottom:0;"></td>
+          <td><input type="text" name="shareholding_percentage" value="{{ p.shareholding_percentage or '' }}" style="min-width:70px;margin-bottom:0;"></td>
           <td><input type="text" name="id_number" value="{{ p.id_number or '' }}" style="min-width:110px;margin-bottom:0;"></td>
           <td><input type="text" name="nationality" value="{{ p.nationality or '' }}" style="min-width:100px;margin-bottom:0;"></td>
           <td><input type="text" name="address" value="{{ p.address or '' }}" style="min-width:140px;margin-bottom:0;"></td>
@@ -204,6 +206,7 @@
         {% for r in person_roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
       </select>
     </div>
+    <div><label for="kp_shares">No. of shares</label><input type="text" id="kp_shares" name="number_of_shares"></div>
     <div><label for="kp_shareholding">Shareholding %</label><input type="text" id="kp_shareholding" name="shareholding_percentage" placeholder="e.g. 25%"></div>
     <div><label for="kp_id">ID number</label><input type="text" id="kp_id" name="id_number"></div>
     <div><label for="kp_nationality">Nationality</label><input type="text" id="kp_nationality" name="nationality"></div>

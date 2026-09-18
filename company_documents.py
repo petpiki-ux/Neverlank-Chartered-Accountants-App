@@ -133,6 +133,7 @@ def upload_document(client_id):
             client_id=client_id,
             full_name=p["full_name"],
             role=p["role"],
+            number_of_shares=p.get("number_of_shares") or None,
             shareholding_percentage=p.get("shareholding_percentage") or None,
             id_number=p.get("id_number") or None,
             nationality=p.get("nationality") or None,
@@ -180,6 +181,7 @@ def reprocess_document(doc_id):
             client_id=doc.client_id,
             full_name=p["full_name"],
             role=p["role"],
+            number_of_shares=p.get("number_of_shares") or None,
             shareholding_percentage=p.get("shareholding_percentage") or None,
             id_number=p.get("id_number") or None,
             nationality=p.get("nationality") or None,
@@ -243,6 +245,7 @@ def add_key_person(client_id):
         client_id=client_id,
         full_name=full_name,
         role=role if role in PERSON_ROLES else "Other",
+        number_of_shares=request.form.get("number_of_shares", "").strip() or None,
         shareholding_percentage=request.form.get("shareholding_percentage", "").strip() or None,
         id_number=request.form.get("id_number", "").strip() or None,
         nationality=request.form.get("nationality", "").strip() or None,
@@ -270,6 +273,7 @@ def update_key_person(person_id):
     person.full_name = full_name
     role = request.form.get("role", person.role).strip()
     person.role = role if role in PERSON_ROLES else person.role
+    person.number_of_shares = request.form.get("number_of_shares", "").strip() or None
     person.shareholding_percentage = request.form.get("shareholding_percentage", "").strip() or None
     person.id_number = request.form.get("id_number", "").strip() or None
     person.nationality = request.form.get("nationality", "").strip() or None
@@ -310,7 +314,7 @@ def split_legacy_details_for_client(client_id):
         p for p in client.key_people
         if (p.details or "").strip()
         and not p.needs_detail_review
-        and not (p.shareholding_percentage or p.id_number or p.nationality or p.address)
+        and not (p.number_of_shares or p.shareholding_percentage or p.id_number or p.nationality or p.address)
     ]
     if not candidates:
         flash("Nothing to split - every director/shareholder already has separate fields (or no notes to split).", "info")
@@ -324,6 +328,7 @@ def split_legacy_details_for_client(client_id):
             break
         if status != "done":
             continue  # skip this one, leave their note untouched, carry on with the rest
+        person.number_of_shares = fields["number_of_shares"] or None
         person.shareholding_percentage = fields["shareholding_percentage"] or None
         person.id_number = fields["id_number"] or None
         person.nationality = fields["nationality"] or None

@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Payroll - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Payroll</h1>
+    <div class="subtitle">Neverlank's own staff payroll, and payroll processed as a service for clients</div>
+  </div>
+  <a href="{{ url_for('payroll.tax_settings') }}" class="btn secondary">Tax Settings</a>
+</div>
+
+{% if bands_missing %}
+<div class="flash warning">
+  <strong>No PAYE bands entered yet.</strong> {{ caveat }}
+  <a href="{{ url_for('payroll.tax_settings') }}">Set up Payroll Tax Settings now</a>.
+</div>
+{% endif %}
+
+<div class="form-row" style="align-items:stretch;">
+  <div class="card">
+    <div class="page-header" style="margin-bottom:10px;">
+      <h2 style="margin:0;font-size:17px;">Neverlank Staff Payroll</h2>
+    </div>
+    <p class="muted">{{ internal_employee_count }} active staff member(s) on payroll.</p>
+    <a href="{{ url_for('payroll.list_employees', scope='internal') }}" class="btn small secondary">Employees</a>
+    <a href="{{ url_for('payroll.list_periods', scope='internal') }}" class="btn small secondary">Periods</a>
+    <a href="{{ url_for('payroll.new_period', scope='internal') }}" class="btn small gold">+ New Period</a>
+
+    {% if internal_periods %}
+    <table style="margin-top:14px;">
+      <thead><tr><th>Period</th><th>Pay date</th><th>Status</th><th class="text-right">Net pay</th></tr></thead>
+      <tbody>
+        {% for p in internal_periods %}
+        <tr>
+          <td><a href="{{ url_for('payroll.view_period', period_id=p.id) }}">{{ p.name }}</a></td>
+          <td>{{ p.pay_date.strftime('%d %b %Y') if p.pay_date else '—' }}</td>
+          <td><span class="badge status-{{ p.status }}">{{ p.status }}</span></td>
+          <td class="text-right">{{ p.currency }} {{ '%.2f'|format(p.total_net_pay) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No internal payroll periods yet.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="page-header" style="margin-bottom:10px;">
+      <h2 style="margin:0;font-size:17px;">Client Payroll Service</h2>
+    </div>
+    <p class="muted">{{ client_employee_count }} active client employee(s) across {{ clients_with_payroll|length }} client(s).</p>
+    <a href="{{ url_for('payroll.list_employees', scope='client') }}" class="btn small secondary">Employees</a>
+    <a href="{{ url_for('payroll.list_periods', scope='client') }}" class="btn small secondary">Periods</a>
+    <a href="{{ url_for('payroll.new_period', scope='client') }}" class="btn small gold">+ New Period</a>
+
+    {% if clients_with_payroll %}
+    <p style="margin-top:12px;font-size:12.5px;" class="muted">
+      Clients on payroll: {% for c in clients_with_payroll %}<a href="{{ url_for('payroll.list_employees', scope='client', client_id=c.id) }}">{{ c.name }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+    </p>
+    {% endif %}
+
+    {% if client_periods %}
+    <table style="margin-top:14px;">
+      <thead><tr><th>Client</th><th>Period</th><th>Status</th><th class="text-right">Net pay</th></tr></thead>
+      <tbody>
+        {% for p in client_periods %}
+        <tr>
+          <td>{{ p.client.name if p.client else '—' }}</td>
+          <td><a href="{{ url_for('payroll.view_period', period_id=p.id) }}">{{ p.name }}</a></td>
+          <td><span class="badge status-{{ p.status }}">{{ p.status }}</span></td>
+          <td class="text-right">{{ p.currency }} {{ '%.2f'|format(p.total_net_pay) }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No client payroll periods yet.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

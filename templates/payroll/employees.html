@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Payroll Employees - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ 'Neverlank Staff Payroll' if scope == 'internal' else 'Client Payroll Employees' }}</h1>
+    <div class="subtitle">{{ employees|length }} record(s){% if selected_client %} - {{ selected_client.name }}{% endif %}</div>
+  </div>
+  <div>
+    <a href="{{ url_for('payroll.dashboard') }}" class="btn secondary">Back to Payroll</a>
+    <a href="{{ url_for('payroll.new_employee', scope=scope, client_id=selected_client.id if selected_client else none) }}" class="btn gold">+ Add employee</a>
+  </div>
+</div>
+
+{% if scope == 'client' %}
+<div class="card">
+  <form method="get" class="form-row" style="align-items:flex-end;margin-bottom:0;">
+    <input type="hidden" name="scope" value="client">
+    <div>
+      <label for="client_id">Client</label>
+      <select id="client_id" name="client_id" onchange="this.form.submit()">
+        <option value="">All clients</option>
+        {% for c in clients %}<option value="{{ c.id }}" {% if selected_client and selected_client.id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  {% if employees %}
+  <table>
+    <thead>
+      <tr>
+        <th>Name</th><th>Emp. No.</th>{% if scope=='client' %}<th>Client</th>{% endif %}<th>Job Title</th>
+        <th class="text-right">Basic Salary</th><th>Pay Freq.</th><th>Status</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in employees %}
+      <tr{% if not e.is_active %} class="muted"{% endif %}>
+        <td>{{ e.full_name }}</td>
+        <td>{{ e.employee_number or '—' }}</td>
+        {% if scope=='client' %}<td>{{ e.client.name if e.client else '—' }}</td>{% endif %}
+        <td>{{ e.job_title or '—' }}</td>
+        <td class="text-right">{{ '%.2f'|format(e.basic_salary or 0) }}</td>
+        <td>{{ e.pay_frequency }}</td>
+        <td>{% if e.is_active %}<span class="badge status-Approved">Active</span>{% else %}<span class="badge status-OnHold">Inactive</span>{% endif %}</td>
+        <td class="text-right">
+          <a href="{{ url_for('payroll.edit_employee', employee_id=e.id) }}" class="btn small secondary">Edit</a>
+          <form method="post" action="{{ url_for('payroll.delete_employee', employee_id=e.id) }}" class="inline" onsubmit="return confirm('Remove this employee from payroll?');">
+            <button type="submit" class="btn small danger">Remove</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No employees yet. <a href="{{ url_for('payroll.new_employee', scope=scope) }}">Add the first one</a>.</div>
+  {% endif %}
+</div>
+{% endblock %}
