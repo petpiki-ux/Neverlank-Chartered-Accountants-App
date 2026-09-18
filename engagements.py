@@ -18,6 +18,8 @@ from models import (
     ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     RISK_CATEGORIES,
     SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
+    SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, REGULATORY_NOTICE_SOURCE_LABELS,
+    SanctionsListStatus, RegulatoryNotice,
     COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
     FinalisationChecklist, FinalisationChecklistItem, DEFAULT_FINALISATION_CHECKLIST_ITEMS, FORENSIC_FINALISATION_CHECKLIST_ITEMS,
@@ -252,6 +254,19 @@ def view_engagement(engagement_id):
     _ensure_engagement_access(engagement, require_accepted=False)
     client_acceptance = ClientAcceptance.query.filter_by(engagement_id=engagement_id).first()
     acceptance_cleared = engagement_acceptance_cleared(engagement)
+    # Automated screening status, shown alongside the Sanctions & Adverse
+    # Notice Screening card on the acceptance tab - how current the UN/OFAC/
+    # EU cache is, and how many RBZ/FIU notices are on file to check against.
+    sanctions_list_status = {
+        row.source: row for row in SanctionsListStatus.query.filter(SanctionsListStatus.source.in_(SANCTIONS_AUTO_SOURCES)).all()
+    }
+    regulatory_notice_counts = {}
+    for source in REGULATORY_NOTICE_SOURCES:
+        notices = RegulatoryNotice.query.filter_by(source=source).all()
+        regulatory_notice_counts[source] = {
+            "total": len(notices),
+            "searchable": sum(1 for n in notices if n.extraction_status == "extracted"),
+        }
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
     tab = request.args.get("tab", "overview")
     # Document Templates matching this engagement's type (Audit/Assurance/
@@ -358,6 +373,12 @@ def view_engagement(engagement_id):
         risk_categories=RISK_CATEGORIES,
         sanctions_screening_sources=SANCTIONS_SCREENING_SOURCES,
         sanctions_screening_results=SANCTIONS_SCREENING_RESULTS,
+        sanctions_auto_sources=SANCTIONS_AUTO_SOURCES,
+        sanctions_list_status=sanctions_list_status,
+        can_manage_sanctions_lists=user_has_permission(current_user, "manage_sanctions_lists"),
+        regulatory_notice_sources=REGULATORY_NOTICE_SOURCES,
+        regulatory_notice_source_labels=REGULATORY_NOTICE_SOURCE_LABELS,
+        regulatory_notice_counts=regulatory_notice_counts,
         finalisation_checklist=finalisation_checklist,
         finalisation_checklist_responses=CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     )

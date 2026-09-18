@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block title %}Regulatory Notices - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Regulatory Notices</h1>
+    <div class="subtitle">RBZ and FIU Zimbabwe adverse-notice PDFs, uploaded by the firm and read automatically during Sanctions &amp; Adverse Notice Screening.</div>
+  </div>
+</div>
+
+<div class="card">
+  <p class="muted" style="font-size:12.5px;">
+    UN, OFAC and EU each publish a free, official sanctions list the app can check automatically. Neither
+    the Reserve Bank of Zimbabwe nor Zimbabwe's Financial Intelligence Unit does &mdash; RBZ only posts
+    occasional PDF "Public Notices" and FIU Zimbabwe has no searchable list at all &mdash; so instead, upload
+    the notices the firm receives or finds here once. The app extracts the text from each PDF automatically,
+    and every "Auto-screen" run on an engagement's Client Acceptance tab searches that text for a name match,
+    in place of a live feed. A scanned/image-only PDF is still kept on file, but has no selectable text to
+    search &mdash; add a note listing the key names it covers instead.
+  </p>
+</div>
+
+{% if can_edit %}
+<div class="card">
+  <h3 class="mt-0">Upload a notice</h3>
+  <form method="post" action="{{ url_for('regulatory_notices.upload_notice') }}" enctype="multipart/form-data">
+    <div class="form-row" style="align-items:flex-end;">
+      <div>
+        <label for="notice_source">Source</label>
+        <select id="notice_source" name="source" required>
+          {% for source in sources %}<option value="{{ source }}">{{ source_labels.get(source, source) }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="notice_title">Title</label><input type="text" id="notice_title" name="title" placeholder="e.g. Exchange Control Adverse Notice - March 2026" required></div>
+      <div><label for="notice_date">Notice date</label><input type="date" id="notice_date" name="notice_date"></div>
+      <div><label for="notice_file">PDF file</label><input type="file" id="notice_file" name="file" accept=".pdf" required></div>
+    </div>
+    <label for="notice_notes">Notes (optional)</label>
+    <textarea id="notice_notes" name="notes" rows="2" placeholder="e.g. key names this notice covers, reference number"></textarea>
+    <button type="submit" class="btn gold">Upload</button>
+  </form>
+</div>
+{% endif %}
+
+{% for source in sources %}
+{% if library.get(source) %}
+<div class="card">
+  <h3 class="mt-0"><span class="badge">{{ source_labels.get(source, source) }}</span></h3>
+  <table>
+    <thead><tr><th>Title</th><th>Notice date</th><th>Uploaded</th><th>Text status</th><th></th></tr></thead>
+    <tbody>
+      {% for notice in library[source] %}
+      <tr>
+        <td>
+          {{ notice.title }}
+          {% if notice.notes %}<div class="muted" style="font-size:12px;">{{ notice.notes }}</div>{% endif %}
+        </td>
+        <td class="muted">{{ notice.notice_date.strftime('%d %b %Y') if notice.notice_date else '—' }}</td>
+        <td class="muted">{{ notice.uploaded_at.strftime('%d %b %Y') if notice.uploaded_at else '—' }}{% if notice.uploaded_by %} by {{ notice.uploaded_by.name }}{% endif %}</td>
+        <td>
+          {% if notice.extraction_status == 'extracted' %}
+          <span class="badge risk-Low">Searchable ({{ notice.page_count }} pg)</span>
+          {% elif notice.extraction_status == 'no_text_found' %}
+          <span class="badge risk-Medium">No text found (scanned?)</span>
+          {% else %}
+          <span class="badge risk-High">Couldn't read PDF</span>
+          {% endif %}
+        </td>
+        <td class="text-right">
+          <a href="{{ url_for('regulatory_notices.download_notice', notice_id=notice.id) }}" class="btn small secondary">Download</a>
+          {% if can_edit %}
+          <form method="post" action="{{ url_for('regulatory_notices.delete_notice', notice_id=notice.id) }}" style="display:inline;" onsubmit="return confirm('Delete this notice? This cannot be undone.');">
+            <button type="submit" class="btn small danger">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endfor %}
+
+{% if not library %}
+<div class="card">
+  <p class="muted">No regulatory notices uploaded yet.{% if can_edit %} Use "Upload a notice" above to add the first one.{% endif %}</p>
+</div>
+{% endif %}
+{% endblock %}

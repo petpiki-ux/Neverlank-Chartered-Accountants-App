@@ -90,6 +90,15 @@ def _add_missing_columns():
             ("competence_scope_confirmed", "BOOLEAN"),
             ("competence_scope_notes", "TEXT"),
         ],
+        "sanctions_screening": [
+            ("un_auto_notes", "TEXT"),
+            ("ofac_auto_notes", "TEXT"),
+            ("eu_auto_notes", "TEXT"),
+            ("rbz_auto_notes", "TEXT"),
+            ("fiu_auto_notes", "TEXT"),
+            ("auto_screened_at", "DATETIME"),
+            ("auto_screened_by_id", "INTEGER"),
+        ],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
@@ -258,6 +267,7 @@ def create_app():
     from calls import calls_bp
     from acceptance import acceptance_bp
     from invoicing import invoicing_bp
+    from regulatory_notices import regulatory_notices_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -269,6 +279,7 @@ def create_app():
     app.register_blueprint(calls_bp)
     app.register_blueprint(acceptance_bp)
     app.register_blueprint(invoicing_bp)
+    app.register_blueprint(regulatory_notices_bp)
 
     @app.route("/")
     def index():
@@ -306,17 +317,16 @@ def create_app():
             # steps needed from the user. Safe/idempotent either way.
             from seed import seed_document_templates
             seed_document_templates()
-        if Permission.query.count() == 0:
-            # Likewise for the configurable role permissions (also a new
-            # feature) - seed default rows that exactly reproduce this
-            # app's previous hardcoded behaviour, so upgrading changes
-            # nothing until an admin opens Team > Permissions and changes
-            # a toggle. A plain `if` (not `elif`) so this still runs on the
-            # very first launch of a brand-new install alongside the seeding
-            # above - though run_seed() already seeds permissions itself, so
-            # this is a no-op there and only does real work on an upgrade.
-            from seed import seed_permissions
-            seed_permissions()
+        # Configurable role permissions: seed_permissions() only ever adds a
+        # (role, key) row that doesn't already exist, so it's safe/cheap to
+        # call on every startup rather than gating it on the table being
+        # empty - that's what picks up a later update's new permission keys
+        # (e.g. manage_regulatory_notices, manage_sanctions_lists) on an
+        # existing install without a manual migration step. A no-op on a
+        # brand-new install, since run_seed() above already seeds every
+        # current key.
+        from seed import seed_permissions
+        seed_permissions()
         _fix_forensic_template_type()
         _fix_forensic_checklist_items()
 
@@ -332,6 +342,24 @@ def register_cli(app):
         from seed import run_seed
         run_seed()
         click.echo("Database seeded.")
+
+    @app.cli.command("refresh-sanctions-lists")
+    def refresh_sanctions_lists():
+        """Refresh the cached UN/OFAC/EU sanctions lists used by automated
+        screening (see sanctions_data.refresh_all_sources). Run this from a
+        scheduled job (e.g. a Render Cron Job hitting this command on a
+        daily/weekly schedule) to keep the cache current without anyone
+        having to click "Refresh lists now" in the app - see the README for
+        how to set that up. Safe to run any time; each source is refreshed
+        independently, so one being temporarily unreachable doesn't stop
+        the others."""
+        import sanctions_data
+        results = sanctions_data.refresh_all_sources()
+        for source, (ok, count, error) in results.items():
+            if ok:
+                click.echo(f"{source}: refreshed, {count} entries.")
+            else:
+                click.echo(f"{source}: FAILED - {error}")
 
 
 app = create_app()

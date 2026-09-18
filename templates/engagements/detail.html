@@ -336,10 +336,45 @@
     <p class="muted" style="font-size:12px;">
       Screen every key individual associated with this client - directors, beneficial owners, authorised signatories{% if engagement.type == 'Investigative Engagement' %}, and any suspect, target or key witness{% endif %} - against the UN Sanctions List, OFAC (US Treasury), the EU Sanctions List, and adverse notices issued by the Reserve Bank of Zimbabwe (RBZ) or the Financial Intelligence Unit (FIU). Purely advisory, like the checklist assessment above: a confirmed hit doesn't block anything here automatically - escalate it through the Decision below.
     </p>
+
+    <div class="card" style="background:#faf9f6;margin-bottom:14px;">
+      <strong style="font-size:12.5px;">Automated screening status</strong>
+      <table style="font-size:12px;margin-top:6px;margin-bottom:0;">
+        <thead><tr><th>Source</th><th>Cache last refreshed</th><th>Entries cached</th><th></th></tr></thead>
+        <tbody>
+          {% for source in sanctions_auto_sources %}
+          {% set status = sanctions_list_status.get(source) %}
+          <tr>
+            <td><strong>{{ source }}</strong></td>
+            <td class="muted">
+              {% if status and status.last_refreshed_at %}{{ status.last_refreshed_at.strftime('%d %b %Y %H:%M') }}{% else %}Never refreshed{% endif %}
+              {% if status and status.last_error %}<br><span style="color:#b02a2a;">Last attempt failed: {{ status.last_error[:160] }}</span>{% endif %}
+            </td>
+            <td>{{ status.entry_count if status else 0 }}</td>
+            <td></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% if can_manage_sanctions_lists %}
+      <form method="post" action="{{ url_for('acceptance.refresh_sanctions_lists') }}" style="margin-top:8px;margin-bottom:0;">
+        <button type="submit" class="btn small secondary">Refresh UN/OFAC/EU lists now</button>
+      </form>
+      {% endif %}
+      <p class="muted" style="font-size:11.5px;margin-top:8px;margin-bottom:0;">
+        RBZ and FIU Zimbabwe don't publish a feed the app can check automatically - instead, matching is against the firm's own
+        <a href="{{ url_for('regulatory_notices.list_notices') }}">Regulatory Notices</a> library:
+        {% for source in regulatory_notice_sources %}{% set c = regulatory_notice_counts.get(source, {'total': 0, 'searchable': 0}) %}{{ source }} {{ c.searchable }}/{{ c.total }} notice(s) searchable{% if not loop.last %}, {% endif %}{% endfor %}.
+      </p>
+    </div>
+
     {% if client_acceptance and client_acceptance.screening_assessment %}
     <div class="flash {{ client_acceptance.screening_assessment.level }}" style="margin-bottom:10px;">{{ client_acceptance.screening_assessment.label }}</div>
     {% endif %}
     {% if client_acceptance and client_acceptance.screenings %}
+    <form method="post" action="{{ url_for('acceptance.auto_screen_all', engagement_id=engagement.id) }}" style="margin-bottom:8px;">
+      <button type="submit" class="btn small gold">Auto-screen all individuals now</button>
+    </form>
     <table>
       <thead><tr><th>Individual</th><th>Role</th>{% for field, label in sanctions_screening_sources %}<th>{{ label }}</th>{% endfor %}<th>Notes</th><th>Status</th><th></th></tr></thead>
       <tbody>
@@ -350,15 +385,21 @@
           <td><input type="text" name="role_description" value="{{ s.role_description or '' }}" style="width:130px;margin-bottom:0;" placeholder="e.g. Director"></td>
           {% for field, label in sanctions_screening_sources %}
           <td>
-            <select name="{{ field }}" style="margin-bottom:0;min-width:120px;">
+            <select name="{{ field }}" style="margin-bottom:0;min-width:120px;" title="{{ s.auto_notes_for(field) or '' }}">
               {% for r in sanctions_screening_results %}<option value="{{ r }}" {% if s[field]==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
             </select>
           </td>
           {% endfor %}
-          <td><input type="text" name="notes" value="{{ s.notes or '' }}" placeholder="Match details / reference" style="width:150px;margin-bottom:0;"></td>
+          <td>
+            <input type="text" name="notes" value="{{ s.notes or '' }}" placeholder="Match details / reference" style="width:150px;margin-bottom:0;">
+            {% if s.auto_screened_at %}
+            <div class="muted" style="font-size:10.5px;margin-top:3px;">Auto-screened {{ s.auto_screened_at.strftime('%d %b %Y') }}{% if s.auto_screened_by %} by {{ s.auto_screened_by.name }}{% endif %} - hover a result for its notes.</div>
+            {% endif %}
+          </td>
           <td><span class="badge {% if s.overall_status == 'Confirmed Hit' %}risk-High{% elif s.overall_status == 'Potential Match' %}risk-Medium{% elif s.overall_status == 'Clear' %}risk-Low{% endif %}">{{ s.overall_status }}</span></td>
           <td>
             <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('acceptance.auto_screen_screening', screening_id=s.id) }}" class="btn small secondary">Auto-screen</button>
             <button type="submit" formaction="{{ url_for('acceptance.delete_sanctions_screening', screening_id=s.id) }}" class="btn small danger" onclick="return confirm('Delete this individual\'s screening record?')">Delete</button>
           </td>
         </tr>

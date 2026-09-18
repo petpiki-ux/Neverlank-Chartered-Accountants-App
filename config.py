@@ -46,6 +46,13 @@ DOCUMENT_TEMPLATES_DIR = DOCUMENT_TEMPLATES_SEED_DIR
 # DOCUMENT_TEMPLATES_DATA_DIR above, but there's no bundled/seeded starting
 # set; it starts empty and admins/partners add files from the app.
 POLICIES_DATA_DIR = os.path.join(DATA_DIR, "policies_data")
+# Writable folder for the Regulatory Notices library (RBZ and FIU Zimbabwe
+# adverse-notice PDFs the firm uploads itself, since neither regulator
+# publishes a searchable/machine-readable list) - same idea as
+# POLICIES_DATA_DIR above: starts empty, admins/partners add files from the
+# app, and the extracted text of each PDF is what Sanctions & Adverse
+# Notice Screening searches during an auto-screen.
+REGULATORY_NOTICES_DATA_DIR = os.path.join(DATA_DIR, "regulatory_notices_data")
 
 
 class Config:
@@ -65,3 +72,4 @@ class Config:
     DOCUMENT_TEMPLATES_DATA_DIR = DOCUMENT_TEMPLATES_DATA_DIR
     DOCUMENT_TEMPLATES_DIR = DOCUMENT_TEMPLATES_DIR
     POLICIES_DATA_DIR = POLICIES_DATA_DIR
+    REGULATORY_NOTICES_DATA_DIR = REGULATORY_NOTICES_DATA_DIR

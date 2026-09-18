@@ -62,6 +62,12 @@ PERMISSIONS = [
     ("manage_policies", "Manage Policies & Procedures",
      "Add, edit or delete documents in the Policies & Procedures library (previously admin/partner only).",
      ("partner", "admin")),
+    ("manage_regulatory_notices", "Manage Regulatory Notices",
+     "Upload or delete RBZ/FIU adverse notice PDFs in the Regulatory Notices library, used by automated sanctions/adverse-notice screening.",
+     ("partner", "admin")),
+    ("manage_sanctions_lists", "Refresh Sanctions Lists",
+     "Trigger a manual refresh of the cached UN, OFAC and EU sanctions lists used by automated screening.",
+     ("partner", "admin")),
     ("manage_checklist_templates", "Manage Checklist Templates",
      "Create, edit or delete the checklist templates used to start new engagements (previously unrestricted).",
      tuple(USER_ROLES)),
@@ -2431,6 +2437,24 @@ SANCTIONS_SCREENING_SOURCES = [
 
 SANCTIONS_SCREENING_RESULTS = ["Not Checked", "Clear", "Potential Match", "Confirmed Hit"]
 
+# The three sources with a free, official, machine-readable feed the app can
+# fetch and cache itself (see sanctions_data.py) - matched automatically
+# against SanctionsWatchlistEntry rows cached from that feed. Maps each
+# source's short code to its result-field/auto-notes-field prefix on
+# SanctionsScreening and to its SanctionsListStatus row.
+SANCTIONS_AUTO_SOURCES = ["UN", "OFAC", "EU"]
+
+# RBZ and FIU Zimbabwe publish no such feed (RBZ posts occasional PDF
+# "Public Notices"; FIU Zimbabwe has no searchable list at all) - so instead
+# the firm uploads the PDFs it receives to the Regulatory Notices library
+# (see RegulatoryNotice below) and an auto-screen searches their extracted
+# text for a name match, in place of a live API call.
+REGULATORY_NOTICE_SOURCES = ["RBZ", "FIU"]
+REGULATORY_NOTICE_SOURCE_LABELS = {
+    "RBZ": "Reserve Bank of Zimbabwe (RBZ)",
+    "FIU": "Financial Intelligence Unit (FIU) Zimbabwe",
+}
+
 
 class SanctionsScreening(db.Model):
     """One row per key individual (director, beneficial owner, authorised
@@ -2457,6 +2481,20 @@ class SanctionsScreening(db.Model):
     notes = db.Column(db.Text)  # match details, reference/search numbers, follow-up/escalation actions
     order = db.Column(db.Integer, default=0)
 
+    # Populated by the auto-screen action (acceptance.auto_screen_individual)
+    # alongside the *_result columns above - a short, human-readable note on
+    # what the automated match (or lack of one) against the cached UN/OFAC/EU
+    # lists or the uploaded RBZ/FIU notice library actually found, kept
+    # separate from the shared `notes` field above so a reviewer's own
+    # manual notes are never silently overwritten by a later auto-screen.
+    un_auto_notes = db.Column(db.Text)
+    ofac_auto_notes = db.Column(db.Text)
+    eu_auto_notes = db.Column(db.Text)
+    rbz_auto_notes = db.Column(db.Text)
+    fiu_auto_notes = db.Column(db.Text)
+    auto_screened_at = db.Column(db.DateTime)
+    auto_screened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
     screened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     screened_at = db.Column(db.DateTime)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -2468,6 +2506,13 @@ class SanctionsScreening(db.Model):
     )
     screened_by = db.relationship("User", foreign_keys=[screened_by_id])
     created_by = db.relationship("User", foreign_keys=[created_by_id])
+    auto_screened_by = db.relationship("User", foreign_keys=[auto_screened_by_id])
+
+    def auto_notes_for(self, field):
+        """auto_notes_for('un_result') -> self.un_auto_notes, etc - lets the
+        template loop over SANCTIONS_SCREENING_SOURCES once and look up the
+        matching auto-note without a second parallel list to keep in sync."""
+        return getattr(self, field.replace("_result", "_auto_notes"), None)
 
     @property
     def is_screened(self):
@@ -2488,6 +2533,81 @@ class SanctionsScreening(db.Model):
 
     def __repr__(self):
         return f"<SanctionsScreening {self.individual_name!r} status={self.overall_status!r}>"
+
+
+class SanctionsWatchlistEntry(db.Model):
+    """One cached name from the UN, OFAC or EU sanctions list (see
+    SANCTIONS_AUTO_SOURCES and sanctions_data.py), refreshed periodically
+    from each source's own free, official, machine-readable feed and stored
+    here so screening a name is an instant local lookup rather than a live
+    call to three different government/international-body servers on every
+    keystroke. The whole table for a given source is replaced wholesale on
+    each refresh (see sanctions_data.refresh_source) rather than diffed, since
+    these feeds don't expose an incremental/delta API."""
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(10), nullable=False)  # "UN", "OFAC", "EU" - see SANCTIONS_AUTO_SOURCES
+    name = db.Column(db.String(300), nullable=False)
+    aliases = db.Column(db.Text)  # other known names/spellings, if the feed provides them, newline-separated
+    reference = db.Column(db.String(150))  # the source's own reference/ID number for this listing, if provided
+    programme = db.Column(db.String(300))  # sanctions programme/regime this listing falls under, if provided
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<SanctionsWatchlistEntry {self.source} {self.name!r}>"
+
+
+class SanctionsListStatus(db.Model):
+    """One row per SANCTIONS_AUTO_SOURCES entry, tracking when that source's
+    cache (SanctionsWatchlistEntry rows) was last refreshed, how many entries
+    it holds, and the last error (if the most recent refresh attempt failed) -
+    shown on the Sanctions & Adverse Notice Screening card so staff can see
+    how current the automated screening actually is, and surfaced per-source
+    since one feed being temporarily unreachable shouldn't hide the status of
+    the other two (see sanctions_data.refresh_all_sources)."""
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(10), nullable=False, unique=True)
+    last_refreshed_at = db.Column(db.DateTime)
+    entry_count = db.Column(db.Integer, default=0)
+    last_error = db.Column(db.Text)
+    last_refreshed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    last_refreshed_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<SanctionsListStatus {self.source} entries={self.entry_count}>"
+
+
+class RegulatoryNotice(db.Model):
+    """One RBZ or FIU Zimbabwe adverse-notice PDF the firm has uploaded to
+    the firm-wide Regulatory Notices library (see regulatory_notices.py) -
+    the practical substitute for the automated feed those two regulators
+    don't publish (see REGULATORY_NOTICE_SOURCES). Text is extracted from
+    the PDF on upload (see sanctions_data.extract_pdf_text) and stored here
+    so an auto-screen can search it for a name match without re-reading the
+    PDF from disk every time; extraction_status records whether that
+    actually worked (a scanned, image-only PDF has no selectable text to
+    extract, so it's left searchable only by its title/notes)."""
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(10), nullable=False)  # "RBZ" or "FIU" - see REGULATORY_NOTICE_SOURCES
+    title = db.Column(db.String(300), nullable=False)
+    notice_date = db.Column(db.Date)
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))
+    extracted_text = db.Column(db.Text)
+    extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error"
+    page_count = db.Column(db.Integer)
+    notes = db.Column(db.Text)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    uploaded_by = db.relationship("User")
+
+    @property
+    def file_ext(self):
+        return self.original_filename.rsplit(".", 1)[-1] if self.original_filename and "." in self.original_filename else ""
+
+    def __repr__(self):
+        return f"<RegulatoryNotice {self.source} {self.title!r}>"
 
 
 # ---------- Finalisation checklist ("what's left to close this engagement") ----------

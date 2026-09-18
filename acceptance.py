@@ -30,8 +30,10 @@ from models import (
     DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS,
     RISK_CATEGORIES,
     SanctionsScreening, SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
-    REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES, user_can_access_engagement,
+    SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, RegulatoryNotice,
+    REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES, user_can_access_engagement, user_has_permission,
 )
+import sanctions_data
 
 acceptance_bp = Blueprint("acceptance", __name__, url_prefix="/engagements")
 
@@ -527,3 +529,107 @@ def delete_sanctions_screening(screening_id):
     db.session.delete(screening)
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+# ---------- Automated screening (UN/OFAC/EU cache + RBZ/FIU uploaded notices) ----------
+# See sanctions_data.py for the matching itself. Automated matching here only
+# ever sets a result to "Clear" or "Potential Match" - it never sets
+# "Confirmed Hit", and it never downgrades a result a human has already set
+# to "Confirmed Hit" (that stays until a person changes it via the manual
+# dropdown on the row). A "Potential Match" always needs a person to look at
+# it and decide, same as before this feature existed.
+
+def auto_screen_individual(screening):
+    """Run one SanctionsScreening row through the UN/OFAC/EU cache and the
+    uploaded RBZ/FIU notice library, updating its five *_result fields (per
+    the conservative rule above) and their matching *_auto_notes fields.
+    Does not commit - callers do that once, after looping over every row
+    they're screening, so "screen all individuals" is a single transaction."""
+    for source in SANCTIONS_AUTO_SOURCES:  # UN, OFAC, EU
+        field = f"{source.lower()}_result"
+        notes_field = f"{source.lower()}_auto_notes"
+        matches = sanctions_data.find_matches(screening.individual_name, source)
+        if matches:
+            setattr(screening, field, "Potential Match")
+            setattr(screening, notes_field, "; ".join(
+                f"{m['name']} (similarity {m['score']:.0%}{', ref ' + m['reference'] if m['reference'] else ''}{', ' + m['programme'] if m['programme'] else ''})"
+                for m in matches
+            ))
+        else:
+            if getattr(screening, field) != "Confirmed Hit":
+                setattr(screening, field, "Clear")
+            setattr(screening, notes_field, "No match found in the cached list as of the last refresh.")
+
+    for source in REGULATORY_NOTICE_SOURCES:  # RBZ, FIU
+        field = f"{source.lower()}_result"
+        notes_field = f"{source.lower()}_auto_notes"
+        notices = RegulatoryNotice.query.filter_by(source=source).all()
+        if not notices:
+            setattr(screening, notes_field, "No RBZ/FIU notices uploaded yet to check against - see the Regulatory Notices library.")
+            continue  # leave the result field as-is rather than falsely marking it "Clear"
+        matches = sanctions_data.search_notices_for_name(screening.individual_name, notices)
+        if matches:
+            setattr(screening, field, "Potential Match")
+            setattr(screening, notes_field, "; ".join(
+                f"\"{m['excerpt']}\" in {m['notice'].title} (similarity {m['score']:.0%})" for m in matches[:3]
+            ))
+        else:
+            searchable = [n for n in notices if n.extraction_status == "extracted"]
+            if not searchable:
+                setattr(screening, notes_field, f"{len(notices)} {source} notice(s) on file, but none have readable text (scanned PDFs) - not automatically searchable.")
+                continue
+            if getattr(screening, field) != "Confirmed Hit":
+                setattr(screening, field, "Clear")
+            setattr(screening, notes_field, f"No match found across {len(searchable)} searchable {source} notice(s) on file.")
+
+    screening.auto_screened_at = datetime.utcnow()
+    screening.auto_screened_by_id = current_user.id
+
+
+@acceptance_bp.route("/acceptance/screening/<int:screening_id>/auto-screen", methods=["POST"])
+@login_required
+def auto_screen_screening(screening_id):
+    screening = SanctionsScreening.query.get_or_404(screening_id)
+    _ensure_access(screening.client_acceptance.engagement)
+    auto_screen_individual(screening)
+    db.session.commit()
+    flash(f"Auto-screened {screening.individual_name} against UN/OFAC/EU and the uploaded RBZ/FIU notices - review any Potential Match below.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=screening.client_acceptance.engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/screening/auto-screen-all", methods=["POST"])
+@login_required
+def auto_screen_all(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    if not record.screenings:
+        flash("No key individuals added for screening yet.", "info")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+    for screening in record.screenings:
+        auto_screen_individual(screening)
+    db.session.commit()
+    flash(f"Auto-screened all {len(record.screenings)} individual(s) - review any Potential Match below.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/acceptance/lists/refresh", methods=["POST"])
+@login_required
+def refresh_sanctions_lists():
+    """Manually refresh the cached UN/OFAC/EU sanctions lists (see
+    sanctions_data.refresh_all_sources) - the same refresh a scheduled
+    `flask refresh-sanctions-lists` job would trigger, available here for
+    an on-demand check. Gated by the configurable "Refresh Sanctions Lists"
+    permission (partner/admin by default) since it's a firm-wide action,
+    not scoped to one engagement."""
+    if not user_has_permission(current_user, "manage_sanctions_lists"):
+        abort(403)
+    results = sanctions_data.refresh_all_sources(user_id=current_user.id)
+    ok_sources = [s for s, (ok, _count, _err) in results.items() if ok]
+    failed_sources = [s for s, (ok, _count, _err) in results.items() if not ok]
+    if ok_sources:
+        flash(f"Refreshed: {', '.join(ok_sources)}.", "success")
+    if failed_sources:
+        flash(f"Could not refresh: {', '.join(failed_sources)} - see the error shown against each below (the previous cache is kept in place).", "danger")
+    referrer = request.referrer or url_for("engagements.dashboard")
+    return redirect(referrer)
