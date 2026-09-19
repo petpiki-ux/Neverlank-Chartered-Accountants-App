@@ -800,10 +800,14 @@
   <div class="card">
     <h3 class="mt-0">Generate from Trial Balance</h3>
     {% if trial_balance and trial_balance.lines %}
-    <p class="muted" style="font-size:12.5px;">Fills in Revenue, Gross profit, Operating profit, Total assets and the rest of the key figures below automatically from the preliminary trial balance ({{ trial_balance.lines|length }} accounts, entered on the Planning tab) - no manual typing needed. Safe to run again after the trial balance changes; it only overwrites the lines it generated last time, never anything added or edited by hand.</p>
+    <p class="muted" style="font-size:12.5px;">Fills in Revenue, Gross profit, Operating profit, Total assets and the rest of the key figures below automatically from the preliminary trial balance ({{ trial_balance.lines|length }} accounts, entered on the Trial Balance tab) - no manual typing needed. Safe to run again after the trial balance changes; it only overwrites the lines it generated last time, never anything added or edited by hand.</p>
+    {% if trial_balance.unmapped_count > 0 %}
+    <div class="flash danger">&#9888; {{ trial_balance.unmapped_count }} account(s) still need an IAS 1 category - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">finish Account Mapping setup on the Trial Balance tab</a> first. Generating now would leave every figure below at zero, since unmapped accounts' amounts aren't included.</div>
+    {% else %}
     <form method="post" action="{{ url_for('engagements.generate_analytical_review_from_trial_balance', engagement_id=engagement.id) }}" class="inline">
       <button type="submit" class="btn gold">Generate from Trial Balance</button>
     </form>
+    {% endif %}
     {% else %}
     <div class="empty-state">No preliminary trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">enter or import it on the Trial Balance tab</a> to generate these figures automatically instead of typing them in below.</div>
     {% endif %}
@@ -1316,6 +1320,72 @@
     <div class="stat-card{% if not trial_balance.is_prior_balanced %} danger{% endif %}"><div class="num">{{ 'Balanced' if trial_balance.is_prior_balanced else 'Out of balance' }}</div><div class="label">Prior year TB</div></div>
     <div class="stat-card{% if trial_balance.unmapped_count > 0 %} danger{% endif %}"><div class="num">{{ trial_balance.lines|length - trial_balance.unmapped_count }}/{{ trial_balance.lines|length }}</div><div class="label">Accounts mapped</div></div>
   </div>
+
+  {% if trial_balance.lines %}
+  {% set cur_d, cur_c = trial_balance.current_totals %}
+  {% set pri_d, pri_c = trial_balance.prior_totals %}
+  <div class="card">
+    <h3 class="mt-0">Face of Trial Balance</h3>
+    <p class="muted" style="font-size:12.5px;">The trial balance as it stands - account-by-account, or summarised by IAS 1 category. Both views are built from the same {{ trial_balance.lines|length }} account(s) below, so their totals always agree.</p>
+    <div class="form-row" style="margin-bottom:10px;">
+      <button type="button" id="tb_face_btn_detailed" class="btn small gold" onclick="showTbFace('detailed')">Detailed</button>
+      <button type="button" id="tb_face_btn_summarised" class="btn small secondary" onclick="showTbFace('summarised')">Summarised</button>
+    </div>
+    <p style="font-size:12.5px;margin:4px 0;{% if not trial_balance.is_current_balanced %}color:#b02a2a;{% endif %}"><strong>Current year:</strong> Debits {{ '%.2f'|format(cur_d) }} &middot; Credits {{ '%.2f'|format(cur_c) }} &middot; {% if trial_balance.is_current_balanced %}Balanced{% else %}Out of balance by {{ '%.2f'|format((cur_d - cur_c)|abs) }}{% endif %}</p>
+    <p style="font-size:12.5px;margin:4px 0 14px;{% if not trial_balance.is_prior_balanced %}color:#b02a2a;{% endif %}"><strong>Prior year:</strong> Debits {{ '%.2f'|format(pri_d) }} &middot; Credits {{ '%.2f'|format(pri_c) }} &middot; {% if trial_balance.is_prior_balanced %}Balanced{% else %}Out of balance by {{ '%.2f'|format((pri_d - pri_c)|abs) }}{% endif %}</p>
+
+    <div id="tb_face_detailed">
+      <table>
+        <thead><tr><th>Code</th><th>Account</th><th>IAS 1 category</th><th class="text-right">Current Dr</th><th class="text-right">Current Cr</th><th class="text-right">Prior Dr</th><th class="text-right">Prior Cr</th></tr></thead>
+        <tbody>
+        {% for line in trial_balance.lines %}
+          <tr{% if not line.fs_category %} class="danger"{% endif %}>
+            <td>{{ line.account_code or '' }}</td>
+            <td>{{ line.account_name }}</td>
+            <td>{{ category_label(line.fs_category) if line.fs_category else 'Unmapped' }}</td>
+            <td class="text-right">{{ '%.2f'|format(line.current_debit or 0) }}</td>
+            <td class="text-right">{{ '%.2f'|format(line.current_credit or 0) }}</td>
+            <td class="text-right">{{ '%.2f'|format(line.prior_debit or 0) }}</td>
+            <td class="text-right">{{ '%.2f'|format(line.prior_credit or 0) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr><td colspan="3"><strong>Total</strong></td><td class="text-right"><strong>{{ '%.2f'|format(cur_d) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(cur_c) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(pri_d) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(pri_c) }}</strong></td></tr>
+        </tfoot>
+      </table>
+    </div>
+
+    <div id="tb_face_summarised" style="display:none;">
+      <table>
+        <thead><tr><th>IAS 1 category</th><th>Accounts</th><th class="text-right">Current Dr</th><th class="text-right">Current Cr</th><th class="text-right">Prior Dr</th><th class="text-right">Prior Cr</th></tr></thead>
+        <tbody>
+        {% for g in tb_face_summary %}
+          <tr{% if g.code == '__unmapped__' %} class="danger"{% endif %}>
+            <td>{{ g.label }}</td>
+            <td>{{ g.count }}</td>
+            <td class="text-right">{{ '%.2f'|format(g.current_debit) }}</td>
+            <td class="text-right">{{ '%.2f'|format(g.current_credit) }}</td>
+            <td class="text-right">{{ '%.2f'|format(g.prior_debit) }}</td>
+            <td class="text-right">{{ '%.2f'|format(g.prior_credit) }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr><td colspan="2"><strong>Total</strong></td><td class="text-right"><strong>{{ '%.2f'|format(cur_d) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(cur_c) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(pri_d) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(pri_c) }}</strong></td></tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+  <script>
+    function showTbFace(which) {
+      document.getElementById('tb_face_detailed').style.display = (which === 'detailed') ? '' : 'none';
+      document.getElementById('tb_face_summarised').style.display = (which === 'summarised') ? '' : 'none';
+      document.getElementById('tb_face_btn_detailed').className = 'btn small ' + (which === 'detailed' ? 'gold' : 'secondary');
+      document.getElementById('tb_face_btn_summarised').className = 'btn small ' + (which === 'summarised' ? 'gold' : 'secondary');
+    }
+  </script>
+  {% endif %}
 
   <div class="card">
     <h3 class="mt-0">Account Mapping setup</h3>

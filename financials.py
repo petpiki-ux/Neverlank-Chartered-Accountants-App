@@ -103,6 +103,42 @@ def normalize_account_name(name):
     return (name or "").strip().lower()
 
 
+def summarise_tb_by_category(lines):
+    """Groups trial balance lines by their IAS 1 category for the Trial
+    Balance tab's "Summarised" Face of Trial Balance view - one row per
+    category actually used (Unmapped first, since that's what needs
+    attention, then everything else in FS_CATEGORIES order), each with its
+    account count and the RAW current/prior debit & credit totals (not
+    netted - this is a presentation of the trial balance itself, not the
+    financial statements built from it, so both sides of every account
+    stay visible and the summarised and detailed totals always agree).
+    Categories with no lines are left out entirely."""
+    label_by_code = {c[0]: c[1] for c in FS_CATEGORIES}
+    UNMAPPED = "__unmapped__"
+    buckets = {}
+
+    def _bucket(code, label):
+        if code not in buckets:
+            buckets[code] = {
+                "code": code, "label": label, "count": 0,
+                "current_debit": 0.0, "current_credit": 0.0,
+                "prior_debit": 0.0, "prior_credit": 0.0,
+            }
+        return buckets[code]
+
+    for line in lines:
+        code = line.fs_category
+        b = _bucket(code, label_by_code[code]) if code in label_by_code else _bucket(UNMAPPED, "Unmapped")
+        b["count"] += 1
+        b["current_debit"] += line.current_debit or 0.0
+        b["current_credit"] += line.current_credit or 0.0
+        b["prior_debit"] += line.prior_debit or 0.0
+        b["prior_credit"] += line.prior_credit or 0.0
+
+    ordered_codes = ([UNMAPPED] if UNMAPPED in buckets else []) + [c[0] for c in FS_CATEGORIES if c[0] in buckets]
+    return [buckets[code] for code in ordered_codes]
+
+
 def compute_totals(lines):
     """lines: iterable of objects/rows with .fs_category, .current_debit,
     .current_credit, .prior_debit, .prior_credit (None treated as 0).

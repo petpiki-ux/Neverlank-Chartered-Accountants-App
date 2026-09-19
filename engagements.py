@@ -319,6 +319,10 @@ def view_engagement(engagement_id):
         fin.build_all_statements(trial_balance.lines, trial_balance.adjustments)
         if trial_balance and trial_balance.lines else None
     )
+    # Face of Trial Balance (Trial Balance tab): the summarised, by-category
+    # view alongside the detailed, account-by-account one - built from the
+    # same preliminary lines so the two views (and their totals) always agree.
+    tb_face_summary = fin.summarise_tb_by_category(trial_balance.lines) if trial_balance and trial_balance.lines else []
 
     # On an Investigative Engagement, Substantive Procedures uses the four
     # forensic evidence-type categories instead of the financial-statement
@@ -394,6 +398,7 @@ def view_engagement(engagement_id):
         latest_public_research=latest_public_research,
         analytical_review=analytical_review,
         trial_balance=trial_balance,
+        tb_face_summary=tb_face_summary,
         financial_statements=financial_statements,
         statements=statements,
         category_choices=fin.category_choices(),
@@ -781,6 +786,19 @@ def generate_analytical_review_from_trial_balance(engagement_id):
     if not trial_balance or not trial_balance.lines:
         flash("Enter or import the preliminary trial balance (Trial Balance tab) before generating analytical review figures from it.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+    if trial_balance.unmapped_count > 0:
+        # compute_totals() (via build_all_statements) silently skips any
+        # line with no IAS 1 category - generating with unmapped accounts
+        # still there would file every figure as a confident-looking zero
+        # instead of an honest "not ready yet", which is exactly the trap
+        # this guard exists to avoid.
+        flash(
+            f"{trial_balance.unmapped_count} account(s) on the trial balance still need an IAS 1 category "
+            "(see Account Mapping setup on the Trial Balance tab) before generating analytical review figures - "
+            "until they're mapped, those accounts' amounts are left out and every figure below would come out as zero.",
+            "danger",
+        )
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
     review = _get_or_create_analytical_review(engagement_id)
     statements = fin.build_all_statements(trial_balance.lines)
