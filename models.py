@@ -20,6 +20,57 @@ REPORTING_FRAMEWORKS = [
     ("other", "Other / local GAAP"),
 ]
 REPORTING_FRAMEWORK_LABELS = dict(REPORTING_FRAMEWORKS)
+
+# Which method the Cash Flow Statement's operating activities section uses
+# (IAS 7.18) - see financials.build_cash_flow. Every other line on every
+# statement is identical regardless of which is chosen; only how operating
+# cash flow is presented changes, and both always reconcile to the same
+# net cash from operating activities.
+CASH_FLOW_METHODS = [
+    ("indirect", "Indirect method"),
+    ("direct", "Direct method"),
+]
+CASH_FLOW_METHOD_LABELS = dict(CASH_FLOW_METHODS)
+
+# Public Interest Entity checklist (Finalisation tab, "Company
+# classification"): PAAB Pronouncement 2/2016's own criteria for presuming
+# an entity to be a Public Interest Entity (public accountability) -
+# https://paab.org.zw, "Definition of a Public Interest Entity". PAAB and
+# the IASB draw the Full IFRS / IFRS for SMEs line on exactly this test
+# (public accountability), not on a numeric size threshold - Zimbabwean
+# company law itself sets none for this purpose (the Companies and Other
+# Business Entities Act just requires "generally accepted accounting
+# practice" as recognised by PAAB). Each tuple is
+# (Engagement boolean column name, checklist label). Any "yes" makes the
+# entity a Public Interest Entity - see Engagement.is_public_interest_entity.
+PIE_CRITERIA = [
+    ("pie_listed", "Listed on a licensed securities exchange"),
+    ("pie_financial_institution", "Bank, building society, or deposit-taking microfinance institution"),
+    ("pie_insurer", "Insurer (life or general)"),
+    ("pie_asset_manager", "Asset manager or collective investment scheme"),
+    ("pie_pension_fund", "Pension fund open to a large number and wide range of employees"),
+    ("pie_medical_aid", "Registered medical aid society"),
+    ("pie_debt_equity_issuer", "Issues debt or equity instruments to the public"),
+]
+
+# Separately, Zimbabwe's Small and Medium Enterprises Act [Chapter 24:12]
+# does classify enterprises by size (Micro/Small/Medium, by sector) - a
+# different, business-development/tax classification, not an accounting-
+# standards one (a Large non-PIE company remains free to use IFRS for
+# SMEs). Recorded on the Finalisation tab as preparer-entered client
+# information alongside the Public Interest Entity test above, not as
+# something the app computes or that changes which statements are
+# prepared - see Engagement.sme_sector / sme_size_band.
+SME_ACT_SECTORS = [
+    "Agriculture", "Mining", "Manufacturing", "Construction", "Energy",
+    "Financial Services", "Transport", "Retail and Wholesale",
+    "Tourism and Hospitality", "Arts and Entertainment", "Services", "Other",
+]
+SME_ACT_SIZE_BANDS = [
+    ("micro", "Micro"), ("small", "Small"), ("medium", "Medium"), ("large", "Large"),
+]
+SME_ACT_SIZE_BAND_LABELS = dict(SME_ACT_SIZE_BANDS)
+
 SECRETARIAL_SUBDIVISIONS = ["Company Registrations", "Trusts", "PVOs"]
 ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"]
 TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
@@ -893,6 +944,31 @@ class Engagement(db.Model):
     # local framework instead.
     reporting_framework = db.Column(db.String(20), default="full_ifrs", nullable=False)
 
+    # Which method the Cash Flow Statement's operating activities section
+    # uses - see CASH_FLOW_METHODS above and financials.build_cash_flow.
+    # Defaults to "indirect" for every engagement (existing ones included),
+    # matching how the Cash Flow Statement has always been presented here.
+    cash_flow_method = db.Column(db.String(10), default="indirect", nullable=False)
+
+    # Public Interest Entity checklist - see PIE_CRITERIA above. Any one of
+    # these true makes the entity a Public Interest Entity for the purposes
+    # of the "Company classification" guidance on the Finalisation tab.
+    # All default False, i.e. "not (yet) known to be a PIE" - matching every
+    # existing engagement, none of which is retroactively assumed to be one.
+    pie_listed = db.Column(db.Boolean, default=False, nullable=False)
+    pie_financial_institution = db.Column(db.Boolean, default=False, nullable=False)
+    pie_insurer = db.Column(db.Boolean, default=False, nullable=False)
+    pie_asset_manager = db.Column(db.Boolean, default=False, nullable=False)
+    pie_pension_fund = db.Column(db.Boolean, default=False, nullable=False)
+    pie_medical_aid = db.Column(db.Boolean, default=False, nullable=False)
+    pie_debt_equity_issuer = db.Column(db.Boolean, default=False, nullable=False)
+
+    # Small and Medium Enterprises Act classification - recorded, informational
+    # client information only (see SME_ACT_SECTORS / SME_ACT_SIZE_BANDS
+    # above); it does not drive reporting_framework.
+    sme_sector = db.Column(db.String(50))
+    sme_size_band = db.Column(db.String(10))
+
     partner = db.relationship("User", foreign_keys=[partner_id])
     manager = db.relationship("User", foreign_keys=[manager_id])
     team_members = db.relationship("User", secondary=engagement_team, backref="engagements")
@@ -915,6 +991,23 @@ class Engagement(db.Model):
     @property
     def is_overdue(self):
         return bool(self.deadline and self.deadline < date.today() and self.status != "Completed")
+
+    @property
+    def is_public_interest_entity(self):
+        """Whether any Public Interest Entity checklist box (see
+        PIE_CRITERIA) is ticked - PAAB's own test for which entities must
+        report under Full IFRS rather than being eligible for IFRS for
+        SMEs. Recomputed from the checklist every time, never stored
+        separately, so it can never drift out of sync with the checklist."""
+        return any(getattr(self, code) for code, _ in PIE_CRITERIA)
+
+    @property
+    def recommended_reporting_framework(self):
+        """A hint only - see the "Company classification" card on the
+        Finalisation tab. The preparer always makes the final call in the
+        Financial reporting framework dropdown below it; this never changes
+        reporting_framework on its own."""
+        return "full_ifrs" if self.is_public_interest_entity else "ifrs_for_smes"
 
     def __repr__(self):
         return f"<Engagement {self.title}>"

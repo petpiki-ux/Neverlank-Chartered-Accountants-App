@@ -242,7 +242,11 @@ def _row(label, current, prior=None, bold=False, memo=False, category=None):
         # attach the right Notes to the Financial Statements number onto this
         # row afterwards (see _attach_note_numbers below). Left unset on a
         # subtotal/total row (e.g. "Gross profit") - those aren't accounts,
-        # so they never get their own note.
+        # so they never get their own note. Usually a single category code;
+        # a Cash Flow Statement line that nets together more than one SFP
+        # category (e.g. "Proceeds from shares issued" = share capital +
+        # share premium) instead passes a list, and picks up every matching
+        # note number (see _attach_note_numbers).
         r["category"] = category
     return r
 
@@ -438,7 +442,20 @@ def build_financial_position(totals, equity):
     }
 
 
-def build_cash_flow(totals, pl):
+def build_cash_flow(totals, pl, method="indirect"):
+    """`method` ("indirect", the default, or "direct" - see
+    models.CASH_FLOW_METHODS) controls only how the OPERATING activities
+    section is presented, per IAS 7.18: the indirect method reconciles
+    profit before tax to operating cash flow through non-cash and working
+    capital adjustments; the direct method instead shows the gross cash
+    receipts from customers and cash payments to suppliers/employees
+    directly. Investing and financing activities - and every subtotal from
+    "Cash generated from operations" down to the closing cash balance - are
+    IDENTICAL either way: IAS 7 requires both methods to arrive at exactly
+    the same net cash from operating activities, and the direct-method
+    figures below are deliberately built (see the algebra in the comments)
+    to net to that same "Cash generated from operations" figure rather than
+    being a separate, potentially-inconsistent calculation."""
     t = totals
 
     def move(code):
@@ -479,27 +496,63 @@ def build_cash_flow(totals, pl):
 
     finance_costs_paid = -finance_costs
     tax_paid = -(t["current_tax_payable"]["prior"] + pl["income_tax_expense"]["current"] - t["current_tax_payable"]["current"])
-    operating_rows = (
-        adjustments
-        + memo_rows
-        + [_row("Operating cash flow before working capital changes", op_before_wc, bold=True)]
-        + wc_rows
-        + [_row("Cash generated from operations", cash_from_ops, bold=True)]
-        + [_row("Finance costs paid", finance_costs_paid), _row("Income tax paid", tax_paid)]
-    )
+
+    if method == "direct":
+        # Cash received from customers = revenue, adjusted for the same
+        # movement in trade receivables the indirect method uses.
+        receipts_customers = t["revenue"]["current"] - move("trade_receivables")
+        # Other income is taken as received in cash as-is (no separate
+        # receivable category to adjust it against at this level of detail).
+        other_income_received = t["other_income"]["current"]
+        # Everything else that feeds "cash generated from operations" -
+        # cost of sales, distribution/admin/other expenses (including the
+        # non-cash depreciation & amortisation charge, consistent with how
+        # the indirect method above also nets it into operating rather than
+        # adding it back - see the note on investing activities), plus every
+        # remaining working-capital and non-cash movement the indirect
+        # method uses - is bundled into one "paid to suppliers and
+        # employees" figure. This is deliberately the plug that makes
+        # receipts_customers + other_income_received + paid_suppliers
+        # algebraically equal cash_from_ops above, term for term - the two
+        # methods cannot disagree on "Cash generated from operations".
+        paid_suppliers = (
+            -(t["cost_of_sales"]["current"] + t["distribution_costs"]["current"]
+              + t["admin_expenses"]["current"] + t["depreciation_amortisation"]["current"]
+              + t["other_expenses"]["current"])
+            - move("inventories") - move("other_current_assets")
+            + move("trade_payables") + move("short_term_provisions") + move("other_current_liabilities")
+            + prov_move + dtl_move - dta_move
+        )
+        operating_rows = [
+            _row("Cash received from customers", receipts_customers, category="revenue"),
+            _row("Other income received", other_income_received, category="other_income"),
+            _row("Cash paid to suppliers and employees", paid_suppliers),
+            _row("Cash generated from operations", receipts_customers + other_income_received + paid_suppliers, bold=True),
+            _row("Finance costs paid", finance_costs_paid),
+            _row("Income tax paid", tax_paid),
+        ]
+    else:
+        operating_rows = (
+            adjustments
+            + memo_rows
+            + [_row("Operating cash flow before working capital changes", op_before_wc, bold=True)]
+            + wc_rows
+            + [_row("Cash generated from operations", cash_from_ops, bold=True)]
+            + [_row("Finance costs paid", finance_costs_paid), _row("Income tax paid", tax_paid)]
+        )
     net_operating = cash_from_ops + finance_costs_paid + tax_paid
 
     investing_codes = ["ppe", "intangible_assets", "investment_property", "long_term_investments", "other_noncurrent_assets"]
-    investing_rows = [_row(f"Net movement in {category_label(c).lower()}", -move(c)) for c in investing_codes]
+    investing_rows = [_row(f"Net movement in {category_label(c).lower()}", -move(c), category=c) for c in investing_codes]
     net_investing = sum(r["current"] for r in investing_rows)
 
     shares_move = move("share_capital") + move("share_premium")
     borrowings_move = move("long_term_borrowings") + move("short_term_borrowings")
     dividends_paid = -t["dividends_paid"]["current"]
     financing_rows = [
-        _row("Proceeds from shares issued", shares_move),
-        _row("Proceeds from/(repayment of) borrowings", borrowings_move),
-        _row("Dividends paid", dividends_paid),
+        _row("Proceeds from shares issued", shares_move, category=["share_capital", "share_premium"]),
+        _row("Proceeds from/(repayment of) borrowings", borrowings_move, category=["long_term_borrowings", "short_term_borrowings"]),
+        _row("Dividends paid", dividends_paid, category="dividends_paid"),
     ]
     net_financing = shares_move + borrowings_move + dividends_paid
 
@@ -509,10 +562,13 @@ def build_cash_flow(totals, pl):
     cash_close_actual = t["cash"]["current"]
 
     return {
+        "method": method,
         # operating_rows deliberately isn't nil-filtered: it's a fixed
         # reconciliation format (adjustments, subtotals, working capital
-        # movements), not a list of trial balance accounts, so every line
-        # stays for the reconciliation to read correctly start to finish.
+        # movements, or - under the direct method - a fixed set of
+        # receipts/payments lines), not a list of trial balance accounts, so
+        # every line stays for the reconciliation to read correctly start to
+        # finish.
         "operating_rows": operating_rows, "net_operating": net_operating,
         "investing_rows": _filter_nil_rows(investing_rows), "net_investing": net_investing,
         "financing_rows": _filter_nil_rows(financing_rows), "net_financing": net_financing,
@@ -790,23 +846,39 @@ def build_notes(lines, totals):
     return notes, note_number_by_category
 
 
-def _attach_note_numbers(pl, sfp, note_number_by_category):
+def _attach_note_numbers(pl, sfp, cf, note_number_by_category):
     """Sets row['note'] on every statement row that has a `category` (see
     _row()) and a matching entry in note_number_by_category - every such
     row survived nil-filtering, so a category with `category` set always
-    resolves to a real note number here, never a dangling reference."""
+    resolves to a real note number here, never a dangling reference.
+
+    `category` is usually a single code, giving a single note number
+    (e.g. "5"). A Cash Flow Statement investing/financing row can instead
+    carry a list of codes when it nets together more than one SFP category
+    (e.g. "Proceeds from shares issued" = share capital + share premium) -
+    row['note'] then becomes a comma-separated list of every distinct note
+    number involved (e.g. "8, 9"), in the order NOTE_DEFINITIONS lists them.
+    The Cash Flow Statement's operating activities section is deliberately
+    left out here regardless of method (indirect or direct) - its lines are
+    a fixed reconciliation/receipts-and-payments presentation, not
+    individual trial balance accounts, so they never carry a note number."""
     all_row_lists = (
         [pl["rows"]]
         + [sfp[k] for k in ("non_current_assets", "current_assets", "equity", "non_current_liabilities", "current_liabilities")]
+        + [cf["investing_rows"], cf["financing_rows"]]
     )
     for rows in all_row_lists:
         for row in rows:
             code = row.get("category")
-            if code:
-                row["note"] = note_number_by_category.get(code)
+            if not code:
+                continue
+            codes = code if isinstance(code, list) else [code]
+            numbers = sorted({note_number_by_category[c] for c in codes if c in note_number_by_category})
+            if numbers:
+                row["note"] = ", ".join(str(n) for n in numbers)
 
 
-def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs"):
+def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs", cash_flow_method="indirect"):
     """`adjustments`, when given (a TrialBalance's .adjustments), are applied
     on top of the preliminary trial balance's totals before the statements
     are built - see apply_adjustments() above. Leave it out (the default)
@@ -818,17 +890,22 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     cross-referenced onto the face (build_notes() above) - "full_ifrs" and
     "ifrs_for_smes" both get them, "other"/local-GAAP engagements get
     `notes=[]` and no note numbers on the face, leaving the plain
-    statements exactly as before this feature."""
+    statements exactly as before this feature.
+
+    `cash_flow_method` ("indirect", the default, or "direct" - see
+    models.CASH_FLOW_METHODS and build_cash_flow()) controls only how the
+    Cash Flow Statement's operating activities section is presented; every
+    other statement, and every Cash Flow subtotal, is unaffected."""
     totals = compute_totals(lines)
     if adjustments:
         totals = apply_adjustments(totals, adjustments)
     pl = build_income_statement(totals)
     equity = build_equity_statement(totals, pl)
     sfp = build_financial_position(totals, equity)
-    cf = build_cash_flow(totals, pl)
+    cf = build_cash_flow(totals, pl, method=cash_flow_method)
     if reporting_framework in ("full_ifrs", "ifrs_for_smes"):
         notes, note_number_by_category = build_notes(lines, totals)
-        _attach_note_numbers(pl, sfp, note_number_by_category)
+        _attach_note_numbers(pl, sfp, cf, note_number_by_category)
     else:
         notes = []
     return {"totals": totals, "pl": pl, "equity": equity, "sfp": sfp, "cf": cf, "notes": notes}

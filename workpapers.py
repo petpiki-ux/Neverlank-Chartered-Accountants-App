@@ -33,7 +33,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak,
 )
 
-from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS, filing_reference
+from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS, filing_reference, CASH_FLOW_METHOD_LABELS
 import financials as fin
 
 FIRM_NAME = "Neverlank Chartered Accountants"
@@ -143,6 +143,61 @@ def _finish(doc):
     return buf
 
 
+def _statement_table(doc, title, headers, row_specs, level=1):
+    """Builds ONE continuous Word table for a whole financial statement -
+    used for the Statement of Financial Position, the Statement of Profit
+    or Loss, and the Statement of Cash Flows, matching how the Finalisation
+    tab shows each of them on screen (a single table with bold section-title
+    and subtotal rows running straight down, not a separate table per
+    section with paragraph breaks in between).
+
+    `row_specs` is an ordered list of dicts, each either:
+      {"section": "Non-current assets"} - a bold row spanning every column
+      {"cells": [...], "bold": bool, "muted": bool} - a normal/total/memo row,
+        one string per column in `headers`' order
+    """
+    _add_heading(doc, title, level=level)
+    table = doc.add_table(rows=1, cols=len(headers))
+    hdr_cells = table.rows[0].cells
+    for i, h in enumerate(headers):
+        hdr_cells[i].text = h
+    _style_table(table)
+    for spec in row_specs:
+        cells = table.add_row().cells
+        if "section" in spec:
+            merged = cells[0]
+            for c in cells[1:]:
+                merged = merged.merge(c)
+            merged.text = spec["section"]
+            for p in merged.paragraphs:
+                for run in p.runs:
+                    run.bold = True
+            continue
+        for i, text in enumerate(spec["cells"]):
+            cells[i].text = text
+        if spec.get("bold") or spec.get("muted"):
+            for c in cells:
+                for p in c.paragraphs:
+                    for run in p.runs:
+                        if spec.get("bold"):
+                            run.bold = True
+                        if spec.get("muted"):
+                            run.italic = True
+    doc.add_paragraph()
+    return table
+
+
+def _fs_row_cells(r, with_prior=True):
+    """A statement row (see financials._row) as this document's cell texts:
+    label, Note (blank if the row has none), current year, and - unless
+    with_prior is False (the Cash Flow Statement, current year only) -
+    prior year."""
+    cells = [r["label"], str(r.get("note") or ""), _fmt_num(r["current"])]
+    if with_prior:
+        cells.append(_fmt_num(r.get("prior", 0)))
+    return cells
+
+
 # ---------------------------------------------------------------- Excel helpers
 
 _HEADER_FILL = PatternFill(start_color=_GOLD_HEX, end_color=_GOLD_HEX, fill_type="solid")
@@ -226,18 +281,33 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         return table
 
     sfp = statements["sfp"]
-    _add_heading(doc, "Statement of Financial Position", level=1)
-    two_col_table("Non-current assets", sfp["non_current_assets"], level=2)
-    doc.add_paragraph(f"Total non-current assets: {_fmt_num(sfp['nca_total']['current'])} ({_fmt_num(sfp['nca_total']['prior'])} prior year)")
-    two_col_table("Current assets", sfp["current_assets"], level=2)
-    doc.add_paragraph(f"Total assets: {_fmt_num(sfp['total_assets']['current'])} ({_fmt_num(sfp['total_assets']['prior'])} prior year)")
-    two_col_table("Equity", sfp["equity"], level=2)
-    doc.add_paragraph(f"Total equity: {_fmt_num(sfp['total_equity']['current'])} ({_fmt_num(sfp['total_equity']['prior'])} prior year)")
-    two_col_table("Non-current liabilities", sfp["non_current_liabilities"], level=2)
-    two_col_table("Current liabilities", sfp["current_liabilities"], level=2)
-    doc.add_paragraph(f"Total equity and liabilities: {_fmt_num(sfp['total_equity_and_liabilities']['current'])} ({_fmt_num(sfp['total_equity_and_liabilities']['prior'])} prior year)")
+    sfp_specs = [{"section": "Non-current assets"}]
+    sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["non_current_assets"]]
+    sfp_specs.append({"cells": ["Total non-current assets", "", _fmt_num(sfp["nca_total"]["current"]), _fmt_num(sfp["nca_total"]["prior"])], "bold": True})
+    sfp_specs.append({"section": "Current assets"})
+    sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["current_assets"]]
+    sfp_specs.append({"cells": ["Total current assets", "", _fmt_num(sfp["ca_total"]["current"]), _fmt_num(sfp["ca_total"]["prior"])], "bold": True})
+    sfp_specs.append({"cells": ["Total assets", "", _fmt_num(sfp["total_assets"]["current"]), _fmt_num(sfp["total_assets"]["prior"])], "bold": True})
+    sfp_specs.append({"section": "Equity"})
+    sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["equity"]]
+    sfp_specs.append({"cells": ["Total equity", "", _fmt_num(sfp["total_equity"]["current"]), _fmt_num(sfp["total_equity"]["prior"])], "bold": True})
+    sfp_specs.append({"section": "Non-current liabilities"})
+    sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["non_current_liabilities"]]
+    sfp_specs.append({"cells": ["Total non-current liabilities", "", _fmt_num(sfp["ncl_total"]["current"]), _fmt_num(sfp["ncl_total"]["prior"])], "bold": True})
+    sfp_specs.append({"section": "Current liabilities"})
+    sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["current_liabilities"]]
+    sfp_specs.append({"cells": ["Total current liabilities", "", _fmt_num(sfp["cl_total"]["current"]), _fmt_num(sfp["cl_total"]["prior"])], "bold": True})
+    sfp_specs.append({"cells": ["Total equity and liabilities", "", _fmt_num(sfp["total_equity_and_liabilities"]["current"]), _fmt_num(sfp["total_equity_and_liabilities"]["prior"])], "bold": True})
+    # One continuous table, top to bottom, exactly matching the Finalisation
+    # tab on screen - not a separate table per section with paragraph
+    # breaks in between.
+    _statement_table(doc, "Statement of Financial Position", ["", "Note", "Current year", "Prior year"], sfp_specs)
+    bc = sfp["balance_check"]
+    tie_note = "Ties out." if abs(bc["current"]) <= 0.01 and abs(bc["prior"]) <= 0.01 else "Non-zero - check every account is mapped to the right category and that the trial balance balances."
+    doc.add_paragraph(f"Balance check (assets less equity and liabilities): current year {_fmt_num(bc['current'])}, prior year {_fmt_num(bc['prior'])}. {tie_note}").runs[0].italic = True
 
-    two_col_table("Statement of Profit or Loss and Other Comprehensive Income", statements["pl"]["rows"])
+    pl_specs = [{"cells": _fs_row_cells(r), "bold": r.get("bold", False)} for r in statements["pl"]["rows"]]
+    _statement_table(doc, "Statement of Profit or Loss and Other Comprehensive Income", ["", "Note", "Current year", "Prior year"], pl_specs)
 
     _add_heading(doc, "Statement of Changes in Equity", level=1)
     eq_table = doc.add_table(rows=1, cols=4)
@@ -253,12 +323,26 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     doc.add_paragraph()
 
     cf = statements["cf"]
-    _add_heading(doc, "Statement of Cash Flows (current year, indirect method)", level=1)
-    doc.add_paragraph(f"Net cash from operating activities: {_fmt_num(cf['net_operating'])}")
-    doc.add_paragraph(f"Net cash used in investing activities: {_fmt_num(cf['net_investing'])}")
-    doc.add_paragraph(f"Net cash from financing activities: {_fmt_num(cf['net_financing'])}")
-    doc.add_paragraph(f"Net increase/(decrease) in cash: {_fmt_num(cf['net_movement'])}")
-    doc.add_paragraph(f"Cash at end of year (per trial balance): {_fmt_num(cf['cash_close_actual'])}")
+    method_label = CASH_FLOW_METHOD_LABELS.get(cf["method"], "Indirect method")
+    cf_specs = [{"section": "Operating activities"}]
+    for r in cf["operating_rows"]:
+        cf_specs.append({"cells": _fs_row_cells(r, with_prior=False), "bold": r.get("bold", False), "muted": r.get("memo", False)})
+    cf_specs.append({"cells": ["Net cash from operating activities", "", _fmt_num(cf["net_operating"])], "bold": True})
+    cf_specs.append({"section": "Investing activities"})
+    for r in cf["investing_rows"]:
+        cf_specs.append({"cells": _fs_row_cells(r, with_prior=False)})
+    cf_specs.append({"cells": ["Net cash used in investing activities", "", _fmt_num(cf["net_investing"])], "bold": True})
+    cf_specs.append({"section": "Financing activities"})
+    for r in cf["financing_rows"]:
+        cf_specs.append({"cells": _fs_row_cells(r, with_prior=False)})
+    cf_specs.append({"cells": ["Net cash from financing activities", "", _fmt_num(cf["net_financing"])], "bold": True})
+    cf_specs.append({"cells": ["Net increase/(decrease) in cash", "", _fmt_num(cf["net_movement"])], "bold": True})
+    cf_specs.append({"cells": ["Cash at beginning of year", "", _fmt_num(cf["cash_open"])]})
+    cf_specs.append({"cells": ["Cash at end of year (computed)", "", _fmt_num(cf["cash_close_computed"])], "bold": True})
+    cf_specs.append({"cells": ["Cash at end of year (per trial balance)", "", _fmt_num(cf["cash_close_actual"])]})
+    _statement_table(doc, f"Statement of Cash Flows ({method_label}, current year)", ["", "Note", "Amount"], cf_specs)
+    variance_note = "Ties out to the trial balance." if abs(cf["variance"]) <= 0.01 else f"Computed closing cash differs from the trial balance by {_fmt_num(cf['variance'])} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust."
+    doc.add_paragraph(variance_note).runs[0].italic = True
 
     if is_ifrs_framework:
         _add_heading(doc, "Notes to the Financial Statements", level=1)

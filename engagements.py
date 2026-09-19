@@ -22,6 +22,7 @@ from models import (
     SanctionsListStatus, RegulatoryNotice, ClientKeyPerson,
     COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
     REPORTING_FRAMEWORKS, REPORTING_FRAMEWORK_LABELS,
+    CASH_FLOW_METHODS, CASH_FLOW_METHOD_LABELS, PIE_CRITERIA, SME_ACT_SECTORS, SME_ACT_SIZE_BANDS,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
     FinalisationChecklist, FinalisationChecklistItem, DEFAULT_FINALISATION_CHECKLIST_ITEMS, FORENSIC_FINALISATION_CHECKLIST_ITEMS,
     AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES,
@@ -317,7 +318,10 @@ def view_engagement(engagement_id):
     # Analytical Review and Substantive Procedures work from the preliminary
     # trial_balance.lines directly, unadjusted, so they're unaffected by this.
     statements = (
-        fin.build_all_statements(trial_balance.lines, trial_balance.adjustments, reporting_framework=engagement.reporting_framework)
+        fin.build_all_statements(
+            trial_balance.lines, trial_balance.adjustments,
+            reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,
+        )
         if trial_balance and trial_balance.lines else None
     )
     # Face of Trial Balance (Trial Balance tab): the summarised, by-category
@@ -419,6 +423,11 @@ def view_engagement(engagement_id):
         general_information_note=fin.general_information_note(engagement.client, engagement),
         default_basis_of_preparation=fin.REPORTING_FRAMEWORK_COMPLIANCE_TEXT.get(engagement.reporting_framework, "") + fin.DEFAULT_BASIS_OF_PREPARATION_TAIL,
         default_closing_notes=fin.DEFAULT_CLOSING_NOTE_TEXT,
+        cash_flow_methods=CASH_FLOW_METHODS,
+        cash_flow_method_labels=CASH_FLOW_METHOD_LABELS,
+        pie_criteria=PIE_CRITERIA,
+        sme_act_sectors=SME_ACT_SECTORS,
+        sme_act_size_bands=SME_ACT_SIZE_BANDS,
         category_choices=fin.category_choices(),
         category_label=fin.category_label,
         audit_areas=substantive_area_names,
@@ -2856,6 +2865,24 @@ def save_financial_statements_notes(engagement_id):
     framework = request.form.get("reporting_framework", "").strip()
     if framework in dict(REPORTING_FRAMEWORKS):
         engagement.reporting_framework = framework
+    # Which method the Cash Flow Statement's operating activities section
+    # uses (IAS 7.18) - see models.CASH_FLOW_METHODS. Every other figure on
+    # every statement is unaffected either way.
+    cash_flow_method = request.form.get("cash_flow_method", "").strip()
+    if cash_flow_method in dict(CASH_FLOW_METHODS):
+        engagement.cash_flow_method = cash_flow_method
+    # Public Interest Entity checklist - see models.PIE_CRITERIA. A pure
+    # guidance checklist: it never sets reporting_framework itself, so an
+    # unticked box here never silently changes which statements are shown.
+    for code, _ in PIE_CRITERIA:
+        setattr(engagement, code, request.form.get(code) == "on")
+    # Small and Medium Enterprises Act classification - recorded as plain
+    # client information (see models.SME_ACT_SECTORS / SME_ACT_SIZE_BANDS);
+    # doesn't affect reporting_framework or the statements themselves.
+    sme_sector = request.form.get("sme_sector", "").strip()
+    engagement.sme_sector = sme_sector if sme_sector in SME_ACT_SECTORS else None
+    sme_size_band = request.form.get("sme_size_band", "").strip()
+    engagement.sme_size_band = sme_size_band if sme_size_band in dict(SME_ACT_SIZE_BANDS) else None
     fs.basis_of_preparation = request.form.get("basis_of_preparation", "").strip()
     # Notes to the Financial Statements are free text and editable here, same
     # as the basis of preparation - but note that the FIGURES throughout the
@@ -3432,7 +3459,10 @@ def generate_financial_statements_docx(engagement_id):
     if not trial_balance or not trial_balance.lines:
         flash("Enter or import the trial balance (Trial Balance tab) before generating the financial statements working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
-    statements = fin.build_all_statements(trial_balance.lines, trial_balance.adjustments, reporting_framework=engagement.reporting_framework)
+    statements = fin.build_all_statements(
+        trial_balance.lines, trial_balance.adjustments,
+        reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,
+    )
     financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
     buf = wp.build_financial_statements_docx(engagement, statements, financial_statements)
     doc = _file_generated_workpaper(engagement, "financial_statements", "Financial Statements", "N8100", "Financial_Statements", "docx", buf)

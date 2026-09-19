@@ -2120,29 +2120,30 @@
   </div>
 
   <div class="card">
-    <h3 class="mt-0">Statement of Cash Flows (current year, indirect method)</h3>
-    <p class="muted" style="font-size:12px;">Investing activities are approximated as the net movement in each non-current asset's carrying value, so depreciation is not separately added back in operating activities (see the memo line below) - review against the fixed asset register and adjust for any disposals during the year. Shown for the current year only; a prior-year comparative needs the trial balance from two years back.</p>
+    <h3 class="mt-0">Statement of Cash Flows ({{ cash_flow_method_labels.get(statements.cf.method, 'Indirect method') }}, current year)</h3>
+    <p class="muted" style="font-size:12px;">Investing activities are approximated as the net movement in each non-current asset's carrying value, so depreciation is not separately added back in operating activities (see the memo line below) - review against the fixed asset register and adjust for any disposals during the year. Shown for the current year only; a prior-year comparative needs the trial balance from two years back. Change the method used below in "Basis of preparation &amp; sign-off" - investing and financing activities, and every subtotal from "Cash generated from operations" onward, are identical either way (IAS 7 requires both methods to reconcile to the same net cash from operating activities).</p>
     <table>
-      <thead><tr><th></th><th class="text-right">Amount</th></tr></thead>
+      <thead><tr><th></th><th>Note</th><th class="text-right">Amount</th></tr></thead>
       <tbody>
-        <tr><td class="section-title" colspan="2">Operating activities</td></tr>
+        <tr><td class="section-title" colspan="3">Operating activities</td></tr>
         {% for r in statements.cf.operating_rows %}
         <tr{% if r.memo %} class="muted"{% endif %}>
           <td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}</td>
+          <td>{{ r.note or '' }}</td>
           <td class="text-right">{% if r.bold %}<strong>{{ '%.2f'|format(r.current) }}</strong>{% else %}{{ '%.2f'|format(r.current) }}{% endif %}</td>
         </tr>
         {% endfor %}
-        <tr><td><strong>Net cash from operating activities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_operating) }}</strong></td></tr>
-        <tr><td class="section-title" colspan="2">Investing activities</td></tr>
-        {% for r in statements.cf.investing_rows %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td></tr>{% endfor %}
-        <tr><td><strong>Net cash used in investing activities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_investing) }}</strong></td></tr>
-        <tr><td class="section-title" colspan="2">Financing activities</td></tr>
-        {% for r in statements.cf.financing_rows %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td></tr>{% endfor %}
-        <tr><td><strong>Net cash from financing activities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_financing) }}</strong></td></tr>
-        <tr><td><strong>Net increase/(decrease) in cash</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_movement) }}</strong></td></tr>
-        <tr><td>Cash at beginning of year</td><td class="text-right">{{ '%.2f'|format(statements.cf.cash_open) }}</td></tr>
-        <tr><td><strong>Cash at end of year (computed)</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.cash_close_computed) }}</strong></td></tr>
-        <tr><td>Cash at end of year (per trial balance)</td><td class="text-right">{{ '%.2f'|format(statements.cf.cash_close_actual) }}</td></tr>
+        <tr><td><strong>Net cash from operating activities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_operating) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="3">Investing activities</td></tr>
+        {% for r in statements.cf.investing_rows %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td></tr>{% endfor %}
+        <tr><td><strong>Net cash used in investing activities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_investing) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="3">Financing activities</td></tr>
+        {% for r in statements.cf.financing_rows %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td></tr>{% endfor %}
+        <tr><td><strong>Net cash from financing activities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_financing) }}</strong></td></tr>
+        <tr><td><strong>Net increase/(decrease) in cash</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_movement) }}</strong></td></tr>
+        <tr><td>Cash at beginning of year</td><td></td><td class="text-right">{{ '%.2f'|format(statements.cf.cash_open) }}</td></tr>
+        <tr><td><strong>Cash at end of year (computed)</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.cash_close_computed) }}</strong></td></tr>
+        <tr><td>Cash at end of year (per trial balance)</td><td></td><td class="text-right">{{ '%.2f'|format(statements.cf.cash_close_actual) }}</td></tr>
       </tbody>
     </table>
     <p class="muted" style="font-size:11.5px;{% if statements.cf.variance|abs > 0.01 %}color:#b02a2a;{% endif %}">
@@ -2201,13 +2202,50 @@
   {% endif %}
 
   <div class="card">
-    <h3 class="mt-0">Basis of preparation &amp; sign-off</h3>
+    <h3 class="mt-0">Company classification</h3>
+    <p class="muted" style="font-size:12px;">Decide this once all adjustments above are final. Zimbabwean company law doesn't set a numeric size threshold for choosing a reporting framework - the Companies and Other Business Entities Act just requires "generally accepted accounting practice" as recognised by PAAB, and PAAB (Pronouncement 2/2016) draws the Full IFRS / IFRS for SMEs line on public accountability instead. Tick anything that applies to this entity:</p>
     <form method="post" action="{{ url_for('engagements.save_financial_statements_notes', engagement_id=engagement.id) }}">
-      <label for="reporting_framework">Financial reporting framework</label>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:2px 16px;">
+        {% for code, label in pie_criteria %}
+        <label style="font-weight:normal;display:flex;align-items:flex-start;gap:6px;">
+          <input type="checkbox" name="{{ code }}" {% if engagement[code] %}checked{% endif %} style="margin-top:3px;">
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <p style="margin:10px 0 16px;">
+        {% if engagement.is_public_interest_entity %}
+        <span class="badge status-Completed">Public Interest Entity</span> - recommended framework: <strong>Full IFRS</strong>.
+        {% else %}
+        <span class="badge">Not a Public Interest Entity</span> - eligible for IFRS for SMEs (recommended), though Full IFRS may still be elected.
+        {% endif %}
+        This is guidance only - pick the actual framework to use in the dropdown below.
+      </p>
+
+      <label for="sme_sector" style="margin-top:6px;">Sector (Small and Medium Enterprises Act)</label>
+      <select id="sme_sector" name="sme_sector">
+        <option value="">Not classified</option>
+        {% for sector in sme_act_sectors %}<option value="{{ sector }}" {% if engagement.sme_sector==sector %}selected{% endif %}>{{ sector }}</option>{% endfor %}
+      </select>
+      <label for="sme_size_band" style="margin-top:10px;">Size band (Small and Medium Enterprises Act)</label>
+      <select id="sme_size_band" name="sme_size_band">
+        <option value="">Not classified</option>
+        {% for code, label in sme_act_size_bands %}<option value="{{ code }}" {% if engagement.sme_size_band==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Recorded for your own client/engagement records - this is a separate, business-development/tax classification (turnover, assets and employees by sector), not an accounting-standards one, and doesn't change the reporting framework above or below.</p>
+
+      <label for="reporting_framework" style="margin-top:14px;">Financial reporting framework</label>
       <select id="reporting_framework" name="reporting_framework">
         {% for code, label in reporting_frameworks %}<option value="{{ code }}" {% if engagement.reporting_framework==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
       </select>
       <p class="muted" style="font-size:11.5px;margin-top:-2px;">Full IFRS and IFRS for SMEs get the numbered Notes to the Financial Statements above, generated from the trial balance. Other/local GAAP keeps the plain statements below with only the free-text notes box.</p>
+
+      <label for="cash_flow_method" style="margin-top:10px;">Cash Flow Statement method</label>
+      <select id="cash_flow_method" name="cash_flow_method">
+        {% for code, label in cash_flow_methods %}<option value="{{ code }}" {% if engagement.cash_flow_method==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Either method reconciles to the same net cash from operating activities (IAS 7.18) - only the operating activities section's presentation changes.</p>
+
       <label for="basis_of_preparation" style="margin-top:10px;">Basis of preparation{% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %} (Note 2 above){% endif %}</label>
       <textarea id="basis_of_preparation" name="basis_of_preparation" rows="3">{{ financial_statements.basis_of_preparation if financial_statements else '' }}</textarea>
       {% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %}
