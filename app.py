@@ -39,7 +39,12 @@ def _add_missing_columns():
         return  # only SQLite is supported/expected; skip silently otherwise
     partner_signoff_cols = [("partner_signed_by_id", "INTEGER"), ("partner_signed_at", "DATETIME")]
     additions = {
-        "document": [("reference", "VARCHAR(100)"), ("substantive_area_id", "INTEGER"), ("filing_index_id", "INTEGER")],
+        "document": [
+            ("reference", "VARCHAR(100)"), ("substantive_area_id", "INTEGER"), ("filing_index_id", "INTEGER"),
+            ("is_generated", "BOOLEAN DEFAULT 0"), ("workpaper_kind", "VARCHAR(40)"),
+            ("is_current_version", "BOOLEAN DEFAULT 1"),
+            ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
+        ] + partner_signoff_cols,
         "client": [("company_number", "VARCHAR(80)")],
         "message_recipient": [("recalled_at", "DATETIME")],
         "engagement": [("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0")],
@@ -73,7 +78,10 @@ def _add_missing_columns():
         ] + partner_signoff_cols,
         "entity_understanding": list(partner_signoff_cols),
         "analytical_review": list(partner_signoff_cols),
-        "trial_balance": list(partner_signoff_cols),
+        "trial_balance": list(partner_signoff_cols) + [
+            ("not_applicable", "BOOLEAN DEFAULT 0"), ("not_applicable_reason", "TEXT"),
+            ("marked_na_by_id", "INTEGER"), ("marked_na_at", "DATETIME"),
+        ],
         "financial_statements": list(partner_signoff_cols) + [("notes_to_financial_statements", "TEXT")],
         "client_acceptance": [
             ("risk_conflicts_score", "INTEGER"),

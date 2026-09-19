@@ -1194,9 +1194,57 @@ class Document(db.Model):
     # doesn't cover, or for firms/engagements not using it).
     filing_index_id = db.Column(db.Integer, db.ForeignKey("filing_index_section.id"))
 
-    uploaded_by = db.relationship("User")
+    # System-generated workpapers (see engagements.py's
+    # _file_generated_workpaper and the "Generate & File" buttons on the
+    # Finalisation/Checklist/Substantive Procedures tabs) are filed as
+    # ordinary Documents - reusing the same storage, versioning-by-count,
+    # download and Filing-Index tagging already built for uploads - plus
+    # these extra fields so a generated workpaper carries its own
+    # Prepared/Reviewed/Partner sign-off, same as every other workpaper in
+    # the app (Trial Balance, Analytical Review, Audit Adjustments, ...).
+    # is_generated distinguishes these from a person's own upload (which
+    # never has this sign-off asked of it); workpaper_kind is the stable
+    # machine key (e.g. "financial_statements") used to group every
+    # version of the SAME generated workpaper together and to work out the
+    # next version number - regenerating never overwrites or deletes a
+    # prior version (the firm's own Filing Index policy: "superseded, not
+    # overwritten"), it only flips is_current_version to False on the ones
+    # it replaces.
+    is_generated = db.Column(db.Boolean, default=False)
+    workpaper_kind = db.Column(db.String(40))
+    is_current_version = db.Column(db.Boolean, default=True)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    uploaded_by = db.relationship("User", foreign_keys=[uploaded_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
     substantive_area = db.relationship("SubstantiveProcedureArea", backref=db.backref("documents", lazy=True, order_by="Document.uploaded_at.desc()"))
     filing_index = db.relationship("FilingIndexSection")
+
+    # Aliases so the standard effectively_reviewed()/sign-off display
+    # pattern used everywhere else in the app (which reads
+    # completed_by/completed_by_id as "who prepared this") works unchanged
+    # on a generated Document too, without a duplicate pair of columns -
+    # "prepared" a generated workpaper IS "uploaded" it, from the system's
+    # point of view.
+    @property
+    def completed_by(self):
+        return self.uploaded_by
+
+    @property
+    def completed_by_id(self):
+        return self.uploaded_by_id
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
 
 
 class PermanentFileDocument(db.Model):
@@ -1787,13 +1835,17 @@ class AnalyticalReviewLine(db.Model):
     prior_amount = db.Column(db.Float)
     current_amount = db.Column(db.Float)
     explanation = db.Column(db.Text)
-    # "manual" (typed in by hand, the only option before this column existed)
-    # or "auto" (last written by "Generate from Trial Balance" - see
-    # generate_analytical_review_from_trial_balance in engagements.py).
-    # Regenerating only overwrites the amounts on "auto" lines that share a
-    # label with a freshly computed figure, so a manually-typed line, and
-    # any explanation already typed against an auto line, both survive a
-    # re-generate.
+    # "manual" (typed in by hand, the only option before this column existed),
+    # "auto" (last written by "Generate from Trial Balance" - see
+    # generate_analytical_review_from_trial_balance in engagements.py), or
+    # "tb_account" (added via the "pick an account" dropdown on the Add
+    # line item form - see add_analytical_review_line - its label and
+    # prior/current amounts came directly from one specific
+    # TrialBalanceLine rather than a rolled-up IAS 1 category or a typed
+    # figure). Regenerating only overwrites the amounts on "auto" lines
+    # that share a label with a freshly computed figure, so a
+    # manually-typed line, a tb_account-picked line, and any explanation
+    # already typed against an auto line, all survive a re-generate.
     source = db.Column(db.String(10), default="manual")
 
     @property
@@ -1863,9 +1915,22 @@ class TrialBalance(db.Model):
     partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     partner_signed_at = db.Column(db.DateTime)
 
+    # Some engagements genuinely have no trial balance (e.g. a Consulting or
+    # Secretarial engagement, or an Investigative Engagement scoped to a
+    # specific matter rather than the whole set of accounts) - rather than
+    # leaving the Trial Balance tab looking unfinished/broken, the team can
+    # explicitly record why and move on. Deliberately kept on this row
+    # rather than a separate table: a TrialBalance row with no lines and
+    # not_applicable=True IS the "no trial balance, and here's why" record.
+    not_applicable = db.Column(db.Boolean, default=False)
+    not_applicable_reason = db.Column(db.Text)
+    marked_na_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    marked_na_at = db.Column(db.DateTime)
+
     engagement = db.relationship("Engagement", backref=db.backref("trial_balance", uselist=False, cascade="all, delete-orphan"))
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    marked_na_by = db.relationship("User", foreign_keys=[marked_na_by_id])
     partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
     lines = db.relationship(
         "TrialBalanceLine", backref="trial_balance", lazy=True,

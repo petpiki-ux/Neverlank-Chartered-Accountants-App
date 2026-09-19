@@ -4,7 +4,7 @@ import io
 import uuid
 from datetime import datetime, date
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, send_from_directory, send_file, abort
+from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, send_from_directory, abort
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 import openpyxl
@@ -428,6 +428,9 @@ def view_engagement(engagement_id):
         effectively_reviewed=effectively_reviewed,
         workpaper_narratives=workpaper_narratives,
         workpaper_narrative_kinds=WORKPAPER_NARRATIVE_KINDS,
+        filed_workpapers_by_kind=_filed_workpapers_by_kind(engagement_id),
+        REVIEWER_ROLES=REVIEWER_ROLES,
+        PARTNER_SIGNOFF_ROLES=PARTNER_SIGNOFF_ROLES,
     )
 
 
@@ -761,7 +764,7 @@ def _touch_analytical_review(review):
 def generate_analytical_review_from_trial_balance(engagement_id):
     """Fills in Analytical Review line items automatically from the
     engagement's preliminary Trial Balance (entered/imported on the
-    Planning tab), instead of the auditor having to type in every current
+    Trial Balance tab), instead of the auditor having to type in every current
     vs prior year figure by hand. Reuses financials.build_all_statements()
     - the same maths behind the Finalisation tab's financial statements -
     on the trial balance's PRELIMINARY (unadjusted) figures, since
@@ -776,7 +779,7 @@ def generate_analytical_review_from_trial_balance(engagement_id):
     _ensure_engagement_access(engagement)
     trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
     if not trial_balance or not trial_balance.lines:
-        flash("Enter or import the preliminary trial balance (Planning tab) before generating analytical review figures from it.", "danger")
+        flash("Enter or import the preliminary trial balance (Trial Balance tab) before generating analytical review figures from it.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
 
     review = _get_or_create_analytical_review(engagement_id)
@@ -829,14 +832,17 @@ def save_analytical_review_threshold(engagement_id):
 @engagements_bp.route("/<int:engagement_id>/analytical-review/lines/add", methods=["POST"])
 @login_required
 def add_analytical_review_line(engagement_id):
+    """Adds one Analytical Review line - either typed in by hand (label +
+    prior/current amounts), or picked from a dropdown of the engagement's
+    own trial balance accounts (tb_line_id), in which case the account's
+    name and its prior/current net movement (debit minus credit, for each
+    period) are used automatically instead of typing them in. Picking an
+    account is the recommended path once a trial balance exists: it's the
+    same account, guaranteed to agree with the trial balance, rather than
+    a manually retyped figure that can drift out of step with it."""
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     review = _get_or_create_analytical_review(engagement_id)
-
-    label = request.form.get("label", "").strip()
-    if not label:
-        flash("Please name the line item (e.g. Revenue, Gross profit).", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
 
     def _float_or_none(name):
         raw = request.form.get(name, "").strip()
@@ -845,12 +851,31 @@ def add_analytical_review_line(engagement_id):
         except ValueError:
             return None
 
+    tb_line_id = request.form.get("tb_line_id", "").strip()
+    label = request.form.get("label", "").strip()
+    prior_amount = _float_or_none("prior_amount")
+    current_amount = _float_or_none("current_amount")
+
+    if tb_line_id.isdigit():
+        tb_line = TrialBalanceLine.query.get(int(tb_line_id))
+        if not tb_line or tb_line.trial_balance.engagement_id != engagement_id:
+            flash("That account doesn't belong to this engagement's trial balance.", "danger")
+            return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+        label = label or tb_line.account_name
+        prior_amount = (tb_line.prior_debit or 0.0) - (tb_line.prior_credit or 0.0)
+        current_amount = (tb_line.current_debit or 0.0) - (tb_line.current_credit or 0.0)
+
+    if not label:
+        flash("Please name the line item (e.g. Revenue, Gross profit) or pick an account from the trial balance.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
     line = AnalyticalReviewLine(
         analytical_review_id=review.id,
         label=label,
-        prior_amount=_float_or_none("prior_amount"),
-        current_amount=_float_or_none("current_amount"),
+        prior_amount=prior_amount,
+        current_amount=current_amount,
         explanation=request.form.get("explanation", "").strip(),
+        source="tb_account" if tb_line_id.isdigit() else "manual",
     )
     db.session.add(line)
     _touch_analytical_review(review)
@@ -1258,6 +1283,170 @@ def delete_document(doc_id):
     db.session.delete(doc)
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=return_tab))
+
+
+# ---------- Generated workpapers (filed under Documents, sign-off tracked) ----------
+#
+# Every downloadable working paper the app can build (Financial Statements,
+# Trial Balance & Adjustments, the checklists, Substantive Procedures, etc)
+# is generated and FILED here rather than streamed straight to the
+# browser - it becomes an ordinary Document (tagged with the firm's N-code
+# filing reference where one applies, exactly like a manually-uploaded and
+# WP-No.-tagged file), with its own Prepared/Reviewed/Partner sign-off.
+# Downloading it is then a separate, explicit action on that filed copy
+# (the existing download_document route above) rather than something that
+# happens automatically the moment it's generated.
+
+# Which engagement tab each generated workpaper's routes should redirect
+# back to, and its return-tab default for when something goes wrong (e.g.
+# missing trial balance).
+WORKPAPER_KIND_TABS = {
+    "financial_statements": "finalisation",
+    "trial_balance_adjustments": "finalisation",
+    "rep_letter": "finalisation",
+    "report_to_management": "finalisation",
+    "forensic_report": "finalisation",
+    "file_summary": "finalisation",
+    "finalisation_checklist": "finalisation",
+    "acceptance_checklist": "acceptance",
+    "entity_checklist": "entity",
+    "engagement_checklist": "checklist",
+    "substantive_procedures_docx": "substantive",
+    "substantive_procedures_xlsx": "substantive",
+}
+
+
+def _filed_workpapers_by_kind(engagement_id):
+    """Every generated-and-filed workpaper for this engagement, grouped by
+    kind and ordered newest version first - what each tab's "Filed
+    versions" list renders. A dict of lists, never missing a key that's
+    actually been generated at least once."""
+    docs = (
+        Document.query
+        .filter_by(engagement_id=engagement_id, is_generated=True)
+        .order_by(Document.workpaper_kind, Document.version.desc())
+        .all()
+    )
+    by_kind = {}
+    for d in docs:
+        by_kind.setdefault(d.workpaper_kind, []).append(d)
+    return by_kind
+
+
+def _file_generated_workpaper(engagement, kind, category_label, filing_code, description_stub, ext, buf, reference_override=None):
+    """Generate-and-file step shared by every "Generate & File" button: saves
+    the already-built file (buf, a BytesIO from workpapers.py) to disk and
+    records it as a new Document, following the same N[code]_[Description]
+    filing convention as a manually-tagged upload whenever filing_code
+    matches a real Filing Index entry (the download route then adds the
+    year and applies it automatically, exactly like any other WP-No.-tagged
+    Document) - otherwise falls back to a plain descriptive filename, same
+    as the old direct-download naming did for sections with no single N-code
+    (the Engagement Checklist, Substantive Procedures, the Forensic report).
+
+    Every previous version of this SAME kind for this engagement is kept
+    (per the firm's own Filing Index policy: "superseded, not overwritten")
+    - only its is_current_version flag flips to False. The new version
+    starts with a clean slate for Reviewed/Partner-signed, since a freshly
+    generated file is new work needing its own review."""
+    filing_section = FilingIndexSection.query.filter_by(code=filing_code).first() if filing_code else None
+
+    prior_versions = Document.query.filter_by(engagement_id=engagement.id, workpaper_kind=kind).all()
+    for p in prior_versions:
+        p.is_current_version = False
+    version = len(prior_versions) + 1
+
+    stored_name = f"eng{engagement.id}_wp_{kind}_{uuid.uuid4().hex[:10]}.{ext}"
+    with open(os.path.join(current_app.config["UPLOAD_FOLDER"], stored_name), "wb") as f:
+        f.write(buf.getvalue())
+
+    doc = Document(
+        engagement_id=engagement.id,
+        original_filename=f"{description_stub}.{ext}",
+        stored_filename=stored_name,
+        category=category_label,
+        reference=reference_override or filing_code,
+        version=version,
+        uploaded_by_id=current_user.id,
+        uploaded_at=datetime.utcnow(),
+        filing_index_id=filing_section.id if filing_section else None,
+        is_generated=True,
+        workpaper_kind=kind,
+        is_current_version=True,
+    )
+    db.session.add(doc)
+    db.session.commit()
+    return doc
+
+
+@engagements_bp.route("/documents/<int:doc_id>/review", methods=["POST"])
+@login_required
+def review_generated_document(doc_id):
+    doc = Document.query.get_or_404(doc_id)
+    _ensure_engagement_access(doc.engagement)
+    if not doc.is_generated:
+        abort(404)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if doc.uploaded_by_id == current_user.id:
+        flash("You can't review a working paper you generated yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=doc.engagement_id, tab=WORKPAPER_KIND_TABS.get(doc.workpaper_kind, "documents")))
+    doc.reviewed_by_id = current_user.id
+    doc.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Working paper marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=doc.engagement_id, tab=WORKPAPER_KIND_TABS.get(doc.workpaper_kind, "documents")))
+
+
+@engagements_bp.route("/documents/<int:doc_id>/unreview", methods=["POST"])
+@login_required
+def unreview_generated_document(doc_id):
+    doc = Document.query.get_or_404(doc_id)
+    _ensure_engagement_access(doc.engagement)
+    if not doc.is_generated:
+        abort(404)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    doc.reviewed_by_id = None
+    doc.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=doc.engagement_id, tab=WORKPAPER_KIND_TABS.get(doc.workpaper_kind, "documents")))
+
+
+@engagements_bp.route("/documents/<int:doc_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_generated_document(doc_id):
+    doc = Document.query.get_or_404(doc_id)
+    _ensure_engagement_access(doc.engagement)
+    if not doc.is_generated:
+        abort(404)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if doc.uploaded_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a working paper you generated yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=doc.engagement_id, tab=WORKPAPER_KIND_TABS.get(doc.workpaper_kind, "documents")))
+    doc.partner_signed_by_id = current_user.id
+    doc.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=doc.engagement_id, tab=WORKPAPER_KIND_TABS.get(doc.workpaper_kind, "documents")))
+
+
+@engagements_bp.route("/documents/<int:doc_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_generated_document(doc_id):
+    doc = Document.query.get_or_404(doc_id)
+    _ensure_engagement_access(doc.engagement)
+    if not doc.is_generated:
+        abort(404)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    doc.partner_signed_by_id = None
+    doc.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=doc.engagement_id, tab=WORKPAPER_KIND_TABS.get(doc.workpaper_kind, "documents")))
 
 
 # ---------- Tasks ----------
@@ -1967,6 +2156,10 @@ def _touch_trial_balance(tb):
     tb.reviewed_at = None
     tb.partner_signed_by_id = None
     tb.partner_signed_at = None
+    # Entering real trial balance data supersedes an earlier "not
+    # applicable" note - the note only makes sense while there's nothing
+    # else on this tab.
+    tb.not_applicable = False
 
 
 def _lookup_coa_mapping(client_id, account_name):
@@ -1997,10 +2190,10 @@ def upload_trial_balance(engagement_id):
     file = request.files.get("file")
     if not file or file.filename == "":
         flash("Please choose a file to upload.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
     if not _allowed_tb_file(file.filename):
         flash("Please upload a .xlsx or .csv file.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
     original_name = secure_filename(file.filename)
     try:
@@ -2008,10 +2201,10 @@ def upload_trial_balance(engagement_id):
         cleaned_rows = fin.parse_tb_rows(raw_rows)
     except ValueError as e:
         flash(str(e), "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
     except Exception:
         flash("Could not read that file - make sure it's a .xlsx or .csv using the template's columns.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
     tb = _get_or_create_trial_balance(engagement_id, source="upload")
     tb.source = "upload"
@@ -2039,7 +2232,7 @@ def upload_trial_balance(engagement_id):
     _touch_trial_balance(tb)
     db.session.commit()
     flash(f"Imported {len(cleaned_rows)} account(s) from '{original_name}'.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
 
 @engagements_bp.route("/<int:engagement_id>/trial-balance/lines/add", methods=["POST"])
@@ -2050,7 +2243,7 @@ def add_trial_balance_line(engagement_id):
     name = request.form.get("account_name", "").strip()
     if not name:
         flash("Please give the account a name.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
     def to_float(field):
         raw = request.form.get(field, "").strip()
@@ -2074,7 +2267,7 @@ def add_trial_balance_line(engagement_id):
     _touch_trial_balance(tb)
     db.session.commit()
     flash("Account added.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
 
 @engagements_bp.route("/trial-balance/lines/<int:line_id>/update", methods=["POST"])
@@ -2110,7 +2303,7 @@ def update_trial_balance_line(line_id):
     _touch_trial_balance(tb)
     db.session.commit()
     flash("Account updated.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="trial_balance"))
 
 
 @engagements_bp.route("/trial-balance/lines/<int:line_id>/delete", methods=["POST"])
@@ -2123,7 +2316,7 @@ def delete_trial_balance_line(line_id):
     db.session.delete(line)
     _touch_trial_balance(tb)
     db.session.commit()
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
 
 @engagements_bp.route("/trial-balance/<int:tb_id>/review", methods=["POST"])
@@ -2135,15 +2328,15 @@ def review_trial_balance(tb_id):
         abort(403)
     if not tb.is_fully_mapped:
         flash("Every account needs an IAS 1 category (or 'Excluded') before the trial balance can be reviewed.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="trial_balance"))
     if tb.completed_by_id == current_user.id:
         flash("You can't review a trial balance you imported/entered yourself - ask another supervisor/partner to review it.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="trial_balance"))
     tb.reviewed_by_id = current_user.id
     tb.reviewed_at = datetime.utcnow()
     db.session.commit()
     flash("Trial balance marked as reviewed.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="trial_balance"))
 
 
 @engagements_bp.route("/trial-balance/<int:tb_id>/unreview", methods=["POST"])
@@ -2157,7 +2350,7 @@ def unreview_trial_balance(tb_id):
     tb.reviewed_at = None
     db.session.commit()
     flash("Review sign-off removed.", "info")
-    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="trial_balance"))
 
 
 @engagements_bp.route("/trial-balance/<int:tb_id>/partner-sign", methods=["POST"])
@@ -2169,15 +2362,15 @@ def partner_sign_trial_balance(tb_id):
         abort(403)
     if not tb.is_fully_mapped:
         flash("Every account needs an IAS 1 category (or 'Excluded') before the partner can sign off.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="trial_balance"))
     if tb.completed_by_id == current_user.id:
         flash("You can't give the partner sign-off on a trial balance you imported/entered yourself - ask another partner to sign off.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="trial_balance"))
     tb.partner_signed_by_id = current_user.id
     tb.partner_signed_at = datetime.utcnow()
     db.session.commit()
     flash("Partner sign-off recorded.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="trial_balance"))
 
 
 @engagements_bp.route("/trial-balance/<int:tb_id>/partner-unsign", methods=["POST"])
@@ -2191,7 +2384,48 @@ def partner_unsign_trial_balance(tb_id):
     tb.partner_signed_at = None
     db.session.commit()
     flash("Partner sign-off removed.", "info")
-    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="trial_balance"))
+
+
+@engagements_bp.route("/<int:engagement_id>/trial-balance/mark-not-applicable", methods=["POST"])
+@login_required
+def mark_trial_balance_not_applicable(engagement_id):
+    """Records that this engagement genuinely has no trial balance (e.g. a
+    Consulting/Secretarial engagement, or an Investigative Engagement
+    scoped to a specific matter) instead of leaving the tab looking
+    unfinished. Refuses if real data already exists - clear the trial
+    balance's lines first if you actually want to switch it to N/A."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    reason = request.form.get("not_applicable_reason", "").strip()
+    if not reason:
+        flash("Please explain why this engagement has no trial balance.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
+    tb = _get_or_create_trial_balance(engagement_id)
+    if tb.lines:
+        flash("This engagement already has trial balance accounts entered - remove them first if it's genuinely not applicable.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
+    tb.not_applicable = True
+    tb.not_applicable_reason = reason
+    tb.marked_na_by_id = current_user.id
+    tb.marked_na_at = datetime.utcnow()
+    db.session.commit()
+    flash("Trial balance marked as not applicable for this engagement.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
+
+
+@engagements_bp.route("/trial-balance/<int:tb_id>/unmark-not-applicable", methods=["POST"])
+@login_required
+def unmark_trial_balance_not_applicable(tb_id):
+    tb = TrialBalance.query.get_or_404(tb_id)
+    _ensure_engagement_access(tb.engagement)
+    tb.not_applicable = False
+    tb.not_applicable_reason = None
+    tb.marked_na_by_id = None
+    tb.marked_na_at = None
+    db.session.commit()
+    flash("Trial balance no longer marked as not applicable.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="trial_balance"))
 
 
 @engagements_bp.route("/trial-balance/<int:tb_id>/adjustments/add", methods=["POST"])
@@ -2963,61 +3197,41 @@ def queries_board():
 
 # ---------- Working papers: Word/Excel generation (Finalisation + Substantive Procedures tabs) ----------
 
-def _workpaper_filename(engagement, label, ext):
-    client_name = engagement.client.name if engagement.client else "Client"
-    return secure_filename(f"{client_name}_{engagement.title}_{label}.{ext}") or f"workpaper.{ext}"
-
-
-def _filing_download_name(engagement, code, description, ext):
-    """The firm's filing convention: N[code]_[Short_Description]_[Year].ext
-    (see models.FilingIndexSection / the Filing Index & Manual page). Falls
-    back to the plain client/engagement-based name (_workpaper_filename)
-    when this workpaper has no single dedicated filing code."""
-    if not code:
-        return _workpaper_filename(engagement, description, ext)
-    year = engagement.period_end.year if engagement.period_end else date.today().year
-    return secure_filename(f"{code}_{description}_{year}.{ext}") or f"workpaper.{ext}"
-
-
-@engagements_bp.route("/<int:engagement_id>/workpapers/financial-statements.docx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/financial-statements/generate", methods=["POST"])
 @login_required
-def download_financial_statements_docx(engagement_id):
+def generate_financial_statements_docx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
     if not trial_balance or not trial_balance.lines:
-        flash("Enter or import the trial balance (Planning tab) before generating the financial statements working paper.", "danger")
+        flash("Enter or import the trial balance (Trial Balance tab) before generating the financial statements working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
     statements = fin.build_all_statements(trial_balance.lines, trial_balance.adjustments)
     financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
     buf = wp.build_financial_statements_docx(engagement, statements, financial_statements)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_filing_download_name(engagement, "N8100", "Financial_Statements", "docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    doc = _file_generated_workpaper(engagement, "financial_statements", "Financial Statements", "N8100", "Financial_Statements", "docx", buf)
+    flash(f"Financial statements filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/trial-balance.xlsx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/trial-balance/generate", methods=["POST"])
 @login_required
-def download_trial_balance_xlsx(engagement_id):
+def generate_trial_balance_xlsx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
     if not trial_balance or not trial_balance.lines:
-        flash("Enter or import the trial balance (Planning tab) before generating this working paper.", "danger")
+        flash("Enter or import the trial balance (Trial Balance tab) before generating this working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
     buf = wp.build_trial_balance_adjustments_xlsx(engagement, trial_balance)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_filing_download_name(engagement, "N1000", "Trial_Balance_and_Adjustments", "xlsx"),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    doc = _file_generated_workpaper(engagement, "trial_balance_adjustments", "Trial Balance & Adjustments", "N1000", "Trial_Balance_and_Adjustments", "xlsx", buf)
+    flash(f"Trial balance & adjustments filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/rep-letter.docx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/rep-letter/generate", methods=["POST"])
 @login_required
-def download_rep_letter_docx(engagement_id):
+def generate_rep_letter_docx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
@@ -3027,30 +3241,26 @@ def download_rep_letter_docx(engagement_id):
     )
     narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind="rep_letter").first()
     buf = wp.build_rep_letter_docx(engagement, statements, narrative)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_filing_download_name(engagement, "N9006", "Management_Representation_Letter", "docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    doc = _file_generated_workpaper(engagement, "rep_letter", "Management Representation Letter", "N9006", "Management_Representation_Letter", "docx", buf)
+    flash(f"Management representation letter filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/report-to-management.docx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/report-to-management/generate", methods=["POST"])
 @login_required
-def download_report_to_management_docx(engagement_id):
+def generate_report_to_management_docx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind="report_to_management").first()
     buf = wp.build_report_to_management_docx(engagement, narrative)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_filing_download_name(engagement, "N8300", "Report_to_Management", "docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    doc = _file_generated_workpaper(engagement, "report_to_management", "Report to Management", "N8300", "Report_to_Management", "docx", buf)
+    flash(f"Report to management filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/forensic-report.docx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/forensic-report/generate", methods=["POST"])
 @login_required
-def download_forensic_report_docx(engagement_id):
+def generate_forensic_report_docx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     if engagement.type != "Investigative Engagement":
@@ -3058,80 +3268,68 @@ def download_forensic_report_docx(engagement_id):
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
     narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind="forensic_executive_summary").first()
     buf = wp.build_forensic_report_docx(engagement, narrative)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Forensic_Investigation_Report", "docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    doc = _file_generated_workpaper(engagement, "forensic_report", "Forensic Investigation Report", None, "Forensic_Investigation_Report", "docx", buf, reference_override=filing_reference("forensic_report"))
+    flash(f"Forensic investigation report filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/file-summary.pdf")
+@engagements_bp.route("/<int:engagement_id>/workpapers/file-summary/generate", methods=["POST"])
 @login_required
-def download_engagement_file_summary_pdf(engagement_id):
+def generate_engagement_file_summary_pdf(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     buf = wp.build_engagement_file_summary_pdf(engagement)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Engagement_File_Summary", "pdf"),
-        mimetype="application/pdf",
-    )
+    doc = _file_generated_workpaper(engagement, "file_summary", "Engagement File Summary", None, "Engagement_File_Summary", "pdf", buf)
+    flash(f"Engagement file summary filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/acceptance-checklist.docx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/acceptance-checklist/generate", methods=["POST"])
 @login_required
-def download_acceptance_checklist_docx(engagement_id):
+def generate_acceptance_checklist_docx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     buf = wp.build_client_acceptance_checklist_docx(engagement, engagement.client_acceptance)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_filing_download_name(engagement, "N1009", "Client_Acceptance_Checklist", "docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    doc = _file_generated_workpaper(engagement, "acceptance_checklist", "Client Acceptance Checklist", "N1009", "Client_Acceptance_Checklist", "docx", buf)
+    flash(f"Client acceptance checklist filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/entity-checklist.docx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/entity-checklist/generate", methods=["POST"])
 @login_required
-def download_entity_checklist_docx(engagement_id):
+def generate_entity_checklist_docx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     buf = wp.build_entity_understanding_checklist_docx(engagement, engagement.entity_understanding)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_filing_download_name(engagement, "N1003", "Understanding_the_Entity_Checklist", "docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    doc = _file_generated_workpaper(engagement, "entity_checklist", "Understanding the Entity Checklist", "N1003", "Understanding_the_Entity_Checklist", "docx", buf)
+    flash(f"Understanding the Entity checklist filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/engagement-checklist.docx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/engagement-checklist/generate", methods=["POST"])
 @login_required
-def download_engagement_checklist_docx(engagement_id):
+def generate_engagement_checklist_docx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     buf = wp.build_engagement_checklist_docx(engagement)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Engagement_Checklist", "docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    doc = _file_generated_workpaper(engagement, "engagement_checklist", "Engagement Checklist", None, "Engagement_Checklist", "docx", buf, reference_override="F-1")
+    flash(f"Engagement checklist filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="checklist"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/finalisation-checklist.docx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/finalisation-checklist/generate", methods=["POST"])
 @login_required
-def download_finalisation_checklist_docx(engagement_id):
+def generate_finalisation_checklist_docx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     buf = wp.build_finalisation_checklist_docx(engagement, engagement.finalisation_checklist)
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_filing_download_name(engagement, "N9009", "Finalisation_Checklist", "docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    doc = _file_generated_workpaper(engagement, "finalisation_checklist", "Finalisation Checklist", "N9009", "Finalisation_Checklist", "docx", buf)
+    flash(f"Finalisation checklist filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
 
 
 def _substantive_programme_context(engagement):
-    """Shared setup for the two Substantive Procedures workpaper downloads
+    """Shared setup for the two Substantive Procedures workpaper generators
     below - the same area list/order/reference codes the tab itself shows
     (see view_engagement), so the generated file always matches the screen."""
     is_forensic = engagement.type == "Investigative Engagement"
@@ -3143,37 +3341,33 @@ def _substantive_programme_context(engagement):
     return areas_by_name, area_order, area_refs
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/substantive-procedures.docx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/substantive-procedures-docx/generate", methods=["POST"])
 @login_required
-def download_substantive_procedures_docx(engagement_id):
+def generate_substantive_procedures_docx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     areas_by_name, area_order, area_refs = _substantive_programme_context(engagement)
     if not areas_by_name:
-        flash("Generate suggested procedures (or add some manually) before downloading this working paper.", "danger")
+        flash("Generate suggested procedures (or add some manually) before filing this working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
     buf = wp.build_substantive_procedures_docx(engagement, areas_by_name, area_order, area_refs)
     label = "Investigative_Procedures_Programme" if engagement.type == "Investigative Engagement" else "Substantive_Procedures_Programme"
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, label, "docx"),
-        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    )
+    doc = _file_generated_workpaper(engagement, "substantive_procedures_docx", "Substantive Procedures Programme", None, label, "docx", buf, reference_override=filing_reference("substantive"))
+    flash(f"Procedures programme (Word) filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
 
 
-@engagements_bp.route("/<int:engagement_id>/workpapers/substantive-procedures.xlsx")
+@engagements_bp.route("/<int:engagement_id>/workpapers/substantive-procedures-xlsx/generate", methods=["POST"])
 @login_required
-def download_substantive_procedures_xlsx(engagement_id):
+def generate_substantive_procedures_xlsx(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     areas_by_name, area_order, area_refs = _substantive_programme_context(engagement)
     if not areas_by_name:
-        flash("Generate suggested procedures (or add some manually) before downloading this working paper.", "danger")
+        flash("Generate suggested procedures (or add some manually) before filing this working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
     buf = wp.build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, area_refs)
     label = "Investigative_Procedures_Programme" if engagement.type == "Investigative Engagement" else "Substantive_Procedures_Programme"
-    return send_file(
-        buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, label, "xlsx"),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    doc = _file_generated_workpaper(engagement, "substantive_procedures_xlsx", "Substantive Procedures Programme", None, label, "xlsx", buf, reference_override=filing_reference("substantive"))
+    flash(f"Procedures programme (Excel) filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))

@@ -26,6 +26,50 @@
     {% if ns.open %}</optgroup>{% endif %}
   </select>
 {% endmacro %}
+{% macro filed_workpapers(kind) %}
+  {% set docs = filed_workpapers_by_kind.get(kind, []) %}
+  {% if docs %}
+  <table style="margin-top:10px;">
+    <thead><tr><th>Version</th><th>Reference</th><th>Prepared</th><th>Reviewed</th><th>Partner sign-off</th><th></th></tr></thead>
+    <tbody>
+    {% for d in docs %}
+      <tr{% if not d.is_current_version %} class="muted"{% endif %}>
+        <td>v{{ d.version }}{% if d.is_current_version %} <span class="badge status-Completed">Current</span>{% else %} <span class="badge">Superseded</span>{% endif %}</td>
+        <td>{{ d.filing_index.display_label if d.filing_index else (d.reference or '—') }}</td>
+        <td style="font-size:11.5px;">{{ d.uploaded_by.name if d.uploaded_by else '—' }}<br>{{ d.uploaded_at.strftime('%d %b %Y %H:%M') if d.uploaded_at else '—' }}</td>
+        <td style="font-size:11.5px;">
+          {% if d.is_reviewed %}{{ d.reviewed_by.name }}<br>{{ d.reviewed_at.strftime('%d %b %Y') }}
+          {% elif d.is_current_version and current_user.role in ('supervisor', 'partner', 'admin') %}
+            {% if d.completed_by_id != current_user.id %}
+            <form method="post" action="{{ url_for('engagements.review_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+            {% elif effectively_reviewed(d) %}
+            <span class="badge status-Completed">Effectively reviewed</span>
+            {% else %}Awaiting review{% endif %}
+          {% else %}—{% endif %}
+          {% if d.is_reviewed and d.is_current_version and current_user.role in ('supervisor', 'partner', 'admin') %}
+          <form method="post" action="{{ url_for('engagements.unreview_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove</button></form>
+          {% endif %}
+        </td>
+        <td style="font-size:11.5px;">
+          {% if d.is_partner_signed %}{{ d.partner_signed_by.name }}<br>{{ d.partner_signed_at.strftime('%d %b %Y') }}
+          {% elif d.is_current_version and current_user.role in ('partner', 'admin') %}
+            {% if d.completed_by_id != current_user.id %}
+            <form method="post" action="{{ url_for('engagements.partner_sign_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+            {% else %}Not on your own work{% endif %}
+          {% else %}—{% endif %}
+          {% if d.is_partner_signed and d.is_current_version and current_user.role in ('partner', 'admin') %}
+          <form method="post" action="{{ url_for('engagements.partner_unsign_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove</button></form>
+          {% endif %}
+        </td>
+        <td><a href="{{ url_for('engagements.download_document', doc_id=d.id) }}" class="btn small secondary">Download</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="font-size:11.5px;margin-top:6px;">Not generated yet - nothing filed under Documents for this working paper.</p>
+  {% endif %}
+{% endmacro %}
 <div class="page-header">
   <div>
     <h1>{{ engagement.title }}</h1>
@@ -49,11 +93,12 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='analytical') }}" class="{% if tab=='analytical' %}active{% endif %}">Analytical Review{% if analytical_review and analytical_review.significant_lines %} ({{ analytical_review.significant_lines|length }} flagged){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}" class="{% if tab=='risks' %}active{% endif %}">Risk Assessment{% if risk_assessment and risk_assessment.rating %} ({{ risk_assessment.rating }}){% else %} (Not started){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}" class="{% if tab=='planning' %}active{% endif %}">{% if engagement.type == 'Investigative Engagement' %}Audit Strategy{% else %}Planning{% endif %}</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}" class="{% if tab=='trial_balance' %}active{% endif %}">Trial Balance{% if trial_balance and trial_balance.lines %} ({{ trial_balance.lines|length }} accounts){% elif trial_balance and trial_balance.not_applicable %} (N/A){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}" class="{% if tab=='substantive' %}active{% endif %}">Substantive Procedures{% if substantive_areas %} ({{ substantive_areas|length }}/{{ audit_areas|length }} areas){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
-  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}" class="{% if tab=='finalisation' %}active{% endif %}">Finalisation{% if trial_balance and trial_balance.lines %} ({{ trial_balance.lines|length }} accounts){% endif %}</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}" class="{% if tab=='finalisation' %}active{% endif %}">Finalisation</a>
 </div>
 
 {% if tab == 'overview' %}
@@ -218,7 +263,8 @@
     {% if client_acceptance and not client_acceptance.checklist_items %}
     <form method="post" action="{{ url_for('acceptance.seed_acceptance_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist to every section below</button></form>
     {% endif %}
-    <a href="{{ url_for('engagements.download_acceptance_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. {{ filing_reference('acceptance') }})</a>
+    <form method="post" action="{{ url_for('engagements.generate_acceptance_checklist_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file checklist (Word, Ref. {{ filing_reference('acceptance') }})</button></form>
+    {{ filed_workpapers('acceptance_checklist') }}
   </div>
 
   {% if engagement.type == 'Investigative Engagement' %}
@@ -679,7 +725,8 @@
     {% if not entity_understanding or not entity_understanding.checklist_items %}
     <form method="post" action="{{ url_for('engagements.seed_entity_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist</button></form>
     {% endif %}
-    <a href="{{ url_for('engagements.download_entity_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. {{ filing_reference('entity') }})</a>
+    <form method="post" action="{{ url_for('engagements.generate_entity_checklist_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file checklist (Word, Ref. {{ filing_reference('entity') }})</button></form>
+    {{ filed_workpapers('entity_checklist') }}
   </div>
 
   {% set entity_forensic_sections = ['Objectives & Scope of the Engagement', 'Legal, Regulatory & Governance Context', 'Data, Systems & Access Checklist', 'Stakeholders, Logistics & Timeline', 'Risk Assessment & Safety'] %}
@@ -758,19 +805,32 @@
       <button type="submit" class="btn gold">Generate from Trial Balance</button>
     </form>
     {% else %}
-    <div class="empty-state">No preliminary trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}">enter or import it on the Planning tab</a> to generate these figures automatically instead of typing them in below.</div>
+    <div class="empty-state">No preliminary trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">enter or import it on the Trial Balance tab</a> to generate these figures automatically instead of typing them in below.</div>
     {% endif %}
   </div>
 
   <div class="card">
     <h3 class="mt-0">Add line item</h3>
+    <p class="muted" style="font-size:12.5px;">Pick a specific account from the trial balance to analyse (its prior/current year figures are filled in automatically from the trial balance), or leave "Manual entry" selected and type a line in by hand - for a rolled-up figure like "Revenue" or "Gross profit" that isn't a single account.</p>
     <form method="post" action="{{ url_for('engagements.add_analytical_review_line', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
-      <div><label for="label">Line item *</label><input type="text" id="label" name="label" placeholder="e.g. Revenue" required></div>
+      {% if trial_balance and trial_balance.lines %}
+      <div>
+        <label for="tb_line_id">Account to analyse</label>
+        <select id="tb_line_id" name="tb_line_id">
+          <option value="">-- Manual entry --</option>
+          {% for line in trial_balance.lines %}
+          <option value="{{ line.id }}">{{ line.account_code + ' - ' if line.account_code }}{{ line.account_name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      {% endif %}
+      <div><label for="label">Line item {% if not trial_balance or not trial_balance.lines %}*{% endif %}</label><input type="text" id="label" name="label" placeholder="e.g. Revenue (leave blank to use the picked account's name)"{% if not trial_balance or not trial_balance.lines %} required{% endif %}></div>
       <div><label for="prior_amount">Prior year</label><input type="number" step="0.01" id="prior_amount" name="prior_amount"></div>
       <div><label for="current_amount">Current year</label><input type="number" step="0.01" id="current_amount" name="current_amount"></div>
       <div><label for="explanation">Explanation (optional)</label><input type="text" id="explanation" name="explanation"></div>
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add line</button></div>
     </form>
+    <p class="muted" style="font-size:11px;">Picking an account ignores anything typed into Line item/Prior year/Current year above and uses the account's own figures instead.</p>
   </div>
 
   <div class="card">
@@ -781,7 +841,7 @@
       {% for line in analytical_review.lines %}
         <tr{% if line.is_significant %} class="danger"{% endif %}>
           <form method="post" action="{{ url_for('engagements.update_analytical_review_line', line_id=line.id) }}" class="inline">
-          <td><input type="text" name="label" value="{{ line.label }}" style="width:140px;margin-bottom:0;">{% if line.source == 'auto' %} <span class="badge" style="font-size:10px;" title="Generated from the Trial Balance - editing and saving this line keeps your change on the next Generate">Auto</span>{% endif %}</td>
+          <td><input type="text" name="label" value="{{ line.label }}" style="width:140px;margin-bottom:0;">{% if line.source == 'auto' %} <span class="badge" style="font-size:10px;" title="Generated from the Trial Balance - editing and saving this line keeps your change on the next Generate">Auto</span>{% elif line.source == 'tb_account' %} <span class="badge" style="font-size:10px;" title="Added by picking this specific account from the trial balance">From TB</span>{% endif %}</td>
           <td><input type="number" step="0.01" name="prior_amount" value="{{ line.prior_amount if line.prior_amount is not none else '' }}" style="width:110px;margin-bottom:0;"></td>
           <td><input type="number" step="0.01" name="current_amount" value="{{ line.current_amount if line.current_amount is not none else '' }}" style="width:110px;margin-bottom:0;"></td>
           <td>{{ '%.2f'|format(line.variance_amount) if line.variance_amount is not none else '—' }}</td>
@@ -1201,8 +1261,32 @@
   {% endif %}
 
   <div class="card">
+    <p class="muted" style="font-size:12.5px;margin:0;">The preliminary trial balance now has its own <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab, right after this one - import or enter it there (it drives Analytical Review below and, later, the Financial Statements on Finalisation).</p>
+  </div>
+
+  {{ qmacros.render_queries(engagement, 'planning', queries_by_section.get('planning', [])) }}
+
+{% endif %}
+{% elif tab == 'trial_balance' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+
+  {% if trial_balance and trial_balance.not_applicable %}
+  <div class="card">
+    <h3 class="mt-0">Trial Balance - Not Applicable</h3>
+    <div class="empty-state">
+      This engagement has been marked as having no trial balance.
+      <p class="muted" style="font-size:12.5px;">{{ trial_balance.not_applicable_reason }}</p>
+      <p class="muted" style="font-size:11px;">Marked by {{ trial_balance.marked_na_by.name if trial_balance.marked_na_by else '—' }} on {{ trial_balance.marked_na_at.strftime('%d %b %Y') if trial_balance.marked_na_at else '—' }}.</p>
+    </div>
+    <form method="post" action="{{ url_for('engagements.unmark_trial_balance_not_applicable', tb_id=trial_balance.id) }}" class="inline" style="margin-top:10px;"><button type="submit" class="btn small secondary">This engagement does have a trial balance after all</button></form>
+  </div>
+  {% else %}
+
+  <div class="card">
     <h3 class="mt-0">Trial Balance</h3>
-    <p class="muted" style="font-size:12.5px;">Import the period's PRELIMINARY trial balance here at planning - current year and prior year comparative columns - so Analytical Review below can be generated from real figures instead of typed in by hand. Map each account to an IAS 1 category once and it's remembered for this client's future periods. Audit adjustments and the financial statements built from this trial balance are on the Finalisation tab.</p>
+    <p class="muted" style="font-size:12.5px;">Import the period's PRELIMINARY trial balance here at planning - current year and prior year comparative columns - so Analytical Review can be generated from real figures instead of typed in by hand. Map each account to an IAS 1 category once and it's remembered for this client's future periods. Audit adjustments and the financial statements built from this trial balance are on the Finalisation tab.</p>
     <div class="form-row" style="align-items:flex-end;">
       <form method="post" action="{{ url_for('engagements.upload_trial_balance', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end; grid-column: span 2;">
         <div><label for="tb_file">Upload .xlsx / .csv</label><input type="file" id="tb_file" name="file" accept=".xlsx,.xls,.csv" required></div>
@@ -1215,11 +1299,60 @@
     {% endif %}
   </div>
 
+  {% if not trial_balance or not trial_balance.lines %}
+  <div class="card">
+    <h3 class="mt-0">No trial balance for this engagement?</h3>
+    <p class="muted" style="font-size:12.5px;">Some engagements genuinely have none - a Consulting or Secretarial engagement, or an Investigative Engagement scoped to a specific matter. Record why instead of leaving this tab looking unfinished.</p>
+    <form method="post" action="{{ url_for('engagements.mark_trial_balance_not_applicable', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div style="grid-column: span 2;"><label for="not_applicable_reason">Reason *</label><input type="text" id="not_applicable_reason" name="not_applicable_reason" placeholder="e.g. Secretarial-only engagement, no financial statements involved" required></div>
+      <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Mark not applicable</button></div>
+    </form>
+  </div>
+  {% endif %}
+
   {% if trial_balance %}
   <div class="stat-grid">
     <div class="stat-card{% if not trial_balance.is_current_balanced %} danger{% endif %}"><div class="num">{{ 'Balanced' if trial_balance.is_current_balanced else 'Out of balance' }}</div><div class="label">Current year TB</div></div>
     <div class="stat-card{% if not trial_balance.is_prior_balanced %} danger{% endif %}"><div class="num">{{ 'Balanced' if trial_balance.is_prior_balanced else 'Out of balance' }}</div><div class="label">Prior year TB</div></div>
     <div class="stat-card{% if trial_balance.unmapped_count > 0 %} danger{% endif %}"><div class="num">{{ trial_balance.lines|length - trial_balance.unmapped_count }}/{{ trial_balance.lines|length }}</div><div class="label">Accounts mapped</div></div>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Account Mapping setup</h3>
+    <p class="muted" style="font-size:12.5px;">Every account needs an IAS 1 category before the trial balance can be reviewed or the financial statements generated. Once an account is mapped here, the same account name is remembered for this client's future periods (see the full accounts table below to change amounts or delete an account).</p>
+    {% if trial_balance.unmapped_count > 0 %}
+    <table>
+      <thead><tr><th>Account</th><th>IAS 1 category</th><th></th></tr></thead>
+      <tbody>
+      {% for line in trial_balance.lines if not line.fs_category %}
+        <tr class="danger">
+          <form method="post" action="{{ url_for('engagements.update_trial_balance_line', line_id=line.id) }}" class="inline">
+          <td>{{ line.account_code + ' - ' if line.account_code }}{{ line.account_name }}</td>
+          <td>
+            <input type="hidden" name="account_code" value="{{ line.account_code or '' }}">
+            <input type="hidden" name="account_name" value="{{ line.account_name }}">
+            <input type="hidden" name="current_debit" value="{{ line.current_debit or 0 }}">
+            <input type="hidden" name="current_credit" value="{{ line.current_credit or 0 }}">
+            <input type="hidden" name="prior_debit" value="{{ line.prior_debit or 0 }}">
+            <input type="hidden" name="prior_credit" value="{{ line.prior_credit or 0 }}">
+            <select name="fs_category" style="margin-bottom:0;">
+              <option value="">Unmapped</option>
+              {% for group_label, choices in category_choices %}
+              <optgroup label="{{ group_label }}">
+                {% for code, label in choices %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+              </optgroup>
+              {% endfor %}
+            </select>
+          </td>
+          <td><button type="submit" class="btn small gold">Map</button></td>
+          </form>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">Every account is mapped to an IAS 1 category.</div>
+    {% endif %}
   </div>
 
   <div class="card">
@@ -1313,6 +1446,7 @@
     {% endif %}
   </div>
   {% endif %}
+  {% endif %}
 
   {{ qmacros.render_queries(engagement, 'planning', queries_by_section.get('planning', [])) }}
 
@@ -1328,7 +1462,8 @@
       <div style="grid-column: span 2;"><label for="item_text">Procedure *</label><input type="text" id="item_text" name="item_text" required></div>
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add item</button></div>
     </form>
-    <a href="{{ url_for('engagements.download_engagement_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. F-1)</a>
+    <form method="post" action="{{ url_for('engagements.generate_engagement_checklist_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file checklist (Word, Ref. F-1)</button></form>
+    {{ filed_workpapers('engagement_checklist') }}
   </div>
 
   <div class="card">
@@ -1645,18 +1780,37 @@
 
   <div class="card">
     <h3 class="mt-0">Working papers</h3>
-    <p class="muted" style="font-size:12.5px;">Generate downloadable working papers directly from the data already captured on this engagement - Word and Excel files, ready to file or send. References (see the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>): {{ filing_reference('financials') }} (financial statements), N1000 (trial balance &amp; adjustments), {{ filing_reference('rep_letter') }} (management representation letter), {{ filing_reference('report_to_management') }} (report to management), {{ filing_reference('finalisation') }} (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report - no filing-index code, outside the scope of the audit filing policy){% endif %}.</p>
-    <div class="form-row">
-      <div><a href="{{ url_for('engagements.download_financial_statements_docx', engagement_id=engagement.id) }}" class="btn secondary">Financial statements (Word)</a></div>
-      <div><a href="{{ url_for('engagements.download_trial_balance_xlsx', engagement_id=engagement.id) }}" class="btn secondary">Trial balance &amp; adjustments (Excel)</a></div>
-      <div><a href="{{ url_for('engagements.download_finalisation_checklist_docx', engagement_id=engagement.id) }}" class="btn secondary">Finalisation checklist (Word, Ref. {{ filing_reference('finalisation') }})</a></div>
-      <div><a href="{{ url_for('engagements.download_rep_letter_docx', engagement_id=engagement.id) }}" class="btn secondary">Management representation letter (Word)</a></div>
-      <div><a href="{{ url_for('engagements.download_report_to_management_docx', engagement_id=engagement.id) }}" class="btn secondary">Report to management (Word)</a></div>
-      {% if engagement.type == 'Investigative Engagement' %}
-      <div><a href="{{ url_for('engagements.download_forensic_report_docx', engagement_id=engagement.id) }}" class="btn secondary">Forensic investigation report (Word)</a></div>
-      {% endif %}
-      <div><a href="{{ url_for('engagements.download_engagement_file_summary_pdf', engagement_id=engagement.id) }}" class="btn gold">Engagement file summary (PDF)</a></div>
-    </div>
+    <p class="muted" style="font-size:12.5px;">Generate working papers directly from the data already captured on this engagement - each one is FILED under Documents (following the firm's Filing Index reference where one applies) rather than downloaded straight away; download the filed copy whenever you actually need the file. Regenerating keeps every earlier version on file rather than replacing it. References (see the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>): {{ filing_reference('financials') }} (financial statements), N1000 (trial balance &amp; adjustments), {{ filing_reference('rep_letter') }} (management representation letter), {{ filing_reference('report_to_management') }} (report to management), {{ filing_reference('finalisation') }} (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report - no filing-index code, outside the scope of the audit filing policy){% endif %}.</p>
+
+    <h4 class="mt-0" style="margin-bottom:4px;">Financial statements (Word, Ref. {{ filing_reference('financials') }})</h4>
+    <form method="post" action="{{ url_for('engagements.generate_financial_statements_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('financial_statements') }}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">Trial balance &amp; adjustments (Excel, Ref. N1000)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_trial_balance_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('trial_balance_adjustments') }}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">Finalisation checklist (Word, Ref. {{ filing_reference('finalisation') }})</h4>
+    <form method="post" action="{{ url_for('engagements.generate_finalisation_checklist_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('finalisation_checklist') }}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">Management representation letter (Word, Ref. {{ filing_reference('rep_letter') }})</h4>
+    <form method="post" action="{{ url_for('engagements.generate_rep_letter_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('rep_letter') }}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">Report to management (Word, Ref. {{ filing_reference('report_to_management') }})</h4>
+    <form method="post" action="{{ url_for('engagements.generate_report_to_management_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('report_to_management') }}
+
+    {% if engagement.type == 'Investigative Engagement' %}
+    <h4 style="margin-bottom:4px;margin-top:16px;">Forensic investigation report (Word, Ref. FR-1 - outside the filing policy's scope)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_forensic_report_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('forensic_report') }}
+    {% endif %}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">Engagement file summary (PDF)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_engagement_file_summary_pdf', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small gold">Generate &amp; file</button></form>
+    {{ filed_workpapers('file_summary') }}
   </div>
 
   {% macro narrative_editor(kind, title) %}
@@ -1707,9 +1861,9 @@
 
   <div class="card">
     <h3 class="mt-0">Trial Balance</h3>
-    <p class="muted" style="font-size:12.5px;">The preliminary trial balance is now entered on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}">Planning</a> tab (so it can drive Analytical Review earlier in the engagement) - come back here once it exists to propose audit adjustments and generate the financial statements below.</p>
+    <p class="muted" style="font-size:12.5px;">The preliminary trial balance is entered on its own <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab (so it can drive Analytical Review earlier in the engagement) - come back here once it exists to propose audit adjustments and generate the financial statements below.</p>
     {% if not trial_balance or not trial_balance.lines %}
-    <div class="empty-state">No trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}">enter or import it on the Planning tab</a> first.</div>
+    <div class="empty-state">No trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">enter or import it on the Trial Balance tab</a> first.</div>
     {% else %}
     <p class="muted" style="font-size:11.5px;">{{ trial_balance.lines|length }} account(s){% if trial_balance.completed_by %}, last updated by {{ trial_balance.completed_by.name }} on {{ trial_balance.completed_at.strftime('%d %b %Y') }}{% endif %}. {{ trial_balance.unmapped_count }} unmapped.</p>
     {% endif %}
@@ -1968,7 +2122,7 @@
     {% endif %}
   </div>
   {% elif trial_balance %}
-  <div class="card"><div class="empty-state">Map every account on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}">Planning tab's trial balance</a> to an IAS 1 category to generate the financial statements here.</div></div>
+  <div class="card"><div class="empty-state">Map every account on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance tab</a> to an IAS 1 category to generate the financial statements here.</div></div>
   {% endif %}
 
   {{ qmacros.render_queries(engagement, 'finalisation', queries_by_section.get('finalisation', [])) }}
@@ -1999,12 +2153,15 @@
   <div class="card">
     <h3 class="mt-0">Working papers</h3>
     <p class="muted" style="font-size:12.5px;">
-      Generate the whole programme above as a downloadable working paper, with each area's reference code carried through - Word or Excel, ready to file or send.
+      Generate the whole programme above as a working paper, with each area's reference code carried through - it's filed under Documents (Ref. {{ filing_reference('substantive') }}) rather than downloaded immediately; download the filed copy whenever you need the file.
     </p>
-    <div class="form-row">
-      <div><a href="{{ url_for('engagements.download_substantive_procedures_docx', engagement_id=engagement.id) }}" class="btn secondary">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% else %}Substantive procedures programme{% endif %} (Word)</a></div>
-      <div><a href="{{ url_for('engagements.download_substantive_procedures_xlsx', engagement_id=engagement.id) }}" class="btn secondary">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% else %}Substantive procedures programme{% endif %} (Excel)</a></div>
-    </div>
+    <h4 class="mt-0" style="margin-bottom:4px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% else %}Substantive procedures programme{% endif %} (Word)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_substantive_procedures_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('substantive_procedures_docx') }}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% else %}Substantive procedures programme{% endif %} (Excel)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_substantive_procedures_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('substantive_procedures_xlsx') }}
   </div>
   {% endif %}
 
