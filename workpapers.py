@@ -24,6 +24,17 @@ import openpyxl
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.units import inch
+from reportlab.lib import colors
+from reportlab.lib.enums import TA_CENTER
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import (
+    SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak,
+)
+
+from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS
+
 FIRM_NAME = "Neverlank Chartered Accountants"
 FIRM_ADDRESS = "2nd Floor, Michael House, 62 Nelson Mandela Avenue, Harare, Zimbabwe"
 
@@ -247,6 +258,11 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     doc.add_paragraph(f"Net increase/(decrease) in cash: {_fmt_num(cf['net_movement'])}")
     doc.add_paragraph(f"Cash at end of year (per trial balance): {_fmt_num(cf['cash_close_actual'])}")
 
+    if financial_statements and financial_statements.notes_to_financial_statements:
+        _add_heading(doc, "Notes to the Financial Statements", level=1)
+        for para in financial_statements.notes_to_financial_statements.split("\n"):
+            doc.add_paragraph(para)
+
     _add_heading(doc, "Sign-off", level=2)
     if financial_statements:
         doc.add_paragraph(
@@ -337,7 +353,7 @@ def build_trial_balance_adjustments_xlsx(engagement, trial_balance):
 
 # ================================================================= Management representation letter (Word)
 
-def build_rep_letter_docx(engagement, statements):
+def build_rep_letter_docx(engagement, statements, narrative=None):
     doc = _new_document("Management Representation Letter", engagement, subtitle="Ref. MRL-1")
 
     client_name = engagement.client.name if engagement.client else "[Client]"
@@ -354,20 +370,14 @@ def build_rep_letter_docx(engagement, statements):
     )
     doc.add_paragraph("We confirm that, to the best of our knowledge and belief, having made such inquiries as we considered necessary for the purpose of appropriately informing ourselves:")
 
-    reps = [
-        "We have fulfilled our responsibilities for the preparation of the financial statements in accordance with the applicable financial reporting framework, and they are fairly presented.",
-        "The significant assumptions used by us in making accounting estimates, including those measured at fair value, are reasonable.",
-        "Related party relationships and transactions have been appropriately accounted for and disclosed.",
-        "All events subsequent to the date of the financial statements and for which the applicable financial reporting framework requires adjustment or disclosure have been adjusted or disclosed.",
-        "The effects of uncorrected misstatements are immaterial, both individually and in the aggregate, to the financial statements as a whole. A list of the uncorrected misstatements is attached (if any).",
-        "We have disclosed to you the results of our assessment of the risk that the financial statements may be materially misstated as a result of fraud.",
-        "We have disclosed to you all known instances of non-compliance or suspected non-compliance with laws and regulations whose effects should be considered when preparing financial statements.",
-        "We have disclosed to you the identity of the entity's related parties and all the related party relationships and transactions of which we are aware.",
-        "We have provided you with access to all information of which we are aware that is relevant to the preparation of the financial statements, and access to all records, documentation and other matters requested.",
-        "There have been no irregularities involving management or employees who have a significant role in internal control that could have a material effect on the financial statements.",
-    ]
-    for r in reps:
-        doc.add_paragraph(r, style="List Bullet")
+    # The body of representations is a persistent, editable workpaper (see
+    # models.WorkpaperNarrative, kind="rep_letter") rather than fixed text -
+    # fall back to the firm's default wording if nothing has been saved yet.
+    body = (narrative.body if narrative and narrative.body else None) or DEFAULT_WORKPAPER_NARRATIVE_BODIES["rep_letter"]
+    for line in body.split("\n"):
+        line = line.strip()
+        if line:
+            doc.add_paragraph(line, style="List Bullet")
 
     if statements:
         pbt = statements["pl"]["profit_before_tax"]["current"]
@@ -380,12 +390,68 @@ def build_rep_letter_docx(engagement, statements):
     doc.add_paragraph("_______________________________")
     doc.add_paragraph("Name / Title / Date")
 
+    if narrative and narrative.completed_by:
+        doc.add_paragraph()
+        _add_heading(doc, "Sign-off", level=2)
+        doc.add_paragraph(f"Prepared by {narrative.completed_by.name} on {_fmt_date(narrative.completed_at)}.")
+        if narrative.is_reviewed:
+            doc.add_paragraph(f"Reviewed by {narrative.reviewed_by.name} on {_fmt_date(narrative.reviewed_at)}.")
+        if narrative.is_partner_signed:
+            doc.add_paragraph(f"Partner sign-off by {narrative.partner_signed_by.name} on {_fmt_date(narrative.partner_signed_at)}.")
+
+    return _finish(doc)
+
+
+# ================================================================= Report to Management (Word)
+
+def build_report_to_management_docx(engagement, narrative=None):
+    """The Report to Management (RTM) - the standard audit deliverable to
+    client management covering internal-control observations and
+    recommendations arising during the engagement, distinct from the
+    Management Representation Letter above (which is signed BY management,
+    not addressed TO them). Its body is a persistent, editable workpaper
+    (models.WorkpaperNarrative, kind="report_to_management")."""
+    doc = _new_document("Report to Management", engagement, subtitle="Ref. RTM-1")
+
+    client_name = engagement.client.name if engagement.client else "[Client]"
+    period_end = _fmt_date(engagement.period_end)
+
+    doc.add_paragraph(f"To: The Directors, {client_name}")
+    doc.add_paragraph(f"Date: {_fmt_date(date.today())}")
+    doc.add_paragraph()
+    doc.add_paragraph(
+        f"In connection with our engagement in respect of {client_name} for the period ended {period_end}, "
+        f"we set out below the matters we wish to bring to the attention of management."
+    )
+    doc.add_paragraph()
+
+    body = (narrative.body if narrative and narrative.body else None) or DEFAULT_WORKPAPER_NARRATIVE_BODIES["report_to_management"]
+    for line in body.split("\n"):
+        line = line.strip()
+        if line:
+            doc.add_paragraph(line, style="List Bullet")
+
+    doc.add_paragraph()
+    doc.add_paragraph("Yours faithfully,")
+    doc.add_paragraph()
+    doc.add_paragraph("_______________________________")
+    doc.add_paragraph(FIRM_NAME)
+
+    if narrative and narrative.completed_by:
+        doc.add_paragraph()
+        _add_heading(doc, "Sign-off", level=2)
+        doc.add_paragraph(f"Prepared by {narrative.completed_by.name} on {_fmt_date(narrative.completed_at)}.")
+        if narrative.is_reviewed:
+            doc.add_paragraph(f"Reviewed by {narrative.reviewed_by.name} on {_fmt_date(narrative.reviewed_at)}.")
+        if narrative.is_partner_signed:
+            doc.add_paragraph(f"Partner sign-off by {narrative.partner_signed_by.name} on {_fmt_date(narrative.partner_signed_at)}.")
+
     return _finish(doc)
 
 
 # ================================================================= Forensic investigation report (Word)
 
-def build_forensic_report_docx(engagement):
+def build_forensic_report_docx(engagement, narrative=None):
     ca = engagement.client_acceptance
     ra = engagement.risk_assessment
     strategy = engagement.audit_strategy
@@ -396,6 +462,17 @@ def build_forensic_report_docx(engagement):
 
     doc.add_paragraph("Confidential", ).runs[0].bold = True
     doc.add_paragraph(f"Date of report: {_fmt_date(date.today())}")
+
+    # Executive Summary is a persistent, editable workpaper (see models.
+    # WorkpaperNarrative, kind="forensic_executive_summary") - everything
+    # else in this report stays a live roll-up of the engagement's other
+    # tabs, since there's no other free-standing narrative to persist there.
+    _add_heading(doc, "Executive Summary")
+    summary_body = (narrative.body if narrative and narrative.body else None) or DEFAULT_WORKPAPER_NARRATIVE_BODIES["forensic_executive_summary"]
+    for line in summary_body.split("\n"):
+        line = line.strip()
+        if line:
+            doc.add_paragraph(line)
 
     _add_heading(doc, "1. Background and Mandate")
     if strategy and strategy.objective_statement:
@@ -470,6 +547,12 @@ def build_forensic_report_docx(engagement):
             doc.add_paragraph(f"Reviewed by {strategy.reviewed_by.name} on {_fmt_date(strategy.reviewed_at)}.")
         if strategy.is_partner_signed:
             doc.add_paragraph(f"Partner sign-off by {strategy.partner_signed_by.name} on {_fmt_date(strategy.partner_signed_at)}.")
+    if narrative and narrative.completed_by:
+        doc.add_paragraph(f"Executive Summary prepared by {narrative.completed_by.name} on {_fmt_date(narrative.completed_at)}.")
+        if narrative.is_reviewed:
+            doc.add_paragraph(f"Executive Summary reviewed by {narrative.reviewed_by.name} on {_fmt_date(narrative.reviewed_at)}.")
+        if narrative.is_partner_signed:
+            doc.add_paragraph(f"Executive Summary partner sign-off by {narrative.partner_signed_by.name} on {_fmt_date(narrative.partner_signed_at)}.")
 
     return _finish(doc)
 
@@ -551,3 +634,253 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
 
     _autofit(ws, [8, 28, 55, 12, 14, 30])
     return _finish_wb(wb)
+
+
+# ================================================================= Engagement File Summary (PDF)
+
+def _sign_off_line(record, label="Prepared", preparer_attr="completed_by"):
+    """One plain-text status line for any workpaper record carrying the
+    standard Preparer/Reviewer/Partner fields (or MaterialityCalculation's
+    updated_by/updated_at variant) - "not yet started" if there's no record
+    or no preparer yet, otherwise Prepared/Reviewed(-or-exempt)/Partner-
+    signed, each only if it applies."""
+    if record is None:
+        return "Not yet started."
+    preparer = getattr(record, preparer_attr, None)
+    prepared_at = getattr(record, "completed_at", None) or getattr(record, "updated_at", None)
+    if not preparer:
+        return "Not yet started."
+    parts = [f"{label} by {preparer.name} on {_fmt_date(prepared_at)}."]
+    if getattr(record, "is_reviewed", False):
+        parts.append(f"Reviewed by {record.reviewed_by.name} on {_fmt_date(record.reviewed_at)}.")
+    elif effectively_reviewed(record):
+        parts.append("Prepared by a Partner/Admin - no separate reviewer required.")
+    else:
+        parts.append("Not yet reviewed.")
+    if getattr(record, "is_partner_signed", False):
+        parts.append(f"Partner sign-off by {record.partner_signed_by.name} on {_fmt_date(record.partner_signed_at)}.")
+    return " ".join(parts)
+
+
+def _checklist_items_table(items):
+    """A reportlab Table summarising a list of checklist-item rows (item
+    text, response, comment, tickmark) - used for every checklist-driven
+    workpaper section in the file summary below."""
+    # EngagementChecklistItem (the main Checklist tab) predates the other
+    # three checklist-item models and names its fields differently -
+    # "status" (Not Started/In Progress/Done/N/A) instead of "response", and
+    # "notes" instead of "comment" - handle both rather than special-casing
+    # the main checklist tab's items at every call site.
+    data = [["Item", "Response", "Comment", "Tickmark"]]
+    for item in items:
+        tickmark = f"{item.tickmark.symbol}" if getattr(item, "tickmark", None) else ""
+        response = getattr(item, "response", None) or getattr(item, "status", None) or "Not assessed"
+        comment = getattr(item, "comment", None) or getattr(item, "notes", None) or ""
+        data.append([
+            Paragraph(item.item_text or "", getSampleStyleSheet()["BodyText"]),
+            response,
+            Paragraph(comment, getSampleStyleSheet()["BodyText"]),
+            tickmark,
+        ])
+    table = Table(data, colWidths=[210, 60, 170, 50], repeatRows=1)
+    table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{_GOLD_HEX}")),
+        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
+        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DDDDDD")),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
+        ("TOPPADDING", (0, 0), (-1, -1), 4),
+    ]))
+    return table
+
+
+def build_engagement_file_summary_pdf(engagement):
+    """The Engagement File Summary - one PDF pulling together every major
+    workpaper section (see models.WORKPAPER_SECTIONS for the fixed A-L
+    index), its sign-off status (honouring the Partner-preparer review
+    exemption - models.effectively_reviewed), and, for the four checklist-
+    driven sections, every response filed under that section's reference -
+    the "responses summarised in a PDF with references filed under the
+    relevant sections" requested for a completed, reviewed and signed
+    engagement. Ends with the tickmark legend for whichever tickmarks were
+    actually used somewhere in this engagement's file."""
+    is_forensic = engagement.type == "Investigative Engagement"
+    narratives = {wn.kind: wn for wn in engagement.workpaper_narratives}
+
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buf, pagesize=A4,
+        leftMargin=0.8 * inch, rightMargin=0.8 * inch,
+        topMargin=0.7 * inch, bottomMargin=0.7 * inch,
+    )
+    styles = getSampleStyleSheet()
+    center = ParagraphStyle("center", parent=styles["Normal"], alignment=TA_CENTER)
+    body = styles["BodyText"]
+    gold = colors.HexColor(f"#{_GOLD_HEX}")
+    h1 = ParagraphStyle("h1", parent=styles["Heading1"], textColor=gold, fontSize=13, spaceBefore=14, spaceAfter=6)
+    status_style = ParagraphStyle("status", parent=styles["Normal"], fontSize=8.5, textColor=colors.grey, spaceAfter=8)
+
+    story = []
+    if os.path.exists(_LOGO_PATH):
+        try:
+            img = Image(_LOGO_PATH, width=1.4 * inch, height=0.6 * inch)
+            img.hAlign = "CENTER"
+            story.append(img)
+            story.append(Spacer(1, 8))
+        except Exception:
+            pass
+    story.append(Paragraph(f"<b><font color='#{_GOLD_HEX}' size=16>{FIRM_NAME}</font></b>", center))
+    story.append(Paragraph(f"<font size=9>{FIRM_ADDRESS}</font>", center))
+    story.append(Spacer(1, 16))
+    story.append(Paragraph("<b>ENGAGEMENT FILE SUMMARY</b>", ParagraphStyle("title", parent=styles["Normal"], alignment=TA_CENTER, fontSize=15)))
+    story.append(Spacer(1, 10))
+    story.append(Paragraph(f"{engagement.title}", ParagraphStyle("sub", parent=styles["Normal"], alignment=TA_CENTER, fontSize=12)))
+    story.append(Paragraph(f"{engagement.client.name if engagement.client else ''} &middot; {engagement.type}", center))
+    story.append(Paragraph(f"Period ended {_fmt_date(engagement.period_end)}", center))
+    story.append(Spacer(1, 4))
+    story.append(Paragraph(f"<font size=8 color='grey'>Generated {_fmt_date(date.today())}</font>", center))
+    story.append(PageBreak())
+
+    for code, key, label in WORKPAPER_SECTIONS:
+        if key == "forensic_report" and not is_forensic:
+            continue  # the forensic report only exists on Investigative Engagements
+        story.append(Paragraph(f"{code}. {label}", h1))
+
+        if key == "acceptance":
+            record = engagement.client_acceptance
+            story.append(Paragraph(_sign_off_line(record), status_style))
+            if record:
+                decision = record.decision or "Not yet decided"
+                story.append(Paragraph(f"Decision: <b>{decision}</b>", body))
+                if record.checklist_items:
+                    story.append(Spacer(1, 4))
+                    story.append(_checklist_items_table(record.checklist_items))
+            else:
+                story.append(Paragraph("No Client Acceptance record on this engagement yet.", body))
+
+        elif key == "entity":
+            record = engagement.entity_understanding
+            story.append(Paragraph(_sign_off_line(record), status_style))
+            if record:
+                if record.checklist_items:
+                    story.append(_checklist_items_table(record.checklist_items))
+                else:
+                    for field, question, _ in ENTITY_UNDERSTANDING_FIELDS:
+                        value = getattr(record, field, None)
+                        if value:
+                            story.append(Paragraph(f"<b>{question}</b> {value}", body))
+                            story.append(Spacer(1, 4))
+            else:
+                story.append(Paragraph("Understanding the Entity's Business not yet started.", body))
+
+        elif key == "risks":
+            record = engagement.risk_assessment
+            story.append(Paragraph(_sign_off_line(record), status_style))
+            if record and record.rating:
+                story.append(Paragraph(f"Overall risk rating: <b>{record.rating}</b> (score {record.score}/25).", body))
+            else:
+                story.append(Paragraph("Risk Assessment not yet completed.", body))
+
+        elif key == "planning":
+            record = engagement.materiality
+            story.append(Paragraph(_sign_off_line(record, preparer_attr="updated_by"), status_style))
+            if record and record.overall_materiality:
+                story.append(Paragraph(
+                    f"Overall materiality: {_fmt_num(record.overall_materiality)}. "
+                    f"Performance materiality: {_fmt_num(record.performance_materiality)}. "
+                    f"Clearly trivial threshold: {_fmt_num(record.trivial_threshold)}.", body,
+                ))
+            else:
+                story.append(Paragraph("Materiality not yet calculated.", body))
+
+        elif key == "analytical":
+            record = engagement.analytical_review
+            story.append(Paragraph(_sign_off_line(record), status_style))
+            if record:
+                flagged = len(record.significant_lines) if record.significant_lines else 0
+                story.append(Paragraph(f"{flagged} line(s) flagged as significant fluctuations.", body))
+            else:
+                story.append(Paragraph("Analytical Review not yet started.", body))
+
+        elif key == "checklist":
+            items = engagement.checklist_items
+            story.append(Paragraph(f"Progress: {engagement.checklist_progress}% complete.", status_style))
+            if items:
+                story.append(_checklist_items_table(items))
+            else:
+                story.append(Paragraph("No checklist items added yet.", body))
+
+        elif key == "substantive":
+            areas = sorted(engagement.substantive_procedure_areas, key=lambda a: a.area) if engagement.substantive_procedure_areas else []
+            if areas:
+                for area in areas:
+                    story.append(Paragraph(f"<b>{area.area}</b> - {_sign_off_line(area)}", status_style))
+            else:
+                story.append(Paragraph("No substantive procedure areas started yet.", body))
+
+        elif key == "financials":
+            record = engagement.financial_statements
+            story.append(Paragraph(_sign_off_line(record), status_style))
+            if record and record.notes_to_financial_statements:
+                for line in record.notes_to_financial_statements.split("\n"):
+                    if line.strip():
+                        story.append(Paragraph(line.strip(), body))
+            else:
+                story.append(Paragraph("No notes to the financial statements recorded yet.", body))
+
+        elif key == "finalisation":
+            record = engagement.finalisation_checklist
+            story.append(Paragraph(_sign_off_line(record), status_style))
+            if record and record.checklist_items:
+                story.append(_checklist_items_table(record.checklist_items))
+            else:
+                story.append(Paragraph("Finalisation checklist not yet started.", body))
+
+        elif key in ("rep_letter", "report_to_management", "forensic_report"):
+            narrative_kind = {"rep_letter": "rep_letter", "report_to_management": "report_to_management", "forensic_report": "forensic_executive_summary"}[key]
+            narrative = narratives.get(narrative_kind)
+            story.append(Paragraph(_sign_off_line(narrative), status_style))
+            text = narrative.body if narrative and narrative.body else DEFAULT_WORKPAPER_NARRATIVE_BODIES.get(narrative_kind, "")
+            for line in text.split("\n"):
+                if line.strip():
+                    story.append(Paragraph(f"&bull; {line.strip()}", body))
+
+        story.append(Spacer(1, 6))
+
+    # ------------------------------------------------------- Tickmark legend
+    used_ids = set()
+    used = {}
+    item_sources = list(engagement.checklist_items)
+    if engagement.client_acceptance:
+        item_sources += list(engagement.client_acceptance.checklist_items)
+    if engagement.entity_understanding:
+        item_sources += list(engagement.entity_understanding.checklist_items)
+    if engagement.finalisation_checklist:
+        item_sources += list(engagement.finalisation_checklist.checklist_items)
+    for item in item_sources:
+        tm = getattr(item, "tickmark", None)
+        if tm and tm.id not in used_ids:
+            used_ids.add(tm.id)
+            used[tm.id] = tm
+
+    story.append(PageBreak())
+    story.append(Paragraph("Tickmark Legend", h1))
+    if used:
+        data = [["Symbol", "Meaning"]] + [[tm.symbol, tm.meaning] for tm in sorted(used.values(), key=lambda t: t.symbol)]
+        legend_table = Table(data, colWidths=[80, 400])
+        legend_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), gold),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 9),
+            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DDDDDD")),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(legend_table)
+    else:
+        story.append(Paragraph("No tickmarks were used anywhere in this engagement's file.", body))
+
+    doc.build(story)
+    buf.seek(0)
+    return buf

@@ -498,6 +498,8 @@ def update_acceptance_checklist_item(item_id):
     response = request.form.get("response", "").strip()
     item.response = response if response in CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES else ""
     item.comment = request.form.get("comment", "").strip()
+    tickmark_id = request.form.get("tickmark_id", "").strip()
+    item.tickmark_id = int(tickmark_id) if tickmark_id.isdigit() else None
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=item.client_acceptance.engagement_id, tab="acceptance"))
 

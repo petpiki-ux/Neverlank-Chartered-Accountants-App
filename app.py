@@ -47,7 +47,11 @@ def _add_missing_columns():
         "engagement_checklist_item": [
             ("reviewed_by_id", "INTEGER"),
             ("reviewed_at", "DATETIME"),
+            ("tickmark_id", "INTEGER"),
         ] + partner_signoff_cols,
+        "client_acceptance_checklist_item": [("tickmark_id", "INTEGER")],
+        "entity_understanding_checklist_item": [("tickmark_id", "INTEGER")],
+        "finalisation_checklist_item": [("tickmark_id", "INTEGER")],
         "engagement_task": [
             ("completed_by_id", "INTEGER"),
             ("completed_at", "DATETIME"),
@@ -73,7 +77,7 @@ def _add_missing_columns():
         "entity_understanding": list(partner_signoff_cols),
         "analytical_review": list(partner_signoff_cols),
         "trial_balance": list(partner_signoff_cols),
-        "financial_statements": list(partner_signoff_cols),
+        "financial_statements": list(partner_signoff_cols) + [("notes_to_financial_statements", "TEXT")],
         "client_acceptance": [
             ("risk_conflicts_score", "INTEGER"),
             ("risk_security_score", "INTEGER"),
@@ -278,6 +282,7 @@ def create_app():
     from regulatory_notices import regulatory_notices_bp
     from company_documents import company_documents_bp
     from payroll import payroll_bp
+    from tickmarks import tickmarks_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -292,6 +297,7 @@ def create_app():
     app.register_blueprint(regulatory_notices_bp)
     app.register_blueprint(company_documents_bp)
     app.register_blueprint(payroll_bp)
+    app.register_blueprint(tickmarks_bp)
 
     @app.route("/")
     def index():

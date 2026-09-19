@@ -2,6 +2,14 @@
 {% import "engagements/_query_macros.html" as qmacros with context %}
 {% block title %}{{ engagement.title }} - {{ firm_name }}{% endblock %}
 {% block content %}
+{% macro tickmark_picker(selected_id) %}
+  <select name="tickmark_id" title="Tickmark" style="width:auto;margin-bottom:0;">
+    <option value="">No tickmark</option>
+    {% for tm in tickmarks %}
+    <option value="{{ tm.id }}" {% if selected_id==tm.id %}selected{% endif %}>{{ tm.symbol }} - {{ tm.meaning }}</option>
+    {% endfor %}
+  </select>
+{% endmacro %}
 <div class="page-header">
   <div>
     <h1>{{ engagement.title }}</h1>
@@ -128,6 +136,7 @@
         {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
       </select>
       <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
+      {{ tickmark_picker(item.tickmark_id) }}
       <button type="submit" class="btn small secondary">Save</button>
       <button type="submit" formaction="{{ url_for('acceptance.delete_acceptance_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
     </form>
@@ -552,6 +561,8 @@
       <form method="post" action="{{ url_for('acceptance.unreview_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif client_acceptance.completed_by_id != current_user.id %}
       <form method="post" action="{{ url_for('acceptance.review_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(client_acceptance) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% else %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% endif %}
@@ -614,6 +625,7 @@
         {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
       </select>
       <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
+      {{ tickmark_picker(item.tickmark_id) }}
       <button type="submit" class="btn small secondary">Save</button>
       <button type="submit" formaction="{{ url_for('engagements.delete_entity_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
     </form>
@@ -686,6 +698,8 @@
       <form method="post" action="{{ url_for('engagements.unreview_entity_understanding', record_id=entity_understanding.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif entity_understanding.completed_by_id != current_user.id %}
       <form method="post" action="{{ url_for('engagements.review_entity_understanding', record_id=entity_understanding.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(entity_understanding) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% else %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% endif %}
@@ -784,6 +798,8 @@
       <form method="post" action="{{ url_for('engagements.unreview_analytical_review', review_id=analytical_review.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif analytical_review.completed_by_id != current_user.id %}
       <form method="post" action="{{ url_for('engagements.review_analytical_review', review_id=analytical_review.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(analytical_review) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% else %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% endif %}
@@ -883,6 +899,8 @@
       <form method="post" action="{{ url_for('engagements.unreview_risk_assessment', assessment_id=risk_assessment.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif risk_assessment.completed_by_id != current_user.id %}
       <form method="post" action="{{ url_for('engagements.review_risk_assessment', assessment_id=risk_assessment.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(risk_assessment) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% else %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% endif %}
@@ -989,6 +1007,8 @@
       <form method="post" action="{{ url_for('engagements.unreview_materiality', calc_id=materiality.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif materiality.updated_by_id != current_user.id %}
       <form method="post" action="{{ url_for('engagements.review_materiality', calc_id=materiality.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(materiality) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% else %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% endif %}
@@ -1145,6 +1165,8 @@
       <form method="post" action="{{ url_for('engagements.unreview_audit_strategy', strategy_id=audit_strategy.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif audit_strategy.completed_by_id != current_user.id %}
       <form method="post" action="{{ url_for('engagements.review_audit_strategy', strategy_id=audit_strategy.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(audit_strategy) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% else %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% endif %}
@@ -1258,6 +1280,8 @@
       <form method="post" action="{{ url_for('engagements.unreview_trial_balance', tb_id=trial_balance.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif trial_balance.completed_by_id != current_user.id %}
       <form method="post" action="{{ url_for('engagements.review_trial_balance', tb_id=trial_balance.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(trial_balance) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% else %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% endif %}
@@ -1308,6 +1332,7 @@
           <select name="status" onchange="this.form.submit()">
             {% for s in checklist_statuses %}<option value="{{ s }}" {% if item.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
           </select>
+          {{ tickmark_picker(item.tickmark_id) }}
           <button type="submit" class="btn small secondary">Save</button>
           <button type="submit" formaction="{{ url_for('engagements.delete_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
         </form>
@@ -1317,6 +1342,8 @@
           <button type="submit" class="btn small secondary">Remove review sign-off</button>
           {% elif item.status in ('Done', 'N/A') and item.completed_by_id != current_user.id %}
           <button type="submit" class="btn small gold">Mark as reviewed</button>
+          {% elif item.status in ('Done', 'N/A') and effectively_reviewed(item) %}
+          <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
           {% elif item.status in ('Done', 'N/A') %}
           <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
           {% endif %}
@@ -1522,6 +1549,7 @@
         {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
       </select>
       <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
+      {{ tickmark_picker(item.tickmark_id) }}
       <button type="submit" class="btn small secondary">Save</button>
       <button type="submit" formaction="{{ url_for('engagements.delete_finalisation_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
     </form>
@@ -1578,6 +1606,8 @@
       <form method="post" action="{{ url_for('engagements.unreview_finalisation_checklist', record_id=finalisation_checklist.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif finalisation_checklist.is_complete and finalisation_checklist.completed_by_id != current_user.id %}
       <form method="post" action="{{ url_for('engagements.review_finalisation_checklist', record_id=finalisation_checklist.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif finalisation_checklist.is_complete and effectively_reviewed(finalisation_checklist) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% elif finalisation_checklist.is_complete %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% else %}
@@ -1598,16 +1628,64 @@
 
   <div class="card">
     <h3 class="mt-0">Working papers</h3>
-    <p class="muted" style="font-size:12.5px;">Generate downloadable working papers directly from the data already captured on this engagement - Word and Excel files, ready to file or send. References: FS-1 (financial statements), TB-1 (trial balance &amp; adjustments), MRL-1 (management representation letter){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report){% endif %}.</p>
+    <p class="muted" style="font-size:12.5px;">Generate downloadable working papers directly from the data already captured on this engagement - Word and Excel files, ready to file or send. References: FS-1 (financial statements), TB-1 (trial balance &amp; adjustments), MRL-1 (management representation letter), RTM-1 (report to management){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report){% endif %}.</p>
     <div class="form-row">
       <div><a href="{{ url_for('engagements.download_financial_statements_docx', engagement_id=engagement.id) }}" class="btn secondary">Financial statements (Word)</a></div>
       <div><a href="{{ url_for('engagements.download_trial_balance_xlsx', engagement_id=engagement.id) }}" class="btn secondary">Trial balance &amp; adjustments (Excel)</a></div>
       <div><a href="{{ url_for('engagements.download_rep_letter_docx', engagement_id=engagement.id) }}" class="btn secondary">Management representation letter (Word)</a></div>
+      <div><a href="{{ url_for('engagements.download_report_to_management_docx', engagement_id=engagement.id) }}" class="btn secondary">Report to management (Word)</a></div>
       {% if engagement.type == 'Investigative Engagement' %}
       <div><a href="{{ url_for('engagements.download_forensic_report_docx', engagement_id=engagement.id) }}" class="btn secondary">Forensic investigation report (Word)</a></div>
       {% endif %}
+      <div><a href="{{ url_for('engagements.download_engagement_file_summary_pdf', engagement_id=engagement.id) }}" class="btn gold">Engagement file summary (PDF)</a></div>
     </div>
   </div>
+
+  {% macro narrative_editor(kind, title) %}
+    {% set narrative = workpaper_narratives.get(kind) %}
+    <div class="card">
+      <h3 class="mt-0">{{ title }}</h3>
+      <form method="post" action="{{ url_for('engagements.save_workpaper_narrative', engagement_id=engagement.id, kind=kind) }}">
+        <textarea name="body" rows="8" placeholder="One point per line - each becomes a bullet in the downloaded document.">{{ narrative.body if narrative else '' }}</textarea>
+        <button type="submit" class="btn gold">Save</button>
+      </form>
+      {% if narrative and narrative.id %}
+      <p class="muted" style="font-size:12.5px;margin-top:10px;">
+        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ narrative.completed_at.strftime('%d %b %Y') if narrative.completed_at else '—' }}.
+        {% if narrative.is_reviewed %}Reviewed by {{ narrative.reviewed_by.name }} on {{ narrative.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+        {% if narrative.is_partner_signed %}Partner sign-off by {{ narrative.partner_signed_by.name }} on {{ narrative.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      </p>
+      {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+        {% if narrative.is_reviewed %}
+        <form method="post" action="{{ url_for('engagements.unreview_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+        {% elif narrative.completed_by_id != current_user.id %}
+        <form method="post" action="{{ url_for('engagements.review_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+        {% elif effectively_reviewed(narrative) %}
+        <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+        {% else %}
+        <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+        {% endif %}
+      {% endif %}
+      {% if current_user.role in ('partner', 'admin') %}
+        {% if narrative.is_partner_signed %}
+        <form method="post" action="{{ url_for('engagements.partner_unsign_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+        {% elif narrative.completed_by_id != current_user.id %}
+        <form method="post" action="{{ url_for('engagements.partner_sign_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+        {% else %}
+        <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+        {% endif %}
+      {% endif %}
+      {% else %}
+      <p class="muted" style="font-size:11.5px;margin-top:10px;">Not saved yet - shown above is the firm's default starting wording. Edit and Save to make this engagement's own persistent copy.</p>
+      {% endif %}
+    </div>
+  {% endmacro %}
+
+  {{ narrative_editor('rep_letter', 'Management Representation Letter - body (Ref. MRL-1)') }}
+  {{ narrative_editor('report_to_management', 'Report to Management - body (Ref. RTM-1)') }}
+  {% if engagement.type == 'Investigative Engagement' %}
+  {{ narrative_editor('forensic_executive_summary', 'Forensic Investigation Report - Executive Summary (Ref. FR-1)') }}
+  {% endif %}
 
   <div class="card">
     <h3 class="mt-0">Trial Balance</h3>
@@ -1702,6 +1780,8 @@
         <form method="post" action="{{ url_for('engagements.unreview_audit_adjustment', adjustment_id=adj.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
         {% elif adj.completed_by_id != current_user.id %}
         <form method="post" action="{{ url_for('engagements.review_audit_adjustment', adjustment_id=adj.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+        {% elif effectively_reviewed(adj) %}
+        <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
         {% else %}
         <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
         {% endif %}
@@ -1836,6 +1916,9 @@
     <form method="post" action="{{ url_for('engagements.save_financial_statements_notes', engagement_id=engagement.id) }}">
       <label for="basis_of_preparation">Basis of preparation / notes</label>
       <textarea id="basis_of_preparation" name="basis_of_preparation" rows="3">{{ financial_statements.basis_of_preparation if financial_statements else '' }}</textarea>
+      <label for="notes_to_financial_statements" style="margin-top:10px;">Notes to the Financial Statements</label>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Free text - accounting policies, breakdowns, commitments/contingencies, related parties, subsequent events, etc. The figures throughout the statements above always come from the Trial Balance and are never set here.</p>
+      <textarea id="notes_to_financial_statements" name="notes_to_financial_statements" rows="10">{{ financial_statements.notes_to_financial_statements if financial_statements else '' }}</textarea>
       <button type="submit" class="btn gold">Save</button>
     </form>
     {% if financial_statements %}
@@ -1849,6 +1932,8 @@
       <form method="post" action="{{ url_for('engagements.unreview_financial_statements', fs_id=financial_statements.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif financial_statements.completed_by_id != current_user.id %}
       <form method="post" action="{{ url_for('engagements.review_financial_statements', fs_id=financial_statements.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(financial_statements) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% else %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% endif %}
@@ -1993,6 +2078,8 @@
       <form method="post" action="{{ url_for('engagements.unreview_substantive_area', area_id=area.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
       {% elif area.is_complete and area.completed_by_id != current_user.id %}
       <form method="post" action="{{ url_for('engagements.review_substantive_area', area_id=area.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif area.is_complete and effectively_reviewed(area) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
       {% elif area.is_complete %}
       <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
       {% else %}

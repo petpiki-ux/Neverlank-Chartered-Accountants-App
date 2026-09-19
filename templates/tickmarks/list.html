@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Tickmarks - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Tickmarks</h1>
+    <div class="subtitle">The firm's shared tickmark legend - a symbol and its meaning, attachable to any checklist response as evidence of what was done (e.g. agreed to the Trial Balance, vouched to supporting documentation). Used across the firm on every engagement, and printed as a legend page in each engagement's File Summary PDF.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Add a tickmark</h3>
+  <form method="post" action="{{ url_for('tickmarks.add_tickmark') }}" class="form-row" style="align-items:flex-end;">
+    <div><label>Symbol</label><input type="text" name="symbol" placeholder="e.g. TB" maxlength="20" required></div>
+    <div style="flex:2;"><label>Meaning</label><input type="text" name="meaning" placeholder="e.g. Agreed to Trial Balance" maxlength="300" required></div>
+    <div><button type="submit" class="btn gold">+ Add</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Legend</h3>
+  {% for tm in tickmarks %}
+    <form method="post" action="{{ url_for('tickmarks.update_tickmark', tickmark_id=tm.id) }}" class="checklist-row">
+      <input type="text" name="symbol" value="{{ tm.symbol }}" maxlength="20" required style="width:100px;margin-bottom:0;">
+      <input type="text" name="meaning" value="{{ tm.meaning }}" maxlength="300" required style="flex:1;margin-bottom:0;">
+      <span class="muted" style="font-size:11.5px;">{{ tm.created_by.name if tm.created_by else '' }}</span>
+      <button type="submit" class="btn small secondary">Save</button>
+      <button type="submit" formaction="{{ url_for('tickmarks.delete_tickmark', tickmark_id=tm.id) }}" class="btn small danger" onclick="return confirm('Delete this tickmark? Any checklist responses using it will just show no tickmark.');">Delete</button>
+    </form>
+  {% else %}
+    <div class="empty-state">No tickmarks yet - add the firm's first one above.</div>
+  {% endfor %}
+</div>
+{% endblock %}

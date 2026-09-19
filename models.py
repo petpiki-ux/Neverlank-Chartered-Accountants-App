@@ -45,6 +45,59 @@ QUERY_SECTIONS = [
 QUERY_SECTION_KEYS = {key for key, _ in QUERY_SECTIONS}
 QUERY_SECTION_LABELS = dict(QUERY_SECTIONS)
 
+# Fixed workpaper index - one lettered reference per major engagement
+# section/tab, in file order, so every part of the engagement can be
+# referred to (and filed under, in the Engagement File Summary PDF) the
+# way a paper audit file would be indexed. This is intentionally a fixed
+# firm-standard registry rather than something edited per engagement - a
+# firm's workpaper index rarely changes engagement to engagement. "forensic"
+# entries only appear in the file summary for an "Investigative Engagement".
+WORKPAPER_SECTIONS = [
+    ("A", "acceptance", "Client Acceptance & Continuance"),
+    ("B", "entity", "Understanding the Entity's Business"),
+    ("C", "risks", "Risk Assessment"),
+    ("D", "planning", "Planning (Materiality)"),
+    ("E", "analytical", "Analytical Review"),
+    ("F", "checklist", "Engagement Checklist"),
+    ("G", "substantive", "Substantive Procedures"),
+    ("H", "financials", "Financial Statements"),
+    ("I", "finalisation", "Finalisation Checklist"),
+    ("J", "rep_letter", "Management Representation Letter"),
+    ("K", "report_to_management", "Report to Management"),
+    ("L", "forensic_report", "Forensic Investigation Report"),
+]
+WORKPAPER_SECTION_BY_KEY = {key: (code, label) for code, key, label in WORKPAPER_SECTIONS}
+
+
+def workpaper_reference(section_key):
+    """The fixed "A", "B", "C"... index letter for a workpaper section key
+    (see WORKPAPER_SECTIONS), or None if the key isn't recognised."""
+    entry = WORKPAPER_SECTION_BY_KEY.get(section_key)
+    return entry[0] if entry else None
+
+
+def effectively_reviewed(record):
+    """True if `record` (any workpaper carrying the standard Preparer/
+    Reviewer/Partner sign-off fields - completed_by/is_reviewed) either has
+    an independent Reviewer sign-off, or its preparer is already a Partner
+    or Admin - in which case a separate Reviewer isn't required, since a
+    Partner's own preparation of a section is treated as definitive.
+
+    This is read-only/display-only: it never sets reviewed_by_id/reviewed_at
+    on the record, and it never changes the existing rule (enforced in the
+    routes) that a reviewer/partner sign-off can never be the same person as
+    the preparer - a Partner still can't click "Review" on their own work.
+    It only affects whether work is treated as "reviewed enough" for things
+    like the Engagement File Summary PDF and the checklist tab's display.
+    """
+    if getattr(record, "is_reviewed", False):
+        return True
+    # Almost every workpaper names its preparer relationship "completed_by",
+    # but MaterialityCalculation (re-saved rather than "completed") instead
+    # calls it "updated_by" - check both rather than special-casing it.
+    preparer = getattr(record, "completed_by", None) or getattr(record, "updated_by", None)
+    return bool(preparer and getattr(preparer, "role", None) in PARTNER_SIGNOFF_ROLES)
+
 # Configurable role permissions: a small set of firm-administration actions
 # (managing shared libraries, deleting whole clients/engagements/documents,
 # managing team members) that an admin can allow or deny per role from the
@@ -851,6 +904,26 @@ class ChecklistTemplateItem(db.Model):
     order = db.Column(db.Integer, default=0)
 
 
+class Tickmark(db.Model):
+    """One entry in the firm's tickmark legend - a short symbol (e.g. "TB",
+    "PY", "V", "CB") plus its meaning, in the standard audit-workpaper
+    convention. Firm-wide (not per-engagement), managed from the Tickmarks
+    settings screen, and attachable to any checklist-item response so a
+    response can point at which tie-out/agreement a tick represents. The
+    Engagement File Summary PDF prints the legend for whichever tickmarks
+    were actually used in that engagement's file."""
+    id = db.Column(db.Integer, primary_key=True)
+    symbol = db.Column(db.String(20), nullable=False, unique=True)
+    meaning = db.Column(db.String(300), nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<Tickmark {self.symbol!r}>"
+
+
 class EngagementChecklistItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
@@ -859,6 +932,8 @@ class EngagementChecklistItem(db.Model):
     order = db.Column(db.Integer, default=0)
     status = db.Column(db.String(20), default="Not Started")
     notes = db.Column(db.Text)
+    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
+    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     completed_at = db.Column(db.DateTime)
     # Review sign-off: separate from completed_by/completed_at (the preparer)
@@ -1423,6 +1498,8 @@ class EntityUnderstandingChecklistItem(db.Model):
     response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
     comment = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)
+    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
+    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -1701,6 +1778,11 @@ class FinancialStatements(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
     basis_of_preparation = db.Column(db.Text)
+    # Notes to the Financial Statements - free text, editable in-app (unlike
+    # the figures throughout the statements themselves, which are always
+    # computed live from the adjusted TrialBalance via financials.py and are
+    # never independently editable/overridable here).
+    notes_to_financial_statements = db.Column(db.Text)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     completed_at = db.Column(db.DateTime)
@@ -2536,6 +2618,8 @@ class ClientAcceptanceChecklistItem(db.Model):
     response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
     comment = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)
+    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
+    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -3040,6 +3124,8 @@ class FinalisationChecklistItem(db.Model):
     response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
     comment = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)
+    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
+    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -3051,6 +3137,91 @@ class FinalisationChecklistItem(db.Model):
 
     def __repr__(self):
         return f"<FinalisationChecklistItem {self.item_text!r} response={self.response!r}>"
+
+
+# The narrative workpapers that get a persistent, editable copy in-app
+# (rather than being generated fresh, throwaway, on every download) - see
+# WorkpaperNarrative below. Each is a (kind, label, workpaper section key)
+# tuple; the section key looks up its lettered reference in
+# WORKPAPER_SECTIONS above.
+WORKPAPER_NARRATIVE_KINDS = [
+    ("rep_letter", "Management Representation Letter", "rep_letter"),
+    ("report_to_management", "Report to Management", "report_to_management"),
+    ("forensic_executive_summary", "Forensic Investigation Report - Executive Summary", "forensic_report"),
+]
+WORKPAPER_NARRATIVE_KIND_KEYS = {kind for kind, _, _ in WORKPAPER_NARRATIVE_KINDS}
+WORKPAPER_NARRATIVE_KIND_LABELS = {kind: label for kind, label, _ in WORKPAPER_NARRATIVE_KINDS}
+
+# Starting wording for each narrative workpaper the first time it's opened on
+# an engagement - editable from there on (see WorkpaperNarrative above). Kept
+# as plain text with one representation/point per line, rendered as a
+# bulleted list in the generated Word document.
+DEFAULT_WORKPAPER_NARRATIVE_BODIES = {
+    "rep_letter": "\n".join([
+        "We have fulfilled our responsibilities for the preparation of the financial statements in accordance with the applicable financial reporting framework, and they are fairly presented.",
+        "The significant assumptions used by us in making accounting estimates, including those measured at fair value, are reasonable.",
+        "Related party relationships and transactions have been appropriately accounted for and disclosed.",
+        "All events subsequent to the date of the financial statements and for which the applicable financial reporting framework requires adjustment or disclosure have been adjusted or disclosed.",
+        "The effects of uncorrected misstatements are immaterial, both individually and in the aggregate, to the financial statements as a whole. A list of the uncorrected misstatements is attached (if any).",
+        "We have disclosed to you the results of our assessment of the risk that the financial statements may be materially misstated as a result of fraud.",
+        "We have disclosed to you all known instances of non-compliance or suspected non-compliance with laws and regulations whose effects should be considered when preparing financial statements.",
+        "We have disclosed to you the identity of the entity's related parties and all the related party relationships and transactions of which we are aware.",
+        "We have provided you with access to all information of which we are aware that is relevant to the preparation of the financial statements, and access to all records, documentation and other matters requested.",
+        "There have been no irregularities involving management or employees who have a significant role in internal control that could have a material effect on the financial statements.",
+    ]),
+    "report_to_management": "\n".join([
+        "During the course of our engagement, we identified the following matters relating to internal control and other operational matters which we bring to the attention of management.",
+        "[Add each observation as its own line - e.g. \"Observation: ... / Implication: ... / Recommendation: ...\"]",
+        "This report is provided for the sole use of management and is not a comprehensive statement of all weaknesses that may exist, since it is based on matters that came to our attention during the course of our normal engagement procedures rather than a review specifically designed to identify all such matters.",
+    ]),
+    "forensic_executive_summary": "\n".join([
+        "[Summarise, in a few sentences, the mandate, the key findings, and the overall conclusion of this investigation - the detail behind each point is set out in the numbered sections that follow.]",
+    ]),
+}
+
+
+class WorkpaperNarrative(db.Model):
+    """A persistent, editable body of free text for one of the "narrative"
+    workpapers (see WORKPAPER_NARRATIVE_KINDS) - generated once with sensible
+    default wording, then edited and updated in-app like any other
+    workpaper, rather than being recomputed from scratch every time it's
+    downloaded. One row per (engagement, kind); carries its own Preparer/
+    Reviewer/Partner sign-off, same pattern as every other workpaper.
+    Editing the body after review resets reviewed_by/partner_signed_by, same
+    as elsewhere - a changed write-up needs a fresh review."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    kind = db.Column(db.String(50), nullable=False)
+    body = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("workpaper_narratives", lazy=True, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    __table_args__ = (db.UniqueConstraint("engagement_id", "kind", name="uq_workpaper_narrative_engagement_kind"),)
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def label(self):
+        return WORKPAPER_NARRATIVE_KIND_LABELS.get(self.kind, self.kind)
+
+    def __repr__(self):
+        return f"<WorkpaperNarrative engagement={self.engagement_id} kind={self.kind!r}>"
 
 
 # ---------- Native Invoicing ----------

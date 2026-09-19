@@ -34,6 +34,9 @@ from models import (
     FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
+    Tickmark, WORKPAPER_SECTIONS, workpaper_reference, effectively_reviewed,
+    WorkpaperNarrative, WORKPAPER_NARRATIVE_KINDS, WORKPAPER_NARRATIVE_KIND_KEYS,
+    DEFAULT_WORKPAPER_NARRATIVE_BODIES,
 )
 import financials as fin
 import workpapers as wp
@@ -331,6 +334,22 @@ def view_engagement(engagement_id):
 
     finalisation_checklist = FinalisationChecklist.query.filter_by(engagement_id=engagement_id).first()
 
+    # Firm-wide tickmark legend (see tickmarks.py) - offered as a picker on
+    # every checklist row across Acceptance/Entity/Checklist/Finalisation.
+    tickmarks = Tickmark.query.order_by(Tickmark.symbol).all()
+
+    # The narrative workpapers with a persistent, editable copy (Rep Letter,
+    # Report to Management, Forensic Report executive summary) - keyed by
+    # kind so the Finalisation tab can look each one up directly. Any kind
+    # not yet saved is seeded (in memory only, not committed) with the
+    # firm's default starting wording, so the edit box is never blank.
+    workpaper_narratives = {
+        wn.kind: wn for wn in WorkpaperNarrative.query.filter_by(engagement_id=engagement_id).all()
+    }
+    for kind, _label, _section in WORKPAPER_NARRATIVE_KINDS:
+        if kind not in workpaper_narratives:
+            workpaper_narratives[kind] = _get_or_seed_workpaper_narrative(engagement_id, kind)
+
     # Review Queries, grouped for the template: by section for every plain
     # section, and separately by audit area for "substantive" (which has one
     # query list per area rather than one for the whole tab). Newest first
@@ -397,6 +416,12 @@ def view_engagement(engagement_id):
         client_key_people=client_key_people,
         finalisation_checklist=finalisation_checklist,
         finalisation_checklist_responses=CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
+        tickmarks=tickmarks,
+        workpaper_sections=WORKPAPER_SECTIONS,
+        workpaper_reference=workpaper_reference,
+        effectively_reviewed=effectively_reviewed,
+        workpaper_narratives=workpaper_narratives,
+        workpaper_narrative_kinds=WORKPAPER_NARRATIVE_KINDS,
     )
 
 
@@ -427,6 +452,8 @@ def update_checklist_item(item_id):
     _ensure_engagement_access(item.engagement)
     item.status = request.form.get("status", item.status)
     item.notes = request.form.get("notes", item.notes)
+    tickmark_id = request.form.get("tickmark_id", "").strip()
+    item.tickmark_id = int(tickmark_id) if tickmark_id.isdigit() else None
     if item.status in ("Done", "N/A"):
         item.completed_by_id = current_user.id
         item.completed_at = datetime.utcnow()
@@ -687,6 +714,8 @@ def update_entity_checklist_item(item_id):
     response = request.form.get("response", "").strip()
     item.response = response if response in CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES else ""
     item.comment = request.form.get("comment", "").strip()
+    tickmark_id = request.form.get("tickmark_id", "").strip()
+    item.tickmark_id = int(tickmark_id) if tickmark_id.isdigit() else None
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=item.entity_understanding.engagement_id, tab="entity"))
 
@@ -1782,6 +1811,8 @@ def update_finalisation_checklist_item(item_id):
     response = request.form.get("response", "").strip()
     item.response = response if response in CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES else ""
     item.comment = request.form.get("comment", "").strip()
+    tickmark_id = request.form.get("tickmark_id", "").strip()
+    item.tickmark_id = int(tickmark_id) if tickmark_id.isdigit() else None
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=item.finalisation_checklist.engagement_id, tab="finalisation"))
 
@@ -2355,6 +2386,11 @@ def save_financial_statements_notes(engagement_id):
         fs = FinancialStatements(engagement_id=engagement_id)
         db.session.add(fs)
     fs.basis_of_preparation = request.form.get("basis_of_preparation", "").strip()
+    # Notes to the Financial Statements are free text and editable here, same
+    # as the basis of preparation - but note that the FIGURES throughout the
+    # statements themselves are never set from this form: they always come
+    # live from the adjusted TrialBalance (financials.py) and stay that way.
+    fs.notes_to_financial_statements = request.form.get("notes_to_financial_statements", "").strip()
     fs.completed_by_id = current_user.id
     fs.completed_at = datetime.utcnow()
     fs.reviewed_by_id = None
@@ -2434,6 +2470,109 @@ def partner_unsign_financial_statements(fs_id):
     db.session.commit()
     flash("Partner sign-off removed.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=fs.engagement_id, tab="finalisation"))
+
+
+# ---------- Workpaper Narratives (persistent, editable copies of the
+# Management Representation Letter, Report to Management, and the Forensic
+# Investigation Report's Executive Summary - see models.WorkpaperNarrative)
+# ----------
+
+def _get_or_seed_workpaper_narrative(engagement_id, kind):
+    """The existing WorkpaperNarrative row for (engagement, kind), or a new
+    unsaved one pre-filled with the firm's default starting wording - so the
+    edit form always has sensible text to start from rather than a blank
+    box, the first time this narrative is opened on an engagement."""
+    narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind=kind).first()
+    if not narrative:
+        narrative = WorkpaperNarrative(engagement_id=engagement_id, kind=kind, body=DEFAULT_WORKPAPER_NARRATIVE_BODIES.get(kind, ""))
+    return narrative
+
+
+@engagements_bp.route("/<int:engagement_id>/workpaper-narrative/<string:kind>/save", methods=["POST"])
+@login_required
+def save_workpaper_narrative(engagement_id, kind):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    if kind not in WORKPAPER_NARRATIVE_KIND_KEYS:
+        abort(404)
+    narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind=kind).first()
+    if not narrative:
+        narrative = WorkpaperNarrative(engagement_id=engagement_id, kind=kind)
+        db.session.add(narrative)
+    narrative.body = request.form.get("body", "").strip()
+    narrative.completed_by_id = current_user.id
+    narrative.completed_at = datetime.utcnow()
+    # Editing after review/sign-off invalidates them, same as every other
+    # workpaper - a changed write-up needs a fresh review.
+    narrative.reviewed_by_id = None
+    narrative.reviewed_at = None
+    narrative.partner_signed_by_id = None
+    narrative.partner_signed_at = None
+    db.session.commit()
+    flash(f"{narrative.label} saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/workpaper-narrative/<int:narrative_id>/review", methods=["POST"])
+@login_required
+def review_workpaper_narrative(narrative_id):
+    narrative = WorkpaperNarrative.query.get_or_404(narrative_id)
+    _ensure_engagement_access(narrative.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if narrative.completed_by_id == current_user.id:
+        flash("You can't review a write-up you prepared yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+    narrative.reviewed_by_id = current_user.id
+    narrative.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash(f"{narrative.label} marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/workpaper-narrative/<int:narrative_id>/unreview", methods=["POST"])
+@login_required
+def unreview_workpaper_narrative(narrative_id):
+    narrative = WorkpaperNarrative.query.get_or_404(narrative_id)
+    _ensure_engagement_access(narrative.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    narrative.reviewed_by_id = None
+    narrative.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/workpaper-narrative/<int:narrative_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_workpaper_narrative(narrative_id):
+    narrative = WorkpaperNarrative.query.get_or_404(narrative_id)
+    _ensure_engagement_access(narrative.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if narrative.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a write-up you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+    narrative.partner_signed_by_id = current_user.id
+    narrative.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/workpaper-narrative/<int:narrative_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_workpaper_narrative(narrative_id):
+    narrative = WorkpaperNarrative.query.get_or_404(narrative_id)
+    _ensure_engagement_access(narrative.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    narrative.partner_signed_by_id = None
+    narrative.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
 
 
 # ---------- Substantive Procedures (system-based: by audit area, driven by risk + industry) ----------
@@ -2857,10 +2996,25 @@ def download_rep_letter_docx(engagement_id):
         fin.build_all_statements(trial_balance.lines, trial_balance.adjustments)
         if trial_balance and trial_balance.lines else None
     )
-    buf = wp.build_rep_letter_docx(engagement, statements)
+    narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind="rep_letter").first()
+    buf = wp.build_rep_letter_docx(engagement, statements, narrative)
     return send_file(
         buf, as_attachment=True,
         download_name=_workpaper_filename(engagement, "Management_Representation_Letter", "docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/report-to-management.docx")
+@login_required
+def download_report_to_management_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind="report_to_management").first()
+    buf = wp.build_report_to_management_docx(engagement, narrative)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Report_to_Management", "docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
@@ -2873,11 +3027,25 @@ def download_forensic_report_docx(engagement_id):
     if engagement.type != "Investigative Engagement":
         flash("The forensic investigation report is only available on Investigative Engagements.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
-    buf = wp.build_forensic_report_docx(engagement)
+    narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind="forensic_executive_summary").first()
+    buf = wp.build_forensic_report_docx(engagement, narrative)
     return send_file(
         buf, as_attachment=True,
         download_name=_workpaper_filename(engagement, "Forensic_Investigation_Report", "docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/file-summary.pdf")
+@login_required
+def download_engagement_file_summary_pdf(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    buf = wp.build_engagement_file_summary_pdf(engagement)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Engagement_File_Summary", "pdf"),
+        mimetype="application/pdf",
     )
 
 
