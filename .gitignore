@@ -2,8 +2,14 @@ venv/
 __pycache__/
 *.pyc
 instance/*.db
+instance/*.db-shm
+instance/*.db-wal
 uploads/*
 !uploads/.gitkeep
+# Ad-hoc local test scripts written while developing a feature (not part of
+# the deployed app, and never uploaded to Render) - kept out of the repo so
+# they don't clutter it or get mistaken for something that ships.
+smoke_test*.py
 document_templates_data/
 build/
 dist/

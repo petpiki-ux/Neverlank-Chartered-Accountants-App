@@ -233,22 +233,50 @@ TEMPLATES = [
 
 
 # (type, filename in document_templates/<type>/, ref_code, title, description)
+#
+# The 8 Standard-Audit / Full-Audit templates below (SA-* / FA-* originally)
+# have their ref_code set to the matching Filing Index N-code instead, per
+# the firm's Audit Working Paper Indexing & Filing Policy - these templates
+# produce a working paper that has a direct home in that index, so the
+# reference shown in the app should be the one staff will actually file the
+# finished document under, not the old pre-Filing-Index catalogue code.
+# The forensic (FR-*), Assurance (AS-*/AUP-*), Consulting (CE-*) and Tax
+# (TX-*) templates are left as-is: the filing policy is explicitly scoped to
+# statutory audits, so those engagement types have no N-code equivalent.
+#
+# Two of the eight are judgment calls, since a template can bundle content
+# that spans more than one N-code section - flagged here so the firm can
+# reassign either one from the Filing Index page if a different code fits
+# their practice better:
+#   - FA-03 "Materiality and Risk Assessment Workpaper" -> N1001. Its own
+#     description covers both materiality and a risk register; N1001
+#     (Materiality) was chosen as the primary because materiality is named
+#     first and is this workpaper's core calculation.
+#   - FA-05 "Audit Completion Memorandum" -> N9003. Its description spans
+#     misstatements, going concern and opinion type, none of which is a
+#     perfect single match; N9003 (Summary of Misstatements) was chosen
+#     since that's the completion memorandum's usual centrepiece.
+# Where a template's own ref_code was NOT changed, it's because either it
+# is out of the filing policy's scope (see above) or is intentionally
+# unassigned, and any DocumentTemplate row the firm has already renamed
+# via the app's Edit screen is left untouched - see
+# migrate_document_template_ref_codes() below.
 DOCUMENT_LIBRARY = [
-    ("Audit", "SA-01 Engagement Letter.docx", "SA-01", "Engagement Letter (Standard Audit)",
+    ("Audit", "SA-01 Engagement Letter.docx", "N1008", "Engagement Letter (Standard Audit)",
      "Standard statutory audit engagement letter."),
-    ("Audit", "SA-02 Management Representation Letter.docx", "SA-02", "Management Representation Letter (Standard)",
+    ("Audit", "SA-02 Management Representation Letter.docx", "N9006", "Management Representation Letter (Standard)",
      "Representation letter to obtain from management at completion."),
-    ("Audit", "SA-03 Audit Completion Checklist.docx", "SA-03", "Audit Completion Checklist",
+    ("Audit", "SA-03 Audit Completion Checklist.docx", "N9009", "Audit Completion Checklist",
      "Final sign-off checklist before issuing the audit report."),
-    ("Audit", "FA-01 Engagement Letter.docx", "FA-01", "Engagement Letter (ISA-Aligned)",
+    ("Audit", "FA-01 Engagement Letter.docx", "N1008", "Engagement Letter (ISA-Aligned)",
      "Full statutory audit engagement letter referencing ISAs and independence."),
-    ("Audit", "FA-02 Audit Planning Memorandum.docx", "FA-02", "Audit Planning Memorandum",
+    ("Audit", "FA-02 Audit Planning Memorandum.docx", "N1002", "Audit Planning Memorandum",
      "Understanding the entity, preliminary analytics, materiality, risks and strategy."),
-    ("Audit", "FA-03 Materiality and Risk Assessment Workpaper.docx", "FA-03", "Materiality & Risk Assessment Workpaper",
+    ("Audit", "FA-03 Materiality and Risk Assessment Workpaper.docx", "N1001", "Materiality & Risk Assessment Workpaper",
      "Materiality calculation and risk register for a full ISA-aligned audit."),
-    ("Audit", "FA-04 Management Representation Letter.docx", "FA-04", "Management Representation Letter (Full)",
+    ("Audit", "FA-04 Management Representation Letter.docx", "N9006", "Management Representation Letter (Full)",
      "Detailed representation letter for a full ISA-aligned audit."),
-    ("Audit", "FA-05 Audit Completion Memorandum.docx", "FA-05", "Audit Completion Memorandum",
+    ("Audit", "FA-05 Audit Completion Memorandum.docx", "N9003", "Audit Completion Memorandum",
      "Summary of findings, uncorrected misstatements, going concern and opinion type."),
     ("Audit", "FR-01 Engagement Letter Terms of Reference.docx", "FR-01", "Terms of Reference (Forensic)",
      "Scope, confidentiality and reporting terms for a forensic investigation."),
@@ -286,12 +314,16 @@ DOCUMENT_LIBRARY = [
 def seed_document_templates():
     """Populate the writable Document Templates library from the read-only
     bundled originals. Safe to re-run any time: a template only gets created
-    if no row with that (type, ref_code) already exists, so it never
+    if no row with that (type, filename) already exists, so it never
     overwrites a file or row the user has since edited via the app, and
     re-running after an app update only adds newly-bundled templates.
+    Keyed on filename rather than ref_code so that two templates can
+    legitimately share the same Filing Index N-code (e.g. SA-01 and FA-01
+    are both variants of the Terms of Engagement letter, N1008) without
+    either one being skipped as "already seeded".
     """
     for i, (eng_type, filename, ref_code, title, description) in enumerate(DOCUMENT_LIBRARY):
-        if DocumentTemplate.query.filter_by(type=eng_type, ref_code=ref_code).first():
+        if DocumentTemplate.query.filter_by(type=eng_type, filename=filename).first():
             continue
 
         src_dir = os.path.join(Config.DOCUMENT_TEMPLATES_SEED_DIR, eng_type)
@@ -311,6 +343,43 @@ def seed_document_templates():
             order=i,
         ))
     db.session.commit()
+
+
+# (filename, old ref_code, new ref_code) - only for DocumentTemplate rows
+# already seeded on a live database before the Filing Index N-codes above
+# replaced the old SA-*/FA-* catalogue codes. seed_document_templates() only
+# ever adds new rows, so an existing installation's already-seeded rows keep
+# their original ref_code forever unless something updates them - this does
+# that, once, the first time the app starts after this change.
+DOCUMENT_TEMPLATE_REF_CODE_MIGRATIONS = [
+    ("SA-01 Engagement Letter.docx", "SA-01", "N1008"),
+    ("SA-02 Management Representation Letter.docx", "SA-02", "N9006"),
+    ("SA-03 Audit Completion Checklist.docx", "SA-03", "N9009"),
+    ("FA-01 Engagement Letter.docx", "FA-01", "N1008"),
+    ("FA-02 Audit Planning Memorandum.docx", "FA-02", "N1002"),
+    ("FA-03 Materiality and Risk Assessment Workpaper.docx", "FA-03", "N1001"),
+    ("FA-04 Management Representation Letter.docx", "FA-04", "N9006"),
+    ("FA-05 Audit Completion Memorandum.docx", "FA-05", "N9003"),
+]
+
+
+def migrate_document_template_ref_codes():
+    """Bring already-seeded DocumentTemplate rows' ref_code up to date with
+    the Filing Index N-codes now used in DOCUMENT_LIBRARY. Matches on
+    filename (which never changes) AND the exact old ref_code, so a row the
+    firm has since renamed by hand via the Edit Template screen is left
+    alone rather than being silently overwritten. Safe to call on every
+    startup: once a row is migrated (or was never on the old code to begin
+    with), there is nothing left to match and this is a no-op.
+    """
+    changed = False
+    for filename, old_code, new_code in DOCUMENT_TEMPLATE_REF_CODE_MIGRATIONS:
+        row = DocumentTemplate.query.filter_by(filename=filename, ref_code=old_code).first()
+        if row:
+            row.ref_code = new_code
+            changed = True
+    if changed:
+        db.session.commit()
 
 
 # The firm's Audit Working Paper Indexing & Filing Policy, transcribed from

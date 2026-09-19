@@ -354,6 +354,15 @@ def create_app():
         if FilingIndexSection.query.count() == 0:
             from seed import seed_filing_index
             seed_filing_index()
+        # Document Templates whose reference codes were renumbered to the
+        # Filing Index's N-codes (e.g. SA-02 -> N9006) need already-seeded
+        # rows on an existing install updated to match - safe/cheap to run
+        # on every startup for the same reason as seed_permissions() above:
+        # it only touches a row still on its exact old code, so it's a
+        # no-op once done (or on a brand-new install that seeded with the
+        # new codes to begin with).
+        from seed import migrate_document_template_ref_codes
+        migrate_document_template_ref_codes()
         _fix_forensic_template_type()
         _fix_forensic_checklist_items()
 
