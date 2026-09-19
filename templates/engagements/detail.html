@@ -136,7 +136,6 @@
         {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
       </select>
       <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
-      {{ tickmark_picker(item.tickmark_id) }}
       <button type="submit" class="btn small secondary">Save</button>
       <button type="submit" formaction="{{ url_for('acceptance.delete_acceptance_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
     </form>
@@ -626,7 +625,6 @@
         {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
       </select>
       <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
-      {{ tickmark_picker(item.tickmark_id) }}
       <button type="submit" class="btn small secondary">Save</button>
       <button type="submit" formaction="{{ url_for('engagements.delete_entity_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
     </form>
@@ -1335,7 +1333,6 @@
           <select name="status" onchange="this.form.submit()">
             {% for s in checklist_statuses %}<option value="{{ s }}" {% if item.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
           </select>
-          {{ tickmark_picker(item.tickmark_id) }}
           <button type="submit" class="btn small secondary">Save</button>
           <button type="submit" formaction="{{ url_for('engagements.delete_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
         </form>
@@ -1552,7 +1549,6 @@
         {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
       </select>
       <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
-      {{ tickmark_picker(item.tickmark_id) }}
       <button type="submit" class="btn small secondary">Save</button>
       <button type="submit" formaction="{{ url_for('engagements.delete_finalisation_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
     </form>
@@ -1631,7 +1627,7 @@
 
   <div class="card">
     <h3 class="mt-0">Working papers</h3>
-    <p class="muted" style="font-size:12.5px;">Generate downloadable working papers directly from the data already captured on this engagement - Word and Excel files, ready to file or send. Every checklist response's tickmark (see the Tickmarks page) is included in these downloads. References: FS-1 (financial statements), TB-1 (trial balance &amp; adjustments), MRL-1 (management representation letter), RTM-1 (report to management), I-1 (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report){% endif %}.</p>
+    <p class="muted" style="font-size:12.5px;">Generate downloadable working papers directly from the data already captured on this engagement - Word and Excel files, ready to file or send. References: FS-1 (financial statements), TB-1 (trial balance &amp; adjustments), MRL-1 (management representation letter), RTM-1 (report to management), I-1 (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report){% endif %}.</p>
     <div class="form-row">
       <div><a href="{{ url_for('engagements.download_financial_statements_docx', engagement_id=engagement.id) }}" class="btn secondary">Financial statements (Word)</a></div>
       <div><a href="{{ url_for('engagements.download_trial_balance_xlsx', engagement_id=engagement.id) }}" class="btn secondary">Trial balance &amp; adjustments (Excel)</a></div>

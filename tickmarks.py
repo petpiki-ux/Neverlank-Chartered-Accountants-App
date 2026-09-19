@@ -1,20 +1,16 @@
 """Firm-wide tickmark legend (Tickmark model in models.py) - a small shared
 list of symbol + meaning pairs (e.g. "TB" = "Agreed to Trial Balance", "V" =
 "Vouched to supporting documentation") in the standard audit-workpaper
-convention. Any team member can add to it while working through a checklist
-(see the inline tickmark picker on the Client Acceptance / Understanding the
-Entity / Engagement Checklist / Finalisation Checklist tabs), and it's
-printed as a legend page in the Engagement File Summary PDF for whichever
-tickmarks were actually used on that engagement.
+convention. Any team member can add to it while working through Substantive
+Procedures (see the inline tickmark picker on that tab), and it's printed as
+a legend page in the Engagement File Summary PDF for whichever tickmarks
+were actually used on that engagement.
 """
 from flask import Blueprint, render_template, redirect, url_for, request, flash
 from flask_login import login_required, current_user
 
 from extensions import db
-from models import (
-    Tickmark, EngagementChecklistItem, ClientAcceptanceChecklistItem,
-    EntityUnderstandingChecklistItem, FinalisationChecklistItem,
-)
+from models import Tickmark, SubstantiveProcedureItem
 
 tickmarks_bp = Blueprint("tickmarks", __name__, url_prefix="/tickmarks")
 
@@ -67,11 +63,10 @@ def update_tickmark(tickmark_id):
 @login_required
 def delete_tickmark(tickmark_id):
     tickmark = Tickmark.query.get_or_404(tickmark_id)
-    # Clear the reference from any checklist item using it first, so nothing
-    # is left pointing at a tickmark that no longer exists.
-    for model in (EngagementChecklistItem, ClientAcceptanceChecklistItem,
-                  EntityUnderstandingChecklistItem, FinalisationChecklistItem):
-        model.query.filter_by(tickmark_id=tickmark.id).update({"tickmark_id": None})
+    # Clear the reference from any Substantive Procedure item using it
+    # first, so nothing is left pointing at a tickmark that no longer
+    # exists.
+    SubstantiveProcedureItem.query.filter_by(tickmark_id=tickmark.id).update({"tickmark_id": None})
     db.session.delete(tickmark)
     db.session.commit()
     flash("Tickmark deleted.", "success")

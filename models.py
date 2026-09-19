@@ -932,8 +932,6 @@ class EngagementChecklistItem(db.Model):
     order = db.Column(db.Integer, default=0)
     status = db.Column(db.String(20), default="Not Started")
     notes = db.Column(db.Text)
-    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
-    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     completed_at = db.Column(db.DateTime)
     # Review sign-off: separate from completed_by/completed_at (the preparer)
@@ -1498,8 +1496,6 @@ class EntityUnderstandingChecklistItem(db.Model):
     response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
     comment = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)
-    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
-    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -2620,8 +2616,6 @@ class ClientAcceptanceChecklistItem(db.Model):
     response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
     comment = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)
-    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
-    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -3126,8 +3120,6 @@ class FinalisationChecklistItem(db.Model):
     response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
     comment = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)
-    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
-    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 

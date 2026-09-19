@@ -335,7 +335,7 @@ def view_engagement(engagement_id):
     finalisation_checklist = FinalisationChecklist.query.filter_by(engagement_id=engagement_id).first()
 
     # Firm-wide tickmark legend (see tickmarks.py) - offered as a picker on
-    # every checklist row across Acceptance/Entity/Checklist/Finalisation.
+    # each Substantive Procedures item.
     tickmarks = Tickmark.query.order_by(Tickmark.symbol).all()
 
     # The narrative workpapers with a persistent, editable copy (Rep Letter,
@@ -452,8 +452,6 @@ def update_checklist_item(item_id):
     _ensure_engagement_access(item.engagement)
     item.status = request.form.get("status", item.status)
     item.notes = request.form.get("notes", item.notes)
-    tickmark_id = request.form.get("tickmark_id", "").strip()
-    item.tickmark_id = int(tickmark_id) if tickmark_id.isdigit() else None
     if item.status in ("Done", "N/A"):
         item.completed_by_id = current_user.id
         item.completed_at = datetime.utcnow()
@@ -714,8 +712,6 @@ def update_entity_checklist_item(item_id):
     response = request.form.get("response", "").strip()
     item.response = response if response in CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES else ""
     item.comment = request.form.get("comment", "").strip()
-    tickmark_id = request.form.get("tickmark_id", "").strip()
-    item.tickmark_id = int(tickmark_id) if tickmark_id.isdigit() else None
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=item.entity_understanding.engagement_id, tab="entity"))
 
@@ -1811,8 +1807,6 @@ def update_finalisation_checklist_item(item_id):
     response = request.form.get("response", "").strip()
     item.response = response if response in CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES else ""
     item.comment = request.form.get("comment", "").strip()
-    tickmark_id = request.form.get("tickmark_id", "").strip()
-    item.tickmark_id = int(tickmark_id) if tickmark_id.isdigit() else None
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=item.finalisation_checklist.engagement_id, tab="finalisation"))
 

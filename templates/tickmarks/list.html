@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>Tickmarks</h1>
-    <div class="subtitle">The firm's shared tickmark legend - a symbol and its meaning, attachable to any checklist response as evidence of what was done (e.g. agreed to the Trial Balance, vouched to supporting documentation). Used across the firm on every engagement, and printed as a legend page in each engagement's File Summary PDF.</div>
+    <div class="subtitle">The firm's shared tickmark legend - a symbol and its meaning, attachable to any Substantive Procedures item as evidence of what was done (e.g. agreed to the Trial Balance, vouched to supporting documentation). Used across the firm on every engagement, and printed as a legend page in each engagement's File Summary PDF.</div>
   </div>
 </div>
 
@@ -25,7 +25,7 @@
       <input type="text" name="meaning" value="{{ tm.meaning }}" maxlength="300" required style="flex:1;margin-bottom:0;">
       <span class="muted" style="font-size:11.5px;">{{ tm.created_by.name if tm.created_by else '' }}</span>
       <button type="submit" class="btn small secondary">Save</button>
-      <button type="submit" formaction="{{ url_for('tickmarks.delete_tickmark', tickmark_id=tm.id) }}" class="btn small danger" onclick="return confirm('Delete this tickmark? Any checklist responses using it will just show no tickmark.');">Delete</button>
+      <button type="submit" formaction="{{ url_for('tickmarks.delete_tickmark', tickmark_id=tm.id) }}" class="btn small danger" onclick="return confirm('Delete this tickmark? Any Substantive Procedures items using it will just show no tickmark.');">Delete</button>
     </form>
   {% else %}
     <div class="empty-state">No tickmarks yet - add the firm's first one above.</div>

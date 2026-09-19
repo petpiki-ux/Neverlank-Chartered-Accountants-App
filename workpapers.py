@@ -645,23 +645,23 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
 # downloadable Word workpaper of their own - only the on-screen tab and the
 # Engagement File Summary PDF showed their responses. These four functions
 # fill that gap, each as its own workpaper with a table of every response
-# (including its tickmark, if any) plus the section's sign-off.
+# plus the section's sign-off.
 
 def _checklist_table_docx(doc, items, per_item_status=False):
     """A docx table of checklist-item rows: Section | Item | Response |
-    Comment | Tickmark, and (only for the main Engagement Checklist, whose
-    items each carry their own Preparer/Reviewer/Partner sign-off rather
-    than one for the whole checklist) a trailing Status column.
+    Comment, and (only for the main Engagement Checklist, whose items each
+    carry their own Preparer/Reviewer/Partner sign-off rather than one for
+    the whole checklist) a trailing Status column.
 
     Handles both field-naming conventions across the four checklist-item
     models: "response"/"comment" (Client Acceptance, Entity Understanding,
     Finalisation) and "status"/"notes" (the main Engagement Checklist)."""
-    cols = 6 if per_item_status else 5
+    cols = 5 if per_item_status else 4
     table = doc.add_table(rows=1, cols=cols)
     hdr = table.rows[0].cells
-    hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text, hdr[4].text = "Section", "Item", "Response", "Comment", "Tickmark"
+    hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text = "Section", "Item", "Response", "Comment"
     if per_item_status:
-        hdr[5].text = "Status"
+        hdr[4].text = "Status"
     _style_table(table)
     for item in items:
         response = getattr(item, "response", None) or getattr(item, "status", None) or "Not assessed"
@@ -671,9 +671,8 @@ def _checklist_table_docx(doc, items, per_item_status=False):
         row[1].text = item.item_text or ""
         row[2].text = response
         row[3].text = comment
-        row[4].text = item.tickmark.symbol if item.tickmark else ""
         if per_item_status:
-            row[5].text = _sign_off_line(item)
+            row[4].text = _sign_off_line(item)
     return table
 
 
@@ -757,25 +756,23 @@ def _sign_off_line(record, label="Prepared", preparer_attr="completed_by"):
 
 def _checklist_items_table(items):
     """A reportlab Table summarising a list of checklist-item rows (item
-    text, response, comment, tickmark) - used for every checklist-driven
-    workpaper section in the file summary below."""
+    text, response, comment) - used for every checklist-driven workpaper
+    section in the file summary below."""
     # EngagementChecklistItem (the main Checklist tab) predates the other
     # three checklist-item models and names its fields differently -
     # "status" (Not Started/In Progress/Done/N/A) instead of "response", and
     # "notes" instead of "comment" - handle both rather than special-casing
     # the main checklist tab's items at every call site.
-    data = [["Item", "Response", "Comment", "Tickmark"]]
+    data = [["Item", "Response", "Comment"]]
     for item in items:
-        tickmark = f"{item.tickmark.symbol}" if getattr(item, "tickmark", None) else ""
         response = getattr(item, "response", None) or getattr(item, "status", None) or "Not assessed"
         comment = getattr(item, "comment", None) or getattr(item, "notes", None) or ""
         data.append([
             Paragraph(item.item_text or "", getSampleStyleSheet()["BodyText"]),
             response,
             Paragraph(comment, getSampleStyleSheet()["BodyText"]),
-            tickmark,
         ])
-    table = Table(data, colWidths=[210, 60, 170, 50], repeatRows=1)
+    table = Table(data, colWidths=[220, 70, 200], repeatRows=1)
     table.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{_GOLD_HEX}")),
         ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
@@ -797,7 +794,7 @@ def build_engagement_file_summary_pdf(engagement):
     the "responses summarised in a PDF with references filed under the
     relevant sections" requested for a completed, reviewed and signed
     engagement. Ends with the tickmark legend for whichever tickmarks were
-    actually used somewhere in this engagement's file."""
+    actually used on this engagement's Substantive Procedures."""
     is_forensic = engagement.type == "Investigative Engagement"
     narratives = {wn.kind: wn for wn in engagement.workpaper_narratives}
 
@@ -942,15 +939,12 @@ def build_engagement_file_summary_pdf(engagement):
         story.append(Spacer(1, 6))
 
     # ------------------------------------------------------- Tickmark legend
+    # Tickmarks are only used on Substantive Procedure items now - the four
+    # checklist types (Acceptance, Entity, Checklist, Finalisation) don't
+    # carry a tickmark field.
     used_ids = set()
     used = {}
-    item_sources = list(engagement.checklist_items)
-    if engagement.client_acceptance:
-        item_sources += list(engagement.client_acceptance.checklist_items)
-    if engagement.entity_understanding:
-        item_sources += list(engagement.entity_understanding.checklist_items)
-    if engagement.finalisation_checklist:
-        item_sources += list(engagement.finalisation_checklist.checklist_items)
+    item_sources = []
     for area in engagement.substantive_procedure_areas:
         item_sources += list(area.items)
     for item in item_sources:

@@ -47,11 +47,7 @@ def _add_missing_columns():
         "engagement_checklist_item": [
             ("reviewed_by_id", "INTEGER"),
             ("reviewed_at", "DATETIME"),
-            ("tickmark_id", "INTEGER"),
         ] + partner_signoff_cols,
-        "client_acceptance_checklist_item": [("tickmark_id", "INTEGER")],
-        "entity_understanding_checklist_item": [("tickmark_id", "INTEGER")],
-        "finalisation_checklist_item": [("tickmark_id", "INTEGER")],
         "substantive_procedure_item": [("tickmark_id", "INTEGER")],
         "engagement_task": [
             ("completed_by_id", "INTEGER"),
