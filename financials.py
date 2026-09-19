@@ -233,11 +233,32 @@ def compute_totals(lines):
     return totals
 
 
-def _row(label, current, prior=None, bold=False, memo=False):
+def _row(label, current, prior=None, bold=False, memo=False, category=None):
     r = {"label": label, "current": current, "bold": bold, "memo": memo}
     if prior is not None:
         r["prior"] = prior
+    if category:
+        # Which IAS 1 category this line came from - lets build_all_statements()
+        # attach the right Notes to the Financial Statements number onto this
+        # row afterwards (see _attach_note_numbers below). Left unset on a
+        # subtotal/total row (e.g. "Gross profit") - those aren't accounts,
+        # so they never get their own note.
+        r["category"] = category
     return r
+
+
+def _is_nil(value, tol=0.005):
+    return abs(value or 0.0) < tol
+
+
+def _filter_nil_rows(rows):
+    """Drops a line item whose current AND prior amounts are both nil (an
+    account that never had a balance in either year) - per the rule that
+    the Financial Statements shouldn't clutter the face with a zero line.
+    Never drops a bold subtotal/total row or a memo line: those are
+    structural to the statement's layout, not individual accounts, so IAS 1
+    requires them regardless of whether every line above nets to zero."""
+    return [r for r in rows if r.get("bold") or r.get("memo") or not (_is_nil(r.get("current")) and _is_nil(r.get("prior", 0.0)))]
 
 
 def build_income_statement(totals):
@@ -263,22 +284,22 @@ def build_income_statement(totals):
     tci_cur = profit_cur + v("oci_items", "current")
     tci_pri = profit_pri + v("oci_items", "prior")
 
-    rows = [
-        _row("Revenue", v("revenue", "current"), v("revenue", "prior")),
-        _row("Cost of sales", -v("cost_of_sales", "current"), -v("cost_of_sales", "prior")),
+    rows = _filter_nil_rows([
+        _row("Revenue", v("revenue", "current"), v("revenue", "prior"), category="revenue"),
+        _row("Cost of sales", -v("cost_of_sales", "current"), -v("cost_of_sales", "prior"), category="cost_of_sales"),
         _row("Gross profit", gross_profit_cur, gross_profit_pri, bold=True),
-        _row("Other income", v("other_income", "current"), v("other_income", "prior")),
-        _row("Distribution costs", -v("distribution_costs", "current"), -v("distribution_costs", "prior")),
-        _row("Administrative expenses", -admin_cur, -admin_pri),
-        _row("Other expenses", -v("other_expenses", "current"), -v("other_expenses", "prior")),
+        _row("Other income", v("other_income", "current"), v("other_income", "prior"), category="other_income"),
+        _row("Distribution costs", -v("distribution_costs", "current"), -v("distribution_costs", "prior"), category="distribution_costs"),
+        _row("Administrative expenses", -admin_cur, -admin_pri, category="admin_expenses"),
+        _row("Other expenses", -v("other_expenses", "current"), -v("other_expenses", "prior"), category="other_expenses"),
         _row("Operating profit", operating_profit_cur, operating_profit_pri, bold=True),
-        _row("Finance costs", -v("finance_costs", "current"), -v("finance_costs", "prior")),
+        _row("Finance costs", -v("finance_costs", "current"), -v("finance_costs", "prior"), category="finance_costs"),
         _row("Profit before tax", pbt_cur, pbt_pri, bold=True),
-        _row("Income tax expense", -v("income_tax_expense", "current"), -v("income_tax_expense", "prior")),
+        _row("Income tax expense", -v("income_tax_expense", "current"), -v("income_tax_expense", "prior"), category="income_tax_expense"),
         _row("Profit for the year", profit_cur, profit_pri, bold=True),
-        _row("Other comprehensive income, net of tax", v("oci_items", "current"), v("oci_items", "prior")),
+        _row("Other comprehensive income, net of tax", v("oci_items", "current"), v("oci_items", "prior"), category="oci_items"),
         _row("Total comprehensive income for the year", tci_cur, tci_pri, bold=True),
-    ]
+    ])
     return {
         "rows": rows,
         "profit_before_tax": {"current": pbt_cur, "prior": pbt_pri},
@@ -340,6 +361,15 @@ def build_equity_statement(totals, pl):
         total_closing += closing
         rows.append(row)
 
+    # Retained earnings (the profit/loss roll-forward) is never suppressed;
+    # a share capital/premium/reserves row with no opening, movement or
+    # closing balance in either year is dropped, same nil-line rule as the
+    # other statements.
+    rows = [
+        r for r in rows
+        if r["label"] == "Retained earnings" or not (_is_nil(r["opening"]) and _is_nil(r["movement"]) and _is_nil(r["closing"]))
+    ]
+
     return {
         "rows": rows,
         "total_opening": total_opening,
@@ -354,7 +384,11 @@ def build_financial_position(totals, equity):
     retained_earnings_closing = equity["retained_earnings_closing"]
 
     def section(codes):
-        rows = [_row(category_label(c), t[c]["current"], t[c]["prior"]) for c in codes]
+        # Subtotals are always summed over the FULL codes list, before any
+        # nil-line filtering - a hidden nil line contributes 0 either way,
+        # so this doesn't change the subtotal, it just keeps it correct
+        # regardless of which individual lines end up on screen.
+        rows = _filter_nil_rows([_row(category_label(c), t[c]["current"], t[c]["prior"], category=c) for c in codes])
         sub_cur = sum(t[c]["current"] for c in codes)
         sub_pri = sum(t[c]["prior"] for c in codes)
         return rows, sub_cur, sub_pri
@@ -369,10 +403,14 @@ def build_financial_position(totals, equity):
     total_assets_cur, total_assets_pri = nca_cur + ca_cur, nca_pri + ca_pri
 
     retained_earnings_closing_prior = equity["retained_earnings_closing_prior_year"]
-    equity_rows = [
-        _row("Share capital", t["share_capital"]["current"], t["share_capital"]["prior"]),
-        _row("Share premium", t["share_premium"]["current"], t["share_premium"]["prior"]),
-        _row("Other reserves", t["other_reserves"]["current"], t["other_reserves"]["prior"]),
+    equity_rows = _filter_nil_rows([
+        _row("Share capital", t["share_capital"]["current"], t["share_capital"]["prior"], category="share_capital"),
+        _row("Share premium", t["share_premium"]["current"], t["share_premium"]["prior"], category="share_premium"),
+        _row("Other reserves", t["other_reserves"]["current"], t["other_reserves"]["prior"], category="other_reserves"),
+    ]) + [
+        # Retained earnings is never suppressed even if nil in both years -
+        # it's the profit/loss roll-forward every entity has, not a
+        # discretionary account balance, and IAS 1 requires it regardless.
         _row("Retained earnings", retained_earnings_closing, retained_earnings_closing_prior),
     ]
     total_equity_cur = t["share_capital"]["current"] + t["share_premium"]["current"] + t["other_reserves"]["current"] + retained_earnings_closing
@@ -471,9 +509,13 @@ def build_cash_flow(totals, pl):
     cash_close_actual = t["cash"]["current"]
 
     return {
+        # operating_rows deliberately isn't nil-filtered: it's a fixed
+        # reconciliation format (adjustments, subtotals, working capital
+        # movements), not a list of trial balance accounts, so every line
+        # stays for the reconciliation to read correctly start to finish.
         "operating_rows": operating_rows, "net_operating": net_operating,
-        "investing_rows": investing_rows, "net_investing": net_investing,
-        "financing_rows": financing_rows, "net_financing": net_financing,
+        "investing_rows": _filter_nil_rows(investing_rows), "net_investing": net_investing,
+        "financing_rows": _filter_nil_rows(financing_rows), "net_financing": net_financing,
         "net_movement": net_movement,
         "cash_open": cash_open, "cash_close_computed": cash_close_computed,
         "cash_close_actual": cash_close_actual,
@@ -511,12 +553,272 @@ def apply_adjustments(totals, adjustments):
     return adjusted
 
 
-def build_all_statements(lines, adjustments=None):
+# ---------------------------------------------------------------------------
+# Notes to the Financial Statements (Finalisation tab) - for engagements on
+# a "full_ifrs" or "ifrs_for_smes" reporting_framework (see
+# models.REPORTING_FRAMEWORKS). "other"/local-GAAP engagements keep the
+# original plain statements + free-text notes box, unchanged.
+#
+# The two frameworks share the exact same note numbering, breakdown-note
+# and accounting-policy engine below - the app's trial balance only ever
+# carries one net current/prior balance per account per IAS 1 category
+# (never a full movement schedule), which is inherently SME-scale detail
+# regardless of which of the two frameworks is chosen, so there's nothing
+# to meaningfully build differently between them at that level. The one
+# real difference is the statement-of-compliance wording in Note 2 (see
+# REPORTING_FRAMEWORK_COMPLIANCE_TEXT) - "Full IFRS" cites IFRS Accounting
+# Standards as issued by the IASB, "IFRS for SMEs" cites the IFRS for
+# Small and Medium-sized Entities Standard specifically.
+# ---------------------------------------------------------------------------
+
+REPORTING_FRAMEWORK_COMPLIANCE_TEXT = {
+    "full_ifrs": (
+        "The financial statements have been prepared in accordance with International Financial "
+        "Reporting Standards (IFRS Accounting Standards) as issued by the International Accounting "
+        "Standards Board (IASB), and comply with the requirements of the Companies Act applicable to "
+        "companies reporting under that framework."
+    ),
+    "ifrs_for_smes": (
+        "The financial statements have been prepared in accordance with the International Financial "
+        "Reporting Standard for Small and Medium-sized Entities (IFRS for SMEs), as issued by the "
+        "International Accounting Standards Board (IASB)."
+    ),
+}
+DEFAULT_BASIS_OF_PREPARATION_TAIL = (
+    " The financial statements are prepared on the historical cost basis, except where stated "
+    "otherwise, and are presented in [functional/presentation currency]. The financial statements "
+    "are prepared on a going concern basis - the directors have no reason to believe the entity will "
+    "not continue in operational existence for the foreseeable future."
+)
+
+# Seeded the first time the Finalisation tab's closing notes are shown for
+# an engagement (see engagements.py) - plain, editable placeholder text the
+# preparer fills in or clears, exactly like DEFAULT_WORKPAPER_NARRATIVE_BODIES
+# elsewhere in this app. Not stored until the preparer saves the form, so
+# nothing is written to the database just by viewing the tab.
+DEFAULT_CLOSING_NOTE_TEXT = {
+    "related_party": (
+        "No related party transactions requiring disclosure were identified during the year, other "
+        "than [describe any key management personnel compensation, and any balances or transactions "
+        "with directors, shareholders, or other related entities]."
+    ),
+    "commitments": (
+        "There were no material capital commitments or contingent liabilities at the reporting date, "
+        "other than [describe any guarantees, legal claims, or capital expenditure contracted for but "
+        "not yet incurred]."
+    ),
+    "subsequent_events": (
+        "No material events occurred between the reporting date and the date these financial "
+        "statements were authorised for issue, other than [describe any subsequent events requiring "
+        "adjustment to, or disclosure in, these financial statements]."
+    ),
+}
+
+
+def general_information_note(client, engagement):
+    """Note 1 (General information) - composed from data already on file
+    (the client's name, industry and this engagement's period end) rather
+    than typed in fresh each time. The entity's jurisdiction of
+    incorporation is left as a bracketed placeholder for the preparer to
+    fill in, since the app doesn't currently record one."""
+    sentences = [f"{client.name} (\"the entity\") is a company incorporated in [jurisdiction of incorporation]."]
+    if client.industry:
+        sentences.append(f"The entity's principal activity is {client.industry.lower()}.")
+    if engagement.period_end:
+        sentences.append(f"These financial statements are for the year ended {engagement.period_end.strftime('%d %B %Y')}.")
+    return " ".join(sentences)
+
+# Checked in the order line items appear on the face of the primary
+# statements (Statement of Financial Position: non-current assets, current
+# assets, equity, non-current liabilities, current liabilities; then the
+# Statement of Profit or Loss) - this is also the order breakdown notes are
+# numbered in, so "Note 6" against a line on the face and "Note 6" heading
+# a note always refer to the same thing. Each entry is
+# (category codes, note title, accounting policy paragraph or None) - more
+# than one code in a note (only "Administrative expenses" needs this) is
+# for a note that mirrors a single combined face line rather than two.
+# `policy` is standard, generic IFRS-consistent wording for a category at
+# this level of detail - the preparer should tailor anything client-specific
+# (e.g. an inventory costing method, a revaluation vs. cost model election)
+# before filing, exactly as with any other boilerplate in this app.
+NOTE_DEFINITIONS = [
+    (["ppe"], "Property, plant and equipment", (
+        "Property, plant and equipment are stated at cost less accumulated depreciation and any "
+        "accumulated impairment losses. Depreciation is charged on a straight-line basis over the "
+        "estimated useful life of each asset so as to write down its cost to its estimated residual "
+        "value. Useful lives and residual values are reviewed, and adjusted if appropriate, at each "
+        "reporting date.")),
+    (["intangible_assets"], "Intangible assets", (
+        "Intangible assets acquired separately are measured on initial recognition at cost and are "
+        "subsequently carried at cost less accumulated amortisation and accumulated impairment losses. "
+        "Intangible assets with finite useful lives are amortised on a straight-line basis over their "
+        "useful economic lives.")),
+    (["investment_property"], "Investment property", (
+        "Investment property is property held to earn rental income and/or for capital appreciation, "
+        "rather than for use in the production or supply of goods or services, or for administrative "
+        "purposes, or for sale in the ordinary course of business.")),
+    (["long_term_investments"], "Long-term investments", (
+        "Long-term investments are non-current financial assets that the entity does not intend to "
+        "realise within twelve months of the reporting date, and are carried at cost less any "
+        "accumulated impairment losses unless a more appropriate measurement basis is stated.")),
+    (["deferred_tax_asset"], "Deferred tax", (
+        "Deferred tax is recognised on temporary differences between the carrying amounts of assets "
+        "and liabilities for financial reporting purposes and the amounts used for taxation purposes, "
+        "and on unused tax losses and credits. A deferred tax asset is recognised only to the extent "
+        "it is probable that future taxable profit will be available against which it can be utilised.")),
+    (["other_noncurrent_assets"], "Other non-current assets", None),
+    (["inventories"], "Inventories", (
+        "Inventories are stated at the lower of cost and net realisable value. Cost includes "
+        "expenditure incurred in acquiring the inventories and bringing them to their existing "
+        "location and condition, and is determined on a [FIFO/weighted average] basis.")),
+    (["trade_receivables"], "Trade and other receivables", (
+        "Trade and other receivables are recognised initially at fair value and subsequently measured "
+        "at amortised cost, less any allowance for expected credit losses.")),
+    (["other_current_assets"], "Other current assets", None),
+    (["cash"], "Cash and cash equivalents", (
+        "Cash and cash equivalents comprise cash on hand, deposits held at call with banks, and other "
+        "short-term, highly liquid investments with original maturities of three months or less that "
+        "are subject to an insignificant risk of changes in value.")),
+    (["share_capital"], "Share capital", None),
+    (["share_premium"], "Share premium", None),
+    (["other_reserves"], "Other reserves", None),
+    (["long_term_borrowings"], "Long-term borrowings", (
+        "Borrowings are recognised initially at fair value, net of transaction costs incurred, and "
+        "subsequently measured at amortised cost using the effective interest method.")),
+    (["deferred_tax_liability"], "Deferred tax liabilities", None),
+    (["long_term_provisions"], "Provisions", (
+        "Provisions are recognised when the entity has a present legal or constructive obligation as "
+        "a result of a past event, it is probable that an outflow of resources will be required to "
+        "settle the obligation, and the amount can be reliably estimated.")),
+    (["other_noncurrent_liabilities"], "Other non-current liabilities", None),
+    (["trade_payables"], "Trade and other payables", (
+        "Trade and other payables are obligations to pay for goods or services that have been acquired "
+        "in the ordinary course of business. They are recognised initially at fair value and "
+        "subsequently measured at amortised cost.")),
+    (["short_term_borrowings"], "Short-term borrowings", None),
+    (["current_tax_payable"], "Current tax liabilities", (
+        "Current tax is the expected tax payable on the taxable income for the year, using tax rates "
+        "enacted or substantively enacted at the reporting date, and any adjustment to tax payable in "
+        "respect of previous years.")),
+    (["short_term_provisions"], "Provisions", None),
+    (["other_current_liabilities"], "Other current liabilities", None),
+    (["revenue"], "Revenue", (
+        "Revenue is recognised when control of the promised goods or services is transferred to the "
+        "customer, at an amount that reflects the consideration the entity expects to be entitled to "
+        "in exchange for those goods or services.")),
+    (["cost_of_sales"], "Cost of sales", None),
+    (["other_income"], "Other income", None),
+    (["distribution_costs"], "Distribution costs", None),
+    (["admin_expenses", "depreciation_amortisation"], "Administrative expenses", None),
+    (["other_expenses"], "Other expenses", None),
+    (["finance_costs"], "Finance costs", (
+        "Finance costs comprise interest expense on borrowings and lease liabilities, and are "
+        "recognised in profit or loss using the effective interest method.")),
+    (["income_tax_expense"], "Income tax expense", (
+        "Income tax expense comprises current and deferred tax. It is recognised in profit or loss "
+        "except to the extent that it relates to items recognised directly in equity or in other "
+        "comprehensive income.")),
+    (["dividends_paid"], "Dividends", None),
+]
+
+def _signed_category_value(code, debit, credit):
+    # Notes always show the natural, normal-balance-positive magnitude of an
+    # expense or income item (e.g. Cost of sales as a positive 180,000),
+    # matching how the illustrative IFRS/IFRS-for-SMEs templates present
+    # note breakdowns - it's the face of the Statement of Profit or Loss,
+    # not the note, that then negates/deducts expense categories.
+    normal = CATEGORY_BY_CODE[code]["normal"]
+    return (debit or 0.0) - (credit or 0.0) if normal == "debit" else (credit or 0.0) - (debit or 0.0)
+
+
+def build_notes(lines, totals):
+    """Builds the numbered Notes to the Financial Statements: one breakdown
+    note per IAS 1 category (or small group of categories - see
+    NOTE_DEFINITIONS) with a non-nil current or prior balance, each listing
+    the individual trial balance accounts making up that total, in the
+    same order categories appear on the face of the statements. A category
+    with a nil balance in both years gets no note at all - matches the
+    statements' own nil-line suppression, so a hidden face line never
+    leaves a dangling, empty note behind.
+
+    Numbering starts at 4, after the three fixed introductory notes (1
+    General information, 2 Basis of preparation, 3 Significant accounting
+    policies - composed by the caller, not here).
+
+    Returns (notes, note_number_by_category): `notes` is the ordered list
+    of note dicts ready to render (each with `number`, `title`, `policy`,
+    `accounts` - one row per underlying trial balance line - and `total`);
+    `note_number_by_category` maps every category code that got a note to
+    that note's number, for build_all_statements() to attach onto the
+    matching statement rows so the face and the note cross-reference each
+    other, exactly like the illustrative templates this was modelled on."""
+    lines_by_category = {}
+    for line in lines:
+        lines_by_category.setdefault(line.fs_category, []).append(line)
+
+    notes = []
+    note_number_by_category = {}
+    next_number = 4
+
+    for codes, title, policy in NOTE_DEFINITIONS:
+        cur = sum(totals[c]["current"] for c in codes)
+        pri = sum(totals[c]["prior"] for c in codes)
+        if _is_nil(cur) and _is_nil(pri):
+            continue  # nothing to disclose - matches the statements' own nil-line suppression
+
+        account_rows = []
+        for code in codes:
+            for l in lines_by_category.get(code, []):
+                current = _signed_category_value(code, l.current_debit, l.current_credit)
+                prior = _signed_category_value(code, l.prior_debit, l.prior_credit)
+                if _is_nil(current) and _is_nil(prior):
+                    continue
+                account_rows.append({
+                    "account_code": l.account_code, "account_name": l.account_name,
+                    "current": current, "prior": prior,
+                })
+
+        number = next_number
+        next_number += 1
+        for code in codes:
+            note_number_by_category[code] = number
+        notes.append({
+            "number": number, "title": title, "policy": policy,
+            "accounts": account_rows, "total": {"current": cur, "prior": pri},
+        })
+
+    return notes, note_number_by_category
+
+
+def _attach_note_numbers(pl, sfp, note_number_by_category):
+    """Sets row['note'] on every statement row that has a `category` (see
+    _row()) and a matching entry in note_number_by_category - every such
+    row survived nil-filtering, so a category with `category` set always
+    resolves to a real note number here, never a dangling reference."""
+    all_row_lists = (
+        [pl["rows"]]
+        + [sfp[k] for k in ("non_current_assets", "current_assets", "equity", "non_current_liabilities", "current_liabilities")]
+    )
+    for rows in all_row_lists:
+        for row in rows:
+            code = row.get("category")
+            if code:
+                row["note"] = note_number_by_category.get(code)
+
+
+def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs"):
     """`adjustments`, when given (a TrialBalance's .adjustments), are applied
     on top of the preliminary trial balance's totals before the statements
     are built - see apply_adjustments() above. Leave it out (the default)
     to build statements straight from the preliminary trial balance, e.g.
-    for a quick preliminary view before any adjustments are proposed."""
+    for a quick preliminary view before any adjustments are proposed.
+
+    `reporting_framework` (see models.REPORTING_FRAMEWORKS) controls only
+    whether the numbered Notes to the Financial Statements are built and
+    cross-referenced onto the face (build_notes() above) - "full_ifrs" and
+    "ifrs_for_smes" both get them, "other"/local-GAAP engagements get
+    `notes=[]` and no note numbers on the face, leaving the plain
+    statements exactly as before this feature."""
     totals = compute_totals(lines)
     if adjustments:
         totals = apply_adjustments(totals, adjustments)
@@ -524,7 +826,12 @@ def build_all_statements(lines, adjustments=None):
     equity = build_equity_statement(totals, pl)
     sfp = build_financial_position(totals, equity)
     cf = build_cash_flow(totals, pl)
-    return {"totals": totals, "pl": pl, "equity": equity, "sfp": sfp, "cf": cf}
+    if reporting_framework in ("full_ifrs", "ifrs_for_smes"):
+        notes, note_number_by_category = build_notes(lines, totals)
+        _attach_note_numbers(pl, sfp, note_number_by_category)
+    else:
+        notes = []
+    return {"totals": totals, "pl": pl, "equity": equity, "sfp": sfp, "cf": cf, "notes": notes}
 
 
 def parse_tb_rows(rows):

@@ -2052,25 +2052,25 @@
   <div class="card">
     <h3 class="mt-0">Statement of Financial Position</h3>
     <table>
-      <thead><tr><th></th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
+      <thead><tr><th></th><th>Note</th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
       <tbody>
-        <tr><td class="section-title" colspan="3">Non-current assets</td></tr>
-        {% for r in statements.sfp.non_current_assets %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total non-current assets</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.nca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.nca_total.prior) }}</strong></td></tr>
-        <tr><td class="section-title" colspan="3">Current assets</td></tr>
-        {% for r in statements.sfp.current_assets %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total current assets</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ca_total.prior) }}</strong></td></tr>
-        <tr><td><strong>Total assets</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_assets.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_assets.prior) }}</strong></td></tr>
-        <tr><td class="section-title" colspan="3">Equity</td></tr>
-        {% for r in statements.sfp.equity %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total equity</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity.prior) }}</strong></td></tr>
-        <tr><td class="section-title" colspan="3">Non-current liabilities</td></tr>
-        {% for r in statements.sfp.non_current_liabilities %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total non-current liabilities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ncl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ncl_total.prior) }}</strong></td></tr>
-        <tr><td class="section-title" colspan="3">Current liabilities</td></tr>
-        {% for r in statements.sfp.current_liabilities %}<tr><td>{{ r.label }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total current liabilities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.cl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.cl_total.prior) }}</strong></td></tr>
-        <tr><td><strong>Total equity and liabilities</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity_and_liabilities.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity_and_liabilities.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="4">Non-current assets</td></tr>
+        {% for r in statements.sfp.non_current_assets %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total non-current assets</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.nca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.nca_total.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="4">Current assets</td></tr>
+        {% for r in statements.sfp.current_assets %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total current assets</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ca_total.prior) }}</strong></td></tr>
+        <tr><td><strong>Total assets</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_assets.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_assets.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="4">Equity</td></tr>
+        {% for r in statements.sfp.equity %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total equity</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="4">Non-current liabilities</td></tr>
+        {% for r in statements.sfp.non_current_liabilities %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total non-current liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ncl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ncl_total.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="4">Current liabilities</td></tr>
+        {% for r in statements.sfp.current_liabilities %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total current liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.cl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.cl_total.prior) }}</strong></td></tr>
+        <tr><td><strong>Total equity and liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity_and_liabilities.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity_and_liabilities.prior) }}</strong></td></tr>
       </tbody>
     </table>
     {% set bc = statements.sfp.balance_check %}
@@ -2083,11 +2083,12 @@
   <div class="card">
     <h3 class="mt-0">Statement of Profit or Loss and Other Comprehensive Income</h3>
     <table>
-      <thead><tr><th></th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
+      <thead><tr><th></th><th>Note</th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
       <tbody>
       {% for r in statements.pl.rows %}
         <tr>
           <td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}</td>
+          <td>{{ r.note or '' }}</td>
           <td class="text-right">{% if r.bold %}<strong>{{ '%.2f'|format(r.current) }}</strong>{% else %}{{ '%.2f'|format(r.current) }}{% endif %}</td>
           <td class="text-right">{% if r.bold %}<strong>{{ '%.2f'|format(r.prior) }}</strong>{% else %}{{ '%.2f'|format(r.prior) }}{% endif %}</td>
         </tr>
@@ -2149,13 +2150,79 @@
     </p>
   </div>
 
+  {% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %}
+  <div class="card">
+    <h3 class="mt-0">Notes to the Financial Statements</h3>
+    <p class="muted" style="font-size:11.5px;">
+      Prepared under {{ reporting_framework_labels.get(engagement.reporting_framework) }}. Note 1 and the account
+      breakdown notes are rebuilt fresh from the trial balance every time you open this tab - if a note looks wrong,
+      fix the account mapping rather than this text. The framework can be changed below.
+    </p>
+
+    <h4>1. General information</h4>
+    <p>{{ general_information_note }}</p>
+
+    <h4>2. Basis of preparation</h4>
+    <p>{{ (financial_statements.basis_of_preparation if financial_statements else '') or default_basis_of_preparation }}</p>
+
+    {% set policy_notes = statements.notes|selectattr('policy')|list %}
+    {% if policy_notes %}
+    <h4>3. Significant accounting policies</h4>
+    {% for note in policy_notes %}
+    <p><strong>({{ loop.index }}) {{ note.title }}.</strong> {{ note.policy }}</p>
+    {% endfor %}
+    {% endif %}
+
+    {% for note in statements.notes %}
+    <h4>{{ note.number }}. {{ note.title }}</h4>
+    {% if note.accounts %}
+    <table>
+      <thead><tr><th>Account</th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
+      <tbody>
+        {% for a in note.accounts %}
+        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}</td><td class="text-right">{{ '%.2f'|format(a.current) }}</td><td class="text-right">{{ '%.2f'|format(a.prior) }}</td></tr>
+        {% endfor %}
+        <tr><td><strong>Total</strong></td><td class="text-right"><strong>{{ '%.2f'|format(note.total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(note.total.prior) }}</strong></td></tr>
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-right"><strong>{{ '%.2f'|format(note.total.current) }}</strong> ({{ '%.2f'|format(note.total.prior) }} prior year)</p>
+    {% endif %}
+    {% endfor %}
+
+    {% set next_num = (statements.notes[-1].number + 1) if statements.notes else 4 %}
+    <h4>{{ next_num }}. Related party transactions</h4>
+    <p>{{ (financial_statements.related_party_note if financial_statements else '') or default_closing_notes.related_party }}</p>
+    <h4>{{ next_num + 1 }}. Contingencies and commitments</h4>
+    <p>{{ (financial_statements.commitments_note if financial_statements else '') or default_closing_notes.commitments }}</p>
+    <h4>{{ next_num + 2 }}. Events after the reporting period</h4>
+    <p>{{ (financial_statements.subsequent_events_note if financial_statements else '') or default_closing_notes.subsequent_events }}</p>
+  </div>
+  {% endif %}
+
   <div class="card">
     <h3 class="mt-0">Basis of preparation &amp; sign-off</h3>
     <form method="post" action="{{ url_for('engagements.save_financial_statements_notes', engagement_id=engagement.id) }}">
-      <label for="basis_of_preparation">Basis of preparation / notes</label>
+      <label for="reporting_framework">Financial reporting framework</label>
+      <select id="reporting_framework" name="reporting_framework">
+        {% for code, label in reporting_frameworks %}<option value="{{ code }}" {% if engagement.reporting_framework==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Full IFRS and IFRS for SMEs get the numbered Notes to the Financial Statements above, generated from the trial balance. Other/local GAAP keeps the plain statements below with only the free-text notes box.</p>
+      <label for="basis_of_preparation" style="margin-top:10px;">Basis of preparation{% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %} (Note 2 above){% endif %}</label>
       <textarea id="basis_of_preparation" name="basis_of_preparation" rows="3">{{ financial_statements.basis_of_preparation if financial_statements else '' }}</textarea>
+      {% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %}
+      <label for="related_party_note" style="margin-top:10px;">Related party transactions</label>
+      <textarea id="related_party_note" name="related_party_note" rows="2">{{ financial_statements.related_party_note if financial_statements else '' }}</textarea>
+      <label for="commitments_note" style="margin-top:10px;">Contingencies and commitments</label>
+      <textarea id="commitments_note" name="commitments_note" rows="2">{{ financial_statements.commitments_note if financial_statements else '' }}</textarea>
+      <label for="subsequent_events_note" style="margin-top:10px;">Events after the reporting period</label>
+      <textarea id="subsequent_events_note" name="subsequent_events_note" rows="2">{{ financial_statements.subsequent_events_note if financial_statements else '' }}</textarea>
+      <label for="notes_to_financial_statements" style="margin-top:10px;">Other matters</label>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Anything else not covered by a note above.</p>
+      {% else %}
       <label for="notes_to_financial_statements" style="margin-top:10px;">Notes to the Financial Statements</label>
       <p class="muted" style="font-size:11.5px;margin-top:-2px;">Free text - accounting policies, breakdowns, commitments/contingencies, related parties, subsequent events, etc. The figures throughout the statements above always come from the Trial Balance and are never set here.</p>
+      {% endif %}
       <textarea id="notes_to_financial_statements" name="notes_to_financial_statements" rows="10">{{ financial_statements.notes_to_financial_statements if financial_statements else '' }}</textarea>
       <button type="submit" class="btn gold">Save</button>
     </form>

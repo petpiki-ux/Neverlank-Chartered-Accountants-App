@@ -21,6 +21,7 @@ from models import (
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, REGULATORY_NOTICE_SOURCE_LABELS,
     SanctionsListStatus, RegulatoryNotice, ClientKeyPerson,
     COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
+    REPORTING_FRAMEWORKS, REPORTING_FRAMEWORK_LABELS,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
     FinalisationChecklist, FinalisationChecklistItem, DEFAULT_FINALISATION_CHECKLIST_ITEMS, FORENSIC_FINALISATION_CHECKLIST_ITEMS,
     AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES,
@@ -316,7 +317,7 @@ def view_engagement(engagement_id):
     # Analytical Review and Substantive Procedures work from the preliminary
     # trial_balance.lines directly, unadjusted, so they're unaffected by this.
     statements = (
-        fin.build_all_statements(trial_balance.lines, trial_balance.adjustments)
+        fin.build_all_statements(trial_balance.lines, trial_balance.adjustments, reporting_framework=engagement.reporting_framework)
         if trial_balance and trial_balance.lines else None
     )
     # Face of Trial Balance (Trial Balance tab): the summarised, by-category
@@ -413,6 +414,11 @@ def view_engagement(engagement_id):
         suggested_categories=suggested_categories,
         financial_statements=financial_statements,
         statements=statements,
+        reporting_frameworks=REPORTING_FRAMEWORKS,
+        reporting_framework_labels=REPORTING_FRAMEWORK_LABELS,
+        general_information_note=fin.general_information_note(engagement.client, engagement),
+        default_basis_of_preparation=fin.REPORTING_FRAMEWORK_COMPLIANCE_TEXT.get(engagement.reporting_framework, "") + fin.DEFAULT_BASIS_OF_PREPARATION_TAIL,
+        default_closing_notes=fin.DEFAULT_CLOSING_NOTE_TEXT,
         category_choices=fin.category_choices(),
         category_label=fin.category_label,
         audit_areas=substantive_area_names,
@@ -2842,12 +2848,25 @@ def save_financial_statements_notes(engagement_id):
     if not fs:
         fs = FinancialStatements(engagement_id=engagement_id)
         db.session.add(fs)
+    # Which framework the Financial Statements below are prepared under -
+    # see models.REPORTING_FRAMEWORKS. Only "Full IFRS"/"IFRS for SMEs" get
+    # the auto-generated, numbered Notes (financials.build_notes); changing
+    # this takes effect immediately since the statements are always
+    # rebuilt live from the trial balance, never stored.
+    framework = request.form.get("reporting_framework", "").strip()
+    if framework in dict(REPORTING_FRAMEWORKS):
+        engagement.reporting_framework = framework
     fs.basis_of_preparation = request.form.get("basis_of_preparation", "").strip()
     # Notes to the Financial Statements are free text and editable here, same
     # as the basis of preparation - but note that the FIGURES throughout the
     # statements themselves are never set from this form: they always come
     # live from the adjusted TrialBalance (financials.py) and stay that way.
     fs.notes_to_financial_statements = request.form.get("notes_to_financial_statements", "").strip()
+    # The three standard closing notes (see financials.DEFAULT_CLOSING_NOTE_TEXT
+    # for what the Finalisation tab shows before any of these have been saved).
+    fs.related_party_note = request.form.get("related_party_note", "").strip()
+    fs.commitments_note = request.form.get("commitments_note", "").strip()
+    fs.subsequent_events_note = request.form.get("subsequent_events_note", "").strip()
     fs.completed_by_id = current_user.id
     fs.completed_at = datetime.utcnow()
     fs.reviewed_by_id = None
@@ -3413,7 +3432,7 @@ def generate_financial_statements_docx(engagement_id):
     if not trial_balance or not trial_balance.lines:
         flash("Enter or import the trial balance (Trial Balance tab) before generating the financial statements working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
-    statements = fin.build_all_statements(trial_balance.lines, trial_balance.adjustments)
+    statements = fin.build_all_statements(trial_balance.lines, trial_balance.adjustments, reporting_framework=engagement.reporting_framework)
     financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
     buf = wp.build_financial_statements_docx(engagement, statements, financial_statements)
     doc = _file_generated_workpaper(engagement, "financial_statements", "Financial Statements", "N8100", "Financial_Statements", "docx", buf)

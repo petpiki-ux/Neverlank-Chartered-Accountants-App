@@ -47,7 +47,10 @@ def _add_missing_columns():
         ] + partner_signoff_cols,
         "client": [("company_number", "VARCHAR(80)")],
         "message_recipient": [("recalled_at", "DATETIME")],
-        "engagement": [("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0")],
+        "engagement": [
+            ("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0"),
+            ("reporting_framework", "VARCHAR(20) DEFAULT 'full_ifrs'"),
+        ],
         "analytical_review_line": [("source", "VARCHAR(10) DEFAULT 'manual'")],
         "engagement_checklist_item": [
             ("reviewed_by_id", "INTEGER"),
@@ -82,7 +85,10 @@ def _add_missing_columns():
             ("not_applicable", "BOOLEAN DEFAULT 0"), ("not_applicable_reason", "TEXT"),
             ("marked_na_by_id", "INTEGER"), ("marked_na_at", "DATETIME"),
         ],
-        "financial_statements": list(partner_signoff_cols) + [("notes_to_financial_statements", "TEXT")],
+        "financial_statements": list(partner_signoff_cols) + [
+            ("notes_to_financial_statements", "TEXT"),
+            ("related_party_note", "TEXT"), ("commitments_note", "TEXT"), ("subsequent_events_note", "TEXT"),
+        ],
         "client_acceptance": [
             ("risk_conflicts_score", "INTEGER"),
             ("risk_security_score", "INTEGER"),

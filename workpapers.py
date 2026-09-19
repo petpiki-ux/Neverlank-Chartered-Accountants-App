@@ -34,6 +34,7 @@ from reportlab.platypus import (
 )
 
 from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS, filing_reference
+import financials as fin
 
 FIRM_NAME = "Neverlank Chartered Accountants"
 FIRM_ADDRESS = "2nd Floor, Michael House, 62 Nelson Mandela Avenue, Harare, Zimbabwe"
@@ -198,7 +199,8 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         subtitle=f"Ref. {filing_reference('financials')}" + (" (draft - not yet fully mapped/reviewed)" if not financial_statements or not financial_statements.is_partner_signed else ""),
     )
 
-    if financial_statements and financial_statements.basis_of_preparation:
+    is_ifrs_framework = engagement.reporting_framework in ("full_ifrs", "ifrs_for_smes")
+    if not is_ifrs_framework and financial_statements and financial_statements.basis_of_preparation:
         _add_heading(doc, "Basis of Preparation", level=2)
         doc.add_paragraph(financial_statements.basis_of_preparation)
 
@@ -258,7 +260,50 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     doc.add_paragraph(f"Net increase/(decrease) in cash: {_fmt_num(cf['net_movement'])}")
     doc.add_paragraph(f"Cash at end of year (per trial balance): {_fmt_num(cf['cash_close_actual'])}")
 
-    if financial_statements and financial_statements.notes_to_financial_statements:
+    if is_ifrs_framework:
+        _add_heading(doc, "Notes to the Financial Statements", level=1)
+
+        _add_heading(doc, "1. General information", level=2)
+        doc.add_paragraph(fin.general_information_note(engagement.client, engagement))
+
+        _add_heading(doc, "2. Basis of preparation", level=2)
+        basis_text = (financial_statements.basis_of_preparation if financial_statements else "") or (
+            fin.REPORTING_FRAMEWORK_COMPLIANCE_TEXT.get(engagement.reporting_framework, "") + fin.DEFAULT_BASIS_OF_PREPARATION_TAIL
+        )
+        doc.add_paragraph(basis_text)
+
+        policy_notes = [n for n in statements["notes"] if n.get("policy")]
+        if policy_notes:
+            _add_heading(doc, "3. Significant accounting policies", level=2)
+            for i, note in enumerate(policy_notes, start=1):
+                p = doc.add_paragraph()
+                run = p.add_run(f"({i}) {note['title']}. ")
+                run.bold = True
+                p.add_run(note["policy"])
+
+        for note in statements["notes"]:
+            account_rows = [
+                {"label": (f"{a['account_code']} - " if a.get("account_code") else "") + a["account_name"],
+                 "current": a["current"], "prior": a["prior"]}
+                for a in note["accounts"]
+            ] + [{"label": "Total", "current": note["total"]["current"], "prior": note["total"]["prior"], "bold": True}]
+            two_col_table(f"{note['number']}. {note['title']}", account_rows, level=2)
+
+        next_num = (statements["notes"][-1]["number"] + 1) if statements["notes"] else 4
+        closing_notes = [
+            (next_num, "Related party transactions", financial_statements.related_party_note if financial_statements else None, fin.DEFAULT_CLOSING_NOTE_TEXT["related_party"]),
+            (next_num + 1, "Contingencies and commitments", financial_statements.commitments_note if financial_statements else None, fin.DEFAULT_CLOSING_NOTE_TEXT["commitments"]),
+            (next_num + 2, "Events after the reporting period", financial_statements.subsequent_events_note if financial_statements else None, fin.DEFAULT_CLOSING_NOTE_TEXT["subsequent_events"]),
+        ]
+        for number, title, saved_text, default_text in closing_notes:
+            _add_heading(doc, f"{number}. {title}", level=2)
+            doc.add_paragraph(saved_text or default_text)
+
+        if financial_statements and financial_statements.notes_to_financial_statements:
+            _add_heading(doc, "Other matters", level=2)
+            for para in financial_statements.notes_to_financial_statements.split("\n"):
+                doc.add_paragraph(para)
+    elif financial_statements and financial_statements.notes_to_financial_statements:
         _add_heading(doc, "Notes to the Financial Statements", level=1)
         for para in financial_statements.notes_to_financial_statements.split("\n"):
             doc.add_paragraph(para)

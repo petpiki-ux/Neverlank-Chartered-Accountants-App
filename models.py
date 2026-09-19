@@ -7,6 +7,19 @@ from extensions import db
 
 
 ENGAGEMENT_TYPES = ["Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement"]
+
+# The financial reporting framework the client's Financial Statements are
+# prepared under (Finalisation tab). Only "full_ifrs" and "ifrs_for_smes"
+# get the auto-generated, numbered Notes to the Financial Statements (see
+# financials.build_notes) - "other" keeps the original plain statements +
+# free-text notes box, unchanged, since a local-GAAP framework isn't
+# something this app has any basis to generate IFRS-style notes for.
+REPORTING_FRAMEWORKS = [
+    ("full_ifrs", "Full IFRS"),
+    ("ifrs_for_smes", "IFRS for SMEs"),
+    ("other", "Other / local GAAP"),
+]
+REPORTING_FRAMEWORK_LABELS = dict(REPORTING_FRAMEWORKS)
 SECRETARIAL_SUBDIVISIONS = ["Company Registrations", "Trusts", "PVOs"]
 ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"]
 TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
@@ -870,6 +883,15 @@ class Engagement(db.Model):
     # completely unaffected - nobody has to retroactively fill in an
     # acceptance record for work already under way.
     acceptance_required = db.Column(db.Boolean, default=True, nullable=False)
+
+    # Which financial reporting framework the Financial Statements
+    # (Finalisation tab) are prepared under - see REPORTING_FRAMEWORKS
+    # above. Defaults to "full_ifrs" for every engagement (existing ones
+    # included, via _add_missing_columns in app.py), matching how the
+    # Financial Statements have always been presented here; change it on
+    # the Finalisation tab if a given engagement is on IFRS for SMEs or a
+    # local framework instead.
+    reporting_framework = db.Column(db.String(20), default="full_ifrs", nullable=False)
 
     partner = db.relationship("User", foreign_keys=[partner_id])
     manager = db.relationship("User", foreign_keys=[manager_id])
@@ -2069,8 +2091,19 @@ class FinancialStatements(db.Model):
     # Notes to the Financial Statements - free text, editable in-app (unlike
     # the figures throughout the statements themselves, which are always
     # computed live from the adjusted TrialBalance via financials.py and are
-    # never independently editable/overridable here).
+    # never independently editable/overridable here). Kept as a catch-all
+    # "other matters" section alongside the structured, auto-generated
+    # notes (accounting policies + numbered breakdown notes, built fresh
+    # from the trial balance every time - see financials.build_notes) for
+    # engagements on a Full IFRS / IFRS for SMEs reporting_framework.
     notes_to_financial_statements = db.Column(db.Text)
+    # The three standard closing notes every set of financial statements
+    # needs but that no trial balance account can supply on its own - free
+    # text, seeded with a sensible placeholder default the first time the
+    # Finalisation tab is opened (see engagements._default_closing_note_text).
+    related_party_note = db.Column(db.Text)
+    commitments_note = db.Column(db.Text)
+    subsequent_events_note = db.Column(db.Text)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     completed_at = db.Column(db.DateTime)
