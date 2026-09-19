@@ -56,6 +56,7 @@ def _add_missing_columns():
             ("pie_pension_fund", "BOOLEAN DEFAULT 0"), ("pie_medical_aid", "BOOLEAN DEFAULT 0"),
             ("pie_debt_equity_issuer", "BOOLEAN DEFAULT 0"),
             ("sme_sector", "VARCHAR(50)"), ("sme_size_band", "VARCHAR(10)"),
+            ("sme_annual_turnover", "FLOAT"), ("sme_gross_assets", "FLOAT"), ("sme_staff_headcount", "INTEGER"),
         ],
         "analytical_review_line": [("source", "VARCHAR(10) DEFAULT 'manual'")],
         "engagement_checklist_item": [

@@ -2227,7 +2227,43 @@
         <option value="">Not classified</option>
         {% for sector in sme_act_sectors %}<option value="{{ sector }}" {% if engagement.sme_sector==sector %}selected{% endif %}>{{ sector }}</option>{% endfor %}
       </select>
-      <label for="sme_size_band" style="margin-top:10px;">Size band (Small and Medium Enterprises Act)</label>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px 16px;margin-top:10px;">
+        <div>
+          <label for="sme_staff_headcount">Staff headcount</label>
+          <input type="number" id="sme_staff_headcount" name="sme_staff_headcount" min="0" step="1" value="{{ engagement.sme_staff_headcount if engagement.sme_staff_headcount is not none else '' }}">
+        </div>
+        <div>
+          <label for="sme_annual_turnover">Annual turnover (US$)</label>
+          <input type="number" id="sme_annual_turnover" name="sme_annual_turnover" min="0" step="0.01" value="{{ engagement.sme_annual_turnover if engagement.sme_annual_turnover is not none else '' }}">
+        </div>
+        <div>
+          <label for="sme_gross_assets">Gross assets, excl. real estate (US$)</label>
+          <input type="number" id="sme_gross_assets" name="sme_gross_assets" min="0" step="0.01" value="{{ engagement.sme_gross_assets if engagement.sme_gross_assets is not none else '' }}">
+        </div>
+      </div>
+      <details style="margin-top:6px;">
+        <summary style="cursor:pointer;font-size:11.5px;" class="muted">General Small and Medium Enterprises Act size thresholds used for the suggestion below</summary>
+        <table style="margin-top:6px;">
+          <thead><tr><th>Category</th><th>Staff headcount</th><th class="text-right">Max annual turnover</th><th class="text-right">Max gross assets (excl. real estate)</th></tr></thead>
+          <tbody>
+            {% for code, max_staff, max_turnover, max_assets in sme_act_size_thresholds %}
+            <tr><td>{{ sme_act_size_bands|selectattr('0', 'equalto', code)|map(attribute='1')|first }}</td><td>&le; {{ max_staff }}</td><td class="text-right">US$ {{ '{:,.0f}'.format(max_turnover) }}</td><td class="text-right">US$ {{ '{:,.0f}'.format(max_assets) }}</td></tr>
+            {% endfor %}
+            <tr><td>Large</td><td colspan="3">Exceeds every threshold above</td></tr>
+          </tbody>
+        </table>
+        <p class="muted" style="font-size:11px;">A general table applying across most major sectors - the Act's schedule varies slightly by sector, so treat this as a starting point, not the final word on a borderline case.</p>
+      </details>
+
+      <p style="margin:10px 0 6px;">
+        {% if suggested_sme_size_band %}
+        Suggested band based on the figures above: <strong>{{ sme_act_size_bands|selectattr('0', 'equalto', suggested_sme_size_band)|map(attribute='1')|first or 'Large' }}</strong>. Pick the band to record below - it doesn't have to match the suggestion.
+        {% else %}
+        <span class="muted" style="font-size:11.5px;">Enter staff headcount, annual turnover and gross assets above for a suggested band.</span>
+        {% endif %}
+      </p>
+      <label for="sme_size_band">Size band (Small and Medium Enterprises Act)</label>
       <select id="sme_size_band" name="sme_size_band">
         <option value="">Not classified</option>
         {% for code, label in sme_act_size_bands %}<option value="{{ code }}" {% if engagement.sme_size_band==code %}selected{% endif %}>{{ label }}</option>{% endfor %}

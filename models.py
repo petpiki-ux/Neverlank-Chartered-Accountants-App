@@ -965,9 +965,17 @@ class Engagement(db.Model):
 
     # Small and Medium Enterprises Act classification - recorded, informational
     # client information only (see SME_ACT_SECTORS / SME_ACT_SIZE_BANDS
-    # above); it does not drive reporting_framework.
+    # above); it does not drive reporting_framework. sme_size_band is the
+    # preparer's own final selection - annual_turnover/gross_assets/staff_
+    # headcount, when all three are entered, feed financials.classify_sme_size()
+    # for a recommended band shown alongside the dropdown (see the
+    # Finalisation tab's "Company classification" card), never overwriting
+    # the preparer's own choice on their own.
     sme_sector = db.Column(db.String(50))
     sme_size_band = db.Column(db.String(10))
+    sme_annual_turnover = db.Column(db.Float)
+    sme_gross_assets = db.Column(db.Float)
+    sme_staff_headcount = db.Column(db.Integer)
 
     partner = db.relationship("User", foreign_keys=[partner_id])
     manager = db.relationship("User", foreign_keys=[manager_id])

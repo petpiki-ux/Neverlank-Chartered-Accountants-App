@@ -428,6 +428,8 @@ def view_engagement(engagement_id):
         pie_criteria=PIE_CRITERIA,
         sme_act_sectors=SME_ACT_SECTORS,
         sme_act_size_bands=SME_ACT_SIZE_BANDS,
+        sme_act_size_thresholds=fin.SME_ACT_SIZE_THRESHOLDS,
+        suggested_sme_size_band=fin.classify_sme_size(engagement.sme_staff_headcount, engagement.sme_annual_turnover, engagement.sme_gross_assets),
         category_choices=fin.category_choices(),
         category_label=fin.category_label,
         audit_areas=substantive_area_names,
@@ -2883,6 +2885,19 @@ def save_financial_statements_notes(engagement_id):
     engagement.sme_sector = sme_sector if sme_sector in SME_ACT_SECTORS else None
     sme_size_band = request.form.get("sme_size_band", "").strip()
     engagement.sme_size_band = sme_size_band if sme_size_band in dict(SME_ACT_SIZE_BANDS) else None
+
+    def _blank_tolerant_number(field_name, cast):
+        raw = request.form.get(field_name, "").strip().replace(",", "")
+        if not raw:
+            return None
+        try:
+            return cast(raw)
+        except ValueError:
+            return None
+
+    engagement.sme_annual_turnover = _blank_tolerant_number("sme_annual_turnover", float)
+    engagement.sme_gross_assets = _blank_tolerant_number("sme_gross_assets", float)
+    engagement.sme_staff_headcount = _blank_tolerant_number("sme_staff_headcount", int)
     fs.basis_of_preparation = request.form.get("basis_of_preparation", "").strip()
     # Notes to the Financial Statements are free text and editable here, same
     # as the basis of preparation - but note that the FIGURES throughout the

@@ -174,6 +174,42 @@ def suggest_fs_category(account_name):
     return None
 
 
+# General Small and Medium Enterprises Act [Chapter 24:12] size thresholds
+# (Fourth Schedule) - staff headcount, maximum annual turnover, and maximum
+# gross assets excluding real estate, checked in this order (an entity
+# qualifies for the first/smallest band whose every threshold it meets; if
+# it exceeds even Medium's, it's Large). The Act's actual schedule varies
+# these numbers slightly by sector; this is the general table that applies
+# across most major sectors (Manufacturing, Agriculture, Arts, Services,
+# etc.) - a deliberately practical simplification, not a substitute for
+# checking the sector-specific schedule on a borderline case. Where the
+# general table gives a range for staff headcount (e.g. "6 to 30/40" for
+# Small), the higher figure is used here so a company isn't understated
+# into a smaller band than its sector might actually allow.
+SME_ACT_SIZE_THRESHOLDS = [
+    ("micro", 5, 30_000, 30_000),
+    ("small", 40, 500_000, 500_000),
+    ("medium", 100, 1_000_000, 1_000_000),
+]
+
+
+def classify_sme_size(staff_headcount, annual_turnover, gross_assets):
+    """Suggests a Small and Medium Enterprises Act size band from the three
+    figures a preparer enters on the Finalisation tab's Company
+    classification card - see SME_ACT_SIZE_THRESHOLDS. Returns None if any
+    of the three figures is missing (nothing to compute from yet, leaving
+    the band unclassified rather than guessing), otherwise "micro",
+    "small", "medium", or "large" (exceeds every band's thresholds).
+    A recommendation only - the preparer's own selection in the Finalisation
+    tab's size band dropdown always has the final say."""
+    if staff_headcount is None or annual_turnover is None or gross_assets is None:
+        return None
+    for code, max_staff, max_turnover, max_assets in SME_ACT_SIZE_THRESHOLDS:
+        if staff_headcount <= max_staff and annual_turnover <= max_turnover and gross_assets <= max_assets:
+            return code
+    return "large"
+
+
 def summarise_tb_by_category(lines):
     """Groups trial balance lines by their IAS 1 category for the Trial
     Balance tab's "Summarised" Face of Trial Balance view - one row per
