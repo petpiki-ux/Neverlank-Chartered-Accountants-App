@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+{% block title %}Filing Index &amp; Manual - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Filing Index &amp; Manual</h1>
+    <div class="subtitle">The firm's Audit Working Paper Indexing &amp; Filing Policy - the written policy below, and the full, editable list of every N-series (Current File) and P-series (Permanent File) working-paper reference it defines.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Manual</h3>
+  {% for section in manual %}
+    <div style="margin-bottom:16px;">
+      <h4 style="margin-bottom:6px;">{{ section.heading }}</h4>
+      {% for p in section.paragraphs or [] %}
+        <p style="margin:0 0 8px 0;">{{ p }}</p>
+      {% endfor %}
+      {% if section.bullets %}
+        <ul style="margin-top:0;">
+          {% for b in section.bullets %}<li style="margin-bottom:4px;">{{ b }}</li>{% endfor %}
+        </ul>
+      {% endif %}
+      {% for p in section.paragraphs_after or [] %}
+        <p style="margin:0 0 8px 0;">{{ p }}</p>
+      {% endfor %}
+    </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Add a filing index entry</h3>
+  <form method="post" action="{{ url_for('filing_index.add_section') }}" class="form-row" style="align-items:flex-end;">
+    <div><label>Code</label><input type="text" name="code" placeholder="e.g. N3700" maxlength="10" required></div>
+    <div><label>File</label>
+      <select name="is_permanent">
+        <option value="0">Current File (N-series)</option>
+        <option value="1">Permanent File (P-series)</option>
+      </select>
+    </div>
+    <div><label>Category</label><input type="text" name="category" placeholder="e.g. Statement of Financial Position — Assets"></div>
+    <div style="flex:1;"><label>Section</label><input type="text" name="section" placeholder="e.g. Inventories" required></div>
+    <div style="flex:1;"><label>Typical contents</label><input type="text" name="typical_contents" placeholder="Optional"></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">+ Add</button></div>
+  </form>
+  <p class="muted" style="font-size:12px;">Per the firm's own convention, a number is never deleted or reassigned once used - if a working paper is no longer required, mark its code "not used" below instead.</p>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Current File (N-series)</h3>
+  {% set ns = namespace(category='') %}
+  {% for s in current_file %}
+    {% if s.category and s.category != ns.category %}
+      <div class="section-title">{{ s.category }}</div>
+      {% set ns.category = s.category %}
+    {% endif %}
+    <form method="post" action="{{ url_for('filing_index.update_section', section_id=s.id) }}" class="checklist-row" style="{% if not s.is_active %}opacity:0.55;{% endif %}">
+      <span style="width:70px;font-weight:600;">{{ s.code }}{% if not s.is_active %} <span class="badge">not used</span>{% endif %}</span>
+      <input type="text" name="category" value="{{ s.category or '' }}" placeholder="Category" style="width:220px;margin-bottom:0;">
+      <input type="text" name="section" value="{{ s.section }}" placeholder="Section" required style="width:220px;margin-bottom:0;">
+      <input type="text" name="typical_contents" value="{{ s.typical_contents or '' }}" placeholder="Typical contents" style="flex:1;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Save</button>
+      <button type="submit" formaction="{{ url_for('filing_index.toggle_active', section_id=s.id) }}" class="btn small {% if s.is_active %}danger{% else %}secondary{% endif %}">{{ 'Mark not used' if s.is_active else 'Reactivate' }}</button>
+    </form>
+  {% else %}
+    <div class="empty-state">No Current File entries yet.</div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Permanent File (P-series)</h3>
+  {% for s in permanent_file %}
+    <form method="post" action="{{ url_for('filing_index.update_section', section_id=s.id) }}" class="checklist-row" style="{% if not s.is_active %}opacity:0.55;{% endif %}">
+      <span style="width:70px;font-weight:600;">{{ s.code }}{% if not s.is_active %} <span class="badge">not used</span>{% endif %}</span>
+      <input type="text" name="category" value="{{ s.category or '' }}" placeholder="Category" style="width:220px;margin-bottom:0;">
+      <input type="text" name="section" value="{{ s.section }}" placeholder="Section" required style="width:220px;margin-bottom:0;">
+      <input type="text" name="typical_contents" value="{{ s.typical_contents or '' }}" placeholder="Typical contents" style="flex:1;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Save</button>
+      <button type="submit" formaction="{{ url_for('filing_index.toggle_active', section_id=s.id) }}" class="btn small {% if s.is_active %}danger{% else %}secondary{% endif %}">{{ 'Mark not used' if s.is_active else 'Reactivate' }}</button>
+    </form>
+  {% else %}
+    <div class="empty-state">No Permanent File entries yet.</div>
+  {% endfor %}
+</div>
+{% endblock %}

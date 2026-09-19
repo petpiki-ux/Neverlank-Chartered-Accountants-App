@@ -4,7 +4,7 @@ from flask_login import login_required, current_user
 from extensions import db
 from models import (
     Client, INDUSTRY_OPTIONS, user_has_permission, user_can_access_engagement,
-    COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES,
+    COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES, FilingIndexSection,
 )
 from engagements import sync_substantive_procedures_if_started
 
@@ -103,6 +103,7 @@ def view_client(client_id):
         and not (p.number_of_shares or p.shareholding_percentage or p.id_number or p.nationality or p.address)
         for p in client.key_people
     )
+    permanent_file_sections = FilingIndexSection.query.filter_by(is_permanent=True, is_active=True).order_by(FilingIndexSection.order, FilingIndexSection.code).all()
     return render_template(
         "clients/detail.html", client=client, visible_engagements=visible_engagements,
         suggested_people=suggested_people, confirmed_people=confirmed_people,
@@ -111,6 +112,7 @@ def view_client(client_id):
         public_research_scopes=PUBLIC_RESEARCH_SCOPES,
         public_research_runs=client.public_research_runs,
         can_manage_company_documents=user_has_permission(current_user, "manage_company_documents"),
+        permanent_file_sections=permanent_file_sections,
     )
 
 

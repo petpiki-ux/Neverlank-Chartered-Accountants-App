@@ -114,6 +114,52 @@
 </div>
 
 <div class="card">
+  <h3 class="mt-0">Permanent File</h3>
+  <p class="muted" style="font-size:12px;">
+    Information of continuing relevance across audit years - filed once here rather than re-uploaded to every
+    engagement (see the firm's <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index &amp; Manual</a>
+    for the full P-series policy). The engagement's own Documents tab is for working papers specific to the year
+    under audit.
+  </p>
+  {% if client.permanent_file_documents %}
+  <table>
+    <thead><tr><th>File</th><th>WP No.</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+    <tbody>
+      {% for doc in client.permanent_file_documents %}
+      <tr>
+        <td>{{ doc.original_filename }}{% if doc.notes %}<div class="muted" style="font-size:11.5px;">{{ doc.notes }}</div>{% endif %}</td>
+        <td class="muted">{{ doc.filing_index.display_label if doc.filing_index else '—' }}</td>
+        <td>v{{ doc.version }}</td>
+        <td>{{ doc.uploaded_by.name if doc.uploaded_by else '—' }}</td>
+        <td>{{ doc.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
+        <td>
+          <a href="{{ url_for('permanent_file.download_permanent_file_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
+          {% if user_has_permission(current_user, 'delete_documents') %}
+          <form method="post" action="{{ url_for('permanent_file.delete_permanent_file_document', doc_id=doc.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No Permanent File documents uploaded yet.</div>
+  {% endif %}
+  <form method="post" action="{{ url_for('permanent_file.upload_permanent_file_document', client_id=client.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div><label for="perm_file">File *</label><input type="file" id="perm_file" name="file" required></div>
+    <div>
+      <label for="perm_filing_index_id">WP No.</label>
+      <select id="perm_filing_index_id" name="filing_index_id">
+        <option value="">No WP number</option>
+        {% for s in permanent_file_sections %}<option value="{{ s.id }}">{{ s.code }} — {{ s.section }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label for="perm_notes">Notes</label><input type="text" id="perm_notes" name="notes"></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
+  </form>
+</div>
+
+<div class="card">
   <div class="page-header" style="margin-bottom:6px;">
     <h3 class="mt-0">Directors &amp; Shareholders</h3>
     {% if can_manage_company_documents and has_legacy_details %}

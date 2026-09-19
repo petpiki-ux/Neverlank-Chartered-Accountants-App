@@ -7,7 +7,7 @@ from sqlalchemy.engine import Engine
 
 from config import Config, INSTANCE_DIR
 from extensions import db, login_manager, socketio
-from models import User, DocumentTemplate, Permission
+from models import User, DocumentTemplate, Permission, FilingIndexSection
 
 
 @event.listens_for(Engine, "connect")
@@ -39,7 +39,7 @@ def _add_missing_columns():
         return  # only SQLite is supported/expected; skip silently otherwise
     partner_signoff_cols = [("partner_signed_by_id", "INTEGER"), ("partner_signed_at", "DATETIME")]
     additions = {
-        "document": [("reference", "VARCHAR(100)"), ("substantive_area_id", "INTEGER")],
+        "document": [("reference", "VARCHAR(100)"), ("substantive_area_id", "INTEGER"), ("filing_index_id", "INTEGER")],
         "client": [("company_number", "VARCHAR(80)")],
         "message_recipient": [("recalled_at", "DATETIME")],
         "engagement": [("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0")],
@@ -280,6 +280,8 @@ def create_app():
     from company_documents import company_documents_bp
     from payroll import payroll_bp
     from tickmarks import tickmarks_bp
+    from filing_index import filing_index_bp
+    from permanent_file import permanent_file_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -295,6 +297,8 @@ def create_app():
     app.register_blueprint(company_documents_bp)
     app.register_blueprint(payroll_bp)
     app.register_blueprint(tickmarks_bp)
+    app.register_blueprint(filing_index_bp)
+    app.register_blueprint(permanent_file_bp)
 
     @app.route("/")
     def index():
@@ -342,6 +346,14 @@ def create_app():
         # current key.
         from seed import seed_permissions
         seed_permissions()
+        # Filing Index (FilingIndexSection): another new-feature table that
+        # an existing install won't have any rows in yet - seed it the same
+        # way as Document Templates above, but as its own independent check
+        # (not part of the if/elif chain above it) so it still runs even
+        # when Document Templates was already seeded long ago.
+        if FilingIndexSection.query.count() == 0:
+            from seed import seed_filing_index
+            seed_filing_index()
         _fix_forensic_template_type()
         _fix_forensic_checklist_items()
 

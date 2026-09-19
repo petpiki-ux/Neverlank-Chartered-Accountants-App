@@ -33,7 +33,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak,
 )
 
-from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS
+from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS, filing_reference
 
 FIRM_NAME = "Neverlank Chartered Accountants"
 FIRM_ADDRESS = "2nd Floor, Michael House, 62 Nelson Mandela Avenue, Harare, Zimbabwe"
@@ -195,7 +195,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     doc = _new_document(
         "Financial Statements",
         engagement,
-        subtitle="Ref. FS-1" + (" (draft - not yet fully mapped/reviewed)" if not financial_statements or not financial_statements.is_partner_signed else ""),
+        subtitle=f"Ref. {filing_reference('financials')}" + (" (draft - not yet fully mapped/reviewed)" if not financial_statements or not financial_statements.is_partner_signed else ""),
     )
 
     if financial_statements and financial_statements.basis_of_preparation:
@@ -282,7 +282,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
 # ================================================================= Trial balance & adjustments (Excel)
 
 def build_trial_balance_adjustments_xlsx(engagement, trial_balance):
-    wb, ws = _new_workbook_sheet("Trial Balance & Adjustments — Ref. TB-1", engagement, "Trial Balance")
+    wb, ws = _new_workbook_sheet("Trial Balance & Adjustments — Ref. N1000", engagement, "Trial Balance")
 
     row = 7
     row = _header_row(ws, row, ["Account code", "Account name", "IAS 1 category", "Current debit", "Current credit", "Prior debit", "Prior credit"])
@@ -354,7 +354,7 @@ def build_trial_balance_adjustments_xlsx(engagement, trial_balance):
 # ================================================================= Management representation letter (Word)
 
 def build_rep_letter_docx(engagement, statements, narrative=None):
-    doc = _new_document("Management Representation Letter", engagement, subtitle="Ref. MRL-1")
+    doc = _new_document("Management Representation Letter", engagement, subtitle=f"Ref. {filing_reference('rep_letter')}")
 
     client_name = engagement.client.name if engagement.client else "[Client]"
     period_end = _fmt_date(engagement.period_end)
@@ -411,7 +411,7 @@ def build_report_to_management_docx(engagement, narrative=None):
     Management Representation Letter above (which is signed BY management,
     not addressed TO them). Its body is a persistent, editable workpaper
     (models.WorkpaperNarrative, kind="report_to_management")."""
-    doc = _new_document("Report to Management", engagement, subtitle="Ref. RTM-1")
+    doc = _new_document("Report to Management", engagement, subtitle=f"Ref. {filing_reference('report_to_management')}")
 
     client_name = engagement.client.name if engagement.client else "[Client]"
     period_end = _fmt_date(engagement.period_end)
@@ -677,7 +677,7 @@ def _checklist_table_docx(doc, items, per_item_status=False):
 
 
 def build_client_acceptance_checklist_docx(engagement, client_acceptance):
-    doc = _new_document("Client Acceptance & Continuance - Checklist", engagement, subtitle="Ref. A-1")
+    doc = _new_document("Client Acceptance & Continuance - Checklist", engagement, subtitle=f"Ref. {filing_reference('acceptance')}")
     items = client_acceptance.checklist_items if client_acceptance else []
     if items:
         _checklist_table_docx(doc, items)
@@ -691,7 +691,7 @@ def build_client_acceptance_checklist_docx(engagement, client_acceptance):
 
 
 def build_entity_understanding_checklist_docx(engagement, entity_understanding):
-    doc = _new_document("Understanding the Entity's Business - Checklist", engagement, subtitle="Ref. B-1")
+    doc = _new_document("Understanding the Entity's Business - Checklist", engagement, subtitle=f"Ref. {filing_reference('entity')}")
     items = entity_understanding.checklist_items if entity_understanding else []
     if items:
         _checklist_table_docx(doc, items)
@@ -716,7 +716,7 @@ def build_engagement_checklist_docx(engagement):
 
 
 def build_finalisation_checklist_docx(engagement, finalisation_checklist):
-    doc = _new_document("Finalisation Checklist", engagement, subtitle="Ref. I-1")
+    doc = _new_document("Finalisation Checklist", engagement, subtitle=f"Ref. {filing_reference('finalisation')}")
     items = finalisation_checklist.checklist_items if finalisation_checklist else []
     if items:
         _checklist_table_docx(doc, items)
@@ -832,10 +832,10 @@ def build_engagement_file_summary_pdf(engagement):
     story.append(Paragraph(f"<font size=8 color='grey'>Generated {_fmt_date(date.today())}</font>", center))
     story.append(PageBreak())
 
-    for code, key, label in WORKPAPER_SECTIONS:
+    for code, key, label, filing_code in WORKPAPER_SECTIONS:
         if key == "forensic_report" and not is_forensic:
             continue  # the forensic report only exists on Investigative Engagements
-        story.append(Paragraph(f"{code}. {label}", h1))
+        story.append(Paragraph(f"{filing_code or code}. {label}", h1))
 
         if key == "acceptance":
             record = engagement.client_acceptance

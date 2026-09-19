@@ -34,9 +34,9 @@ from models import (
     FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
-    Tickmark, WORKPAPER_SECTIONS, workpaper_reference, effectively_reviewed,
+    Tickmark, WORKPAPER_SECTIONS, workpaper_reference, filing_reference, effectively_reviewed,
     WorkpaperNarrative, WORKPAPER_NARRATIVE_KINDS, WORKPAPER_NARRATIVE_KIND_KEYS,
-    DEFAULT_WORKPAPER_NARRATIVE_BODIES,
+    DEFAULT_WORKPAPER_NARRATIVE_BODIES, FilingIndexSection,
 )
 import financials as fin
 import workpapers as wp
@@ -338,6 +338,10 @@ def view_engagement(engagement_id):
     # each Substantive Procedures item.
     tickmarks = Tickmark.query.order_by(Tickmark.symbol).all()
 
+    # Firm-wide Filing Index (see filing_index.py) - Current File (N-series)
+    # codes only, offered as a WP No. picker when uploading a Document.
+    filing_index_sections = FilingIndexSection.query.filter_by(is_permanent=False, is_active=True).order_by(FilingIndexSection.order, FilingIndexSection.code).all()
+
     # The narrative workpapers with a persistent, editable copy (Rep Letter,
     # Report to Management, Forensic Report executive summary) - keyed by
     # kind so the Finalisation tab can look each one up directly. Any kind
@@ -417,8 +421,10 @@ def view_engagement(engagement_id):
         finalisation_checklist=finalisation_checklist,
         finalisation_checklist_responses=CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
         tickmarks=tickmarks,
+        filing_index_sections=filing_index_sections,
         workpaper_sections=WORKPAPER_SECTIONS,
         workpaper_reference=workpaper_reference,
+        filing_reference=filing_reference,
         effectively_reviewed=effectively_reviewed,
         workpaper_narratives=workpaper_narratives,
         workpaper_narrative_kinds=WORKPAPER_NARRATIVE_KINDS,
@@ -1114,7 +1120,7 @@ def _allowed_file(filename):
     return ext in current_app.config["ALLOWED_EXTENSIONS"]
 
 
-def _save_engagement_document(engagement_id, file, category, reference, notes, substantive_area_id=None):
+def _save_engagement_document(engagement_id, file, category, reference, notes, substantive_area_id=None, filing_index_id=None):
     """Shared save logic for an engagement working paper/document - used by
     both the general Documents tab upload and by filing a working paper
     directly under a Substantive Procedures area. Saves the file to disk,
@@ -1142,6 +1148,7 @@ def _save_engagement_document(engagement_id, file, category, reference, notes, s
         notes=notes,
         uploaded_by_id=current_user.id,
         substantive_area_id=substantive_area_id,
+        filing_index_id=filing_index_id,
     )
     db.session.add(doc)
     return doc, version
@@ -1163,8 +1170,11 @@ def upload_document(engagement_id):
 
     category = request.form.get("category", "General").strip() or "General"
     reference = request.form.get("reference", "").strip()
+    filing_index_id = request.form.get("filing_index_id", "").strip()
+    filing_index_id = int(filing_index_id) if filing_index_id.isdigit() else None
     doc, version = _save_engagement_document(
-        engagement_id, file, category, reference, request.form.get("notes", "").strip()
+        engagement_id, file, category, reference, request.form.get("notes", "").strip(),
+        filing_index_id=filing_index_id,
     )
     db.session.commit()
     flash(f"Uploaded '{doc.original_filename}' (v{version}).", "success")
@@ -1196,9 +1206,11 @@ def upload_substantive_area_document(engagement_id, area_name):
 
     area = _get_or_create_substantive_area(engagement_id, area_name)
     reference = request.form.get("reference", "").strip()
+    filing_index_id = request.form.get("filing_index_id", "").strip()
+    filing_index_id = int(filing_index_id) if filing_index_id.isdigit() else None
     doc, version = _save_engagement_document(
         engagement_id, file, area_name, reference, request.form.get("notes", "").strip(),
-        substantive_area_id=area.id,
+        substantive_area_id=area.id, filing_index_id=filing_index_id,
     )
     db.session.commit()
     flash(f"Filed '{doc.original_filename}' (v{version}) under {area_name}.", "success")
@@ -1214,9 +1226,19 @@ def download_document(doc_id):
     # downloadable/viewable WHILE acceptance is still pending, otherwise
     # nobody could ever check it before signing off the decision.
     _ensure_engagement_access(doc.engagement, require_accepted=False)
+    # When tagged with a WP number from the Filing Index, the download
+    # follows the firm's N[code]_[Description]_[Year] filing convention
+    # instead of the plain original filename.
+    download_name = doc.original_filename
+    if doc.filing_index and doc.filing_index.code:
+        stem, _, ext = doc.original_filename.rpartition(".")
+        description = stem or doc.original_filename
+        year = doc.engagement.period_end.year if doc.engagement.period_end else date.today().year
+        candidate = f"{doc.filing_index.code}_{description}_{year}.{ext}" if ext else f"{doc.filing_index.code}_{description}_{year}"
+        download_name = secure_filename(candidate) or doc.original_filename
     return send_from_directory(
         current_app.config["UPLOAD_FOLDER"], doc.stored_filename, as_attachment=True,
-        download_name=doc.original_filename,
+        download_name=download_name,
     )
 
 
@@ -2946,6 +2968,17 @@ def _workpaper_filename(engagement, label, ext):
     return secure_filename(f"{client_name}_{engagement.title}_{label}.{ext}") or f"workpaper.{ext}"
 
 
+def _filing_download_name(engagement, code, description, ext):
+    """The firm's filing convention: N[code]_[Short_Description]_[Year].ext
+    (see models.FilingIndexSection / the Filing Index & Manual page). Falls
+    back to the plain client/engagement-based name (_workpaper_filename)
+    when this workpaper has no single dedicated filing code."""
+    if not code:
+        return _workpaper_filename(engagement, description, ext)
+    year = engagement.period_end.year if engagement.period_end else date.today().year
+    return secure_filename(f"{code}_{description}_{year}.{ext}") or f"workpaper.{ext}"
+
+
 @engagements_bp.route("/<int:engagement_id>/workpapers/financial-statements.docx")
 @login_required
 def download_financial_statements_docx(engagement_id):
@@ -2960,7 +2993,7 @@ def download_financial_statements_docx(engagement_id):
     buf = wp.build_financial_statements_docx(engagement, statements, financial_statements)
     return send_file(
         buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Financial_Statements", "docx"),
+        download_name=_filing_download_name(engagement, "N8100", "Financial_Statements", "docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
@@ -2977,7 +3010,7 @@ def download_trial_balance_xlsx(engagement_id):
     buf = wp.build_trial_balance_adjustments_xlsx(engagement, trial_balance)
     return send_file(
         buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Trial_Balance_and_Adjustments", "xlsx"),
+        download_name=_filing_download_name(engagement, "N1000", "Trial_Balance_and_Adjustments", "xlsx"),
         mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
 
@@ -2996,7 +3029,7 @@ def download_rep_letter_docx(engagement_id):
     buf = wp.build_rep_letter_docx(engagement, statements, narrative)
     return send_file(
         buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Management_Representation_Letter", "docx"),
+        download_name=_filing_download_name(engagement, "N9006", "Management_Representation_Letter", "docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
@@ -3010,7 +3043,7 @@ def download_report_to_management_docx(engagement_id):
     buf = wp.build_report_to_management_docx(engagement, narrative)
     return send_file(
         buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Report_to_Management", "docx"),
+        download_name=_filing_download_name(engagement, "N8300", "Report_to_Management", "docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
@@ -3053,7 +3086,7 @@ def download_acceptance_checklist_docx(engagement_id):
     buf = wp.build_client_acceptance_checklist_docx(engagement, engagement.client_acceptance)
     return send_file(
         buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Client_Acceptance_Checklist", "docx"),
+        download_name=_filing_download_name(engagement, "N1009", "Client_Acceptance_Checklist", "docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
@@ -3066,7 +3099,7 @@ def download_entity_checklist_docx(engagement_id):
     buf = wp.build_entity_understanding_checklist_docx(engagement, engagement.entity_understanding)
     return send_file(
         buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Understanding_the_Entity_Checklist", "docx"),
+        download_name=_filing_download_name(engagement, "N1003", "Understanding_the_Entity_Checklist", "docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
@@ -3092,7 +3125,7 @@ def download_finalisation_checklist_docx(engagement_id):
     buf = wp.build_finalisation_checklist_docx(engagement, engagement.finalisation_checklist)
     return send_file(
         buf, as_attachment=True,
-        download_name=_workpaper_filename(engagement, "Finalisation_Checklist", "docx"),
+        download_name=_filing_download_name(engagement, "N9009", "Finalisation_Checklist", "docx"),
         mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 

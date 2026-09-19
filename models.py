@@ -52,21 +52,32 @@ QUERY_SECTION_LABELS = dict(QUERY_SECTIONS)
 # firm-standard registry rather than something edited per engagement - a
 # firm's workpaper index rarely changes engagement to engagement. "forensic"
 # entries only appear in the file summary for an "Investigative Engagement".
+#
+# The 4th element, filing_code, is the matching reference from the firm's
+# Audit Working Paper Indexing & Filing Policy (see FilingIndexSection / the
+# Filing Index & Manual page) - None where this app section doesn't
+# correspond to a single numbered working paper in that scheme (the main
+# Engagement Checklist and Substantive Procedures each span many separate
+# working papers/areas, already given their own codes elsewhere; the
+# Forensic Investigation Report has no equivalent in a filing policy scoped
+# to statutory audits). Where a filing_code exists, it's shown in place of
+# the old letter reference on downloads and the File Summary PDF; where it
+# doesn't, the letter reference is kept as the fallback.
 WORKPAPER_SECTIONS = [
-    ("A", "acceptance", "Client Acceptance & Continuance"),
-    ("B", "entity", "Understanding the Entity's Business"),
-    ("C", "risks", "Risk Assessment"),
-    ("D", "planning", "Planning (Materiality)"),
-    ("E", "analytical", "Analytical Review"),
-    ("F", "checklist", "Engagement Checklist"),
-    ("G", "substantive", "Substantive Procedures"),
-    ("H", "financials", "Financial Statements"),
-    ("I", "finalisation", "Finalisation Checklist"),
-    ("J", "rep_letter", "Management Representation Letter"),
-    ("K", "report_to_management", "Report to Management"),
-    ("L", "forensic_report", "Forensic Investigation Report"),
+    ("A", "acceptance", "Client Acceptance & Continuance", "N1009"),
+    ("B", "entity", "Understanding the Entity's Business", "N1003"),
+    ("C", "risks", "Risk Assessment", "N1004"),
+    ("D", "planning", "Planning (Materiality)", "N1001"),
+    ("E", "analytical", "Analytical Review", "N1006"),
+    ("F", "checklist", "Engagement Checklist", None),
+    ("G", "substantive", "Substantive Procedures", None),
+    ("H", "financials", "Financial Statements", "N8100"),
+    ("I", "finalisation", "Finalisation Checklist", "N9009"),
+    ("J", "rep_letter", "Management Representation Letter", "N9006"),
+    ("K", "report_to_management", "Report to Management", "N8300"),
+    ("L", "forensic_report", "Forensic Investigation Report", None),
 ]
-WORKPAPER_SECTION_BY_KEY = {key: (code, label) for code, key, label in WORKPAPER_SECTIONS}
+WORKPAPER_SECTION_BY_KEY = {key: (code, label, filing_code) for code, key, label, filing_code in WORKPAPER_SECTIONS}
 
 
 def workpaper_reference(section_key):
@@ -74,6 +85,18 @@ def workpaper_reference(section_key):
     (see WORKPAPER_SECTIONS), or None if the key isn't recognised."""
     entry = WORKPAPER_SECTION_BY_KEY.get(section_key)
     return entry[0] if entry else None
+
+
+def filing_reference(section_key):
+    """The firm's actual filing-index reference (e.g. "N1003") for a
+    workpaper section key, falling back to the old letter reference (e.g.
+    "B") where this section doesn't correspond to a single numbered working
+    paper in the filing policy. Always returns something displayable."""
+    entry = WORKPAPER_SECTION_BY_KEY.get(section_key)
+    if not entry:
+        return None
+    code, _, filing_code = entry
+    return filing_code or code
 
 
 def effectively_reviewed(record):
@@ -732,17 +755,35 @@ FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES = {
     ],
 }
 
-# Working-paper reference codes, in the traditional audit-file convention
-# (a short letter/code prefix per section, e.g. "B" for Cash, "B-1" for the
-# first working paper within it) - shown next to each area's heading on the
+# Working-paper reference codes shown next to each area's heading on the
 # Substantive Procedures tab and embedded in the generated Word/Excel
-# workpapers, so a paper reviewer can cite "see B-2" the same way they would
-# in a paper file. AUDIT_AREA_REFERENCES runs B through N for the 13
-# AUDIT_AREAS (A is conventionally reserved for the index/lead schedule,
-# which this app doesn't have a separate tab for). FORENSIC_AREA_REFERENCES
-# uses short mnemonic codes instead of single letters, since there are only
-# four forensic categories and a mnemonic is easier to recall in a report.
-AUDIT_AREA_REFERENCES = {area: chr(ord("B") + i) for i, area in enumerate(AUDIT_AREAS)}
+# workpapers, so a reviewer can cite "see N3100" the same way they would in
+# a paper file. AUDIT_AREA_REFERENCES uses the firm's actual Current File
+# (N-series) codes from the Audit Working Paper Indexing & Filing Policy
+# (see FilingIndexSection / the Filing Index & Manual page) - N3100 through
+# N6200, matching the policy's Statement of Financial Position / Statement
+# of Comprehensive Income / Other Audit Areas sections one-for-one, with one
+# addition: the policy's tables don't include a code for Inventories, so
+# N3700 has been added here (and in the Filing Index) to fill that gap,
+# extending the Assets range immediately after Prepayments & Other Assets
+# (N3600). FORENSIC_AREA_REFERENCES keeps its own short mnemonic codes,
+# since the filing policy is scoped to statutory audits and doesn't cover
+# investigative/forensic engagement areas at all.
+AUDIT_AREA_REFERENCES = {
+    "Cash and Bank": "N3100",
+    "Trade Receivables": "N3200",
+    "Inventories": "N3700",
+    "Property, Plant and Equipment": "N3300",
+    "Investments": "N3500",
+    "Trade Payables and Accruals": "N4100",
+    "Borrowings and Finance Costs": "N4200",
+    "Revenue": "N5100",
+    "Payroll and Employee Costs": "N5200",
+    "Taxation": "N4300",
+    "Equity and Reserves": "N4600",
+    "Related Party Transactions": "N6100",
+    "Going Concern": "N6200",
+}
 
 FORENSIC_AREA_REFERENCES = {
     "Advanced Data Analytics & Forensic Technology": "DA",
@@ -908,10 +949,13 @@ class Tickmark(db.Model):
     """One entry in the firm's tickmark legend - a short symbol (e.g. "TB",
     "PY", "V", "CB") plus its meaning, in the standard audit-workpaper
     convention. Firm-wide (not per-engagement), managed from the Tickmarks
-    settings screen, and attachable to any checklist-item response so a
-    response can point at which tie-out/agreement a tick represents. The
+    settings screen, and attachable to any Substantive Procedures item so a
+    procedure can point at which tie-out/agreement a tick represents. The
     Engagement File Summary PDF prints the legend for whichever tickmarks
-    were actually used in that engagement's file."""
+    were actually used in that engagement's file. Matches the filing
+    policy's own rule (see FilingIndexSection below) that tick marks are
+    defined once per working paper and never redefined elsewhere in the
+    same file - this firm-wide legend is that one definition."""
     id = db.Column(db.Integer, primary_key=True)
     symbol = db.Column(db.String(20), nullable=False, unique=True)
     meaning = db.Column(db.String(300), nullable=False)
@@ -922,6 +966,150 @@ class Tickmark(db.Model):
 
     def __repr__(self):
         return f"<Tickmark {self.symbol!r}>"
+
+
+class FilingIndexSection(db.Model):
+    """One numbered entry in the firm's Audit Working Paper Indexing &
+    Filing Policy (see FILING_INDEX_MANUAL below for the full written
+    policy) - a Current File (N-series, is_permanent=False) or Permanent
+    File (P-series, is_permanent=True) working-paper reference, e.g.
+    "N1001" = Materiality, "P1000" = Incorporation & Statutory. Firm-wide
+    (not per-engagement), seeded once from the firm's filing index document
+    (see seed.seed_filing_index) and editable from the Filing Index page -
+    including retiring a number as "not used" (is_active=False) rather than
+    deleting it outright, per the policy's own rule that a number, once
+    used, is never reused even after the working paper it named is no
+    longer needed."""
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(10), nullable=False, unique=True)  # "N1001", "P1000"
+    is_permanent = db.Column(db.Boolean, default=False)  # False = Current File (N-series), True = Permanent File (P-series)
+    category = db.Column(db.String(150))  # e.g. "Planning & Risk Assessment", "Incorporation & Statutory"
+    section = db.Column(db.String(200), nullable=False)  # e.g. "Materiality"
+    typical_contents = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)  # False = retired/"not used" - see docstring above
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+
+    @property
+    def display_label(self):
+        return f"{self.code} — {self.section}"
+
+    def __repr__(self):
+        return f"<FilingIndexSection {self.code!r} {self.section!r}>"
+
+
+# The firm's Audit Working Paper Indexing & Filing Policy, written out for
+# the in-app Filing Index & Manual page - each entry is a section heading,
+# its explanatory paragraph(s), and (where the policy itself uses a list)
+# its bullet points. This is the policy as documented, plus a closing
+# section explaining how this app implements it - it isn't itself the
+# editable index of codes (see FilingIndexSection / seed.seed_filing_index
+# for that); it's the "why" and "how" that goes with it.
+FILING_INDEX_MANUAL = [
+    {
+        "heading": "Purpose",
+        "paragraphs": [
+            "To establish a single, consistent numbering and filing convention for audit working papers "
+            "across all engagements, so that any file can be located, cross-referenced and reviewed "
+            "without ambiguity, and so that files remain audit-trail compliant under ISA 230 (Audit "
+            "Documentation).",
+        ],
+    },
+    {
+        "heading": "1. File Structure Overview",
+        "paragraphs": ["Every client audit file is split into two parts:"],
+        "bullets": [
+            "Permanent File (P-series) — information of continuing relevance across audit years "
+            "(incorporation documents, engagement letters, accounting policies, group structure, "
+            "standing instructions).",
+            "Current File (N-series) — working papers specific to the year under audit, organised by "
+            "the numbered sections below.",
+        ],
+        "paragraphs_after": [
+            "Each working paper is assigned a single, unique reference in the form:",
+            "N [4-digit code] _ [Short Description] _ [Year]",
+            "Example: N1001_Determination_of_Materiality_2025.xlsx",
+            "The leading digit of the 4-digit code identifies the section (see the Filing Index page "
+            "for the full, current list); the remaining three digits identify the specific working "
+            "paper within that section, allocated sequentially and never reused, even if a working "
+            "paper is later deleted or merged.",
+        ],
+    },
+    {
+        "heading": "2. Current File — Section Index",
+        "paragraphs": [
+            "The section ranges extend the numbering already in use on existing files into a complete "
+            "scheme covering every audit area. The full, editable list of every working paper reference "
+            "within each range is on the Filing Index page - the ranges themselves are:",
+        ],
+        "bullets": [
+            "1000–1999: Planning & Risk Assessment",
+            "2000–2999: Internal Control & Systems",
+            "3000–3999: Statement of Financial Position — Assets",
+            "4000–4999: Statement of Financial Position — Liabilities & Equity",
+            "5000–5999: Statement of Comprehensive Income",
+            "6000–6999: Other Audit Areas",
+            "7000–7999: Compliance & Statutory",
+            "8000–8999: Reporting & Disclosure",
+            "9000–9999: Completion & Review",
+        ],
+    },
+    {
+        "heading": "3. Permanent File (P-series)",
+        "paragraphs": [
+            "Five fixed sections (P1000–P5000) covering incorporation & statutory documents, engagement "
+            "administration, accounting policies, prior year financial statements, and structure & "
+            "governance - see the Permanent File section of the Filing Index page for the complete "
+            "list, and the Permanent File tab on each client's page to file documents under them.",
+        ],
+    },
+    {
+        "heading": "4. Filing Conventions",
+        "bullets": [
+            "Folder structure: [Client Name] / [Financial Year] / Permanent File | Current File, "
+            "mirroring the sections above.",
+            "File naming: N[code]_[Short Description]_[Year].[ext] — no spaces other than underscores, "
+            "no client name repeated inside the current-year folder.",
+            "Every working paper carries a header block: Client, Year End, Prepared By/Date, Reviewed "
+            "By/Date, Objective, and Conclusion.",
+            "Tick marks are defined once per working paper (on a 'Tickmarks' tab or footnote) and never "
+            "redefined elsewhere in the same file.",
+            "Cross-references between working papers use the WP number only (e.g. \"agreed to N1000\"), "
+            "never a page number or free-text description.",
+            "Numbers are never reused. If a working paper is no longer required, its number is left "
+            "vacant and noted as \"not used\" in the index, not reassigned.",
+            "Each file is superseded, not overwritten, when revised after initial sign-off; the review "
+            "trail (e.g. queries raised and cleared) is retained, not deleted.",
+        ],
+    },
+    {
+        "heading": "How this app applies the policy",
+        "paragraphs": [
+            "The Filing Index page is the firm-wide, editable list of every N-series and P-series code - "
+            "add a code, correct one, or mark a number \"not used\" (per the convention above, numbers "
+            "are never deleted or reassigned, only retired).",
+            "Every Substantive Procedures area already carries its matching N-code (shown on its heading "
+            "and in the generated Word/Excel workpapers), and the fixed workpaper sections that have a "
+            "direct equivalent in the index (Materiality, Understanding the Entity, the Management "
+            "Representation Letter, Report to Management, and others) show that code on their downloads "
+            "and in the Engagement File Summary PDF, in place of the app's older lettered references.",
+            "Uploading a working paper under Documents (or under a Substantive Procedures area) lets you "
+            "tag it with its WP number from the index; its download name then follows the "
+            "N[code]_[Description]_[Year] convention automatically.",
+            "Permanent File items (P-series) are filed once per client, on that client's own Permanent "
+            "File tab, rather than being re-uploaded to every engagement.",
+            "The firm's shared Tickmark legend (its own page) is exactly the \"defined once per working "
+            "paper, never redefined elsewhere\" tick mark convention above, applied firm-wide rather than "
+            "file-by-file.",
+        ],
+    },
+]
 
 
 class EngagementChecklistItem(db.Model):
@@ -997,9 +1185,48 @@ class Document(db.Model):
     # only in the engagement's general Documents tab. Nullable: a document
     # doesn't have to belong to any particular audit area.
     substantive_area_id = db.Column(db.Integer, db.ForeignKey("substantive_procedure_area.id"))
+    # Optional tag to a specific Current File (N-series) working-paper
+    # number from the firm's Filing Index (see FilingIndexSection) - when
+    # set, the document's download name follows the firm's
+    # N[code]_[Description]_[Year] filing convention instead of its
+    # original filename. Nullable: tagging is optional, same as the older
+    # free-text `reference` field above (kept for anything the index
+    # doesn't cover, or for firms/engagements not using it).
+    filing_index_id = db.Column(db.Integer, db.ForeignKey("filing_index_section.id"))
 
     uploaded_by = db.relationship("User")
     substantive_area = db.relationship("SubstantiveProcedureArea", backref=db.backref("documents", lazy=True, order_by="Document.uploaded_at.desc()"))
+    filing_index = db.relationship("FilingIndexSection")
+
+
+class PermanentFileDocument(db.Model):
+    """A Permanent File (P-series) working paper, filed once against a
+    Client rather than any one engagement - the firm's Audit Working Paper
+    Indexing & Filing Policy describes this as "information of continuing
+    relevance across audit years" (incorporation documents, the standing
+    engagement letter, the accounting policy manual, prior-year financial
+    statements, structure & governance records) as distinct from an
+    engagement's own Current File (N-series) documents, which are specific
+    to the year under audit. Deliberately a simple file + tag + notes
+    record (unlike CompanyDocument, which runs AI extraction to find
+    Directors/Shareholders) - the Permanent File just needs a place to live
+    and a P-code, not extraction."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    filing_index_id = db.Column(db.Integer, db.ForeignKey("filing_index_section.id"))
+    notes = db.Column(db.Text)
+    version = db.Column(db.Integer, default=1)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("permanent_file_documents", lazy=True, order_by="PermanentFileDocument.uploaded_at.desc()", cascade="all, delete-orphan"))
+    filing_index = db.relationship("FilingIndexSection")
+    uploaded_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<PermanentFileDocument {self.original_filename!r}>"
 
 
 class DocumentTemplate(db.Model):

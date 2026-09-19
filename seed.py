@@ -9,7 +9,7 @@ import os
 import shutil
 
 from extensions import db
-from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES
+from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection
 from config import Config
 
 
@@ -310,6 +310,134 @@ def seed_document_templates():
             filename=filename,
             order=i,
         ))
+    db.session.commit()
+
+
+# The firm's Audit Working Paper Indexing & Filing Policy, transcribed from
+# the source document, as (code, category, section, typical_contents)
+# tuples - Current File (N-series) first, then Permanent File (P-series,
+# marked is_permanent below). Two corrections and one addition were made
+# versus the source document, each flagged where it happens:
+#
+#   - The document's own introduction, and its worked example for an actual
+#     client file, both use N1000 for Trial Balance and N1001 for
+#     Materiality - but the document's own section-index table instead
+#     lists N1001 twice (once for Trial Balance, once for Materiality) and
+#     N1000 for Terms of Engagement. N1000/N1001 are assigned here to match
+#     the introduction and worked example (the more authoritative, doubly-
+#     consistent source), and Terms of Engagement - the one item bumped out
+#     - is placed at N1008, the next free number in the 1000s range.
+#   - N1009 (Client Acceptance & Continuance) has been added: the document
+#     doesn't list a dedicated code for it, and while its content overlaps
+#     with N1007 Independence & Ethics, the app treats Client Acceptance &
+#     Continuance as its own distinct working paper, so it gets its own
+#     number rather than being folded into N1007.
+#   - N3700 (Inventories) has been added: the document's Assets range
+#     (N3100-N3600) has no code for inventories at all, so this fills that
+#     gap immediately after N3600 Prepayments & Other Assets.
+#
+# All three are ordinary rows in the seeded table, not hard-coded - correct
+# them from the Filing Index page if the firm's own numbering differs.
+FILING_INDEX_SEED = [
+    # ---- Current File (N-series) ----
+    # 1000-1999: Planning & Risk Assessment
+    ("N1000", "Planning & Risk Assessment", "Trial Balance", "Client trial balance, lead schedule, cast and cross-reference to draft financial statements."),
+    ("N1001", "Planning & Risk Assessment", "Materiality", "Determination of overall and performance materiality, and clearly trivial threshold."),
+    ("N1002", "Planning & Risk Assessment", "Audit Strategy & Plan", "Overall audit strategy memorandum, engagement timetable, staffing and budget."),
+    ("N1003", "Planning & Risk Assessment", "Understanding the Entity", "Business, industry, regulatory environment, accounting policies."),
+    ("N1004", "Planning & Risk Assessment", "Fraud Risk Assessment", "Engagement team discussion, fraud risk factors, response to risk of management override."),
+    ("N1005", "Planning & Risk Assessment", "Planning & Legal Findings", "Laws & regulations assessment, legal confirmations planning, litigation register."),
+    ("N1006", "Planning & Risk Assessment", "Preliminary Analytical Review", "Ratio analysis, trend analysis, expectation setting for the year."),
+    ("N1007", "Planning & Risk Assessment", "Independence & Ethics", "Independence confirmations, conflict checks, ethical requirements (IESBA/ICAZ)."),
+    ("N1008", "Planning & Risk Assessment", "Terms of Engagement", "Engagement/re-appointment letter, fee agreement."),
+    ("N1009", "Planning & Risk Assessment", "Client Acceptance & Continuance", "Client acceptance/continuance decision and supporting checklist. (Added - not in the source document; see the note above this list.)"),
+    # 2000-2999: Internal Control & Systems
+    ("N2001", "Internal Control & Systems", "Control Environment", "Walkthroughs of key business cycles (revenue, payroll, procurement)."),
+    ("N2002", "Internal Control & Systems", "Control Risk Assessment", "Design and implementation testing, control deficiencies noted."),
+    ("N2003", "Internal Control & Systems", "IT & General Controls", "Systems in use (e.g. QuickBooks), access controls, backup procedures."),
+    ("N2004", "Internal Control & Systems", "Deficiencies in Internal Control", "Matters for the deficiencies letter to management."),
+    # 3000-3999: Statement of Financial Position - Assets
+    ("N3100", "Statement of Financial Position — Assets", "Cash & Bank", "Bank confirmations, bank reconciliations, cash counts."),
+    ("N3200", "Statement of Financial Position — Assets", "Accounts Receivable", "Circularisation, aged analysis, subsequent receipts, impairment assessment."),
+    ("N3300", "Statement of Financial Position — Assets", "Property, Plant & Equipment", "Asset register, additions/disposals testing, depreciation schedule, physical verification."),
+    ("N3400", "Statement of Financial Position — Assets", "Intangible Assets", "Software licences, amortisation testing."),
+    ("N3500", "Statement of Financial Position — Assets", "Investments", "Investment schedule, valuation support."),
+    ("N3600", "Statement of Financial Position — Assets", "Prepayments & Other Assets", "Prepayment schedule, sundry debtors/loans."),
+    ("N3700", "Statement of Financial Position — Assets", "Inventories", "Inventory count observation, costing and net realisable value testing, cut-off. (Added - not in the source document; see the note above this list.)"),
+    # 4000-4999: Statement of Financial Position - Liabilities & Equity
+    ("N4100", "Statement of Financial Position — Liabilities & Equity", "Payables & Accruals", "Trade payables listing, supplier reconciliations, accruals testing."),
+    ("N4200", "Statement of Financial Position — Liabilities & Equity", "Loans & Borrowings", "Shareholder/director loan schedules, loan agreements, interest testing."),
+    ("N4300", "Statement of Financial Position — Liabilities & Equity", "Taxation", "Current and deferred tax computation, tax returns reconciliation, ZIMRA correspondence."),
+    ("N4400", "Statement of Financial Position — Liabilities & Equity", "Provisions & Contingencies", "Provision schedules, legal claims and contingent liability assessment."),
+    ("N4500", "Statement of Financial Position — Liabilities & Equity", "Share Capital", "Share register, share capital movements, statutory filings (CR forms)."),
+    ("N4600", "Statement of Financial Position — Liabilities & Equity", "Equity & Reserves", "Statement of changes in equity working paper, retained earnings roll-forward."),
+    # 5000-5999: Statement of Comprehensive Income
+    ("N5100", "Statement of Comprehensive Income", "Revenue", "Revenue recognition testing (IFRS 15), cut-off, fee income analysis."),
+    ("N5200", "Statement of Comprehensive Income", "Payroll & Staff Costs", "Payroll reconciliation, PAYE/NSSA compliance, staff cost analytics."),
+    ("N5300", "Statement of Comprehensive Income", "Operating Expenses", "Expense analytics, vouching, related working papers per expense line."),
+    ("N5400", "Statement of Comprehensive Income", "Other Income / Expenses & FX", "Exchange gains/losses, other income, non-operating items."),
+    # 6000-6999: Other Audit Areas
+    ("N6100", "Other Audit Areas", "Related Parties", "Related party identification, transactions and balances, disclosure testing."),
+    ("N6200", "Other Audit Areas", "Going Concern", "Going concern assessment, cash flow forecasts, directors' representations."),
+    ("N6300", "Other Audit Areas", "Subsequent Events", "Review of events after the reporting period."),
+    ("N6400", "Other Audit Areas", "Litigation & Claims", "Legal confirmation letters and responses."),
+    ("N6500", "Other Audit Areas", "Group / Component Instructions", "Where applicable - group audit instructions and component reporting."),
+    # 7000-7999: Compliance & Statutory
+    ("N7100", "Compliance & Statutory", "Companies Act / COBE Act", "Section 193 reporting matters, statutory compliance checklist."),
+    ("N7200", "Compliance & Statutory", "Tax Compliance", "Income tax, VAT and PAYE compliance review."),
+    ("N7300", "Compliance & Statutory", "Other Regulatory", "ICAZ/PAAB and sector-specific regulatory matters."),
+    # 8000-8999: Reporting & Disclosure
+    ("N8100", "Reporting & Disclosure", "Draft Financial Statements", "Draft FS with cross-references to supporting working papers."),
+    ("N8200", "Reporting & Disclosure", "Disclosure Checklist", "IFRS presentation and disclosure checklist."),
+    ("N8300", "Reporting & Disclosure", "Reports to Management", "Management letter / report to those charged with governance."),
+    # 9000-9999: Completion & Review
+    ("N9001", "Completion & Review", "Report Items – Equity", "Final check of equity note/statement against underlying records. (Per the source document: file the equity movement schedule itself under N4600, and reserve this number for the final completion-stage cross-check that the equity note agrees to the ledger.)"),
+    ("N9002", "Completion & Review", "Dividends Test", "Test of dividend declarations, approvals and statutory compliance."),
+    ("N9003", "Completion & Review", "Summary of Misstatements", "Corrected and uncorrected misstatements, evaluated against materiality."),
+    ("N9004", "Completion & Review", "Final Analytical Review", "Overall review of financial statements as a whole."),
+    ("N9005", "Completion & Review", "Final Subsequent Events Review", "Review up to the date of the auditor's report."),
+    ("N9006", "Completion & Review", "Management Representation Letter", "Signed representation letter from directors."),
+    ("N9007", "Completion & Review", "Partner / EQCR Review Notes", "Engagement partner and (where applicable) quality control reviewer notes."),
+    ("N9008", "Completion & Review", "Audit Opinion & Sign-off", "Signed independent auditor's report, ICAZ/PAAB sign-off details."),
+    ("N9009", "Completion & Review", "File Completion Checklist", "Confirmation that the file is complete and ready for archiving."),
+]
+
+FILING_INDEX_PERMANENT_SEED = [
+    # ---- Permanent File (P-series) ----
+    ("P1000", "Incorporation & Statutory", "Incorporation & Statutory", "Certificate of incorporation, CR6/CR14, memorandum & articles."),
+    ("P2000", "Engagement Administration", "Engagement Administration", "Standing engagement letter, independence declarations, fee history."),
+    ("P3000", "Accounting Policies", "Accounting Policies", "Group/entity accounting policy manual, significant IFRS elections."),
+    ("P4000", "Prior Year Financial Statements", "Prior Year Financial Statements", "Signed financial statements and auditor's reports, prior years."),
+    ("P5000", "Structure & Governance", "Structure & Governance", "Organisation chart, directors register, shareholding structure."),
+]
+
+
+def seed_filing_index():
+    """Populate the firm-wide Filing Index (FilingIndexSection) from the
+    firm's Audit Working Paper Indexing & Filing Policy - see
+    FILING_INDEX_SEED / FILING_INDEX_PERMANENT_SEED above for the data and
+    the corrections/additions made versus the source document. Safe to
+    re-run any time: only called when the table is empty (see app.py), and
+    only ever adds a code that doesn't already exist, so it never overwrites
+    anything the firm has since edited (including marking a code "not
+    used") from the Filing Index page."""
+    order = 0
+    for code, category, section, typical_contents in FILING_INDEX_SEED:
+        if FilingIndexSection.query.filter_by(code=code).first():
+            continue
+        db.session.add(FilingIndexSection(
+            code=code, is_permanent=False, category=category, section=section,
+            typical_contents=typical_contents, order=order,
+        ))
+        order += 1
+    for code, category, section, typical_contents in FILING_INDEX_PERMANENT_SEED:
+        if FilingIndexSection.query.filter_by(code=code).first():
+            continue
+        db.session.add(FilingIndexSection(
+            code=code, is_permanent=True, category=category, section=section,
+            typical_contents=typical_contents, order=order,
+        ))
+        order += 1
     db.session.commit()
 
 

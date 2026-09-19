@@ -10,6 +10,22 @@
     {% endfor %}
   </select>
 {% endmacro %}
+{% macro filing_index_picker(selected_id=none, preselect_code=none) %}
+  <select name="filing_index_id" title="WP No." style="width:auto;margin-bottom:0;">
+    <option value="">No WP number</option>
+    {% set ns = namespace(category='', open=false) %}
+    {% for fi in filing_index_sections %}
+      {% if fi.category and fi.category != ns.category %}
+        {% if ns.open %}</optgroup>{% endif %}
+        <optgroup label="{{ fi.category }}">
+        {% set ns.category = fi.category %}
+        {% set ns.open = true %}
+      {% endif %}
+      <option value="{{ fi.id }}" {% if (selected_id and selected_id==fi.id) or (not selected_id and preselect_code and fi.code==preselect_code) %}selected{% endif %}>{{ fi.code }} — {{ fi.section }}</option>
+    {% endfor %}
+    {% if ns.open %}</optgroup>{% endif %}
+  </select>
+{% endmacro %}
 <div class="page-header">
   <div>
     <h1>{{ engagement.title }}</h1>
@@ -202,7 +218,7 @@
     {% if client_acceptance and not client_acceptance.checklist_items %}
     <form method="post" action="{{ url_for('acceptance.seed_acceptance_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist to every section below</button></form>
     {% endif %}
-    <a href="{{ url_for('engagements.download_acceptance_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. A-1)</a>
+    <a href="{{ url_for('engagements.download_acceptance_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. {{ filing_reference('acceptance') }})</a>
   </div>
 
   {% if engagement.type == 'Investigative Engagement' %}
@@ -663,7 +679,7 @@
     {% if not entity_understanding or not entity_understanding.checklist_items %}
     <form method="post" action="{{ url_for('engagements.seed_entity_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist</button></form>
     {% endif %}
-    <a href="{{ url_for('engagements.download_entity_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. B-1)</a>
+    <a href="{{ url_for('engagements.download_entity_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. {{ filing_reference('entity') }})</a>
   </div>
 
   {% set entity_forensic_sections = ['Objectives & Scope of the Engagement', 'Legal, Regulatory & Governance Context', 'Data, Systems & Access Checklist', 'Stakeholders, Logistics & Timeline', 'Risk Assessment & Safety'] %}
@@ -1399,21 +1415,23 @@
       <div><label for="file">File *</label><input type="file" id="file" name="file" required></div>
       <div><label for="category">Category</label><input type="text" id="category" name="category" placeholder="e.g. Working Papers" value="General"></div>
       <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" placeholder="e.g. A-1"></div>
+      <div><label for="filing_index_id">WP No.</label>{{ filing_index_picker() }}</div>
       <div><label for="notes">Notes</label><input type="text" id="notes" name="notes"></div>
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
     </form>
-    <p class="muted" style="font-size:12px;">Re-uploading a file with the same name and category creates a new version automatically. Reference is optional - use it for your own filing/working-paper index (e.g. "A-1").</p>
+    <p class="muted" style="font-size:12px;">Re-uploading a file with the same name and category creates a new version automatically. Reference is optional free text; WP No. picks a code from the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a> and follows the firm's N[code]_[Description]_[Year] naming convention on download.</p>
   </div>
 
   <div class="card">
     {% if engagement.documents %}
     <table>
-      <thead><tr><th>File</th><th>Reference</th><th>Category</th><th>Substantive area</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+      <thead><tr><th>File</th><th>Reference</th><th>WP No.</th><th>Category</th><th>Substantive area</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
       <tbody>
       {% for d in engagement.documents|sort(attribute='uploaded_at', reverse=True) %}
         <tr>
           <td>{{ d.original_filename }}{% if d.notes %}<div class="muted" style="font-size:11.5px;">{{ d.notes }}</div>{% endif %}</td>
           <td class="muted">{{ d.reference or '—' }}</td>
+          <td class="muted">{{ d.filing_index.display_label if d.filing_index else '—' }}</td>
           <td>{{ d.category }}</td>
           <td class="muted">{{ d.substantive_area.area if d.substantive_area else '—' }}</td>
           <td>v{{ d.version }}</td>
@@ -1627,11 +1645,11 @@
 
   <div class="card">
     <h3 class="mt-0">Working papers</h3>
-    <p class="muted" style="font-size:12.5px;">Generate downloadable working papers directly from the data already captured on this engagement - Word and Excel files, ready to file or send. References: FS-1 (financial statements), TB-1 (trial balance &amp; adjustments), MRL-1 (management representation letter), RTM-1 (report to management), I-1 (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report){% endif %}.</p>
+    <p class="muted" style="font-size:12.5px;">Generate downloadable working papers directly from the data already captured on this engagement - Word and Excel files, ready to file or send. References (see the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>): {{ filing_reference('financials') }} (financial statements), N1000 (trial balance &amp; adjustments), {{ filing_reference('rep_letter') }} (management representation letter), {{ filing_reference('report_to_management') }} (report to management), {{ filing_reference('finalisation') }} (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report - no filing-index code, outside the scope of the audit filing policy){% endif %}.</p>
     <div class="form-row">
       <div><a href="{{ url_for('engagements.download_financial_statements_docx', engagement_id=engagement.id) }}" class="btn secondary">Financial statements (Word)</a></div>
       <div><a href="{{ url_for('engagements.download_trial_balance_xlsx', engagement_id=engagement.id) }}" class="btn secondary">Trial balance &amp; adjustments (Excel)</a></div>
-      <div><a href="{{ url_for('engagements.download_finalisation_checklist_docx', engagement_id=engagement.id) }}" class="btn secondary">Finalisation checklist (Word)</a></div>
+      <div><a href="{{ url_for('engagements.download_finalisation_checklist_docx', engagement_id=engagement.id) }}" class="btn secondary">Finalisation checklist (Word, Ref. {{ filing_reference('finalisation') }})</a></div>
       <div><a href="{{ url_for('engagements.download_rep_letter_docx', engagement_id=engagement.id) }}" class="btn secondary">Management representation letter (Word)</a></div>
       <div><a href="{{ url_for('engagements.download_report_to_management_docx', engagement_id=engagement.id) }}" class="btn secondary">Report to management (Word)</a></div>
       {% if engagement.type == 'Investigative Engagement' %}
@@ -1681,8 +1699,8 @@
     </div>
   {% endmacro %}
 
-  {{ narrative_editor('rep_letter', 'Management Representation Letter - body (Ref. MRL-1)') }}
-  {{ narrative_editor('report_to_management', 'Report to Management - body (Ref. RTM-1)') }}
+  {{ narrative_editor('rep_letter', 'Management Representation Letter - body (Ref. ' + filing_reference('rep_letter') + ')') }}
+  {{ narrative_editor('report_to_management', 'Report to Management - body (Ref. ' + filing_reference('report_to_management') + ')') }}
   {% if engagement.type == 'Investigative Engagement' %}
   {{ narrative_editor('forensic_executive_summary', 'Forensic Investigation Report - Executive Summary (Ref. FR-1)') }}
   {% endif %}
@@ -2032,12 +2050,13 @@
       <h4 class="mt-0" style="margin-bottom:8px;">Working papers filed under {{ area_name }}</h4>
       {% if area and area.documents %}
       <table>
-        <thead><tr><th>File</th><th>Reference</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+        <thead><tr><th>File</th><th>Reference</th><th>WP No.</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
         <tbody>
         {% for d in area.documents %}
           <tr>
             <td>{{ d.original_filename }}{% if d.notes %}<div class="muted" style="font-size:11.5px;">{{ d.notes }}</div>{% endif %}</td>
             <td class="muted">{{ d.reference or '—' }}</td>
+            <td class="muted">{{ d.filing_index.display_label if d.filing_index else '—' }}</td>
             <td>v{{ d.version }}</td>
             <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
             <td>{{ d.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
@@ -2057,6 +2076,7 @@
       <form method="post" action="{{ url_for('engagements.upload_substantive_area_document', engagement_id=engagement.id, area_name=area_name) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;margin-top:8px;">
         <div><label for="subfile_{{ loop.index }}">File *</label><input type="file" id="subfile_{{ loop.index }}" name="file" required></div>
         <div><label for="subref_{{ loop.index }}">Reference</label><input type="text" id="subref_{{ loop.index }}" name="reference" placeholder="e.g. {{ substantive_area_refs.get(area_name, 'B') }}-1"></div>
+        <div><label>WP No.</label>{{ filing_index_picker(preselect_code=substantive_area_refs.get(area_name)) }}</div>
         <div><label for="subnotes_{{ loop.index }}">Notes</label><input type="text" id="subnotes_{{ loop.index }}" name="notes"></div>
         <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">File under {{ area_name }}</button></div>
       </form>
