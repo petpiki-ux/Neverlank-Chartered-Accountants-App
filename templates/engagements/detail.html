@@ -1391,35 +1391,31 @@
     <h3 class="mt-0">Account Mapping setup</h3>
     <p class="muted" style="font-size:12.5px;">Every account needs an IAS 1 category before the trial balance can be reviewed or the financial statements generated. Once an account is mapped here, the same account name is remembered for this client's future periods (see the full accounts table below to change amounts or delete an account).</p>
     {% if trial_balance.unmapped_count > 0 %}
+    <p class="muted" style="font-size:12.5px;">Rows below are pre-filled with a suggested category based on the account's name, marked <strong>(suggested)</strong> - it's a starting point only, nothing is saved until you review it. Check each one, change any that look wrong, leave a row as "Unmapped" to decide later, then confirm the batch at once.</p>
+    <form method="post" action="{{ url_for('engagements.confirm_suggested_tb_mappings', engagement_id=engagement.id) }}">
     <table>
-      <thead><tr><th>Account</th><th>IAS 1 category</th><th></th></tr></thead>
+      <thead><tr><th>Account</th><th>IAS 1 category</th></tr></thead>
       <tbody>
       {% for line in trial_balance.lines if not line.fs_category %}
+        {% set suggestion = suggested_categories.get(line.id) %}
         <tr class="danger">
-          <form method="post" action="{{ url_for('engagements.update_trial_balance_line', line_id=line.id) }}" class="inline">
           <td>{{ line.account_code + ' - ' if line.account_code }}{{ line.account_name }}</td>
           <td>
-            <input type="hidden" name="account_code" value="{{ line.account_code or '' }}">
-            <input type="hidden" name="account_name" value="{{ line.account_name }}">
-            <input type="hidden" name="current_debit" value="{{ line.current_debit or 0 }}">
-            <input type="hidden" name="current_credit" value="{{ line.current_credit or 0 }}">
-            <input type="hidden" name="prior_debit" value="{{ line.prior_debit or 0 }}">
-            <input type="hidden" name="prior_credit" value="{{ line.prior_credit or 0 }}">
-            <select name="fs_category" style="margin-bottom:0;">
-              <option value="">Unmapped</option>
+            <select name="fs_category__{{ line.id }}" style="margin-bottom:0;">
+              <option value="" {% if not suggestion %}selected{% endif %}>Unmapped</option>
               {% for group_label, choices in category_choices %}
               <optgroup label="{{ group_label }}">
-                {% for code, label in choices %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+                {% for code, label in choices %}<option value="{{ code }}" {% if suggestion==code %}selected{% endif %}>{{ label }}{% if suggestion==code %} (suggested){% endif %}</option>{% endfor %}
               </optgroup>
               {% endfor %}
             </select>
           </td>
-          <td><button type="submit" class="btn small gold">Map</button></td>
-          </form>
         </tr>
       {% endfor %}
       </tbody>
     </table>
+    <button type="submit" class="btn gold" style="margin-top:10px;">Confirm mappings</button>
+    </form>
     {% else %}
     <div class="empty-state">Every account is mapped to an IAS 1 category.</div>
     {% endif %}

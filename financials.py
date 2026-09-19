@@ -103,6 +103,77 @@ def normalize_account_name(name):
     return (name or "").strip().lower()
 
 
+# Checked in order for suggest_fs_category() below - most specific / least
+# ambiguous phrases first, so e.g. "Bank Overdraft" is suggested as a
+# short-term borrowing rather than cash, and "Bank Charges" as a finance
+# cost rather than cash, before the generic "bank" keyword under cash is
+# ever reached. Each entry is (category code, [keyword phrases]) - the
+# phrases are checked as substrings of the lowercased account name.
+_CATEGORY_SUGGESTION_RULES = [
+    ("short_term_borrowings", ["bank overdraft", "overdraft", "short term loan", "short-term loan", "loan payable", "bank loan", "borrowings"]),
+    ("long_term_borrowings", ["long term loan", "long-term loan", "mortgage", "debenture", "term loan"]),
+    ("current_tax_payable", ["tax payable", "paye payable", "vat payable", "income tax payable", "withholding tax payable"]),
+    ("trade_payables", ["accounts payable", "trade payable", "creditors", "accrued expense", "accrual", "payable"]),
+    ("finance_costs", ["bank charges", "bank fees", "interest expense", "interest paid", "finance cost", "loan interest"]),
+
+    ("share_capital", ["share capital", "ordinary shares", "issued capital", "stated capital"]),
+    ("share_premium", ["share premium"]),
+    ("retained_earnings", ["retained earnings", "retained income", "accumulated profit", "accumulated loss"]),
+    ("other_reserves", ["revaluation reserve", "general reserve", "capital reserve", "reserve"]),
+
+    ("trade_receivables", ["accounts receivable", "trade receivable", "debtors", "receivable"]),
+    ("other_current_assets", ["prepaid", "prepayment", "staff loan", "employee loan", "vat receivable", "vat control", "deposit paid", "advance to"]),
+    ("inventories", ["inventory", "inventories", "stock on hand", "finished goods", "raw materials", "work in progress", "merchandise"]),
+    ("cash", ["vault", "petty cash", "cash on hand", "cash in hand", "cash float", "till float", "money market", "current account", "call account", "bank account", "bank balance", "bank -", "bank"]),
+
+    ("ppe", ["property, plant", "property plant", "motor vehicle", "furniture and fittings", "furniture & fittings", "plant and machinery", "office equipment", "computer equipment", "land and buildings", "buildings", "fixed asset", "equipment"]),
+    ("intangible_assets", ["goodwill", "intangible", "software licence", "software license", "patent", "trademark"]),
+    ("investment_property", ["investment property"]),
+    ("long_term_investments", ["long term investment", "long-term investment", "investment in subsidiary", "investment in associate"]),
+    ("deferred_tax_asset", ["deferred tax asset"]),
+    ("deferred_tax_liability", ["deferred tax liability"]),
+
+    ("cost_of_sales", ["cost of sales", "cost of goods sold", "cogs", "purchases"]),
+    ("revenue", ["revenue", "sales", "turnover", "fees earned", "service income"]),
+    ("other_income", ["other income", "interest received", "interest income", "sundry income", "rental income", "gain on disposal"]),
+    ("distribution_costs", ["distribution cost", "selling expense", "marketing expense", "advertising"]),
+    ("income_tax_expense", ["income tax expense", "tax expense", "corporate tax"]),
+    ("depreciation_amortisation", ["depreciation", "amortisation", "amortization"]),
+    ("admin_expenses", [
+        "salaries", "wages", "rent expense", "rent paid", "electricity", "water and", "telephone",
+        "internet", "stationery", "insurance", "repairs and maintenance", "audit fees",
+        "professional fees", "legal fees", "subscriptions", "printing", "cleaning", "security",
+        "fuel", "travel", "staff welfare", "training", "administrative expense", "general expense",
+        "sundry expense", "postage", "licence fees", "license fees",
+    ]),
+
+    ("dividends_paid", ["dividend"]),
+]
+
+
+def suggest_fs_category(account_name):
+    """Best-effort keyword suggestion for an unmapped account's IAS 1
+    category, from its name alone - a starting point for the Account
+    Mapping setup screen to pre-fill, for the accountant to review and
+    confirm (or override) rather than picking every account from a blank
+    dropdown. Never applied on its own - only ever written once a human
+    explicitly confirms it (see engagements.confirm_suggested_tb_mappings).
+
+    Matches the lowercased account name against _CATEGORY_SUGGESTION_RULES
+    in order, so more specific phrases (e.g. "bank overdraft") are checked
+    before more generic ones (e.g. "bank") that would otherwise shadow
+    them. Returns a category code, or None if nothing matched - left for
+    a manual pick rather than guessing at something with no signal."""
+    name = normalize_account_name(account_name)
+    if not name:
+        return None
+    for code, keywords in _CATEGORY_SUGGESTION_RULES:
+        for kw in keywords:
+            if kw in name:
+                return code
+    return None
+
+
 def summarise_tb_by_category(lines):
     """Groups trial balance lines by their IAS 1 category for the Trial
     Balance tab's "Summarised" Face of Trial Balance view - one row per

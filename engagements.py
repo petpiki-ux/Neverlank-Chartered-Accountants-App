@@ -323,6 +323,17 @@ def view_engagement(engagement_id):
     # view alongside the detailed, account-by-account one - built from the
     # same preliminary lines so the two views (and their totals) always agree.
     tb_face_summary = fin.summarise_tb_by_category(trial_balance.lines) if trial_balance and trial_balance.lines else []
+    # Account Mapping setup (Trial Balance tab): a best-effort category
+    # suggestion per unmapped account, from its name alone, for the
+    # accountant to review and confirm in one batch rather than picking
+    # every account from a blank dropdown - see fin.suggest_fs_category().
+    # Never written to the trial balance on its own; only pre-fills the
+    # dropdown, and only takes effect once confirmed via
+    # confirm_suggested_tb_mappings below.
+    suggested_categories = (
+        {line.id: fin.suggest_fs_category(line.account_name) for line in trial_balance.lines if not line.fs_category}
+        if trial_balance else {}
+    )
 
     # On an Investigative Engagement, Substantive Procedures uses the four
     # forensic evidence-type categories instead of the financial-statement
@@ -399,6 +410,7 @@ def view_engagement(engagement_id):
         analytical_review=analytical_review,
         trial_balance=trial_balance,
         tb_face_summary=tb_face_summary,
+        suggested_categories=suggested_categories,
         financial_statements=financial_statements,
         statements=statements,
         category_choices=fin.category_choices(),
@@ -2384,6 +2396,49 @@ def upload_trial_balance(engagement_id):
     if format_note:
         flash(format_note, "info")
     flash(f"Imported {len(cleaned_rows)} account(s) from '{original_name}'.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
+
+
+@engagements_bp.route("/<int:engagement_id>/trial-balance/confirm-suggested-mappings", methods=["POST"])
+@login_required
+def confirm_suggested_tb_mappings(engagement_id):
+    """Batch-confirms the IAS 1 category chosen for each still-unmapped
+    account on the Account Mapping setup screen - one submit instead of
+    the one-account-at-a-time "Map" form, meant to be used alongside
+    fin.suggest_fs_category()'s pre-filled suggestions there: the
+    accountant reviews/adjusts each row's dropdown (already pre-filled
+    with a suggestion where one exists), then confirms the whole batch at
+    once. A row left as "Unmapped" is simply skipped - it stays on the
+    list for next time, exactly as if this batch action had never run."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    tb = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
+    if not tb:
+        flash("No trial balance to map yet.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
+
+    mapped_count = 0
+    for line in tb.lines:
+        if line.fs_category:
+            continue  # already mapped - this batch only ever touches unmapped rows
+        category = request.form.get(f"fs_category__{line.id}", "").strip()
+        if not category or category not in fin.CATEGORY_BY_CODE:
+            continue  # left as "Unmapped" (or an unrecognized value) - skip, don't guess
+        line.fs_category = category
+        _upsert_coa_mapping(engagement.client_id, line.account_name, category, current_user.id)
+        mapped_count += 1
+
+    if mapped_count == 0:
+        flash("No mappings were confirmed - every row was left as “Unmapped”.", "info")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
+
+    _touch_trial_balance(tb)
+    db.session.commit()
+    remaining = tb.unmapped_count
+    if remaining:
+        flash(f"{mapped_count} account(s) mapped. {remaining} still need a category.", "success")
+    else:
+        flash(f"{mapped_count} account(s) mapped - every account now has an IAS 1 category.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
 
