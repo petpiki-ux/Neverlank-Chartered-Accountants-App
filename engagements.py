@@ -2126,14 +2126,138 @@ def _allowed_tb_file(filename):
     return ext in ("xlsx", "xls", "csv")
 
 
+def _read_alt_format_tb_workbook(workbook):
+    """Recognizes an alternate trial balance export layout some accounting
+    systems produce instead of the app's own template: one sheet per year
+    (e.g. '2024', '2025'), each with a header row like ('GL Code', 'Name',
+    'Opening balance', '<year> Transactions', 'Closing balance') and a
+    single signed closing balance per account rather than separate debit/
+    credit columns.
+
+    Returns (rows, note) shaped like the standard import - rows are dicts
+    keyed by TB_IMPORT_COLUMNS' header names, ready for
+    financials.parse_tb_rows() exactly like the standard layout's rows -
+    or (None, None) if the workbook doesn't look like this format at all.
+
+    Two or more matching sheets are treated as successive years - sheet
+    names that parse as plain years (e.g. '2024') are sorted numerically
+    and the latest becomes the current year, the one before it the prior
+    year; otherwise workbook order is used, last sheet as current year. A
+    single matching sheet is read as current year only, with prior year
+    left at zero for every account. Accounts are matched between the two
+    years by GL Code (falling back to the account name when no code
+    column exists). Closing balances are converted to debit/credit with
+    the standard accounting sign convention: a positive balance is a
+    debit, a negative balance is a credit."""
+    sheet_accounts = {}  # sheet name -> {code_or_name: (code, name, closing_balance)}
+
+    for sheet_name in workbook.sheetnames:
+        ws = workbook[sheet_name]
+        rows = list(ws.iter_rows(values_only=True))
+        header_idx = None
+        headers = None
+        for i, row in enumerate(rows):
+            cells = [str(c).strip().lower() if c is not None else "" for c in row]
+            if "closing balance" in cells and ("name" in cells or "account name" in cells):
+                header_idx = i
+                headers = [str(c).strip() if c is not None else "" for c in row]
+                break
+        if header_idx is None:
+            continue
+
+        lower_headers = [h.lower() for h in headers]
+        name_col = lower_headers.index("name") if "name" in lower_headers else lower_headers.index("account name")
+        closing_col = lower_headers.index("closing balance")
+        code_col = next((lower_headers.index(c) for c in ("gl code", "account code", "code") if c in lower_headers), None)
+
+        accounts = {}
+        for row in rows[header_idx + 1:]:
+            if row is None or len(row) <= max(name_col, closing_col):
+                continue
+            if all(c is None or str(c).strip() == "" for c in row):
+                continue
+            name = row[name_col]
+            if name is None or not str(name).strip():
+                continue
+            name = str(name).strip()
+            code = str(row[code_col]).strip() if code_col is not None and row[code_col] is not None else ""
+            closing = row[closing_col]
+            try:
+                closing = float(closing) if closing not in (None, "") else 0.0
+            except (TypeError, ValueError):
+                closing = 0.0
+            accounts[code or name] = (code, name, closing)
+
+        if accounts:
+            sheet_accounts[sheet_name] = accounts
+
+    if not sheet_accounts:
+        return None, None
+
+    def _year_sort_key(name):
+        try:
+            return (0, int(str(name).strip()))
+        except ValueError:
+            return (1, str(name))
+
+    ordered_sheet_names = sorted(sheet_accounts.keys(), key=_year_sort_key)
+    current_sheet_name = ordered_sheet_names[-1]
+    prior_sheet_name = ordered_sheet_names[-2] if len(ordered_sheet_names) > 1 else None
+    current_accounts = sheet_accounts[current_sheet_name]
+    prior_accounts = sheet_accounts[prior_sheet_name] if prior_sheet_name else {}
+
+    def _split(balance):
+        if balance > 0:
+            return balance, 0.0
+        if balance < 0:
+            return 0.0, abs(balance)
+        return 0.0, 0.0
+
+    combined = {}
+    for key, (code, name, balance) in current_accounts.items():
+        combined[key] = {"code": code, "name": name, "current": balance, "prior": 0.0}
+    for key, (code, name, balance) in prior_accounts.items():
+        if key in combined:
+            combined[key]["prior"] = balance
+        else:
+            combined[key] = {"code": code, "name": name, "current": 0.0, "prior": balance}
+
+    out_rows = []
+    for acc in combined.values():
+        cur_debit, cur_credit = _split(acc["current"])
+        prior_debit, prior_credit = _split(acc["prior"])
+        out_rows.append({
+            "Account Code": acc["code"],
+            "Account Name": acc["name"],
+            "Current Year Debit": cur_debit,
+            "Current Year Credit": cur_credit,
+            "Prior Year Debit": prior_debit,
+            "Prior Year Credit": prior_credit,
+        })
+
+    if prior_sheet_name:
+        note = (
+            f"Recognized '{current_sheet_name}' and '{prior_sheet_name}' as this year's and last year's trial "
+            "balance (GL Code / Name / Closing balance format) and matched accounts between them by GL Code."
+        )
+    else:
+        note = (
+            f"Recognized '{current_sheet_name}' as this year's trial balance (GL Code / Name / Closing balance "
+            "format) - no earlier year's tab was found, so prior year was left blank."
+        )
+    return out_rows, note
+
+
 def _read_tb_upload_rows(file_storage, filename):
-    """Returns a list of {header: value} dicts from an uploaded .xlsx/.xls
-    or .csv trial balance file. Raises ValueError with a plain-English
-    message if it can't find a usable header row."""
+    """Returns (rows, note): a list of {header: value} dicts from an
+    uploaded .xlsx/.xls or .csv trial balance file, and an optional note
+    to flash to the user (e.g. when an alternate format was auto-
+    recognized). Raises ValueError with a plain-English message if it
+    can't find a usable header row in any recognized format."""
     ext = filename.rsplit(".", 1)[-1].lower()
     if ext == "csv":
         content = file_storage.read().decode("utf-8-sig", errors="replace")
-        return list(csv.DictReader(io.StringIO(content)))
+        return list(csv.DictReader(io.StringIO(content))), None
 
     workbook = openpyxl.load_workbook(file_storage, data_only=True)
     sheet = workbook.active
@@ -2144,18 +2268,26 @@ def _read_tb_upload_rows(file_storage, filename):
         if "account name" in cells:
             header_idx = i
             break
-    if header_idx is None:
-        raise ValueError(
-            "Could not find a header row containing 'Account Name' in that file. "
-            "Download the template below and use its column headers."
-        )
-    headers = [str(c).strip() if c is not None else "" for c in all_rows[header_idx]]
-    data_rows = []
-    for row in all_rows[header_idx + 1:]:
-        if all(c is None or str(c).strip() == "" for c in row):
-            continue
-        data_rows.append({h: v for h, v in zip(headers, row) if h})
-    return data_rows
+    if header_idx is not None:
+        headers = [str(c).strip() if c is not None else "" for c in all_rows[header_idx]]
+        data_rows = []
+        for row in all_rows[header_idx + 1:]:
+            if all(c is None or str(c).strip() == "" for c in row):
+                continue
+            data_rows.append({h: v for h, v in zip(headers, row) if h})
+        return data_rows, None
+
+    # Not the standard single-sheet "Account Name" layout - check whether
+    # this is the alternate one-sheet-per-year "GL Code/Name/Closing
+    # balance" export before giving up.
+    alt_rows, alt_note = _read_alt_format_tb_workbook(workbook)
+    if alt_rows is not None:
+        return alt_rows, alt_note
+
+    raise ValueError(
+        "Could not find a header row containing 'Account Name' in that file. "
+        "Download the template below and use its column headers."
+    )
 
 
 def _get_or_create_trial_balance(engagement_id, source="manual"):
@@ -2215,7 +2347,7 @@ def upload_trial_balance(engagement_id):
 
     original_name = secure_filename(file.filename)
     try:
-        raw_rows = _read_tb_upload_rows(file, original_name)
+        raw_rows, format_note = _read_tb_upload_rows(file, original_name)
         cleaned_rows = fin.parse_tb_rows(raw_rows)
     except ValueError as e:
         flash(str(e), "danger")
@@ -2249,6 +2381,8 @@ def upload_trial_balance(engagement_id):
 
     _touch_trial_balance(tb)
     db.session.commit()
+    if format_note:
+        flash(format_note, "info")
     flash(f"Imported {len(cleaned_rows)} account(s) from '{original_name}'.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
