@@ -203,6 +203,7 @@
     {% if client_acceptance and not client_acceptance.checklist_items %}
     <form method="post" action="{{ url_for('acceptance.seed_acceptance_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist to every section below</button></form>
     {% endif %}
+    <a href="{{ url_for('engagements.download_acceptance_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. A-1)</a>
   </div>
 
   {% if engagement.type == 'Investigative Engagement' %}
@@ -664,6 +665,7 @@
     {% if not entity_understanding or not entity_understanding.checklist_items %}
     <form method="post" action="{{ url_for('engagements.seed_entity_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist</button></form>
     {% endif %}
+    <a href="{{ url_for('engagements.download_entity_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. B-1)</a>
   </div>
 
   {% set entity_forensic_sections = ['Objectives & Scope of the Engagement', 'Legal, Regulatory & Governance Context', 'Data, Systems & Access Checklist', 'Stakeholders, Logistics & Timeline', 'Risk Assessment & Safety'] %}
@@ -1312,6 +1314,7 @@
       <div style="grid-column: span 2;"><label for="item_text">Procedure *</label><input type="text" id="item_text" name="item_text" required></div>
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add item</button></div>
     </form>
+    <a href="{{ url_for('engagements.download_engagement_checklist_docx', engagement_id=engagement.id) }}" class="btn small secondary">Download checklist (Word, Ref. F-1)</a>
   </div>
 
   <div class="card">
@@ -1628,10 +1631,11 @@
 
   <div class="card">
     <h3 class="mt-0">Working papers</h3>
-    <p class="muted" style="font-size:12.5px;">Generate downloadable working papers directly from the data already captured on this engagement - Word and Excel files, ready to file or send. References: FS-1 (financial statements), TB-1 (trial balance &amp; adjustments), MRL-1 (management representation letter), RTM-1 (report to management){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report){% endif %}.</p>
+    <p class="muted" style="font-size:12.5px;">Generate downloadable working papers directly from the data already captured on this engagement - Word and Excel files, ready to file or send. Every checklist response's tickmark (see the Tickmarks page) is included in these downloads. References: FS-1 (financial statements), TB-1 (trial balance &amp; adjustments), MRL-1 (management representation letter), RTM-1 (report to management), I-1 (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report){% endif %}.</p>
     <div class="form-row">
       <div><a href="{{ url_for('engagements.download_financial_statements_docx', engagement_id=engagement.id) }}" class="btn secondary">Financial statements (Word)</a></div>
       <div><a href="{{ url_for('engagements.download_trial_balance_xlsx', engagement_id=engagement.id) }}" class="btn secondary">Trial balance &amp; adjustments (Excel)</a></div>
+      <div><a href="{{ url_for('engagements.download_finalisation_checklist_docx', engagement_id=engagement.id) }}" class="btn secondary">Finalisation checklist (Word)</a></div>
       <div><a href="{{ url_for('engagements.download_rep_letter_docx', engagement_id=engagement.id) }}" class="btn secondary">Management representation letter (Word)</a></div>
       <div><a href="{{ url_for('engagements.download_report_to_management_docx', engagement_id=engagement.id) }}" class="btn secondary">Report to management (Word)</a></div>
       {% if engagement.type == 'Investigative Engagement' %}
@@ -1996,7 +2000,7 @@
     <h3 class="mt-0"><span class="badge" style="margin-right:6px;">{{ substantive_area_refs.get(area_name, '') }}</span>{{ area_name }}</h3>
     {% if area and area.items %}
     <table>
-      <thead><tr><th>Procedure</th><th>Source</th><th>Notes</th><th>Status</th><th></th></tr></thead>
+      <thead><tr><th>Procedure</th><th>Source</th><th>Notes</th><th>Status</th><th>Tickmark</th><th></th></tr></thead>
       <tbody>
       {% for item in area.items %}
         <form method="post" action="{{ url_for('engagements.update_substantive_procedure_item', item_id=item.id) }}" class="inline">
@@ -2009,6 +2013,7 @@
               {% for s in checklist_statuses %}<option value="{{ s }}" {% if item.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
             </select>
           </td>
+          <td>{{ tickmark_picker(item.tickmark_id) }}</td>
           <td>
             <button type="submit" class="btn small secondary">Save</button>
             <button type="submit" formaction="{{ url_for('engagements.delete_substantive_procedure_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this procedure?')">Delete</button>

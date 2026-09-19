@@ -576,9 +576,9 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
         _add_heading(doc, f"{ref} — {area_name}" if ref else area_name, level=1)
         items = area.items if area else []
         if items:
-            table = doc.add_table(rows=1, cols=4)
+            table = doc.add_table(rows=1, cols=5)
             hdr = table.rows[0].cells
-            hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text = "Procedure", "Source", "Status", "Notes"
+            hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text, hdr[4].text = "Procedure", "Source", "Status", "Notes", "Tickmark"
             _style_table(table)
             for item in items:
                 row = table.add_row().cells
@@ -586,6 +586,7 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
                 row[1].text = item.source
                 row[2].text = item.status
                 row[3].text = item.notes or ""
+                row[4].text = item.tickmark.symbol if item.tickmark else ""
         else:
             doc.add_paragraph("No procedures recorded for this area.")
         if area:
@@ -610,7 +611,7 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
     )
 
     row = 7
-    row = _header_row(ws, row, ["Ref.", "Area", "Procedure", "Source", "Status", "Notes"])
+    row = _header_row(ws, row, ["Ref.", "Area", "Procedure", "Source", "Status", "Notes", "Tickmark"])
     for area_name in area_order:
         area = areas_by_name.get(area_name)
         ref = area_refs.get(area_name, "")
@@ -619,7 +620,7 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
             ws.cell(row=row, column=1, value=ref).border = _BORDER
             ws.cell(row=row, column=2, value=area_name).border = _BORDER
             ws.cell(row=row, column=3, value="(no procedures recorded)").border = _BORDER
-            for col in (4, 5, 6):
+            for col in (4, 5, 6, 7):
                 ws.cell(row=row, column=col, value="").border = _BORDER
             row += 1
             continue
@@ -630,10 +631,102 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
             ws.cell(row=row, column=4, value=item.source).border = _BORDER
             ws.cell(row=row, column=5, value=item.status).border = _BORDER
             ws.cell(row=row, column=6, value=item.notes or "").border = _BORDER
+            ws.cell(row=row, column=7, value=item.tickmark.symbol if item.tickmark else "").border = _BORDER
             row += 1
 
-    _autofit(ws, [8, 28, 55, 12, 14, 30])
+    _autofit(ws, [8, 28, 55, 12, 14, 30, 10])
     return _finish_wb(wb)
+
+
+# ================================================================= Checklist workpapers (Word)
+#
+# None of the four checklist types (Client Acceptance, Understanding the
+# Entity, the main Engagement Checklist, Finalisation) previously had a
+# downloadable Word workpaper of their own - only the on-screen tab and the
+# Engagement File Summary PDF showed their responses. These four functions
+# fill that gap, each as its own workpaper with a table of every response
+# (including its tickmark, if any) plus the section's sign-off.
+
+def _checklist_table_docx(doc, items, per_item_status=False):
+    """A docx table of checklist-item rows: Section | Item | Response |
+    Comment | Tickmark, and (only for the main Engagement Checklist, whose
+    items each carry their own Preparer/Reviewer/Partner sign-off rather
+    than one for the whole checklist) a trailing Status column.
+
+    Handles both field-naming conventions across the four checklist-item
+    models: "response"/"comment" (Client Acceptance, Entity Understanding,
+    Finalisation) and "status"/"notes" (the main Engagement Checklist)."""
+    cols = 6 if per_item_status else 5
+    table = doc.add_table(rows=1, cols=cols)
+    hdr = table.rows[0].cells
+    hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text, hdr[4].text = "Section", "Item", "Response", "Comment", "Tickmark"
+    if per_item_status:
+        hdr[5].text = "Status"
+    _style_table(table)
+    for item in items:
+        response = getattr(item, "response", None) or getattr(item, "status", None) or "Not assessed"
+        comment = getattr(item, "comment", None) or getattr(item, "notes", None) or ""
+        row = table.add_row().cells
+        row[0].text = item.section or ""
+        row[1].text = item.item_text or ""
+        row[2].text = response
+        row[3].text = comment
+        row[4].text = item.tickmark.symbol if item.tickmark else ""
+        if per_item_status:
+            row[5].text = _sign_off_line(item)
+    return table
+
+
+def build_client_acceptance_checklist_docx(engagement, client_acceptance):
+    doc = _new_document("Client Acceptance & Continuance - Checklist", engagement, subtitle="Ref. A-1")
+    items = client_acceptance.checklist_items if client_acceptance else []
+    if items:
+        _checklist_table_docx(doc, items)
+    else:
+        doc.add_paragraph("No checklist items recorded yet.")
+    doc.add_paragraph()
+    _add_heading(doc, "Sign-off", level=2)
+    doc.add_paragraph(f"Decision: {client_acceptance.decision if client_acceptance and client_acceptance.decision else 'Not yet decided'}")
+    doc.add_paragraph(_sign_off_line(client_acceptance))
+    return _finish(doc)
+
+
+def build_entity_understanding_checklist_docx(engagement, entity_understanding):
+    doc = _new_document("Understanding the Entity's Business - Checklist", engagement, subtitle="Ref. B-1")
+    items = entity_understanding.checklist_items if entity_understanding else []
+    if items:
+        _checklist_table_docx(doc, items)
+    else:
+        doc.add_paragraph("No checklist items recorded yet.")
+    doc.add_paragraph()
+    _add_heading(doc, "Sign-off", level=2)
+    doc.add_paragraph(_sign_off_line(entity_understanding))
+    return _finish(doc)
+
+
+def build_engagement_checklist_docx(engagement):
+    doc = _new_document("Engagement Checklist", engagement, subtitle="Ref. F-1")
+    items = engagement.checklist_items
+    if items:
+        _checklist_table_docx(doc, items, per_item_status=True)
+    else:
+        doc.add_paragraph("No checklist items recorded yet.")
+    doc.add_paragraph()
+    doc.add_paragraph(f"Overall progress: {engagement.checklist_progress}% complete.").runs[0].italic = True
+    return _finish(doc)
+
+
+def build_finalisation_checklist_docx(engagement, finalisation_checklist):
+    doc = _new_document("Finalisation Checklist", engagement, subtitle="Ref. I-1")
+    items = finalisation_checklist.checklist_items if finalisation_checklist else []
+    if items:
+        _checklist_table_docx(doc, items)
+    else:
+        doc.add_paragraph("No checklist items recorded yet.")
+    doc.add_paragraph()
+    _add_heading(doc, "Sign-off", level=2)
+    doc.add_paragraph(_sign_off_line(finalisation_checklist))
+    return _finish(doc)
 
 
 # ================================================================= Engagement File Summary (PDF)
@@ -858,6 +951,8 @@ def build_engagement_file_summary_pdf(engagement):
         item_sources += list(engagement.entity_understanding.checklist_items)
     if engagement.finalisation_checklist:
         item_sources += list(engagement.finalisation_checklist.checklist_items)
+    for area in engagement.substantive_procedure_areas:
+        item_sources += list(area.items)
     for item in item_sources:
         tm = getattr(item, "tickmark", None)
         if tm and tm.id not in used_ids:

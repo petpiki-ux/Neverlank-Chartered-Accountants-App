@@ -2730,6 +2730,8 @@ def update_substantive_procedure_item(item_id):
     item.procedure_text = request.form.get("procedure_text", item.procedure_text).strip() or item.procedure_text
     item.status = request.form.get("status", item.status)
     item.notes = request.form.get("notes", item.notes or "").strip()
+    tickmark_id = request.form.get("tickmark_id", "").strip()
+    item.tickmark_id = int(tickmark_id) if tickmark_id.isdigit() else None
     _touch_substantive_area(area)
     db.session.commit()
     flash("Procedure updated.", "success")
@@ -3046,6 +3048,58 @@ def download_engagement_file_summary_pdf(engagement_id):
         buf, as_attachment=True,
         download_name=_workpaper_filename(engagement, "Engagement_File_Summary", "pdf"),
         mimetype="application/pdf",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/acceptance-checklist.docx")
+@login_required
+def download_acceptance_checklist_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    buf = wp.build_client_acceptance_checklist_docx(engagement, engagement.client_acceptance)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Client_Acceptance_Checklist", "docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/entity-checklist.docx")
+@login_required
+def download_entity_checklist_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    buf = wp.build_entity_understanding_checklist_docx(engagement, engagement.entity_understanding)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Understanding_the_Entity_Checklist", "docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/engagement-checklist.docx")
+@login_required
+def download_engagement_checklist_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    buf = wp.build_engagement_checklist_docx(engagement)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Engagement_Checklist", "docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/finalisation-checklist.docx")
+@login_required
+def download_finalisation_checklist_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    buf = wp.build_finalisation_checklist_docx(engagement, engagement.finalisation_checklist)
+    return send_file(
+        buf, as_attachment=True,
+        download_name=_workpaper_filename(engagement, "Finalisation_Checklist", "docx"),
+        mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     )
 
 

@@ -1868,6 +1868,8 @@ class SubstantiveProcedureItem(db.Model):
     status = db.Column(db.String(20), default="Not Started")
     notes = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)
+    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
+    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
 
     def __repr__(self):
         return f"<SubstantiveProcedureItem area={self.area_id}>"
