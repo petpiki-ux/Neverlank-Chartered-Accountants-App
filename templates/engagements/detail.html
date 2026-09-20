@@ -2176,7 +2176,35 @@
 
     {% for note in statements.notes %}
     <h4>{{ note.number }}. {{ note.title }}</h4>
-    {% if note.accounts %}
+    {% if note.movement %}
+    <p class="muted" style="font-size:11.5px;">From the Asset Register (Substantive Procedures &gt; Property, Plant and Equipment) rather than the trial balance account list.</p>
+    <table>
+      <thead><tr><th>Asset class</th><th class="text-right">Opening NBV</th><th class="text-right">Additions</th><th class="text-right">Disposals</th><th class="text-right">Depreciation charge</th><th class="text-right">Closing NBV</th></tr></thead>
+      <tbody>
+        {% for r in note.movement %}
+        <tr>
+          <td>{{ r.class_name }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.opening_nbv) }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.additions) }}</td>
+          <td class="text-right">{{ '%.2f'|format(-(r.disposals_cost - r.disposals_acc_dep)) if r.disposals_cost or r.disposals_acc_dep else '0.00' }}</td>
+          <td class="text-right">{{ '%.2f'|format(-r.charge) if r.charge else '0.00' }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.closing_nbv) }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td><strong>Total</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(note.movement_total.opening_nbv) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(note.movement_total.additions) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(-(note.movement_total.disposals_cost - note.movement_total.disposals_acc_dep)) if note.movement_total.disposals_cost or note.movement_total.disposals_acc_dep else '0.00' }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(-note.movement_total.charge) if note.movement_total.charge else '0.00' }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(note.movement_total.closing_nbv) }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+    {% if note.variance %}
+    <p class="muted" style="font-size:11.5px;color:#B02A2A;">Per trial balance: {{ '%.2f'|format(note.variance.tb_current) }} (current), {{ '%.2f'|format(note.variance.tb_prior) }} (prior). Per Asset Register: {{ '%.2f'|format(note.variance.register_current) }} (current), {{ '%.2f'|format(note.variance.register_prior) }} (prior). Variance to be reviewed - check the Asset Register against the trial balance.</p>
+    {% endif %}
+    {% elif note.accounts %}
     <table>
       <thead><tr><th>Account</th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
       <tbody>
@@ -2409,6 +2437,146 @@
       <div style="grid-column: span 3;"><label>Add a procedure</label><input type="text" name="procedure_text" placeholder="Describe the procedure" required></div>
       <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add</button></div>
     </form>
+
+    {% if area_name == 'Property, Plant and Equipment' %}
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e5e5e5;">
+      <h4 class="mt-0" style="margin-bottom:4px;">Depreciation policy</h4>
+      <p class="muted" style="font-size:12px;">
+        One row per asset class - feeds the Asset Register's rate/method column below, and auto-writes the "Property, plant and equipment" accounting policy note on the Finalisation tab once at least one class is added here (replacing the generic wording).
+      </p>
+      {% if ppe_asset_classes %}
+      <table>
+        <thead><tr><th>Asset class</th><th>Method</th><th>Rate (% p.a.)</th><th>Useful life (yrs)</th><th></th></tr></thead>
+        <tbody>
+        {% for c in ppe_asset_classes %}
+          <form method="post" action="{{ url_for('engagements.update_ppe_asset_class', class_id=c.id) }}" class="inline">
+          <tr>
+            <td><input type="text" name="name" value="{{ c.name }}" style="width:100%;margin-bottom:0;"></td>
+            <td>
+              <select name="depreciation_method">
+                {% for m in ppe_depreciation_methods %}<option value="{{ m }}" {% if c.depreciation_method==m %}selected{% endif %}>{{ m }}</option>{% endfor %}
+              </select>
+            </td>
+            <td><input type="number" step="0.01" name="rate_percent" value="{{ c.rate_percent if c.rate_percent is not none else '' }}" style="width:90px;margin-bottom:0;"></td>
+            <td><input type="number" step="0.01" name="useful_life_years" value="{{ c.useful_life_years if c.useful_life_years is not none else '' }}" style="width:90px;margin-bottom:0;"></td>
+            <td>
+              <button type="submit" class="btn small secondary">Save</button>
+              <button type="submit" formaction="{{ url_for('engagements.delete_ppe_asset_class', class_id=c.id) }}" class="btn small danger" onclick="return confirm('Delete this asset class? Its assets become Unclassified rather than being deleted.')">Delete</button>
+            </td>
+          </tr>
+          </form>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">No asset classes yet - add one below.</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('engagements.add_ppe_asset_class', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+        <div><label>Asset class</label><input type="text" name="name" placeholder="e.g. Motor vehicles" required></div>
+        <div><label>Method</label>
+          <select name="depreciation_method">
+            {% for m in ppe_depreciation_methods %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><label>Rate (% p.a.)</label><input type="number" step="0.01" name="rate_percent"></div>
+        <div><label>Useful life (yrs)</label><input type="number" step="0.01" name="useful_life_years"></div>
+        <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add class</button></div>
+      </form>
+    </div>
+
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e5e5e5;">
+      <h4 class="mt-0" style="margin-bottom:4px;">Asset Register</h4>
+      <p class="muted" style="font-size:12px;">
+        One row per asset, editable directly here. Once this has at least one asset, the "Property, plant and equipment" note on the Finalisation tab is computed from it (a movement schedule by asset class) instead of the plain trial balance account list. "Date acquired" decides whether an asset is an opening balance or a current-year addition, assuming a standard 12-month period ending {{ engagement.period_end.strftime('%d %b %Y') if engagement.period_end else '(period end not set)' }} - review that assumption for a genuinely short or long period.
+      </p>
+      {% if ppe_assets %}
+      <table style="font-size:12px;">
+        <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th>Cost</th><th>Opening acc. dep.</th><th>Current yr dep.</th><th>Disposal cost</th><th>Disposal acc. dep.</th><th>Closing NBV</th><th></th></tr></thead>
+        <tbody>
+        {% for a in ppe_assets %}
+          <form method="post" action="{{ url_for('engagements.update_ppe_asset', asset_id=a.id) }}" class="inline">
+          <tr>
+            <td><input type="text" name="asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
+            <td><input type="text" name="description" value="{{ a.description }}" style="width:140px;margin-bottom:0;"></td>
+            <td>
+              <select name="asset_class_id" style="width:auto;margin-bottom:0;">
+                <option value="">Unclassified</option>
+                {% for c in ppe_asset_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+              </select>
+            </td>
+            <td><input type="date" name="date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') if a.date_acquired else '' }}" style="width:128px;margin-bottom:0;"></td>
+            <td><input type="number" step="0.01" name="cost" value="{{ a.cost or 0 }}" style="width:85px;margin-bottom:0;"></td>
+            <td><input type="number" step="0.01" name="opening_accumulated_depreciation" value="{{ a.opening_accumulated_depreciation or 0 }}" style="width:85px;margin-bottom:0;"></td>
+            <td><input type="number" step="0.01" name="current_year_depreciation" value="{{ a.current_year_depreciation or 0 }}" style="width:85px;margin-bottom:0;"></td>
+            <td><input type="number" step="0.01" name="disposal_cost" value="{{ a.disposal_cost or 0 }}" style="width:85px;margin-bottom:0;"></td>
+            <td><input type="number" step="0.01" name="disposal_accumulated_depreciation" value="{{ a.disposal_accumulated_depreciation or 0 }}" style="width:85px;margin-bottom:0;"></td>
+            <td class="text-right muted">{{ '%.2f'|format(a.closing_nbv) }}</td>
+            <td>
+              <button type="submit" class="btn small secondary">Save</button>
+              <button type="submit" formaction="{{ url_for('engagements.delete_ppe_asset', asset_id=a.id) }}" class="btn small danger" onclick="return confirm('Delete this asset?')">Delete</button>
+            </td>
+          </tr>
+          </form>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">No assets in the register yet - add one below.</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('engagements.add_ppe_asset', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+        <div><label>Code</label><input type="text" name="asset_code"></div>
+        <div style="grid-column: span 2;"><label>Description</label><input type="text" name="description" placeholder="e.g. Toyota Hilux - ABC 1234" required></div>
+        <div><label>Class</label>
+          <select name="asset_class_id">
+            <option value="">Unclassified</option>
+            {% for c in ppe_asset_classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><label>Acquired</label><input type="date" name="date_acquired"></div>
+        <div><label>Cost</label><input type="number" step="0.01" name="cost"></div>
+        <div><label>Opening acc. dep.</label><input type="number" step="0.01" name="opening_accumulated_depreciation"></div>
+        <div><label>Current yr dep.</label><input type="number" step="0.01" name="current_year_depreciation"></div>
+        <div><label>Disposal cost</label><input type="number" step="0.01" name="disposal_cost"></div>
+        <div><label>Disposal acc. dep.</label><input type="number" step="0.01" name="disposal_accumulated_depreciation"></div>
+        <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add asset</button></div>
+      </form>
+
+      {% if ppe_movement %}
+      <div style="margin-top:14px;">
+        <h4 style="margin-bottom:4px;">Movement schedule preview (feeds the PPE note)</h4>
+        <table style="font-size:12px;">
+          <thead><tr><th>Asset class</th><th class="text-right">Opening NBV</th><th class="text-right">Additions</th><th class="text-right">Disposals</th><th class="text-right">Depreciation charge</th><th class="text-right">Closing NBV</th></tr></thead>
+          <tbody>
+          {% for r in ppe_movement.by_class %}
+            <tr>
+              <td>{{ r.class_name }}</td>
+              <td class="text-right">{{ '%.2f'|format(r.opening_nbv) }}</td>
+              <td class="text-right">{{ '%.2f'|format(r.additions) }}</td>
+              <td class="text-right">{{ '%.2f'|format(-(r.disposals_cost - r.disposals_acc_dep)) if r.disposals_cost or r.disposals_acc_dep else '0.00' }}</td>
+              <td class="text-right">{{ '%.2f'|format(-r.charge) if r.charge else '0.00' }}</td>
+              <td class="text-right">{{ '%.2f'|format(r.closing_nbv) }}</td>
+            </tr>
+          {% endfor %}
+            <tr>
+              <td><strong>Total</strong></td>
+              <td class="text-right"><strong>{{ '%.2f'|format(ppe_movement.total.opening_nbv) }}</strong></td>
+              <td class="text-right"><strong>{{ '%.2f'|format(ppe_movement.total.additions) }}</strong></td>
+              <td class="text-right"><strong>{{ '%.2f'|format(-(ppe_movement.total.disposals_cost - ppe_movement.total.disposals_acc_dep)) if ppe_movement.total.disposals_cost or ppe_movement.total.disposals_acc_dep else '0.00' }}</strong></td>
+              <td class="text-right"><strong>{{ '%.2f'|format(-ppe_movement.total.charge) if ppe_movement.total.charge else '0.00' }}</strong></td>
+              <td class="text-right"><strong>{{ '%.2f'|format(ppe_movement.total.closing_nbv) }}</strong></td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="muted" style="font-size:11px;">Matches the "Property, plant and equipment" note shown on the Finalisation tab and in the exported Financial Statements once the trial balance is also populated.</p>
+      </div>
+      {% endif %}
+
+      <div style="margin-top:10px;">
+        <form method="post" action="{{ url_for('engagements.generate_ppe_asset_register_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Export &amp; file (Excel)</button></form>
+        {{ filed_workpapers('ppe_asset_register') }}
+      </div>
+    </div>
+    {% endif %}
 
     <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e5e5e5;">
       <h4 class="mt-0" style="margin-bottom:8px;">Working papers filed under {{ area_name }}</h4>

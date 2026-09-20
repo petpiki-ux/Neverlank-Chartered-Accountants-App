@@ -280,6 +280,48 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         doc.add_paragraph()
         return table
 
+    def movement_table(title, note, level=1):
+        # Property, plant and equipment note built from the Asset Register
+        # (financials.build_ppe_movement_schedule) instead of a plain list
+        # of trial balance accounts - condensed IAS 16.73(e) presentation:
+        # one row per asset class reconciling opening to closing NBV.
+        _add_heading(doc, title, level=level)
+        headers = ["Asset class", "Opening NBV", "Additions", "Disposals", "Depreciation charge", "Closing NBV"]
+        table = doc.add_table(rows=1, cols=len(headers))
+        for i, h in enumerate(headers):
+            table.rows[0].cells[i].text = h
+        _style_table(table)
+
+        def add_row(label, row, bold=False):
+            disposals_nbv = row["disposals_cost"] - row["disposals_acc_dep"]
+            values = [
+                label, _fmt_num(row["opening_nbv"]), _fmt_num(row["additions"]),
+                _fmt_num(-disposals_nbv) if disposals_nbv else _fmt_num(0),
+                _fmt_num(-row["charge"]) if row["charge"] else _fmt_num(0),
+                _fmt_num(row["closing_nbv"]),
+            ]
+            cells = table.add_row().cells
+            for i, v in enumerate(values):
+                cells[i].text = v
+                if bold:
+                    for p in cells[i].paragraphs:
+                        for run in p.runs:
+                            run.bold = True
+
+        for row in note["movement"]:
+            add_row(row["class_name"], row)
+        add_row("Total", note["movement_total"], bold=True)
+
+        if note.get("variance"):
+            v = note["variance"]
+            p = doc.add_paragraph(
+                f"Per trial balance: {_fmt_num(v['tb_current'])} (current year), {_fmt_num(v['tb_prior'])} (prior year). "
+                f"Per Asset Register: {_fmt_num(v['register_current'])} (current year), {_fmt_num(v['register_prior'])} (prior year). "
+                "Variance to be reviewed and the Asset Register or trial balance corrected as appropriate."
+            )
+            p.runs[0].italic = True
+        doc.add_paragraph()
+
     sfp = statements["sfp"]
     sfp_specs = [{"section": "Non-current assets"}]
     sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["non_current_assets"]]
@@ -366,6 +408,9 @@ def build_financial_statements_docx(engagement, statements, financial_statements
                 p.add_run(note["policy"])
 
         for note in statements["notes"]:
+            if note.get("movement"):
+                movement_table(f"{note['number']}. {note['title']}", note, level=2)
+                continue
             account_rows = [
                 {"label": (f"{a['account_code']} - " if a.get("account_code") else "") + a["account_name"],
                  "current": a["current"], "prior": a["prior"]}
@@ -477,6 +522,79 @@ def build_trial_balance_adjustments_xlsx(engagement, trial_balance):
         ws.cell(row=row, column=1, value=prep).font = Font(italic=True, size=9)
 
     _autofit(ws, [16, 32, 24, 16, 16, 16, 16])
+    return _finish_wb(wb)
+
+
+# ================================================================= PPE Depreciation policy & Asset Register (Excel)
+
+def build_ppe_asset_register_xlsx(engagement, asset_classes, assets):
+    """Exports the two Property, Plant and Equipment working papers kept
+    live in the app (Substantive Procedures > Property, Plant and
+    Equipment) - the Depreciation policy and the Asset Register - as one
+    workbook for filing. Both are already editable directly in the app;
+    this is a point-in-time copy for the file, not the working paper's own
+    source of truth (that stays in the database, same as every other
+    in-app working paper this app exports)."""
+    wb, ws = _new_workbook_sheet("PPE Depreciation Policy & Asset Register — Ref. N3300", engagement, "Depreciation policy")
+
+    row = 7
+    row = _header_row(ws, row, ["Asset class", "Depreciation method", "Rate (% p.a.)", "Useful life (years)"])
+    for c in asset_classes:
+        ws.cell(row=row, column=1, value=c.name).border = _BORDER
+        ws.cell(row=row, column=2, value=c.depreciation_method or "").border = _BORDER
+        ws.cell(row=row, column=3, value=c.rate_percent if c.rate_percent is not None else "").border = _BORDER
+        ws.cell(row=row, column=4, value=c.useful_life_years if c.useful_life_years is not None else "").border = _BORDER
+        row += 1
+    if not asset_classes:
+        ws.cell(row=row, column=1, value="No asset classes defined yet.")
+        row += 1
+    _autofit(ws, [28, 22, 16, 18])
+
+    ws2 = wb.create_sheet("Asset Register")
+    ws2["A1"] = FIRM_NAME
+    ws2["A1"].font = Font(bold=True, size=14, color=_GOLD_HEX)
+    ws2["A2"] = FIRM_ADDRESS
+    ws2["A2"].font = Font(italic=True, size=9)
+    ws2["A3"] = "PPE Asset Register — Ref. N3300"
+    ws2["A3"].font = Font(bold=True, size=12)
+    client_name = engagement.client.name if engagement.client else ""
+    ws2["A4"] = f"{client_name} — {engagement.title}"
+    if engagement.period_end:
+        ws2["A5"] = f"Period ended {_fmt_date(engagement.period_end)}"
+
+    headers = [
+        "Asset code", "Description", "Asset class", "Date acquired", "Cost",
+        "Opening accumulated depreciation", "Depreciation method", "Rate / useful life",
+        "Current year depreciation charge", "Disposals - cost", "Disposals - accumulated depreciation",
+        "Closing NBV",
+    ]
+    row = 7
+    row = _header_row(ws2, row, headers)
+    class_by_id = {c.id: c for c in asset_classes}
+    reg_start = row
+    for a in assets:
+        cls = class_by_id.get(a.asset_class_id)
+        values = [
+            a.asset_code or "", a.description, cls.name if cls else "Unclassified",
+            _fmt_date(a.date_acquired) if a.date_acquired else "",
+            a.cost or 0.0, a.opening_accumulated_depreciation or 0.0,
+            cls.depreciation_method if cls else "", cls.rate_display if cls else "—",
+            a.current_year_depreciation or 0.0, a.disposal_cost or 0.0, a.disposal_accumulated_depreciation or 0.0,
+            a.closing_nbv,
+        ]
+        for i, v in enumerate(values, start=1):
+            ws2.cell(row=row, column=i, value=v).border = _BORDER
+        row += 1
+    reg_end = row - 1
+    if reg_end >= reg_start:
+        ws2.cell(row=row, column=2, value="TOTAL").font = Font(bold=True)
+        for col in (5, 6, 9, 10, 11, 12):
+            letter = get_column_letter(col)
+            ws2.cell(row=row, column=col, value=f"=SUM({letter}{reg_start}:{letter}{reg_end})").font = Font(bold=True)
+    else:
+        ws2.cell(row=row, column=1, value="No assets in the register yet.")
+    _autofit(ws2, [14, 32, 18, 14, 14, 16, 16, 16, 16, 14, 16, 14])
+
     return _finish_wb(wb)
 
 

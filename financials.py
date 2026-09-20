@@ -14,6 +14,7 @@ Equity, are computed from that opening balance plus the profit for the
 year (and any dividends/movements mapped), not read directly off the TB -
 see build_equity_statement() below.
 """
+from datetime import date, timedelta
 
 # Each entry: (code, label, statement, section, normal_balance, cash_flow_class)
 #   statement: "SFP" | "PL" | "EQUITY" | "EXCLUDED"
@@ -720,6 +721,143 @@ def general_information_note(client, engagement):
         sentences.append(f"These financial statements are for the year ended {engagement.period_end.strftime('%d %B %Y')}.")
     return " ".join(sentences)
 
+def _infer_period_start(period_end):
+    """Best-effort start of the 12-month reporting period ending on
+    period_end. The app doesn't record a separate period-start date on
+    Engagement (only period_end), so this assumes a standard 12-month
+    period - the ordinary case - purely to decide, in
+    build_ppe_movement_schedule() below, whether an Asset Register entry's
+    date_acquired falls inside the current year (an addition) or before it
+    (an opening balance). A genuinely short or long period should have its
+    Asset Register entries reviewed with that in mind - this is a
+    disclosed approximation, not a stored fact about the engagement."""
+    if not period_end:
+        return None
+    year = period_end.year - 1
+    month, day = period_end.month, period_end.day
+    while True:
+        try:
+            return date(year, month, day) + timedelta(days=1)
+        except ValueError:
+            # e.g. period_end of 29 Feb in a leap year, prior year isn't one
+            day -= 1
+
+
+def build_ppe_movement_schedule(asset_classes, assets, period_end):
+    """Builds the Property, Plant and Equipment movement schedule (IAS
+    16.73(e): a reconciliation of the carrying amount at the beginning and
+    end of the period) from the Asset Register, grouped by Depreciation
+    policy asset class - both plain lists of dicts (see PPEAssetClass/
+    PPEAsset in models.py; the caller converts the ORM rows), kept this way
+    so the maths can be unit tested without a database, exactly like every
+    other function in this module.
+
+    asset_classes: [{"id", "name"}, ...] (id may be None for "Unclassified")
+    assets: [{"asset_class_id", "cost", "opening_accumulated_depreciation",
+              "current_year_depreciation", "disposal_cost",
+              "disposal_accumulated_depreciation", "date_acquired"}, ...]
+
+    Whether an asset's cost is an opening balance or a current-year
+    addition is decided by date_acquired against _infer_period_start()
+    above; an asset with no date_acquired is treated as an opening balance
+    (the conservative assumption - nothing marks it as new this year).
+
+    Returns None if `assets` is empty, so the caller can fall back to the
+    plain trial-balance-account note instead. Otherwise returns
+    {"by_class": [...], "total": {...}}, each row holding opening_cost,
+    additions, disposals_cost, closing_cost, opening_acc_dep, charge,
+    disposals_acc_dep, closing_acc_dep, opening_nbv, closing_nbv - built so
+    that, for every row, opening_nbv + additions - disposals (cost less
+    accumulated depreciation eliminated) - charge always equals
+    closing_nbv exactly, term for term."""
+    if not assets:
+        return None
+    period_start = _infer_period_start(period_end)
+
+    def _blank():
+        return {
+            "opening_cost": 0.0, "additions": 0.0, "disposals_cost": 0.0, "closing_cost": 0.0,
+            "opening_acc_dep": 0.0, "charge": 0.0, "disposals_acc_dep": 0.0, "closing_acc_dep": 0.0,
+            "opening_nbv": 0.0, "closing_nbv": 0.0,
+        }
+
+    def _accumulate(row, a):
+        cost = a.get("cost") or 0.0
+        disposal_cost = a.get("disposal_cost") or 0.0
+        charge = a.get("current_year_depreciation") or 0.0
+        disposal_acc_dep = a.get("disposal_accumulated_depreciation") or 0.0
+        date_acquired = a.get("date_acquired")
+        is_addition = bool(
+            date_acquired and period_start and period_start <= date_acquired <= (period_end or date_acquired)
+        )
+        opening_cost = 0.0 if is_addition else cost
+        addition = cost if is_addition else 0.0
+        # An asset added this year can't have brought-forward accumulated
+        # depreciation, whatever the field holds - zeroed here so a stray
+        # figure can't distort the opening NBV.
+        opening_acc_dep = 0.0 if is_addition else (a.get("opening_accumulated_depreciation") or 0.0)
+        closing_cost = cost - disposal_cost
+        closing_acc_dep = opening_acc_dep + charge - disposal_acc_dep
+        row["opening_cost"] += opening_cost
+        row["additions"] += addition
+        row["disposals_cost"] += disposal_cost
+        row["closing_cost"] += closing_cost
+        row["opening_acc_dep"] += opening_acc_dep
+        row["charge"] += charge
+        row["disposals_acc_dep"] += disposal_acc_dep
+        row["closing_acc_dep"] += closing_acc_dep
+        row["opening_nbv"] += opening_cost - opening_acc_dep
+        row["closing_nbv"] += closing_cost - closing_acc_dep
+
+    class_order = {c.get("id"): i for i, c in enumerate(asset_classes)}
+    class_name = {c.get("id"): c.get("name") for c in asset_classes}
+
+    rows_by_class = {}
+    total = _blank()
+    for a in assets:
+        cid = a.get("asset_class_id")
+        rows_by_class.setdefault(cid, _blank())
+        _accumulate(rows_by_class[cid], a)
+        _accumulate(total, a)
+
+    by_class = [
+        {"class_id": cid, "class_name": class_name.get(cid, "Unclassified") or "Unclassified", **row}
+        for cid, row in rows_by_class.items()
+    ]
+    by_class.sort(key=lambda r: (class_order.get(r["class_id"], len(class_order)), r["class_name"]))
+
+    return {"by_class": by_class, "total": total}
+
+
+def ppe_accounting_policy_text(asset_classes):
+    """Builds the Property, plant and equipment accounting policy note from
+    the Depreciation policy working paper (models.PPEAssetClass, converted
+    to plain dicts by the caller: [{"name", "depreciation_method",
+    "rate_percent", "useful_life_years"}, ...]) instead of the generic
+    boilerplate in NOTE_DEFINITIONS, once at least one asset class has been
+    defined. Returns None if `asset_classes` is empty, so the caller falls
+    back to the standard boilerplate untouched."""
+    if not asset_classes:
+        return None
+    intro = (
+        "Property, plant and equipment are stated at cost less accumulated depreciation and any "
+        "accumulated impairment losses. Depreciation is charged so as to write down the cost of each "
+        "class of asset to its estimated residual value over its estimated useful life, on the "
+        "following bases:"
+    )
+    bases = []
+    for c in asset_classes:
+        method = c.get("depreciation_method") or "Straight-line"
+        details = []
+        if c.get("rate_percent") is not None:
+            details.append(f"{c['rate_percent']:g}% per annum")
+        if c.get("useful_life_years") is not None:
+            details.append(f"{c['useful_life_years']:g} years")
+        detail_str = " (" + ", ".join(details) + ")" if details else ""
+        bases.append(f"{c.get('name', 'Unclassified')} - {method.lower()}{detail_str}")
+    return intro + " " + "; ".join(bases) + "."
+
+
 # Checked in the order line items appear on the face of the primary
 # statements (Statement of Financial Position: non-current assets, current
 # assets, equity, non-current liabilities, current liabilities; then the
@@ -823,7 +961,7 @@ def _signed_category_value(code, debit, credit):
     return (debit or 0.0) - (credit or 0.0) if normal == "debit" else (credit or 0.0) - (debit or 0.0)
 
 
-def build_notes(lines, totals):
+def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None):
     """Builds the numbered Notes to the Financial Statements: one breakdown
     note per IAS 1 category (or small group of categories - see
     NOTE_DEFINITIONS) with a non-nil current or prior balance, each listing
@@ -836,6 +974,20 @@ def build_notes(lines, totals):
     Numbering starts at 4, after the three fixed introductory notes (1
     General information, 2 Basis of preparation, 3 Significant accounting
     policies - composed by the caller, not here).
+
+    `ppe_movement` (see build_ppe_movement_schedule() above), when given,
+    replaces the "Property, plant and equipment" note's flat account list
+    with the movement schedule instead - the note's own total then comes
+    from the Asset Register's closing/opening NBV rather than the trial
+    balance category total, and a `variance` key is added if the two
+    disagree by more than a cent, so a register that hasn't been kept in
+    step with the trial balance is flagged for follow-up rather than
+    silently presented as if it ties out. This still only affects a note
+    that would otherwise be built - if the "ppe" category itself is nil in
+    both years and there's no register data either, no PPE note appears at
+    all, exactly as before. `ppe_policy_text` (see
+    ppe_accounting_policy_text() above), when given, replaces that note's
+    accounting policy paragraph too.
 
     Returns (notes, note_number_by_category): `notes` is the ordered list
     of note dicts ready to render (each with `number`, `title`, `policy`,
@@ -853,9 +1005,12 @@ def build_notes(lines, totals):
     next_number = 4
 
     for codes, title, policy in NOTE_DEFINITIONS:
+        is_ppe_note = codes == ["ppe"]
+        has_register = bool(is_ppe_note and ppe_movement and ppe_movement.get("by_class"))
+
         cur = sum(totals[c]["current"] for c in codes)
         pri = sum(totals[c]["prior"] for c in codes)
-        if _is_nil(cur) and _is_nil(pri):
+        if _is_nil(cur) and _is_nil(pri) and not has_register:
             continue  # nothing to disclose - matches the statements' own nil-line suppression
 
         account_rows = []
@@ -874,10 +1029,26 @@ def build_notes(lines, totals):
         next_number += 1
         for code in codes:
             note_number_by_category[code] = number
-        notes.append({
+        note = {
             "number": number, "title": title, "policy": policy,
             "accounts": account_rows, "total": {"current": cur, "prior": pri},
-        })
+        }
+
+        if has_register:
+            reg_total = ppe_movement["total"]
+            note["accounts"] = []
+            note["movement"] = ppe_movement["by_class"]
+            note["movement_total"] = reg_total
+            note["total"] = {"current": reg_total["closing_nbv"], "prior": reg_total["opening_nbv"]}
+            if ppe_policy_text:
+                note["policy"] = ppe_policy_text
+            if abs(cur - reg_total["closing_nbv"]) > 0.01 or abs(pri - reg_total["opening_nbv"]) > 0.01:
+                note["variance"] = {
+                    "tb_current": cur, "tb_prior": pri,
+                    "register_current": reg_total["closing_nbv"], "register_prior": reg_total["opening_nbv"],
+                }
+
+        notes.append(note)
 
     return notes, note_number_by_category
 
@@ -914,7 +1085,8 @@ def _attach_note_numbers(pl, sfp, cf, note_number_by_category):
                 row["note"] = ", ".join(str(n) for n in numbers)
 
 
-def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs", cash_flow_method="indirect"):
+def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs", cash_flow_method="indirect",
+                          ppe_movement=None, ppe_policy_text=None):
     """`adjustments`, when given (a TrialBalance's .adjustments), are applied
     on top of the preliminary trial balance's totals before the statements
     are built - see apply_adjustments() above. Leave it out (the default)
@@ -931,7 +1103,12 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     `cash_flow_method` ("indirect", the default, or "direct" - see
     models.CASH_FLOW_METHODS and build_cash_flow()) controls only how the
     Cash Flow Statement's operating activities section is presented; every
-    other statement, and every Cash Flow subtotal, is unaffected."""
+    other statement, and every Cash Flow subtotal, is unaffected.
+
+    `ppe_movement`/`ppe_policy_text` (see build_ppe_movement_schedule() and
+    ppe_accounting_policy_text() above) are passed straight through to
+    build_notes() - see there for what they change. Leaving both out (the
+    default) leaves the PPE note exactly as it was before this feature."""
     totals = compute_totals(lines)
     if adjustments:
         totals = apply_adjustments(totals, adjustments)
@@ -940,7 +1117,7 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     sfp = build_financial_position(totals, equity)
     cf = build_cash_flow(totals, pl, method=cash_flow_method)
     if reporting_framework in ("full_ifrs", "ifrs_for_smes"):
-        notes, note_number_by_category = build_notes(lines, totals)
+        notes, note_number_by_category = build_notes(lines, totals, ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text)
         _attach_note_numbers(pl, sfp, cf, note_number_by_category)
     else:
         notes = []

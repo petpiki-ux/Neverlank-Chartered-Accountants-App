@@ -39,6 +39,7 @@ from models import (
     Tickmark, WORKPAPER_SECTIONS, workpaper_reference, filing_reference, effectively_reviewed,
     WorkpaperNarrative, WORKPAPER_NARRATIVE_KINDS, WORKPAPER_NARRATIVE_KIND_KEYS,
     DEFAULT_WORKPAPER_NARRATIVE_BODIES, FilingIndexSection,
+    PPEAssetClass, PPEAsset, PPE_DEPRECIATION_METHODS,
 )
 import financials as fin
 import workpapers as wp
@@ -313,6 +314,12 @@ def view_engagement(engagement_id):
 
     trial_balance = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
     financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
+    # Depreciation policy / Asset Register (Substantive Procedures >
+    # Property, Plant and Equipment) - feeds both the PPE note below (in
+    # place of the plain trial-balance-account list, once populated) and
+    # the "Property, plant and equipment" accounting policy paragraph.
+    ppe_asset_classes, ppe_assets, ppe_class_dicts, ppe_asset_dicts = _ppe_plain_data(engagement_id)
+    ppe_movement, ppe_policy_text = _ppe_movement_and_policy(ppe_class_dicts, ppe_asset_dicts, engagement.period_end)
     # The Financial Statements are always built from the ADJUSTED trial
     # balance (preliminary TB + audit adjustments, current year only) -
     # Analytical Review and Substantive Procedures work from the preliminary
@@ -321,6 +328,7 @@ def view_engagement(engagement_id):
         fin.build_all_statements(
             trial_balance.lines, trial_balance.adjustments,
             reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,
+            ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text,
         )
         if trial_balance and trial_balance.lines else None
     )
@@ -465,6 +473,10 @@ def view_engagement(engagement_id):
         filed_workpapers_by_kind=_filed_workpapers_by_kind(engagement_id),
         REVIEWER_ROLES=REVIEWER_ROLES,
         PARTNER_SIGNOFF_ROLES=PARTNER_SIGNOFF_ROLES,
+        ppe_asset_classes=ppe_asset_classes,
+        ppe_assets=ppe_assets,
+        ppe_depreciation_methods=PPE_DEPRECIATION_METHODS,
+        ppe_movement=ppe_movement,
     )
 
 
@@ -3222,6 +3234,204 @@ def _get_or_create_substantive_area(engagement_id, area_name):
     return area
 
 
+# ---------- PPE Depreciation policy / Asset Register (Substantive Procedures > Property, Plant and Equipment) ----------
+
+def _ppe_plain_data(engagement_id):
+    """Depreciation policy (PPEAssetClass) and Asset Register (PPEAsset)
+    rows for an engagement, both as ORM objects (for the template to render
+    and edit) and as the plain dicts financials.py's
+    build_ppe_movement_schedule()/ppe_accounting_policy_text() expect -
+    keeping those functions free of any ORM/session dependency, consistent
+    with the rest of financials.py."""
+    classes = PPEAssetClass.query.filter_by(engagement_id=engagement_id).order_by(PPEAssetClass.order, PPEAssetClass.id).all()
+    assets = PPEAsset.query.filter_by(engagement_id=engagement_id).order_by(PPEAsset.order, PPEAsset.id).all()
+    class_dicts = [
+        {"id": c.id, "name": c.name, "depreciation_method": c.depreciation_method,
+         "rate_percent": c.rate_percent, "useful_life_years": c.useful_life_years}
+        for c in classes
+    ]
+    asset_dicts = [
+        {"asset_class_id": a.asset_class_id, "cost": a.cost or 0.0,
+         "opening_accumulated_depreciation": a.opening_accumulated_depreciation or 0.0,
+         "current_year_depreciation": a.current_year_depreciation or 0.0,
+         "disposal_cost": a.disposal_cost or 0.0,
+         "disposal_accumulated_depreciation": a.disposal_accumulated_depreciation or 0.0,
+         "date_acquired": a.date_acquired}
+        for a in assets
+    ]
+    return classes, assets, class_dicts, asset_dicts
+
+
+def _ppe_movement_and_policy(class_dicts, asset_dicts, period_end):
+    """The (ppe_movement, ppe_policy_text) pair fin.build_all_statements()
+    takes to replace the generic PPE note/policy with the Asset Register's
+    own movement schedule and the Depreciation policy's own wording - both
+    come back None (no change in behaviour) when neither working paper has
+    any rows yet, so an engagement that hasn't touched this feature is
+    completely unaffected. Takes the plain dicts _ppe_plain_data() already
+    built, rather than re-querying, since callers usually need both."""
+    ppe_movement = fin.build_ppe_movement_schedule(class_dicts, asset_dicts, period_end)
+    ppe_policy_text = fin.ppe_accounting_policy_text(class_dicts)
+    return ppe_movement, ppe_policy_text
+
+
+def _parse_float(value):
+    if value in (None, ""):
+        return None
+    try:
+        return float(str(value).replace(",", "").strip())
+    except ValueError:
+        return None
+
+
+def _parse_date(value):
+    if not value:
+        return None
+    try:
+        return datetime.strptime(value.strip(), "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+@engagements_bp.route("/<int:engagement_id>/ppe/asset-classes/add", methods=["POST"])
+@login_required
+def add_ppe_asset_class(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Please enter an asset class name.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+    order = PPEAssetClass.query.filter_by(engagement_id=engagement_id).count()
+    db.session.add(PPEAssetClass(
+        engagement_id=engagement_id, name=name,
+        depreciation_method=request.form.get("depreciation_method") or "Straight-line",
+        rate_percent=_parse_float(request.form.get("rate_percent")),
+        useful_life_years=_parse_float(request.form.get("useful_life_years")),
+        order=order,
+    ))
+    db.session.commit()
+    flash("Asset class added to the Depreciation policy.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+
+
+@engagements_bp.route("/ppe/asset-classes/<int:class_id>/update", methods=["POST"])
+@login_required
+def update_ppe_asset_class(class_id):
+    asset_class = PPEAssetClass.query.get_or_404(class_id)
+    engagement = asset_class.engagement
+    _ensure_engagement_access(engagement)
+    name = request.form.get("name", "").strip()
+    if not name:
+        flash("Please enter an asset class name.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+    asset_class.name = name
+    asset_class.depreciation_method = request.form.get("depreciation_method") or "Straight-line"
+    asset_class.rate_percent = _parse_float(request.form.get("rate_percent"))
+    asset_class.useful_life_years = _parse_float(request.form.get("useful_life_years"))
+    db.session.commit()
+    flash("Asset class updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+
+
+@engagements_bp.route("/ppe/asset-classes/<int:class_id>/delete", methods=["POST"])
+@login_required
+def delete_ppe_asset_class(class_id):
+    asset_class = PPEAssetClass.query.get_or_404(class_id)
+    engagement = asset_class.engagement
+    _ensure_engagement_access(engagement)
+    # Assets in this class aren't deleted - they just fall back to
+    # "Unclassified" in the Asset Register/movement schedule, same as an
+    # asset that was never assigned a class, rather than losing their data.
+    for a in asset_class.assets:
+        a.asset_class_id = None
+    db.session.delete(asset_class)
+    db.session.commit()
+    flash("Asset class removed from the Depreciation policy. Its assets are now Unclassified in the Asset Register.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+
+
+@engagements_bp.route("/<int:engagement_id>/ppe/assets/add", methods=["POST"])
+@login_required
+def add_ppe_asset(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    description = request.form.get("description", "").strip()
+    if not description:
+        flash("Please enter a description for the asset.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+    asset_class_id = request.form.get("asset_class_id") or None
+    order = PPEAsset.query.filter_by(engagement_id=engagement_id).count()
+    db.session.add(PPEAsset(
+        engagement_id=engagement_id,
+        asset_class_id=int(asset_class_id) if asset_class_id else None,
+        asset_code=request.form.get("asset_code", "").strip() or None,
+        description=description,
+        date_acquired=_parse_date(request.form.get("date_acquired")),
+        cost=_parse_float(request.form.get("cost")) or 0.0,
+        opening_accumulated_depreciation=_parse_float(request.form.get("opening_accumulated_depreciation")) or 0.0,
+        current_year_depreciation=_parse_float(request.form.get("current_year_depreciation")) or 0.0,
+        disposal_cost=_parse_float(request.form.get("disposal_cost")) or 0.0,
+        disposal_accumulated_depreciation=_parse_float(request.form.get("disposal_accumulated_depreciation")) or 0.0,
+        order=order,
+    ))
+    db.session.commit()
+    flash("Asset added to the Asset Register.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+
+
+@engagements_bp.route("/ppe/assets/<int:asset_id>/update", methods=["POST"])
+@login_required
+def update_ppe_asset(asset_id):
+    asset = PPEAsset.query.get_or_404(asset_id)
+    engagement = asset.engagement
+    _ensure_engagement_access(engagement)
+    description = request.form.get("description", "").strip()
+    if not description:
+        flash("Please enter a description for the asset.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+    asset_class_id = request.form.get("asset_class_id") or None
+    asset.asset_class_id = int(asset_class_id) if asset_class_id else None
+    asset.asset_code = request.form.get("asset_code", "").strip() or None
+    asset.description = description
+    asset.date_acquired = _parse_date(request.form.get("date_acquired"))
+    asset.cost = _parse_float(request.form.get("cost")) or 0.0
+    asset.opening_accumulated_depreciation = _parse_float(request.form.get("opening_accumulated_depreciation")) or 0.0
+    asset.current_year_depreciation = _parse_float(request.form.get("current_year_depreciation")) or 0.0
+    asset.disposal_cost = _parse_float(request.form.get("disposal_cost")) or 0.0
+    asset.disposal_accumulated_depreciation = _parse_float(request.form.get("disposal_accumulated_depreciation")) or 0.0
+    db.session.commit()
+    flash("Asset updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+
+
+@engagements_bp.route("/ppe/assets/<int:asset_id>/delete", methods=["POST"])
+@login_required
+def delete_ppe_asset(asset_id):
+    asset = PPEAsset.query.get_or_404(asset_id)
+    engagement = asset.engagement
+    _ensure_engagement_access(engagement)
+    db.session.delete(asset)
+    db.session.commit()
+    flash("Asset removed from the Asset Register.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/ppe-asset-register/generate", methods=["POST"])
+@login_required
+def generate_ppe_asset_register_xlsx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    classes, assets, _, _ = _ppe_plain_data(engagement_id)
+    if not assets:
+        flash("Add at least one asset to the Asset Register before generating this working paper.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+    buf = wp.build_ppe_asset_register_xlsx(engagement, classes, assets)
+    doc = _file_generated_workpaper(engagement, "ppe_asset_register", "Property, Plant and Equipment", "N3300", "PPE_Asset_Register", "xlsx", buf)
+    flash(f"PPE Asset Register filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+
+
 @engagements_bp.route("/<int:engagement_id>/substantive-procedures/areas/<area_name>/items/add", methods=["POST"])
 @login_required
 def add_substantive_procedure_item(engagement_id, area_name):
@@ -3474,9 +3684,12 @@ def generate_financial_statements_docx(engagement_id):
     if not trial_balance or not trial_balance.lines:
         flash("Enter or import the trial balance (Trial Balance tab) before generating the financial statements working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    _, _, ppe_class_dicts, ppe_asset_dicts = _ppe_plain_data(engagement_id)
+    ppe_movement, ppe_policy_text = _ppe_movement_and_policy(ppe_class_dicts, ppe_asset_dicts, engagement.period_end)
     statements = fin.build_all_statements(
         trial_balance.lines, trial_balance.adjustments,
         reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,
+        ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text,
     )
     financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
     buf = wp.build_financial_statements_docx(engagement, statements, financial_statements)

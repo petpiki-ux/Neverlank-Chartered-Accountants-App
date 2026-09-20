@@ -2297,6 +2297,97 @@ class SubstantiveProcedureItem(db.Model):
         return f"<SubstantiveProcedureItem area={self.area_id}>"
 
 
+# Depreciation methods offered on the PPE Depreciation policy working paper
+# (see PPEAssetClass below). Kept short and standard rather than exhaustive -
+# a preparer needing something else can still describe it in the class name.
+PPE_DEPRECIATION_METHODS = ["Straight-line", "Reducing balance"]
+
+
+class PPEAssetClass(db.Model):
+    """One row of the Property, Plant and Equipment Depreciation policy
+    working paper - a single asset class (e.g. "Motor vehicles", "Office
+    equipment") with the method and rate/useful life applied to it. This
+    structured table is what the PPE Asset Register (PPEAsset below) draws
+    its own per-asset method/rate from, and what the auto-generated PPE
+    accounting policy note (financials.ppe_accounting_policy_text) is built
+    from once at least one class exists here - replacing the generic
+    boilerplate that note otherwise falls back to.
+
+    `order` controls both display order here and the order asset classes
+    are listed in the Asset Register/movement schedule, so the preparer's
+    own ordering (usually largest/most material class first) carries
+    through everywhere this data is used."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    depreciation_method = db.Column(db.String(30), default="Straight-line")
+    rate_percent = db.Column(db.Float)
+    useful_life_years = db.Column(db.Float)
+    order = db.Column(db.Integer, default=0)
+
+    engagement = db.relationship(
+        "Engagement",
+        backref=db.backref("ppe_asset_classes", lazy=True, cascade="all, delete-orphan", order_by="PPEAssetClass.order"),
+    )
+
+    @property
+    def rate_display(self):
+        parts = []
+        if self.rate_percent is not None:
+            parts.append(f"{self.rate_percent:g}% p.a.")
+        if self.useful_life_years is not None:
+            parts.append(f"{self.useful_life_years:g} yrs")
+        return " / ".join(parts) if parts else "—"
+
+    def __repr__(self):
+        return f"<PPEAssetClass {self.name} engagement={self.engagement_id}>"
+
+
+class PPEAsset(db.Model):
+    """One row of the Property, Plant and Equipment Asset Register working
+    paper - a single fixed asset, editable directly in the app (with an
+    Excel export for filing) rather than only as a downloaded spreadsheet.
+    The standard column set: asset code/description, category (asset_class),
+    date acquired, cost, opening accumulated depreciation, depreciation
+    method/rate (via asset_class), current-year depreciation charge,
+    disposals (cost and accumulated depreciation), and closing NBV
+    (computed, not stored - see financials.build_ppe_movement_schedule).
+
+    Whether an asset's cost is an opening balance or a current-year
+    addition for the movement schedule is inferred from date_acquired
+    falling inside the engagement's reporting period or before it - see
+    financials._infer_period_start for the (disclosed) assumption this
+    relies on when the app doesn't otherwise record a period start date."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    asset_class_id = db.Column(db.Integer, db.ForeignKey("ppe_asset_class.id"))
+    asset_code = db.Column(db.String(40))
+    description = db.Column(db.String(200), nullable=False)
+    date_acquired = db.Column(db.Date)
+    cost = db.Column(db.Float, default=0.0)
+    opening_accumulated_depreciation = db.Column(db.Float, default=0.0)
+    current_year_depreciation = db.Column(db.Float, default=0.0)
+    disposal_cost = db.Column(db.Float, default=0.0)
+    disposal_accumulated_depreciation = db.Column(db.Float, default=0.0)
+    order = db.Column(db.Integer, default=0)
+
+    engagement = db.relationship(
+        "Engagement",
+        backref=db.backref("ppe_assets", lazy=True, cascade="all, delete-orphan", order_by="PPEAsset.order"),
+    )
+    asset_class = db.relationship("PPEAssetClass", backref=db.backref("assets", lazy=True))
+
+    @property
+    def closing_nbv(self):
+        return (self.cost or 0.0) - (self.disposal_cost or 0.0) - (
+            (self.opening_accumulated_depreciation or 0.0) + (self.current_year_depreciation or 0.0)
+            - (self.disposal_accumulated_depreciation or 0.0)
+        )
+
+    def __repr__(self):
+        return f"<PPEAsset {self.description!r} engagement={self.engagement_id}>"
+
+
 # Evidence-gathering phase statuses for AuditStrategy below - reuses the
 # same vocabulary as CHECKLIST_STATUSES so the UI stays consistent, but
 # named separately since the two lists are conceptually different things
