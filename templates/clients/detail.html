@@ -25,6 +25,31 @@
 </div>
 
 <div class="card">
+  <h3 class="mt-0">Client logo</h3>
+  <p class="muted" style="font-size:12px;">Shown on this client's Financial Statements cover page (not on any firm-branded letterhead, which always uses Neverlank's own logo).</p>
+  <div class="form-row" style="align-items:center;">
+    <div>
+      {% if client.logo_filename %}
+      <img src="{{ url_for('clients.client_logo_image', client_id=client.id) }}" alt="{{ client.name }} logo" style="max-height:70px;max-width:220px;">
+      {% else %}
+      <span class="muted">No logo uploaded yet.</span>
+      {% endif %}
+    </div>
+    <div>
+      <form method="post" action="{{ url_for('clients.upload_client_logo', client_id=client.id) }}" enctype="multipart/form-data" class="inline">
+        <input type="file" name="logo" accept=".png,.jpg,.jpeg" required>
+        <button type="submit" class="btn small secondary">{{ 'Replace' if client.logo_filename else 'Upload' }}</button>
+      </form>
+      {% if client.logo_filename %}
+      <form method="post" action="{{ url_for('clients.remove_client_logo', client_id=client.id) }}" class="inline" onsubmit="return confirm('Remove this client\'s logo?')">
+        <button type="submit" class="btn small danger">Remove</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="card">
   <h3 class="mt-0">Engagements</h3>
   {% if visible_engagements %}
   <table>

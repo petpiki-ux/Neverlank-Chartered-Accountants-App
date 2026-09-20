@@ -34,6 +34,7 @@ from reportlab.platypus import (
 )
 
 from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS, filing_reference, CASH_FLOW_METHOD_LABELS
+from config import Config
 import financials as fin
 
 FIRM_NAME = "Neverlank Chartered Accountants"
@@ -57,10 +58,15 @@ def _fmt_num(n):
 
 # ---------------------------------------------------------------- Word helpers
 
-def _new_document(title, engagement, subtitle=None):
-    """A fresh Word document with the firm's letterhead (logo if available,
-    firm name/address) and a title block for this working paper."""
-    doc = Document()
+def _new_document(title, engagement, subtitle=None, doc=None):
+    """A Word document with the firm's letterhead (logo if available, firm
+    name/address) and a title block for this working paper. Pass an
+    existing `doc` (e.g. one that already has a client-facing cover page
+    and Client Details/Table of Contents page ahead of this letterhead -
+    see build_financial_statements_docx) to append the letterhead to it
+    instead of starting a fresh document."""
+    if doc is None:
+        doc = Document()
 
     section = doc.sections[0]
     section.left_margin = Inches(0.9)
@@ -247,11 +253,162 @@ def _finish_wb(wb):
 
 # ================================================================= Financial statements (Word)
 
-def build_financial_statements_docx(engagement, statements, financial_statements):
+def _cover_page(doc, engagement):
+    """The very first page of the Financial Statements themselves - the
+    CLIENT's own identity (logo if one has been uploaded on the Client
+    detail page, name, reporting period), not the firm's letterhead (that
+    still follows, on its own page, ahead of the primary statements - see
+    build_financial_statements_docx). Renders cleanly with no logo at all
+    for a client who hasn't uploaded one yet."""
+    client = engagement.client
+    logo_path = None
+    if client and client.logo_filename:
+        candidate = os.path.join(Config.CLIENT_LOGOS_DATA_DIR, client.logo_filename)
+        if os.path.exists(candidate):
+            logo_path = candidate
+
+    for _ in range(3):
+        doc.add_paragraph()
+
+    if logo_path:
+        p = doc.add_paragraph()
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        run = p.add_run()
+        try:
+            run.add_picture(logo_path, height=Inches(1.4))
+        except Exception:
+            pass
+        doc.add_paragraph()
+
+    name_p = doc.add_paragraph()
+    name_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    name_run = name_p.add_run(client.name if client else "")
+    name_run.bold = True
+    name_run.font.size = Pt(22)
+
+    doc.add_paragraph()
+
+    title_p = doc.add_paragraph()
+    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title_run = title_p.add_run("Financial Statements")
+    title_run.bold = True
+    title_run.font.size = Pt(18)
+    title_run.font.color.rgb = _GOLD
+
+    period_p = doc.add_paragraph()
+    period_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    period_run = period_p.add_run(f"for the year ended {_fmt_date(engagement.period_end)}")
+    period_run.font.size = Pt(13)
+
+    doc.add_page_break()
+
+
+def _client_details_and_toc_page(doc, engagement, client_key_people, toc_sections):
+    """Client Details (registered name, company number, registered address,
+    directors, company secretary) and a Table of Contents, together on the
+    page immediately after the cover page - the reader's first look at who
+    the entity is and what the pack contains, before the letterhead/primary
+    statements that follow."""
+    client = engagement.client
+    _add_heading(doc, "Client Details", level=1)
+
+    def detail_row(label, value):
+        p = doc.add_paragraph()
+        run = p.add_run(f"{label}: ")
+        run.bold = True
+        p.add_run(value or "—")
+
+    detail_row("Registered name", client.name if client else None)
+    detail_row("Company registration number", client.company_number if client else None)
+    detail_row("Registered address", client.address if client else None)
+    detail_row("Industry", client.industry if client else None)
+    detail_row("Reporting period ended", _fmt_date(engagement.period_end))
+
+    directors = [p for p in (client_key_people or []) if p.get("role") == "Director"]
+    secretaries = [p for p in (client_key_people or []) if p.get("role") == "Company Secretary"]
+    detail_row("Director(s)", ", ".join(p["full_name"] for p in directors) if directors else None)
+    detail_row("Company Secretary", ", ".join(p["full_name"] for p in secretaries) if secretaries else None)
+    detail_row("Auditors", f"{FIRM_NAME}, {FIRM_ADDRESS}")
+
+    doc.add_paragraph()
+    _add_heading(doc, "Table of Contents", level=1)
+    for i, section_title in enumerate(toc_sections, start=1):
+        doc.add_paragraph(f"{i}.  {section_title}")
+
+    doc.add_page_break()
+
+
+def _directors_statement_section(doc, directors_statement):
+    _add_heading(doc, "Directors' Statement", level=1)
+    doc.add_paragraph((directors_statement.statement_text if directors_statement else None) or fin.DEFAULT_DIRECTORS_STATEMENT_TEXT)
+    doc.add_paragraph()
+    sig_table = doc.add_table(rows=3, cols=2)
+    d1_name = (directors_statement.director1_name if directors_statement else None) or "_______________________"
+    d1_title = (directors_statement.director1_title if directors_statement and directors_statement.director1_title else None) or "Director"
+    d2_name = (directors_statement.director2_name if directors_statement else None) or "_______________________"
+    d2_title = (directors_statement.director2_title if directors_statement and directors_statement.director2_title else None) or "Director"
+    sig_table.rows[0].cells[0].text = "_______________________"
+    sig_table.rows[0].cells[1].text = "_______________________"
+    sig_table.rows[1].cells[0].text = d1_name
+    sig_table.rows[1].cells[1].text = d2_name
+    sig_table.rows[2].cells[0].text = d1_title
+    sig_table.rows[2].cells[1].text = d2_title
+    doc.add_paragraph()
+    date_p = doc.add_paragraph()
+    date_p.add_run("Date: " + _fmt_date(directors_statement.statement_date if directors_statement else None))
+    doc.add_page_break()
+
+
+def _audit_opinion_section(doc, audit_opinion):
+    is_audit = (audit_opinion.report_basis if audit_opinion else "audit") != "review"
+    _add_heading(doc, "Independent Auditor's Report" if is_audit else "Independent Reviewer's Report", level=1)
+    if not audit_opinion:
+        doc.add_paragraph("Not yet prepared within the app.")
+        doc.add_page_break()
+        return
+    modification_heading = "Opinion" if audit_opinion.modification == "unmodified" else f"{audit_opinion.modification.capitalize()} {'Opinion' if is_audit else 'Conclusion'}"
+    _add_heading(doc, modification_heading, level=2)
+    doc.add_paragraph(audit_opinion.opinion_paragraph or "")
+    if audit_opinion.modification != "unmodified":
+        _add_heading(doc, f"Basis for {modification_heading}", level=2)
+    else:
+        _add_heading(doc, "Basis for Opinion" if is_audit else "Basis for Conclusion", level=2)
+    doc.add_paragraph(audit_opinion.basis_paragraph or "")
+    _add_heading(doc, "Directors' Responsibility for the Financial Statements", level=2)
+    doc.add_paragraph(audit_opinion.management_responsibility_paragraph or "")
+    _add_heading(doc, "Auditor's Responsibility" if is_audit else "Reviewer's Responsibility", level=2)
+    doc.add_paragraph(audit_opinion.auditor_responsibility_paragraph or "")
+    doc.add_paragraph()
+    doc.add_paragraph(FIRM_NAME)
+    doc.add_paragraph(FIRM_ADDRESS)
+    doc.add_paragraph(_fmt_date(audit_opinion.report_date))
+    doc.add_page_break()
+
+
+def build_financial_statements_docx(engagement, statements, financial_statements, directors_statement=None, audit_opinion=None, client_key_people=None):
+    show_opinion = engagement.type in ("Audit", "Assurance")
+
+    doc = Document()
+    _cover_page(doc, engagement)
+
+    toc_sections = ["Directors' Statement"]
+    if show_opinion:
+        toc_sections.append("Independent Auditor's Report" if (audit_opinion.report_basis if audit_opinion else "audit") != "review" else "Independent Reviewer's Report")
+    toc_sections += [
+        "Statement of Financial Position", "Statement of Profit or Loss and Other Comprehensive Income",
+        "Statement of Changes in Equity", "Statement of Cash Flows", "Notes to the Financial Statements",
+    ]
+    _client_details_and_toc_page(doc, engagement, client_key_people, toc_sections)
+
+    _directors_statement_section(doc, directors_statement)
+    if show_opinion:
+        _audit_opinion_section(doc, audit_opinion)
+
     doc = _new_document(
         "Financial Statements",
         engagement,
         subtitle=f"Ref. {filing_reference('financials')}" + (" (draft - not yet fully mapped/reviewed)" if not financial_statements or not financial_statements.is_partner_signed else ""),
+        doc=doc,
     )
 
     is_ifrs_framework = engagement.reporting_framework in ("full_ifrs", "ifrs_for_smes")
@@ -312,13 +469,24 @@ def build_financial_statements_docx(engagement, statements, financial_statements
             add_row(row["class_name"], row)
         add_row("Total", note["movement_total"], bold=True)
 
-        if note.get("variance"):
-            v = note["variance"]
-            p = doc.add_paragraph(
-                f"Per trial balance: {_fmt_num(v['tb_current'])} (current year), {_fmt_num(v['tb_prior'])} (prior year). "
-                f"Per Asset Register: {_fmt_num(v['register_current'])} (current year), {_fmt_num(v['register_prior'])} (prior year). "
-                "Variance to be reviewed and the Asset Register or trial balance corrected as appropriate."
+        rec = note.get("reconciliation")
+        if rec:
+            # Always shown - links the register's own closing/opening NBV
+            # back to the trial balance PPE total on both years, whether or
+            # not they agree, per the standard "agree the note to the
+            # underlying schedule" step. A non-nil difference is called out
+            # as the basis for a proposed adjustment, not silently dropped.
+            base = (
+                f"Per trial balance: {_fmt_num(rec['tb_current'])} (current year), {_fmt_num(rec['tb_prior'])} (prior year). "
+                f"Per Asset Register: {_fmt_num(rec['register_current'])} (current year), {_fmt_num(rec['register_prior'])} (prior year)."
             )
+            if rec["ties_out"]:
+                p = doc.add_paragraph(base + " Ties out to the trial balance.")
+            else:
+                p = doc.add_paragraph(
+                    base + f" Difference of {_fmt_num(rec['diff_current'])} (current year), {_fmt_num(rec['diff_prior'])} (prior year) "
+                    "- basis for a proposed adjustment to the trial balance or a correction to the Asset Register, as appropriate."
+                )
             p.runs[0].italic = True
         doc.add_paragraph()
 

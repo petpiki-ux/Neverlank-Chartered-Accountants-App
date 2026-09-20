@@ -721,6 +721,230 @@ def general_information_note(client, engagement):
         sentences.append(f"These financial statements are for the year ended {engagement.period_end.strftime('%d %B %Y')}.")
     return " ".join(sentences)
 
+
+# Seeded the first time the Finalisation tab's Directors' Statement is
+# shown for an engagement - plain, editable placeholder text, exactly like
+# DEFAULT_CLOSING_NOTE_TEXT above. Based on the standard IAS 1/Companies
+# Act management-responsibility wording that already underlies
+# DEFAULT_BASIS_OF_PREPARATION_TAIL's going concern sentence above, not
+# retyped from scratch.
+DEFAULT_DIRECTORS_STATEMENT_TEXT = (
+    "The directors are responsible for the preparation and fair presentation of the accompanying "
+    "financial statements, which comprise the statement of financial position, the statement of "
+    "profit or loss and other comprehensive income, the statement of changes in equity, the "
+    "statement of cash flows, and the notes to the financial statements, in accordance with the "
+    "basis of preparation stated in the notes. This responsibility includes maintaining adequate "
+    "accounting records and an effective system of internal control, selecting and applying "
+    "appropriate accounting policies, and making accounting estimates that are reasonable in the "
+    "circumstances. The directors have made an assessment of the entity's ability to continue as a "
+    "going concern and have no reason to believe the business will not be a going concern in the "
+    "year ahead. The financial statements have been approved by the board of directors and are "
+    "signed on its behalf by:"
+)
+
+
+# The four report paragraphs, and their standard ISA 700 (audit)/ISRE 2400
+# (review) wording by modification type - see models.AuditOpinion. Kept as
+# a function rather than a static dict because the Opinion and Basis
+# paragraphs both need the client name, period end and framework label
+# substituted in; the two Responsibilities paragraphs don't vary by any of
+# that; and the Basis paragraph for anything other than "unmodified" needs
+# a bracketed placeholder for the preparer to actually describe the matter
+# (never fabricated here) rather than reading as if none exists. Every
+# paragraph returned is a starting draft, same as every other boilerplate
+# paragraph in this app - the preparer edits it to the real, engagement-
+# specific position before the report is issued.
+def default_audit_opinion_paragraphs(report_basis, modification, client_name, period_end, framework_label):
+    period_str = period_end.strftime("%d %B %Y") if period_end else "[period end]"
+    framework_label = framework_label or "[the applicable financial reporting framework]"
+    is_audit = report_basis != "review"
+    noun = "audit" if is_audit else "review"
+    fair_presentation = (
+        f"present fairly, in all material respects, the financial position of {client_name} as at "
+        f"{period_str}, and its financial performance and cash flows for the year then ended in "
+        f"accordance with {framework_label}"
+    )
+
+    if modification == "unmodified":
+        if is_audit:
+            opinion = f"In our opinion, the accompanying financial statements {fair_presentation}."
+        else:
+            opinion = (
+                f"Based on our review, nothing has come to our attention that causes us to believe that "
+                f"the accompanying financial statements do not {fair_presentation}."
+            )
+        basis_matter = ""
+    elif modification == "qualified":
+        lead = "In our opinion, except for the effects of the matter(s)" if is_audit else "Based on our review, except for the matter(s)"
+        opinion = f"{lead} described in the Basis for Qualified {'Opinion' if is_audit else 'Conclusion'} section below, the accompanying financial statements {fair_presentation}."
+        basis_matter = "[Describe the matter giving rise to the qualification, and its financial effect if determinable.]"
+    elif modification == "adverse":
+        lead = "In our opinion, because of the significance of the matter(s)" if is_audit else "Based on our review, because of the significance of the matter(s)"
+        opinion = (
+            f"{lead} described in the Basis for Adverse {'Opinion' if is_audit else 'Conclusion'} section below, the accompanying financial "
+            f"statements do not present fairly, in all material respects, the financial position of {client_name} "
+            f"as at {period_str} and its financial performance and cash flows for the year then ended in "
+            f"accordance with {framework_label}."
+        )
+        basis_matter = "[Describe the matter giving rise to the adverse opinion/conclusion, and its financial effect if determinable.]"
+    else:  # disclaimer
+        if is_audit:
+            opinion = (
+                f"We do not express an opinion on the accompanying financial statements of {client_name}. "
+                "Because of the significance of the matter(s) described in the Basis for Disclaimer of "
+                "Opinion section below, we have not been able to obtain sufficient appropriate audit "
+                "evidence to provide a basis for an audit opinion on these financial statements."
+            )
+        else:
+            opinion = (
+                f"We are unable to obtain sufficient appropriate evidence to provide a basis for a review "
+                f"conclusion, and we do not express a conclusion on the accompanying financial statements "
+                f"of {client_name}. See the Basis for Disclaimer of Conclusion section below."
+            )
+        basis_matter = "[Describe the matter giving rise to the disclaimer, and why sufficient appropriate evidence could not be obtained.]"
+
+    if is_audit:
+        basis = (
+            f"We conducted our {noun} in accordance with International Standards on Auditing (ISAs). Our "
+            "responsibilities under those standards are further described in the Auditor's Responsibilities "
+            "section below. We are independent of the entity in accordance with the International Ethics "
+            "Standards Board for Accountants' International Code of Ethics for Professional Accountants "
+            "(IESBA Code), and we have fulfilled our other ethical responsibilities in accordance with the "
+            "IESBA Code. We believe that the audit evidence we have obtained is sufficient and appropriate "
+            f"to provide a basis for our {modification} opinion."
+        )
+        responsibility = (
+            "Our objectives are to obtain reasonable assurance about whether the financial statements as a "
+            "whole are free from material misstatement, whether due to fraud or error, and to issue an "
+            "auditor's report that includes our opinion. Reasonable assurance is a high level of assurance, "
+            "but is not a guarantee that an audit conducted in accordance with ISAs will always detect a "
+            "material misstatement when it exists. As part of an audit in accordance with ISAs, we exercise "
+            "professional judgement and maintain professional scepticism throughout the audit, identify and "
+            "assess the risks of material misstatement, obtain an understanding of internal control relevant "
+            "to the audit, evaluate the appropriateness of accounting policies used and the reasonableness "
+            "of accounting estimates, and evaluate the overall presentation, structure and content of the "
+            "financial statements."
+        )
+    else:
+        basis = (
+            f"We conducted our {noun} in accordance with International Standard on Review Engagements "
+            "(ISRE) 2400 (Revised), Engagements to Review Historical Financial Statements. We are "
+            "independent of the entity in accordance with the IESBA Code, and we have fulfilled our other "
+            "ethical responsibilities in accordance with the Code."
+        )
+        responsibility = (
+            "A review of financial statements in accordance with ISRE 2400 (Revised) is a limited assurance "
+            "engagement. We perform procedures, primarily consisting of making inquiries of management and "
+            "others within the entity, as appropriate, and applying analytical procedures, and evaluate the "
+            "evidence obtained. The procedures performed in a review are substantially less than those "
+            "performed in an audit conducted in accordance with International Standards on Auditing. "
+            "Accordingly, we do not express an audit opinion on these financial statements."
+        )
+    if basis_matter:
+        basis = basis + " " + basis_matter
+
+    management = (
+        f"The directors are responsible for the preparation and fair presentation of the financial "
+        f"statements in accordance with {framework_label}, and for such internal control as the "
+        "directors determine is necessary to enable the preparation of financial statements that are "
+        "free from material misstatement, whether due to fraud or error. In preparing the financial "
+        "statements, the directors are responsible for assessing the entity's ability to continue as a "
+        "going concern, disclosing, as applicable, matters related to going concern, and using the going "
+        "concern basis of accounting unless the directors either intend to liquidate the entity or to "
+        "cease operations, or have no realistic alternative but to do so."
+    )
+
+    return {
+        "opinion_paragraph": opinion,
+        "basis_paragraph": basis,
+        "management_responsibility_paragraph": management,
+        "auditor_responsibility_paragraph": responsibility,
+    }
+
+
+def build_income_tax_computation(profit_before_tax, lines, tax_loss_brought_forward=0.0, tax_rate_percent=None, aids_levy_percent=None):
+    """Reconciles accounting profit before tax to taxable income and the
+    resulting current tax charge. `lines`: plain dicts [{"item_type":
+    "addback"|"deduction"|"capital_allowance", "description", "amount"},
+    ...] - entirely preparer-entered (see models.IncomeTaxComputation's
+    module comment on why no ZIMRA rate/allowance figure is hardcoded
+    anywhere in this app). `tax_rate_percent`/`aids_levy_percent` left as
+    None (rather than defaulting to a guessed figure) compute a nil tax
+    charge - the caller/template should prompt for them rather than treat
+    a nil result as a real answer.
+
+    A tax loss brought forward is utilised only up to the amount of
+    positive taxable income before losses; any of it left over is carried
+    forward, added to by a current-year loss if taxable income before
+    losses is itself negative."""
+    addbacks = [l for l in lines if l.get("item_type") == "addback"]
+    deductions = [l for l in lines if l.get("item_type") in ("deduction", "capital_allowance")]
+    total_addbacks = sum(l.get("amount") or 0.0 for l in addbacks)
+    total_deductions = sum(l.get("amount") or 0.0 for l in deductions)
+    taxable_income_before_losses = (profit_before_tax or 0.0) + total_addbacks - total_deductions
+
+    loss_available = tax_loss_brought_forward or 0.0
+    loss_utilised = min(loss_available, max(taxable_income_before_losses, 0.0))
+    taxable_income = max(taxable_income_before_losses - loss_utilised, 0.0)
+    current_year_loss = abs(min(taxable_income_before_losses, 0.0))
+    tax_loss_carried_forward = (loss_available - loss_utilised) + current_year_loss
+
+    rate = (tax_rate_percent or 0.0) / 100.0
+    levy = (aids_levy_percent or 0.0) / 100.0
+    base_tax = taxable_income * rate
+    aids_levy_amount = base_tax * levy
+    total_tax_charge = base_tax + aids_levy_amount
+    effective_rate_percent = (total_tax_charge / profit_before_tax * 100.0) if profit_before_tax else None
+
+    return {
+        "profit_before_tax": profit_before_tax or 0.0,
+        "addbacks": addbacks, "deductions": deductions,
+        "total_addbacks": total_addbacks, "total_deductions": total_deductions,
+        "taxable_income_before_losses": taxable_income_before_losses,
+        "tax_loss_brought_forward": loss_available, "loss_utilised": loss_utilised,
+        "taxable_income": taxable_income, "tax_loss_carried_forward": tax_loss_carried_forward,
+        "tax_rate_percent": tax_rate_percent, "aids_levy_percent": aids_levy_percent,
+        "base_tax": base_tax, "aids_levy_amount": aids_levy_amount, "total_tax_charge": total_tax_charge,
+        "effective_rate_percent": effective_rate_percent,
+    }
+
+
+def build_deferred_tax_computation(tax_rate_percent, ppe_accounting_nbv, ppe_tax_base, other_items):
+    """Nets every temporary difference into a single deferred tax asset/
+    liability at `tax_rate_percent`. The PPE row (if both
+    `ppe_accounting_nbv` - normally the Asset Register's own closing NBV,
+    see build_ppe_movement_schedule() - and `ppe_tax_base` are given) is
+    kept separate from `other_items` (plain dicts: [{"description",
+    "accounting_amount", "tax_base_amount"}, ...], every other temporary
+    difference the preparer has entered by hand) purely so the caller can
+    label the PPE row distinctly; the maths is identical either way.
+
+    A positive (accounting amount > tax base) difference is a taxable
+    temporary difference - net effect a deferred tax LIABILITY (the classic
+    case: accelerated capital allowances have reduced the tax base below
+    the accounting carrying amount). A negative difference is a deductible
+    temporary difference - net effect a deferred tax ASSET."""
+    rate = (tax_rate_percent or 0.0) / 100.0
+    rows = []
+    if ppe_accounting_nbv is not None and ppe_tax_base is not None:
+        diff = ppe_accounting_nbv - ppe_tax_base
+        rows.append({
+            "description": "Property, plant and equipment", "accounting_amount": ppe_accounting_nbv,
+            "tax_base_amount": ppe_tax_base, "temporary_difference": diff, "deferred_tax": diff * rate,
+        })
+    for item in other_items:
+        acc = item.get("accounting_amount") or 0.0
+        base = item.get("tax_base_amount") or 0.0
+        diff = acc - base
+        rows.append({
+            "description": item.get("description", ""), "accounting_amount": acc,
+            "tax_base_amount": base, "temporary_difference": diff, "deferred_tax": diff * rate,
+        })
+    total_deferred_tax = sum(r["deferred_tax"] for r in rows)
+    classification = "liability" if total_deferred_tax > 0.01 else ("asset" if total_deferred_tax < -0.01 else "nil")
+    return {"rows": rows, "total_deferred_tax": total_deferred_tax, "classification": classification}
+
+
 def _infer_period_start(period_end):
     """Best-effort start of the 12-month reporting period ending on
     period_end. The app doesn't record a separate period-start date on
@@ -1042,7 +1266,25 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None):
             note["total"] = {"current": reg_total["closing_nbv"], "prior": reg_total["opening_nbv"]}
             if ppe_policy_text:
                 note["policy"] = ppe_policy_text
-            if abs(cur - reg_total["closing_nbv"]) > 0.01 or abs(pri - reg_total["opening_nbv"]) > 0.01:
+            # Always shown at the foot of the note - links the register's
+            # own closing/opening NBV back to the trial balance's PPE
+            # category total, on both years, whether or not they actually
+            # agree. A non-nil difference is the whole point of doing this:
+            # it's the figure that becomes the basis for a proposed audit
+            # adjustment (either to the trial balance, or to correct the
+            # Asset Register), never silently absorbed either way.
+            diff_current = cur - reg_total["closing_nbv"]
+            diff_prior = pri - reg_total["opening_nbv"]
+            ties_out = abs(diff_current) <= 0.01 and abs(diff_prior) <= 0.01
+            note["reconciliation"] = {
+                "tb_current": cur, "tb_prior": pri,
+                "register_current": reg_total["closing_nbv"], "register_prior": reg_total["opening_nbv"],
+                "diff_current": diff_current, "diff_prior": diff_prior, "ties_out": ties_out,
+            }
+            if not ties_out:
+                # Kept alongside `reconciliation` (not instead of it) purely
+                # for backward compatibility with anything that only checks
+                # for a genuine mismatch via `note["variance"]`.
                 note["variance"] = {
                     "tb_current": cur, "tb_prior": pri,
                     "register_current": reg_total["closing_nbv"], "register_prior": reg_total["opening_nbv"],

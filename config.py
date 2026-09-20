@@ -60,6 +60,11 @@ REGULATORY_NOTICES_DATA_DIR = os.path.join(DATA_DIR, "regulatory_notices_data")
 # team member with the "Manage Company Documents" permission adds files
 # from the app.
 COMPANY_DOCUMENTS_DATA_DIR = os.path.join(DATA_DIR, "company_documents_data")
+# Writable folder for each Client's own logo (see models.Client.logo_filename)
+# - used on the Financial Statements cover page. Same idea as
+# COMPANY_DOCUMENTS_DATA_DIR above: starts empty, one image per client,
+# replaced (not accumulated) whenever a new logo is uploaded.
+CLIENT_LOGOS_DATA_DIR = os.path.join(DATA_DIR, "client_logos_data")
 
 
 class Config:
@@ -81,3 +86,4 @@ class Config:
     POLICIES_DATA_DIR = POLICIES_DATA_DIR
     REGULATORY_NOTICES_DATA_DIR = REGULATORY_NOTICES_DATA_DIR
     COMPANY_DOCUMENTS_DATA_DIR = COMPANY_DOCUMENTS_DATA_DIR
+    CLIENT_LOGOS_DATA_DIR = CLIENT_LOGOS_DATA_DIR

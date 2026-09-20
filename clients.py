@@ -1,5 +1,9 @@
-from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
+import os
+import uuid
+
+from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, current_app, send_from_directory
 from flask_login import login_required, current_user
+from werkzeug.utils import secure_filename
 
 from extensions import db
 from models import (
@@ -7,6 +11,14 @@ from models import (
     COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES, FilingIndexSection,
 )
 from engagements import sync_substantive_procedures_if_started
+
+_LOGO_EXTENSIONS = {"png", "jpg", "jpeg"}
+
+
+def _logos_dir():
+    directory = current_app.config["CLIENT_LOGOS_DATA_DIR"]
+    os.makedirs(directory, exist_ok=True)
+    return directory
 
 clients_bp = Blueprint("clients", __name__, url_prefix="/clients")
 
@@ -161,6 +173,62 @@ def edit_client(client_id):
             flash("Client updated.", "success")
         return redirect(url_for("clients.view_client", client_id=client.id))
     return render_template("clients/form.html", client=client, industry_options=INDUSTRY_OPTIONS)
+
+
+@clients_bp.route("/<int:client_id>/logo/upload", methods=["POST"])
+@login_required
+def upload_client_logo(client_id):
+    """The client's own logo (not the firm's) - used only on the cover page
+    of that client's generated Financial Statements. One file per client:
+    uploading a new one replaces (and deletes) whatever was there before,
+    rather than accumulating old copies with nothing pointing at them."""
+    client = Client.query.get_or_404(client_id)
+    file = request.files.get("logo")
+    if not file or file.filename == "":
+        flash("Please choose an image file to upload.", "danger")
+        return redirect(url_for("clients.view_client", client_id=client_id))
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in _LOGO_EXTENSIONS:
+        flash("Only PNG and JPG images are accepted for a client logo.", "danger")
+        return redirect(url_for("clients.view_client", client_id=client_id))
+
+    old_filename = client.logo_filename
+    stored_name = f"client{client.id}_{uuid.uuid4().hex[:8]}.{ext}"
+    file.save(os.path.join(_logos_dir(), stored_name))
+    client.logo_filename = stored_name
+    db.session.commit()
+    if old_filename:
+        old_path = os.path.join(_logos_dir(), old_filename)
+        if os.path.exists(old_path):
+            os.remove(old_path)
+    flash("Client logo uploaded - it will appear on this client's Financial Statements cover page.", "success")
+    return redirect(url_for("clients.view_client", client_id=client_id))
+
+
+@clients_bp.route("/<int:client_id>/logo/remove", methods=["POST"])
+@login_required
+def remove_client_logo(client_id):
+    client = Client.query.get_or_404(client_id)
+    old_filename = client.logo_filename
+    client.logo_filename = None
+    db.session.commit()
+    if old_filename:
+        old_path = os.path.join(_logos_dir(), old_filename)
+        if os.path.exists(old_path):
+            os.remove(old_path)
+    flash("Client logo removed.", "success")
+    return redirect(url_for("clients.view_client", client_id=client_id))
+
+
+@clients_bp.route("/<int:client_id>/logo")
+@login_required
+def client_logo_image(client_id):
+    """Serves the client's own logo inline (not as a download) so it can be
+    used as an <img> preview on the Client and Finalisation tabs."""
+    client = Client.query.get_or_404(client_id)
+    if not client.logo_filename:
+        abort(404)
+    return send_from_directory(_logos_dir(), client.logo_filename)
 
 
 @clients_bp.route("/<int:client_id>/delete", methods=["POST"])

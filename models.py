@@ -904,6 +904,13 @@ class Client(db.Model):
     company_number = db.Column(db.String(80))
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # The client's own logo (as opposed to the firm's, which is baked into
+    # every generated document's letterhead - see workpapers._LOGO_PATH) -
+    # used only on the Financial Statements cover page. Stored on disk under
+    # Config.CLIENT_LOGOS_DATA_DIR, one file per client (replaced, not
+    # accumulated, each time a new one is uploaded), same pattern as
+    # CompanyDocument's own file storage.
+    logo_filename = db.Column(db.String(255))
 
     engagements = db.relationship("Engagement", backref="client", lazy=True, cascade="all, delete-orphan")
 
@@ -2228,6 +2235,241 @@ class FinancialStatements(db.Model):
 
     def __repr__(self):
         return f"<FinancialStatements engagement={self.engagement_id}>"
+
+
+class DirectorsStatement(db.Model):
+    """The Directors' Statement (Statement of Responsibility) working paper
+    - content that goes INTO the client's Financial Statements for their
+    own directors to sign, not an internal audit sign-off record. Placed
+    right after the Client Details/Table of Contents page and before the
+    Audit Opinion/Review Report (if any) in the generated Word document,
+    matching normal Zimbabwean financial statement ordering. One per
+    engagement, seeded with standard boilerplate the first time the
+    Finalisation tab is opened (see financials.DEFAULT_DIRECTORS_STATEMENT_TEXT)."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    statement_text = db.Column(db.Text)
+    director1_name = db.Column(db.String(150))
+    director1_title = db.Column(db.String(100), default="Director")
+    director2_name = db.Column(db.String(150))
+    director2_title = db.Column(db.String(100), default="Director")
+    statement_date = db.Column(db.Date)
+
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("directors_statement", uselist=False, cascade="all, delete-orphan"))
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+
+    def __repr__(self):
+        return f"<DirectorsStatement engagement={self.engagement_id}>"
+
+
+# The report basis the preparer picks on the Audit Opinion tab - an Audit
+# engagement gets a full ISA 700 audit opinion, an Assurance engagement
+# more usually gets an ISRE 2400 review conclusion (a limited-assurance
+# report, not a full opinion) - kept as an explicit choice rather than
+# inferred purely from Engagement.type, since a firm occasionally performs
+# the other basis on either engagement type.
+AUDIT_OPINION_BASES = ["audit", "review"]
+AUDIT_OPINION_BASIS_LABELS = {
+    "audit": "Audit opinion (ISA 700)",
+    "review": "Review / limited assurance conclusion (ISRE 2400)",
+}
+OPINION_MODIFICATIONS = ["unmodified", "qualified", "adverse", "disclaimer"]
+OPINION_MODIFICATION_LABELS = {
+    "unmodified": "Unmodified (unqualified)",
+    "qualified": "Qualified",
+    "adverse": "Adverse",
+    "disclaimer": "Disclaimer of opinion / conclusion",
+}
+
+
+class AuditOpinion(db.Model):
+    """The Independent Auditor's Report / Independent Reviewer's Report
+    working paper - one per engagement, shown only for Audit and Assurance
+    engagement types (see AUDIT_OPINION_BASES above), placed before the
+    primary statements in the generated Financial Statements Word document.
+    The four report paragraphs are seeded with standard ISA 700/ISRE 2400
+    boilerplate for the chosen basis/modification (see
+    financials.default_audit_opinion_paragraphs) and are always editable -
+    the same "system drafts, preparer tailors" pattern as every other
+    boilerplate paragraph in this app. Only a Partner sign-off actually
+    issues the report - completed_by/reviewed_by exist for drafting/review
+    before it reaches that point, the same 3-stage pattern as every other
+    working paper in this app."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    report_basis = db.Column(db.String(10), default="audit")  # "audit" | "review"
+    modification = db.Column(db.String(15), default="unmodified")  # see OPINION_MODIFICATIONS
+    basis_for_modification = db.Column(db.Text)  # only meaningful when modification != "unmodified"
+    opinion_paragraph = db.Column(db.Text)
+    basis_paragraph = db.Column(db.Text)
+    management_responsibility_paragraph = db.Column(db.Text)
+    auditor_responsibility_paragraph = db.Column(db.Text)
+    report_date = db.Column(db.Date)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("audit_opinion", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<AuditOpinion engagement={self.engagement_id}>"
+
+
+# Zimbabwean corporate tax rates and capital allowance rates change with
+# each year's Finance Act, and reliable current figures could not be
+# sourced with confidence at the time this was built (published sources
+# disagreed even on the headline corporate rate) - so unlike, say,
+# NOTE_DEFINITIONS' accounting policy wording, NOTHING here hardcodes a
+# statutory rate as fact. tax_rate_percent/aids_levy_percent are entirely
+# preparer-entered, with no pre-filled default, and every add-back/
+# deduction/capital allowance line is entered by the preparer too - the
+# computation only does the arithmetic once those figures are supplied.
+INCOME_TAX_ITEM_TYPES = ["addback", "deduction", "capital_allowance"]
+INCOME_TAX_ITEM_TYPE_LABELS = {
+    "addback": "Add back (disallowable / non-taxable item)",
+    "deduction": "Less: allowable deduction",
+    "capital_allowance": "Less: capital allowance",
+}
+
+
+class IncomeTaxComputation(db.Model):
+    """The Income Tax Computation working paper - reconciles accounting
+    profit before tax (taken live from the Statement of Profit or Loss,
+    never re-entered here) to taxable income and the resulting current tax
+    charge, via preparer-entered add-back/deduction/capital allowance
+    lines. See the module comment above on why no rate is pre-filled.
+    One per engagement."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    tax_rate_percent = db.Column(db.Float)
+    aids_levy_percent = db.Column(db.Float)
+    tax_loss_brought_forward = db.Column(db.Float, default=0.0)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("income_tax_computation", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    items = db.relationship(
+        "IncomeTaxAdjustmentLine", backref="computation", lazy=True,
+        cascade="all, delete-orphan", order_by="IncomeTaxAdjustmentLine.order",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<IncomeTaxComputation engagement={self.engagement_id}>"
+
+
+class IncomeTaxAdjustmentLine(db.Model):
+    """One add-back, allowable deduction, or capital allowance line on the
+    Income Tax Computation working paper - entirely preparer-entered (see
+    the module comment above IncomeTaxComputation)."""
+    id = db.Column(db.Integer, primary_key=True)
+    computation_id = db.Column(db.Integer, db.ForeignKey("income_tax_computation.id"), nullable=False)
+    item_type = db.Column(db.String(20), default="addback")  # see INCOME_TAX_ITEM_TYPES
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, default=0.0)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<IncomeTaxAdjustmentLine computation={self.computation_id}>"
+
+
+class DeferredTaxComputation(db.Model):
+    """The Deferred Tax Computation working paper - one temporary
+    difference per row (DeferredTaxItem below), each contributing
+    (accounting amount - tax base) x tax rate to a single net deferred tax
+    asset/liability. The Property, Plant and Equipment temporary difference
+    - almost always the most material one, and the one this app can help
+    with directly - gets its own dedicated field (ppe_tax_base) so its
+    accounting-amount side can be pulled live from the Asset Register's own
+    movement schedule (financials.build_ppe_movement_schedule) rather than
+    retyped; the preparer only has to supply its tax base (the cumulative
+    tax written-down value), since this app has no prior-year capital
+    allowance history to derive that from on its own. Every other temporary
+    difference (provisions, unrealised amounts, assessed losses not
+    recognised elsewhere, etc.) is a plain manual DeferredTaxItem row.
+    One per engagement."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    tax_rate_percent = db.Column(db.Float)
+    ppe_tax_base = db.Column(db.Float)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("deferred_tax_computation", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    items = db.relationship(
+        "DeferredTaxItem", backref="computation", lazy=True,
+        cascade="all, delete-orphan", order_by="DeferredTaxItem.order",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<DeferredTaxComputation engagement={self.engagement_id}>"
+
+
+class DeferredTaxItem(db.Model):
+    """One temporary difference (other than PPE - see DeferredTaxComputation
+    above) on the Deferred Tax Computation working paper: an accounting
+    amount, its tax base, and the resulting (accounting - tax base) x rate
+    deferred tax effect."""
+    id = db.Column(db.Integer, primary_key=True)
+    computation_id = db.Column(db.Integer, db.ForeignKey("deferred_tax_computation.id"), nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    accounting_amount = db.Column(db.Float, default=0.0)
+    tax_base_amount = db.Column(db.Float, default=0.0)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<DeferredTaxItem computation={self.computation_id}>"
 
 
 class SubstantiveProcedureArea(db.Model):

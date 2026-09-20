@@ -40,6 +40,10 @@ from models import (
     WorkpaperNarrative, WORKPAPER_NARRATIVE_KINDS, WORKPAPER_NARRATIVE_KIND_KEYS,
     DEFAULT_WORKPAPER_NARRATIVE_BODIES, FilingIndexSection,
     PPEAssetClass, PPEAsset, PPE_DEPRECIATION_METHODS,
+    DirectorsStatement, AuditOpinion, AUDIT_OPINION_BASES, AUDIT_OPINION_BASIS_LABELS,
+    OPINION_MODIFICATIONS, OPINION_MODIFICATION_LABELS,
+    IncomeTaxComputation, IncomeTaxAdjustmentLine, INCOME_TAX_ITEM_TYPES, INCOME_TAX_ITEM_TYPE_LABELS,
+    DeferredTaxComputation, DeferredTaxItem,
 )
 import financials as fin
 import workpapers as wp
@@ -332,6 +336,65 @@ def view_engagement(engagement_id):
         )
         if trial_balance and trial_balance.lines else None
     )
+    # Directors' Statement, Audit Opinion / Review Report, Income Tax
+    # Computation, Deferred Tax Computation - each queried only (never
+    # created here); the "not saved yet" state is rendered with sensible
+    # defaults by the template, and the record is only actually created the
+    # first time its own Save action is posted (same pattern as the
+    # Financial Statements closing notes' own defaults).
+    directors_statement = DirectorsStatement.query.filter_by(engagement_id=engagement_id).first()
+    suggested_directors = ClientKeyPerson.query.filter_by(client_id=engagement.client_id, role="Director", status="Confirmed").order_by(ClientKeyPerson.id).all()
+    audit_opinion = AuditOpinion.query.filter_by(engagement_id=engagement_id).first()
+    default_opinion_paragraphs = fin.default_audit_opinion_paragraphs(
+        (audit_opinion.report_basis if audit_opinion else ("audit" if engagement.type == "Audit" else "review")),
+        (audit_opinion.modification if audit_opinion else "unmodified"),
+        engagement.client.name, engagement.period_end, REPORTING_FRAMEWORK_LABELS.get(engagement.reporting_framework),
+    )
+    income_tax_computation = IncomeTaxComputation.query.filter_by(engagement_id=engagement_id).first()
+    profit_before_tax = statements["pl"]["profit_before_tax"]["current"] if statements else None
+    income_tax_lines = [
+        {"item_type": l.item_type, "description": l.description, "amount": l.amount}
+        for l in (income_tax_computation.items if income_tax_computation else [])
+    ]
+    income_tax_result = fin.build_income_tax_computation(
+        profit_before_tax, income_tax_lines,
+        tax_loss_brought_forward=income_tax_computation.tax_loss_brought_forward if income_tax_computation else 0.0,
+        tax_rate_percent=income_tax_computation.tax_rate_percent if income_tax_computation else None,
+        aids_levy_percent=income_tax_computation.aids_levy_percent if income_tax_computation else None,
+    ) if profit_before_tax is not None else None
+    income_tax_tb_current = statements["totals"]["income_tax_expense"]["current"] if statements else None
+    # Same "always shown, basis for a proposed adjustment" reconciliation
+    # pattern as the PPE note (financials.build_notes) - the computed
+    # current tax charge vs whatever is actually recorded in the trial
+    # balance's Income Tax Expense line, whether or not they agree.
+    income_tax_reconciliation = None
+    if income_tax_result is not None and income_tax_tb_current is not None:
+        diff = income_tax_tb_current - income_tax_result["total_tax_charge"]
+        income_tax_reconciliation = {
+            "tb_current": income_tax_tb_current, "computed": income_tax_result["total_tax_charge"],
+            "diff": diff, "ties_out": abs(diff) <= 0.01,
+        }
+
+    deferred_tax_computation = DeferredTaxComputation.query.filter_by(engagement_id=engagement_id).first()
+    ppe_accounting_nbv = ppe_movement["total"]["closing_nbv"] if ppe_movement else (statements["totals"]["ppe"]["current"] if statements else None)
+    deferred_tax_other_items = [
+        {"description": i.description, "accounting_amount": i.accounting_amount, "tax_base_amount": i.tax_base_amount}
+        for i in (deferred_tax_computation.items if deferred_tax_computation else [])
+    ]
+    deferred_tax_result = fin.build_deferred_tax_computation(
+        deferred_tax_computation.tax_rate_percent if deferred_tax_computation else None,
+        ppe_accounting_nbv, deferred_tax_computation.ppe_tax_base if deferred_tax_computation else None,
+        deferred_tax_other_items,
+    )
+    deferred_tax_tb_net = (statements["totals"]["deferred_tax_liability"]["current"] - statements["totals"]["deferred_tax_asset"]["current"]) if statements else None
+    deferred_tax_reconciliation = None
+    if deferred_tax_result is not None and deferred_tax_tb_net is not None:
+        diff = deferred_tax_tb_net - deferred_tax_result["total_deferred_tax"]
+        deferred_tax_reconciliation = {
+            "tb_net": deferred_tax_tb_net, "computed": deferred_tax_result["total_deferred_tax"],
+            "diff": diff, "ties_out": abs(diff) <= 0.01,
+        }
+
     # Face of Trial Balance (Trial Balance tab): the summarised, by-category
     # view alongside the detailed, account-by-account one - built from the
     # same preliminary lines so the two views (and their totals) always agree.
@@ -477,6 +540,29 @@ def view_engagement(engagement_id):
         ppe_assets=ppe_assets,
         ppe_depreciation_methods=PPE_DEPRECIATION_METHODS,
         ppe_movement=ppe_movement,
+        directors_statement=directors_statement,
+        suggested_directors=suggested_directors,
+        default_directors_statement_text=fin.DEFAULT_DIRECTORS_STATEMENT_TEXT,
+        audit_opinion=audit_opinion,
+        default_opinion_paragraphs=default_opinion_paragraphs,
+        audit_opinion_bases=AUDIT_OPINION_BASES,
+        audit_opinion_basis_labels=AUDIT_OPINION_BASIS_LABELS,
+        opinion_modifications=OPINION_MODIFICATIONS,
+        opinion_modification_labels=OPINION_MODIFICATION_LABELS,
+        income_tax_computation=income_tax_computation,
+        income_tax_lines=income_tax_lines,
+        income_tax_result=income_tax_result,
+        income_tax_tb_current=income_tax_tb_current,
+        income_tax_reconciliation=income_tax_reconciliation,
+        profit_before_tax=profit_before_tax,
+        income_tax_item_types=INCOME_TAX_ITEM_TYPES,
+        income_tax_item_type_labels=INCOME_TAX_ITEM_TYPE_LABELS,
+        deferred_tax_computation=deferred_tax_computation,
+        ppe_accounting_nbv=ppe_accounting_nbv,
+        deferred_tax_other_items=deferred_tax_other_items,
+        deferred_tax_result=deferred_tax_result,
+        deferred_tax_tb_net=deferred_tax_tb_net,
+        deferred_tax_reconciliation=deferred_tax_reconciliation,
     )
 
 
@@ -3275,6 +3361,489 @@ def _ppe_movement_and_policy(class_dicts, asset_dicts, period_end):
     return ppe_movement, ppe_policy_text
 
 
+# ---------- Directors' Statement (Finalisation tab) ----------
+
+def _get_or_create_directors_statement(engagement):
+    record = DirectorsStatement.query.filter_by(engagement_id=engagement.id).first()
+    if not record:
+        directors = ClientKeyPerson.query.filter_by(client_id=engagement.client_id, role="Director", status="Confirmed").order_by(ClientKeyPerson.id).all()
+        record = DirectorsStatement(
+            engagement_id=engagement.id, statement_text=fin.DEFAULT_DIRECTORS_STATEMENT_TEXT,
+            director1_name=directors[0].full_name if len(directors) > 0 else None,
+            director2_name=directors[1].full_name if len(directors) > 1 else None,
+            statement_date=engagement.period_end,
+        )
+        db.session.add(record)
+        db.session.flush()
+    return record
+
+
+@engagements_bp.route("/<int:engagement_id>/directors-statement/save", methods=["POST"])
+@login_required
+def save_directors_statement(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_directors_statement(engagement)
+    record.statement_text = request.form.get("statement_text", "").strip()
+    record.director1_name = request.form.get("director1_name", "").strip() or None
+    record.director1_title = request.form.get("director1_title", "").strip() or "Director"
+    record.director2_name = request.form.get("director2_name", "").strip() or None
+    record.director2_title = request.form.get("director2_title", "").strip() or "Director"
+    record.statement_date = _parse_date(request.form.get("statement_date")) or engagement.period_end
+    record.updated_by_id = current_user.id
+    record.updated_at = datetime.utcnow()
+    db.session.commit()
+    flash("Directors' Statement saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/<int:engagement_id>/directors-statement/use-directors-on-file", methods=["POST"])
+@login_required
+def use_directors_on_file(engagement_id):
+    """Re-pulls director names from this client's confirmed Directors &
+    Shareholders list (Client detail page) - a one-click refresh for when
+    that list has changed since the statement was first seeded, rather
+    than the preparer having to retype names by hand."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_directors_statement(engagement)
+    directors = ClientKeyPerson.query.filter_by(client_id=engagement.client_id, role="Director", status="Confirmed").order_by(ClientKeyPerson.id).all()
+    if not directors:
+        flash("No confirmed Directors are on file for this client yet - add them on the client's Directors & Shareholders list first.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    record.director1_name = directors[0].full_name if len(directors) > 0 else None
+    record.director2_name = directors[1].full_name if len(directors) > 1 else None
+    record.updated_by_id = current_user.id
+    record.updated_at = datetime.utcnow()
+    db.session.commit()
+    flash("Director names refreshed from the client's Directors & Shareholders list.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+# ---------- Audit Opinion / Review Report (Finalisation tab) ----------
+
+def _get_or_create_audit_opinion(engagement):
+    record = AuditOpinion.query.filter_by(engagement_id=engagement.id).first()
+    if not record:
+        report_basis = "audit" if engagement.type == "Audit" else "review"
+        defaults = fin.default_audit_opinion_paragraphs(
+            report_basis, "unmodified", engagement.client.name, engagement.period_end,
+            REPORTING_FRAMEWORK_LABELS.get(engagement.reporting_framework),
+        )
+        record = AuditOpinion(engagement_id=engagement.id, report_basis=report_basis, modification="unmodified", report_date=engagement.period_end, **defaults)
+        db.session.add(record)
+        db.session.flush()
+    return record
+
+
+@engagements_bp.route("/<int:engagement_id>/audit-opinion/save", methods=["POST"])
+@login_required
+def save_audit_opinion(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_audit_opinion(engagement)
+    record.report_basis = request.form.get("report_basis") if request.form.get("report_basis") in AUDIT_OPINION_BASES else record.report_basis
+    record.modification = request.form.get("modification") if request.form.get("modification") in OPINION_MODIFICATIONS else record.modification
+    record.basis_for_modification = request.form.get("basis_for_modification", "").strip()
+    record.opinion_paragraph = request.form.get("opinion_paragraph", "").strip()
+    record.basis_paragraph = request.form.get("basis_paragraph", "").strip()
+    record.management_responsibility_paragraph = request.form.get("management_responsibility_paragraph", "").strip()
+    record.auditor_responsibility_paragraph = request.form.get("auditor_responsibility_paragraph", "").strip()
+    record.report_date = _parse_date(request.form.get("report_date")) or engagement.period_end
+    record.completed_by_id = current_user.id
+    record.completed_at = datetime.utcnow()
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    db.session.commit()
+    flash("Audit Opinion / Review Report saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/<int:engagement_id>/audit-opinion/regenerate-wording", methods=["POST"])
+@login_required
+def regenerate_audit_opinion_wording(engagement_id):
+    """Rebuilds the four report paragraphs from scratch for the currently
+    selected report basis/modification - for when the preparer has changed
+    either of those and wants fresh standard wording to start editing from,
+    rather than a stale paragraph left over from the previous choice."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_audit_opinion(engagement)
+    report_basis = request.form.get("report_basis") if request.form.get("report_basis") in AUDIT_OPINION_BASES else record.report_basis
+    modification = request.form.get("modification") if request.form.get("modification") in OPINION_MODIFICATIONS else record.modification
+    defaults = fin.default_audit_opinion_paragraphs(
+        report_basis, modification, engagement.client.name, engagement.period_end,
+        REPORTING_FRAMEWORK_LABELS.get(engagement.reporting_framework),
+    )
+    record.report_basis = report_basis
+    record.modification = modification
+    for k, v in defaults.items():
+        setattr(record, k, v)
+    record.completed_by_id = current_user.id
+    record.completed_at = datetime.utcnow()
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    db.session.commit()
+    flash("Standard wording regenerated for the selected basis/modification - review and tailor it before issuing.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/audit-opinion/<int:opinion_id>/review", methods=["POST"])
+@login_required
+def review_audit_opinion(opinion_id):
+    record = AuditOpinion.query.get_or_404(opinion_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if record.completed_by_id == current_user.id:
+        flash("You can't review an Audit Opinion you drafted yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+    record.reviewed_by_id = current_user.id
+    record.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Audit Opinion marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/audit-opinion/<int:opinion_id>/unreview", methods=["POST"])
+@login_required
+def unreview_audit_opinion(opinion_id):
+    record = AuditOpinion.query.get_or_404(opinion_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/audit-opinion/<int:opinion_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_audit_opinion(opinion_id):
+    record = AuditOpinion.query.get_or_404(opinion_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if record.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on an Audit Opinion you drafted yourself - ask another partner to sign it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+    record.partner_signed_by_id = current_user.id
+    record.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded - the report is now issued.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/audit-opinion/<int:opinion_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_audit_opinion(opinion_id):
+    record = AuditOpinion.query.get_or_404(opinion_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="finalisation"))
+
+
+# ---------- Income Tax Computation tab ----------
+
+def _get_or_create_income_tax_computation(engagement_id):
+    record = IncomeTaxComputation.query.filter_by(engagement_id=engagement_id).first()
+    if not record:
+        record = IncomeTaxComputation(engagement_id=engagement_id, tax_loss_brought_forward=0.0)
+        db.session.add(record)
+        db.session.flush()
+    return record
+
+
+@engagements_bp.route("/<int:engagement_id>/income-tax/save", methods=["POST"])
+@login_required
+def save_income_tax_computation(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_income_tax_computation(engagement_id)
+    record.tax_rate_percent = _parse_float(request.form.get("tax_rate_percent"))
+    record.aids_levy_percent = _parse_float(request.form.get("aids_levy_percent"))
+    record.tax_loss_brought_forward = _parse_float(request.form.get("tax_loss_brought_forward")) or 0.0
+    record.notes = request.form.get("notes", "").strip()
+    record.completed_by_id = current_user.id
+    record.completed_at = datetime.utcnow()
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    db.session.commit()
+    flash("Income Tax Computation saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="income_tax"))
+
+
+@engagements_bp.route("/<int:engagement_id>/income-tax/lines/add", methods=["POST"])
+@login_required
+def add_income_tax_line(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    description = request.form.get("description", "").strip()
+    if not description:
+        flash("Please enter a description for this line.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="income_tax"))
+    record = _get_or_create_income_tax_computation(engagement_id)
+    item_type = request.form.get("item_type") if request.form.get("item_type") in INCOME_TAX_ITEM_TYPES else "addback"
+    order = IncomeTaxAdjustmentLine.query.filter_by(computation_id=record.id).count()
+    db.session.add(IncomeTaxAdjustmentLine(
+        computation_id=record.id, item_type=item_type, description=description,
+        amount=_parse_float(request.form.get("amount")) or 0.0, order=order,
+    ))
+    db.session.commit()
+    flash("Line added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="income_tax"))
+
+
+@engagements_bp.route("/income-tax/lines/<int:line_id>/update", methods=["POST"])
+@login_required
+def update_income_tax_line(line_id):
+    line = IncomeTaxAdjustmentLine.query.get_or_404(line_id)
+    engagement = line.computation.engagement
+    _ensure_engagement_access(engagement)
+    description = request.form.get("description", "").strip()
+    if not description:
+        flash("Please enter a description for this line.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="income_tax"))
+    line.item_type = request.form.get("item_type") if request.form.get("item_type") in INCOME_TAX_ITEM_TYPES else line.item_type
+    line.description = description
+    line.amount = _parse_float(request.form.get("amount")) or 0.0
+    db.session.commit()
+    flash("Line updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="income_tax"))
+
+
+@engagements_bp.route("/income-tax/lines/<int:line_id>/delete", methods=["POST"])
+@login_required
+def delete_income_tax_line(line_id):
+    line = IncomeTaxAdjustmentLine.query.get_or_404(line_id)
+    engagement = line.computation.engagement
+    _ensure_engagement_access(engagement)
+    db.session.delete(line)
+    db.session.commit()
+    flash("Line removed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="income_tax"))
+
+
+@engagements_bp.route("/income-tax/<int:computation_id>/review", methods=["POST"])
+@login_required
+def review_income_tax_computation(computation_id):
+    record = IncomeTaxComputation.query.get_or_404(computation_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if record.completed_by_id == current_user.id:
+        flash("You can't review an Income Tax Computation you prepared yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="income_tax"))
+    record.reviewed_by_id = current_user.id
+    record.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Income Tax Computation marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="income_tax"))
+
+
+@engagements_bp.route("/income-tax/<int:computation_id>/unreview", methods=["POST"])
+@login_required
+def unreview_income_tax_computation(computation_id):
+    record = IncomeTaxComputation.query.get_or_404(computation_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="income_tax"))
+
+
+@engagements_bp.route("/income-tax/<int:computation_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_income_tax_computation(computation_id):
+    record = IncomeTaxComputation.query.get_or_404(computation_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if record.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on an Income Tax Computation you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="income_tax"))
+    record.partner_signed_by_id = current_user.id
+    record.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="income_tax"))
+
+
+@engagements_bp.route("/income-tax/<int:computation_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_income_tax_computation(computation_id):
+    record = IncomeTaxComputation.query.get_or_404(computation_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="income_tax"))
+
+
+# ---------- Deferred Tax Computation tab ----------
+
+def _get_or_create_deferred_tax_computation(engagement_id):
+    record = DeferredTaxComputation.query.filter_by(engagement_id=engagement_id).first()
+    if not record:
+        record = DeferredTaxComputation(engagement_id=engagement_id)
+        db.session.add(record)
+        db.session.flush()
+    return record
+
+
+@engagements_bp.route("/<int:engagement_id>/deferred-tax/save", methods=["POST"])
+@login_required
+def save_deferred_tax_computation(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_deferred_tax_computation(engagement_id)
+    record.tax_rate_percent = _parse_float(request.form.get("tax_rate_percent"))
+    record.ppe_tax_base = _parse_float(request.form.get("ppe_tax_base"))
+    record.notes = request.form.get("notes", "").strip()
+    record.completed_by_id = current_user.id
+    record.completed_at = datetime.utcnow()
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    db.session.commit()
+    flash("Deferred Tax Computation saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="deferred_tax"))
+
+
+@engagements_bp.route("/<int:engagement_id>/deferred-tax/items/add", methods=["POST"])
+@login_required
+def add_deferred_tax_item(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    description = request.form.get("description", "").strip()
+    if not description:
+        flash("Please enter a description for this temporary difference.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="deferred_tax"))
+    record = _get_or_create_deferred_tax_computation(engagement_id)
+    order = DeferredTaxItem.query.filter_by(computation_id=record.id).count()
+    db.session.add(DeferredTaxItem(
+        computation_id=record.id, description=description,
+        accounting_amount=_parse_float(request.form.get("accounting_amount")) or 0.0,
+        tax_base_amount=_parse_float(request.form.get("tax_base_amount")) or 0.0,
+        order=order,
+    ))
+    db.session.commit()
+    flash("Temporary difference added.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="deferred_tax"))
+
+
+@engagements_bp.route("/deferred-tax/items/<int:item_id>/update", methods=["POST"])
+@login_required
+def update_deferred_tax_item(item_id):
+    item = DeferredTaxItem.query.get_or_404(item_id)
+    engagement = item.computation.engagement
+    _ensure_engagement_access(engagement)
+    description = request.form.get("description", "").strip()
+    if not description:
+        flash("Please enter a description for this temporary difference.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="deferred_tax"))
+    item.description = description
+    item.accounting_amount = _parse_float(request.form.get("accounting_amount")) or 0.0
+    item.tax_base_amount = _parse_float(request.form.get("tax_base_amount")) or 0.0
+    db.session.commit()
+    flash("Temporary difference updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="deferred_tax"))
+
+
+@engagements_bp.route("/deferred-tax/items/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_deferred_tax_item(item_id):
+    item = DeferredTaxItem.query.get_or_404(item_id)
+    engagement = item.computation.engagement
+    _ensure_engagement_access(engagement)
+    db.session.delete(item)
+    db.session.commit()
+    flash("Temporary difference removed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="deferred_tax"))
+
+
+@engagements_bp.route("/deferred-tax/<int:computation_id>/review", methods=["POST"])
+@login_required
+def review_deferred_tax_computation(computation_id):
+    record = DeferredTaxComputation.query.get_or_404(computation_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if record.completed_by_id == current_user.id:
+        flash("You can't review a Deferred Tax Computation you prepared yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="deferred_tax"))
+    record.reviewed_by_id = current_user.id
+    record.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Deferred Tax Computation marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="deferred_tax"))
+
+
+@engagements_bp.route("/deferred-tax/<int:computation_id>/unreview", methods=["POST"])
+@login_required
+def unreview_deferred_tax_computation(computation_id):
+    record = DeferredTaxComputation.query.get_or_404(computation_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="deferred_tax"))
+
+
+@engagements_bp.route("/deferred-tax/<int:computation_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_deferred_tax_computation(computation_id):
+    record = DeferredTaxComputation.query.get_or_404(computation_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if record.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a Deferred Tax Computation you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="deferred_tax"))
+    record.partner_signed_by_id = current_user.id
+    record.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="deferred_tax"))
+
+
+@engagements_bp.route("/deferred-tax/<int:computation_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_deferred_tax_computation(computation_id):
+    record = DeferredTaxComputation.query.get_or_404(computation_id)
+    _ensure_engagement_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="deferred_tax"))
+
+
 def _parse_float(value):
     if value in (None, ""):
         return None
@@ -3692,7 +4261,16 @@ def generate_financial_statements_docx(engagement_id):
         ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text,
     )
     financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
-    buf = wp.build_financial_statements_docx(engagement, statements, financial_statements)
+    directors_statement = DirectorsStatement.query.filter_by(engagement_id=engagement_id).first()
+    audit_opinion = AuditOpinion.query.filter_by(engagement_id=engagement_id).first()
+    client_key_people = [
+        {"full_name": p.full_name, "role": p.role}
+        for p in ClientKeyPerson.query.filter_by(client_id=engagement.client_id, status="Confirmed").order_by(ClientKeyPerson.id).all()
+    ]
+    buf = wp.build_financial_statements_docx(
+        engagement, statements, financial_statements,
+        directors_statement=directors_statement, audit_opinion=audit_opinion, client_key_people=client_key_people,
+    )
     doc = _file_generated_workpaper(engagement, "financial_statements", "Financial Statements", "N8100", "Financial_Statements", "docx", buf)
     flash(f"Financial statements filed (v{doc.version}).", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))

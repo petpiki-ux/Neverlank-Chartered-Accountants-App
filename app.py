@@ -45,7 +45,7 @@ def _add_missing_columns():
             ("is_current_version", "BOOLEAN DEFAULT 1"),
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
-        "client": [("company_number", "VARCHAR(80)")],
+        "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)")],
         "message_recipient": [("recalled_at", "DATETIME")],
         "engagement": [
             ("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0"),

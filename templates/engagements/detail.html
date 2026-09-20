@@ -98,6 +98,8 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}" class="{% if tab=='income_tax' %}active{% endif %}">Income Tax Computation</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}" class="{% if tab=='deferred_tax' %}active{% endif %}">Deferred Tax Computation</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}" class="{% if tab=='finalisation' %}active{% endif %}">Finalisation</a>
 </div>
 
@@ -1756,6 +1758,255 @@
   {{ qmacros.render_queries(engagement, 'tasks', queries_by_section.get('tasks', [])) }}
 
 {% endif %}
+{% elif tab == 'income_tax' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% elif profit_before_tax is none %}
+  <div class="card"><div class="empty-state">Profit before tax isn't available yet - complete the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab first, then come back here.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Income Tax Computation</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Reconciles accounting profit before tax (taken live from the Statement of Profit or Loss below - never re-entered here) to taxable income and the resulting current tax charge. The tax rate and AIDS levy rate are left for you to enter - Zimbabwean statutory rates change with each year's Finance Act and published sources have disagreed even on the headline corporate rate, so nothing here is pre-filled or assumed on your behalf. Add every allowable deduction, capital allowance and disallowable add-back as its own line below.
+    </p>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(profit_before_tax) }}</div><div class="label">Profit before tax (current year)</div></div>
+    </div>
+    <form method="post" action="{{ url_for('engagements.save_income_tax_computation', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        <div><label for="it_tax_rate_percent">Corporate tax rate (%)</label><input type="number" step="0.01" id="it_tax_rate_percent" name="tax_rate_percent" value="{{ income_tax_computation.tax_rate_percent if income_tax_computation and income_tax_computation.tax_rate_percent is not none else '' }}" placeholder="e.g. the current ZIMRA rate"></div>
+        <div><label for="it_aids_levy_percent">AIDS levy (% of base tax)</label><input type="number" step="0.01" id="it_aids_levy_percent" name="aids_levy_percent" value="{{ income_tax_computation.aids_levy_percent if income_tax_computation and income_tax_computation.aids_levy_percent is not none else '' }}" placeholder="e.g. 3"></div>
+        <div><label for="it_tax_loss_brought_forward">Assessed tax loss brought forward</label><input type="number" step="0.01" id="it_tax_loss_brought_forward" name="tax_loss_brought_forward" value="{{ income_tax_computation.tax_loss_brought_forward if income_tax_computation else 0.0 }}"></div>
+      </div>
+      <label for="it_notes">Notes</label>
+      <textarea id="it_notes" name="notes">{{ income_tax_computation.notes if income_tax_computation else '' }}</textarea>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Add-backs, deductions &amp; capital allowances</h3>
+    {% if income_tax_computation and income_tax_computation.items %}
+    <table>
+      <thead><tr><th>Type</th><th>Description</th><th class="text-right">Amount</th><th></th></tr></thead>
+      <tbody>
+      {% for line in income_tax_computation.items %}
+        <form method="post" action="{{ url_for('engagements.update_income_tax_line', line_id=line.id) }}" class="inline">
+        <tr>
+          <td>
+            <select name="item_type">
+              {% for t in income_tax_item_types %}<option value="{{ t }}" {% if line.item_type==t %}selected{% endif %}>{{ income_tax_item_type_labels[t] }}</option>{% endfor %}
+            </select>
+          </td>
+          <td><input type="text" name="description" value="{{ line.description }}" style="width:100%;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="amount" value="{{ line.amount }}" style="width:120px;margin-bottom:0;" class="text-right"></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_income_tax_line', line_id=line.id) }}" class="btn small danger" onclick="return confirm('Delete this line?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No lines added yet - add the entity's add-backs, allowable deductions and capital allowances below.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('engagements.add_income_tax_line', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div>
+        <label for="it_new_item_type">Type</label>
+        <select id="it_new_item_type" name="item_type">
+          {% for t in income_tax_item_types %}<option value="{{ t }}">{{ income_tax_item_type_labels[t] }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="it_new_description">Description</label><input type="text" id="it_new_description" name="description" placeholder="e.g. Depreciation" required></div>
+      <div><label for="it_new_amount">Amount</label><input type="number" step="0.01" id="it_new_amount" name="amount" value="0"></div>
+      <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add line</button></div>
+    </form>
+  </div>
+
+  {% if income_tax_result %}
+  <div class="card">
+    <h3 class="mt-0">Computation</h3>
+    <table>
+      <tbody>
+        <tr><td>Profit before tax</td><td class="text-right">{{ '%.2f'|format(income_tax_result.profit_before_tax) }}</td></tr>
+        <tr><td>Add: disallowable add-backs</td><td class="text-right">{{ '%.2f'|format(income_tax_result.total_addbacks) }}</td></tr>
+        <tr><td>Less: allowable deductions &amp; capital allowances</td><td class="text-right">({{ '%.2f'|format(income_tax_result.total_deductions) }})</td></tr>
+        <tr><td><strong>Taxable income before assessed losses</strong></td><td class="text-right"><strong>{{ '%.2f'|format(income_tax_result.taxable_income_before_losses) }}</strong></td></tr>
+        <tr><td>Less: assessed tax loss utilised (brought forward: {{ '%.2f'|format(income_tax_result.tax_loss_brought_forward) }})</td><td class="text-right">({{ '%.2f'|format(income_tax_result.loss_utilised) }})</td></tr>
+        <tr><td><strong>Taxable income</strong></td><td class="text-right"><strong>{{ '%.2f'|format(income_tax_result.taxable_income) }}</strong></td></tr>
+        <tr><td>Tax loss carried forward to next year</td><td class="text-right">{{ '%.2f'|format(income_tax_result.tax_loss_carried_forward) }}</td></tr>
+        <tr><td>Tax charge at {{ income_tax_result.tax_rate_percent if income_tax_result.tax_rate_percent is not none else '—' }}%</td><td class="text-right">{{ '%.2f'|format(income_tax_result.base_tax) }}</td></tr>
+        <tr><td>AIDS levy at {{ income_tax_result.aids_levy_percent if income_tax_result.aids_levy_percent is not none else '—' }}% of base tax</td><td class="text-right">{{ '%.2f'|format(income_tax_result.aids_levy_amount) }}</td></tr>
+        <tr><td><strong>Total current tax charge</strong></td><td class="text-right"><strong>{{ '%.2f'|format(income_tax_result.total_tax_charge) }}</strong></td></tr>
+        <tr><td>Effective tax rate</td><td class="text-right">{{ '%.2f'|format(income_tax_result.effective_rate_percent) if income_tax_result.effective_rate_percent is not none else '—' }}%</td></tr>
+      </tbody>
+    </table>
+    {% if not income_tax_computation or income_tax_computation.tax_rate_percent is none %}
+    <p class="flash danger" style="margin-top:10px;">No corporate tax rate has been entered above yet - the tax charge shown is nil until one is supplied.</p>
+    {% endif %}
+
+    {% if income_tax_reconciliation %}
+    <p class="muted" style="font-size:12.5px;margin-top:10px;">
+      <strong>Trial balance reconciliation:</strong> the trial balance's Income Tax Expense is {{ '%.2f'|format(income_tax_reconciliation.tb_current) }} against a computed charge of {{ '%.2f'|format(income_tax_reconciliation.computed) }}.
+      {% if income_tax_reconciliation.ties_out %}Ties out to the trial balance.{% else %}Difference of {{ '%.2f'|format(income_tax_reconciliation.diff) }} - basis for a proposed adjustment to either the trial balance or this computation.{% endif %}
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if income_tax_computation %}
+  <div class="card">
+    <h3 class="mt-0">Sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ income_tax_computation.completed_by.name if income_tax_computation.completed_by else '—' }} on {{ income_tax_computation.completed_at.strftime('%d %b %Y') if income_tax_computation.completed_at else '—' }}.
+      {% if income_tax_computation.is_reviewed %}Reviewed by {{ income_tax_computation.reviewed_by.name }} on {{ income_tax_computation.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+      {% if income_tax_computation.is_partner_signed %}Partner sign-off by {{ income_tax_computation.partner_signed_by.name }} on {{ income_tax_computation.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if income_tax_computation.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_income_tax_computation', computation_id=income_tax_computation.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif income_tax_computation.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_income_tax_computation', computation_id=income_tax_computation.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(income_tax_computation) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if income_tax_computation.is_partner_signed %}
+      <form method="post" action="{{ url_for('engagements.partner_unsign_income_tax_computation', computation_id=income_tax_computation.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif income_tax_computation.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_income_tax_computation', computation_id=income_tax_computation.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+{% endif %}
+
+{% elif tab == 'deferred_tax' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Deferred Tax Computation</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Nets every temporary difference (accounting amount vs tax base) into a single deferred tax asset/liability at the tax rate you enter below. Property, plant and equipment - almost always the most material temporary difference - has its accounting-amount side pulled live from the Asset Register's own movement schedule{% if ppe_accounting_nbv is not none %} (currently {{ '%.2f'|format(ppe_accounting_nbv) }}){% endif %}; you only need to supply its cumulative tax written-down value below, since this app has no prior-year capital allowance history to derive that on its own. Every other temporary difference (provisions, unrealised amounts, unrecognised assessed losses, etc.) is added as its own row further down.
+    </p>
+    <form method="post" action="{{ url_for('engagements.save_deferred_tax_computation', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        <div><label for="dt_tax_rate_percent">Tax rate (%)</label><input type="number" step="0.01" id="dt_tax_rate_percent" name="tax_rate_percent" value="{{ deferred_tax_computation.tax_rate_percent if deferred_tax_computation and deferred_tax_computation.tax_rate_percent is not none else '' }}" placeholder="e.g. the current ZIMRA rate"></div>
+        <div><label for="dt_ppe_tax_base">PPE - tax base (tax written-down value)</label><input type="number" step="0.01" id="dt_ppe_tax_base" name="ppe_tax_base" value="{{ deferred_tax_computation.ppe_tax_base if deferred_tax_computation and deferred_tax_computation.ppe_tax_base is not none else '' }}"></div>
+      </div>
+      <label for="dt_notes">Notes</label>
+      <textarea id="dt_notes" name="notes">{{ deferred_tax_computation.notes if deferred_tax_computation else '' }}</textarea>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Other temporary differences</h3>
+    {% if deferred_tax_computation and deferred_tax_computation.items %}
+    <table>
+      <thead><tr><th>Description</th><th class="text-right">Accounting amount</th><th class="text-right">Tax base</th><th></th></tr></thead>
+      <tbody>
+      {% for item in deferred_tax_computation.items %}
+        <form method="post" action="{{ url_for('engagements.update_deferred_tax_item', item_id=item.id) }}" class="inline">
+        <tr>
+          <td><input type="text" name="description" value="{{ item.description }}" style="width:100%;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="accounting_amount" value="{{ item.accounting_amount }}" style="width:120px;margin-bottom:0;" class="text-right"></td>
+          <td><input type="number" step="0.01" name="tax_base_amount" value="{{ item.tax_base_amount }}" style="width:120px;margin-bottom:0;" class="text-right"></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_deferred_tax_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No other temporary differences added yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('engagements.add_deferred_tax_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div style="flex:2;"><label for="dt_new_description">Description</label><input type="text" id="dt_new_description" name="description" placeholder="e.g. Provision for leave pay" required></div>
+      <div><label for="dt_new_accounting_amount">Accounting amount</label><input type="number" step="0.01" id="dt_new_accounting_amount" name="accounting_amount" value="0"></div>
+      <div><label for="dt_new_tax_base_amount">Tax base</label><input type="number" step="0.01" id="dt_new_tax_base_amount" name="tax_base_amount" value="0"></div>
+      <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add item</button></div>
+    </form>
+  </div>
+
+  {% if deferred_tax_result %}
+  <div class="card">
+    <h3 class="mt-0">Computation</h3>
+    {% if deferred_tax_result.rows %}
+    <table>
+      <thead><tr><th>Description</th><th class="text-right">Accounting amount</th><th class="text-right">Tax base</th><th class="text-right">Temporary difference</th><th class="text-right">Deferred tax</th></tr></thead>
+      <tbody>
+      {% for row in deferred_tax_result.rows %}
+        <tr>
+          <td>{{ row.description }}</td>
+          <td class="text-right">{{ '%.2f'|format(row.accounting_amount) }}</td>
+          <td class="text-right">{{ '%.2f'|format(row.tax_base_amount) }}</td>
+          <td class="text-right">{{ '%.2f'|format(row.temporary_difference) }}</td>
+          <td class="text-right">{{ '%.2f'|format(row.deferred_tax) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      <tfoot><tr><td colspan="4"><strong>Net deferred tax {{ deferred_tax_result.classification }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(deferred_tax_result.total_deferred_tax) }}</strong></td></tr></tfoot>
+    </table>
+    {% if not deferred_tax_computation or deferred_tax_computation.tax_rate_percent is none %}
+    <p class="flash danger" style="margin-top:10px;">No tax rate has been entered above yet - the deferred tax shown is nil until one is supplied.</p>
+    {% endif %}
+    {% else %}
+    <div class="empty-state">Enter the PPE tax base above and/or add other temporary differences to see the computation.</div>
+    {% endif %}
+
+    {% if deferred_tax_reconciliation %}
+    <p class="muted" style="font-size:12.5px;margin-top:10px;">
+      <strong>Trial balance reconciliation:</strong> the trial balance's net deferred tax liability/(asset) is {{ '%.2f'|format(deferred_tax_reconciliation.tb_net) }} against a computed net position of {{ '%.2f'|format(deferred_tax_reconciliation.computed) }}.
+      {% if deferred_tax_reconciliation.ties_out %}Ties out to the trial balance.{% else %}Difference of {{ '%.2f'|format(deferred_tax_reconciliation.diff) }} - basis for a proposed adjustment to either the trial balance or this computation.{% endif %}
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if deferred_tax_computation %}
+  <div class="card">
+    <h3 class="mt-0">Sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ deferred_tax_computation.completed_by.name if deferred_tax_computation.completed_by else '—' }} on {{ deferred_tax_computation.completed_at.strftime('%d %b %Y') if deferred_tax_computation.completed_at else '—' }}.
+      {% if deferred_tax_computation.is_reviewed %}Reviewed by {{ deferred_tax_computation.reviewed_by.name }} on {{ deferred_tax_computation.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+      {% if deferred_tax_computation.is_partner_signed %}Partner sign-off by {{ deferred_tax_computation.partner_signed_by.name }} on {{ deferred_tax_computation.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if deferred_tax_computation.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_deferred_tax_computation', computation_id=deferred_tax_computation.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif deferred_tax_computation.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_deferred_tax_computation', computation_id=deferred_tax_computation.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(deferred_tax_computation) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if deferred_tax_computation.is_partner_signed %}
+      <form method="post" action="{{ url_for('engagements.partner_unsign_deferred_tax_computation', computation_id=deferred_tax_computation.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif deferred_tax_computation.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_deferred_tax_computation', computation_id=deferred_tax_computation.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+{% endif %}
+
 {% elif tab == 'finalisation' %}
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
@@ -1840,6 +2091,103 @@
       {% elif finalisation_checklist.is_complete %}
       <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
       {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h3 class="mt-0">Directors' Statement</h3>
+    <p class="muted" style="font-size:12.5px;">Goes into the Financial Statements themselves - right after the Client Details / Table of Contents page and before the Audit Opinion/Review Report (if any) - with space for two directors to sign. Tailor the wording below to the entity, then keep the director names and date current.</p>
+    <form method="post" action="{{ url_for('engagements.save_directors_statement', engagement_id=engagement.id) }}">
+      <label for="ds_statement_text">Statement text</label>
+      <textarea id="ds_statement_text" name="statement_text" rows="8">{{ directors_statement.statement_text if directors_statement and directors_statement.statement_text else default_directors_statement_text }}</textarea>
+      <div class="form-row">
+        <div><label for="ds_director1_name">Director 1 - name</label><input type="text" id="ds_director1_name" name="director1_name" value="{{ directors_statement.director1_name if directors_statement and directors_statement.director1_name else (suggested_directors[0].full_name if suggested_directors|length > 0 else '') }}"></div>
+        <div><label for="ds_director1_title">Director 1 - title</label><input type="text" id="ds_director1_title" name="director1_title" value="{{ directors_statement.director1_title if directors_statement and directors_statement.director1_title else 'Director' }}"></div>
+      </div>
+      <div class="form-row">
+        <div><label for="ds_director2_name">Director 2 - name</label><input type="text" id="ds_director2_name" name="director2_name" value="{{ directors_statement.director2_name if directors_statement and directors_statement.director2_name else (suggested_directors[1].full_name if suggested_directors|length > 1 else '') }}"></div>
+        <div><label for="ds_director2_title">Director 2 - title</label><input type="text" id="ds_director2_title" name="director2_title" value="{{ directors_statement.director2_title if directors_statement and directors_statement.director2_title else 'Director' }}"></div>
+      </div>
+      <div class="form-row">
+        <div><label for="ds_statement_date">Statement date</label><input type="date" id="ds_statement_date" name="statement_date" value="{{ directors_statement.statement_date.strftime('%Y-%m-%d') if directors_statement and directors_statement.statement_date else (engagement.period_end.strftime('%Y-%m-%d') if engagement.period_end else '') }}"></div>
+      </div>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+    <form method="post" action="{{ url_for('engagements.use_directors_on_file', engagement_id=engagement.id) }}" class="inline" style="margin-top:6px;">
+      <button type="submit" class="btn small secondary">Use directors on file</button>
+    </form>
+    {% if directors_statement and directors_statement.updated_at %}
+    <p class="muted" style="font-size:11px;margin-top:8px;">Last updated by {{ directors_statement.updated_by.name if directors_statement.updated_by else '—' }} on {{ directors_statement.updated_at.strftime('%d %b %Y') }}.</p>
+    {% endif %}
+  </div>
+
+  {% if engagement.type in ('Audit', 'Assurance') %}
+  <div class="card">
+    <h3 class="mt-0">Audit Opinion / Review Report</h3>
+    <p class="muted" style="font-size:12.5px;">One flexible tab for either report basis - pick an Audit opinion (ISA 700) or a Review / limited assurance conclusion (ISRE 2400), and the modification type. "Regenerate wording" rebuilds all four paragraphs as a fresh starting draft for whatever basis/modification is currently selected below (overwriting anything typed into them) - tailor the result to the engagement before issuing. Only a Partner sign-off actually issues the report.</p>
+    <form method="post" action="{{ url_for('engagements.save_audit_opinion', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        <div>
+          <label for="ao_report_basis">Report basis</label>
+          <select id="ao_report_basis" name="report_basis">
+            {% for b in audit_opinion_bases %}<option value="{{ b }}" {% if (audit_opinion.report_basis if audit_opinion else ('audit' if engagement.type == 'Audit' else 'review'))==b %}selected{% endif %}>{{ audit_opinion_basis_labels[b] }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="ao_modification">Modification</label>
+          <select id="ao_modification" name="modification">
+            {% for m in opinion_modifications %}<option value="{{ m }}" {% if (audit_opinion.modification if audit_opinion else 'unmodified')==m %}selected{% endif %}>{{ opinion_modification_labels[m] }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><label for="ao_report_date">Report date</label><input type="date" id="ao_report_date" name="report_date" value="{{ audit_opinion.report_date.strftime('%Y-%m-%d') if audit_opinion and audit_opinion.report_date else (engagement.period_end.strftime('%Y-%m-%d') if engagement.period_end else '') }}"></div>
+      </div>
+      {% if (audit_opinion.modification if audit_opinion else 'unmodified') != 'unmodified' %}
+      <label for="ao_basis_for_modification">Basis for modification (internal note - describe the matter)</label>
+      <textarea id="ao_basis_for_modification" name="basis_for_modification" rows="3">{{ audit_opinion.basis_for_modification if audit_opinion else '' }}</textarea>
+      {% endif %}
+      <label for="ao_opinion_paragraph">Opinion / Conclusion paragraph</label>
+      <textarea id="ao_opinion_paragraph" name="opinion_paragraph" rows="4">{{ audit_opinion.opinion_paragraph if audit_opinion else default_opinion_paragraphs.opinion_paragraph }}</textarea>
+      <label for="ao_basis_paragraph">Basis for Opinion / Conclusion paragraph</label>
+      <textarea id="ao_basis_paragraph" name="basis_paragraph" rows="4">{{ audit_opinion.basis_paragraph if audit_opinion else default_opinion_paragraphs.basis_paragraph }}</textarea>
+      <label for="ao_management_responsibility_paragraph">Directors' Responsibility paragraph</label>
+      <textarea id="ao_management_responsibility_paragraph" name="management_responsibility_paragraph" rows="4">{{ audit_opinion.management_responsibility_paragraph if audit_opinion else default_opinion_paragraphs.management_responsibility_paragraph }}</textarea>
+      <label for="ao_auditor_responsibility_paragraph">Auditor's / Reviewer's Responsibility paragraph</label>
+      <textarea id="ao_auditor_responsibility_paragraph" name="auditor_responsibility_paragraph" rows="4">{{ audit_opinion.auditor_responsibility_paragraph if audit_opinion else default_opinion_paragraphs.auditor_responsibility_paragraph }}</textarea>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+    <form method="post" action="{{ url_for('engagements.regenerate_audit_opinion_wording', engagement_id=engagement.id) }}" class="inline" style="margin-top:6px;">
+      <input type="hidden" name="report_basis" value="{{ audit_opinion.report_basis if audit_opinion else ('audit' if engagement.type == 'Audit' else 'review') }}">
+      <input type="hidden" name="modification" value="{{ audit_opinion.modification if audit_opinion else 'unmodified' }}">
+      <button type="submit" class="btn small secondary">Regenerate wording for the basis/modification above</button>
+    </form>
+
+    {% if audit_opinion %}
+    <p class="muted" style="font-size:12.5px;margin-top:10px;">
+      Drafted by {{ audit_opinion.completed_by.name if audit_opinion.completed_by else '—' }} on {{ audit_opinion.completed_at.strftime('%d %b %Y') if audit_opinion.completed_at else '—' }}.
+      {% if audit_opinion.is_reviewed %}Reviewed by {{ audit_opinion.reviewed_by.name }} on {{ audit_opinion.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+      {% if audit_opinion.is_partner_signed %}Partner sign-off by {{ audit_opinion.partner_signed_by.name }} on {{ audit_opinion.partner_signed_at.strftime('%d %b %Y') }} - report issued.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if audit_opinion.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_audit_opinion', opinion_id=audit_opinion.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif audit_opinion.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_audit_opinion', opinion_id=audit_opinion.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(audit_opinion) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if audit_opinion.is_partner_signed %}
+      <form method="post" action="{{ url_for('engagements.partner_unsign_audit_opinion', opinion_id=audit_opinion.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif audit_opinion.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_audit_opinion', opinion_id=audit_opinion.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off (issues the report)</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
     {% endif %}
   </div>
   {% endif %}
@@ -2201,8 +2549,12 @@
         </tr>
       </tbody>
     </table>
-    {% if note.variance %}
-    <p class="muted" style="font-size:11.5px;color:#B02A2A;">Per trial balance: {{ '%.2f'|format(note.variance.tb_current) }} (current), {{ '%.2f'|format(note.variance.tb_prior) }} (prior). Per Asset Register: {{ '%.2f'|format(note.variance.register_current) }} (current), {{ '%.2f'|format(note.variance.register_prior) }} (prior). Variance to be reviewed - check the Asset Register against the trial balance.</p>
+    {% if note.reconciliation %}
+    {% set rec = note.reconciliation %}
+    <p class="muted" style="font-size:11.5px;{% if not rec.ties_out %}color:#B02A2A;{% endif %}">
+      Per trial balance: {{ '%.2f'|format(rec.tb_current) }} (current), {{ '%.2f'|format(rec.tb_prior) }} (prior). Per Asset Register: {{ '%.2f'|format(rec.register_current) }} (current), {{ '%.2f'|format(rec.register_prior) }} (prior).
+      {% if rec.ties_out %}Ties out to the trial balance.{% else %}Difference of {{ '%.2f'|format(rec.diff_current) }} (current), {{ '%.2f'|format(rec.diff_prior) }} (prior) - basis for a proposed adjustment to the trial balance, or a correction to the Asset Register, as appropriate.{% endif %}
+    </p>
     {% endif %}
     {% elif note.accounts %}
     <table>
