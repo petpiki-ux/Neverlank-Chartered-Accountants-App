@@ -339,25 +339,59 @@ PERMISSIONS = [
 ]
 PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
 
+# The two engagement types that involve PAYE work (see TAX_HEADS below,
+# which includes "PAYE" as one of the areas every Tax engagement's
+# Execution Plan covers) - used by the "manage_payroll" carve-out in
+# user_has_permission below: staff actually staffed on a Tax engagement
+# need the Payroll module's PAYE tax bands/settings for that work, so they
+# get it automatically even where their role wouldn't otherwise grant it.
+TAX_ENGAGEMENT_TYPES = ("Tax Compliance", "Tax Advisory & Health Check")
+
 
 def user_has_permission(user, key):
     """The one place this app should ever ask "is this role allowed to do
     X?" for the administrative actions in PERMISSIONS above - routes call
     this instead of hardcoding a role check. Admin is always allowed,
     hardcoded here rather than stored, so a mistaken/mischievous toggle on
-    the settings screen can never lock every admin out of fixing it."""
+    the settings screen can never lock every admin out of fixing it.
+
+    Below that, three layers are checked in order:
+    1. A per-user override (UserPermissionOverride, "Access Rights" on a
+       team member's own profile) - an explicit, named decision about this
+       one person, so it wins over everything else.
+    2. For "manage_payroll" specifically, whether the user is staffed on an
+       active Tax Compliance / Tax Advisory & Health Check engagement (see
+       TAX_ENGAGEMENT_TYPES above) - PAYE review work on a Tax engagement
+       needs the Payroll module's PAYE tax settings, granted automatically
+       rather than requiring every such person to get an explicit override.
+    3. The ordinary role-level Permission toggle (Team > Permissions),
+       falling back to the registry's own default_roles if no row exists
+       yet for this (role, key) - e.g. a permission added by an app update
+       before the next seed/migration runs."""
     if user.role == "admin":
+        return True
+    override = UserPermissionOverride.query.filter_by(user_id=user.id, permission_key=key).first()
+    if override is not None:
+        return override.allowed
+    if key == "manage_payroll" and _user_has_active_tax_engagement(user):
         return True
     perm = Permission.query.filter_by(role=user.role, permission_key=key).first()
     if perm is not None:
         return perm.allowed
-    # No row yet for this (role, key) - e.g. a permission added by an app
-    # update before the next seed/migration runs. Fall back to the
-    # registry's own default rather than silently denying everything.
     for reg_key, _, _, default_roles in PERMISSIONS:
         if reg_key == key:
             return user.role in default_roles
     return False
+
+
+def _user_has_active_tax_engagement(user):
+    """True if `user` is a team member (Engagement.team_members) on at
+    least one Tax Compliance / Tax Advisory & Health Check engagement that
+    isn't yet Completed - see the "manage_payroll" carve-out above."""
+    return any(
+        e.type in TAX_ENGAGEMENT_TYPES and e.status != "Completed"
+        for e in user.engagements
+    )
 
 
 # Standard industry list for clients - lets engagements automatically align
@@ -2584,6 +2618,16 @@ class MaterialityCalculation(db.Model):
     performance_pct = db.Column(db.Float, default=75.0)  # % of overall materiality
     trivial_pct = db.Column(db.Float, default=5.0)  # % of overall materiality
 
+    # Whether financial-figure-based (quantitative) materiality is actually
+    # relevant to this engagement - defaults True (unchanged behaviour for
+    # every existing engagement). A preparer can mark it False for an
+    # engagement where a dollar threshold doesn't drive materiality the way
+    # it does on a financial statement audit (e.g. a Business Intelligence
+    # and IT Engagement, or one with unusually sparse financial figures) -
+    # see the Qualitative Materiality Index (QualitativeMaterialityFactor
+    # below) as the alternative basis in that case.
+    quantitative_important = db.Column(db.Boolean, default=True, nullable=False)
+
     notes = db.Column(db.Text)
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # preparer - set whenever the calculation is (re)saved
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -2645,6 +2689,67 @@ class MaterialityCalculation(db.Model):
 
     def __repr__(self):
         return f"<MaterialityCalculation engagement={self.engagement_id}>"
+
+
+# The Qualitative Materiality Index - a lightweight, judgement-based
+# alternative/complement to the dollar-figure-driven MaterialityCalculation
+# above, for the (common in practice) cases where a matter can be material
+# regardless of its size: a small misstatement that turns a profit into a
+# loss, reveals a regulatory breach, or exposes a related-party dealing.
+# Rated per factor (Low/Medium/High, or unrated) rather than averaged into
+# a single score - qualitative materiality is conventionally driven by
+# whichever factor is most significant, not by a blend of all of them, so
+# the "index" (see QualitativeMaterialityFactor.overall_rating_for) is the
+# highest rating recorded across the factors below rather than a mean.
+QUALITATIVE_MATERIALITY_FACTORS = [
+    ("nature_sensitivity", "Nature and sensitivity of the matter",
+     "e.g. related party dealings, fraud or suspected fraud, an illegal or possibly illegal act, a breach of covenant or regulatory requirement."),
+    ("regulatory_legal_impact", "Effect on compliance with laws, regulations or contractual requirements",
+     "e.g. loan covenants, licence conditions, statutory filing requirements, AML/CFT or data protection obligations."),
+    ("trend_consistency", "Effect on trends, consistency or comparability",
+     "e.g. changes a profit into a loss, reverses a positive trend, or breaks comparability with the prior period."),
+    ("stakeholder_reliance", "Effect on a key stakeholder's understanding or decision-making",
+     "e.g. lenders, regulators, shareholders, or the investing/donor public relying on the information."),
+    ("reputational_impact", "Potential reputational or public-interest impact",
+     "e.g. media/public attention, loss of stakeholder confidence, or damage to the entity's standing if the matter went unaddressed."),
+]
+QUALITATIVE_MATERIALITY_FACTOR_KEYS = {f[0] for f in QUALITATIVE_MATERIALITY_FACTORS}
+QUALITATIVE_MATERIALITY_RATINGS = ["Low", "Medium", "High"]
+_QUALITATIVE_MATERIALITY_RATING_ORDER = {"Low": 1, "Medium": 2, "High": 3}
+
+
+class QualitativeMaterialityFactor(db.Model):
+    """One rated factor (see QUALITATIVE_MATERIALITY_FACTORS above) in an
+    engagement's Qualitative Materiality Index - one row per
+    (engagement, factor_key), created on demand as each factor is rated
+    rather than all seeded up front, since a preparer may only ever rate
+    the factors actually relevant to this engagement."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    factor_key = db.Column(db.String(50), nullable=False)
+    rating = db.Column(db.String(10))  # "Low" | "Medium" | "High" | "" (not yet assessed)
+    notes = db.Column(db.Text)
+
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint("engagement_id", "factor_key", name="uq_qual_materiality_engagement_factor"),)
+
+    engagement = db.relationship("Engagement", backref=db.backref("qualitative_materiality_factors", lazy=True, cascade="all, delete-orphan"))
+    updated_by = db.relationship("User")
+
+    @staticmethod
+    def overall_rating_for(factors):
+        """The Qualitative Materiality Index for a list of
+        QualitativeMaterialityFactor rows - the highest rating among them
+        (see the module note above), or None if none has been rated yet."""
+        rated = [f.rating for f in factors if f.rating in _QUALITATIVE_MATERIALITY_RATING_ORDER]
+        if not rated:
+            return None
+        return max(rated, key=lambda r: _QUALITATIVE_MATERIALITY_RATING_ORDER[r])
+
+    def __repr__(self):
+        return f"<QualitativeMaterialityFactor engagement={self.engagement_id} {self.factor_key}={self.rating}>"
 
 
 class EntityUnderstanding(db.Model):
@@ -4869,6 +4974,30 @@ class Permission(db.Model):
         return f"<Permission {self.role}:{self.permission_key}={self.allowed}>"
 
 
+class UserPermissionOverride(db.Model):
+    """A per-user override on top of the role-level Permission toggle above
+    - "Access Rights" on one team member's own profile (Team > edit a
+    person), for a firm that wants a named individual to have or lack a
+    capability regardless of what their role defaults to (e.g. restricting
+    one particular Partner from Payroll, or granting one Staff member
+    access to Manage Policies without promoting their role). Checked FIRST
+    in user_has_permission - an explicit per-user decision always wins over
+    both the role default and the "manage_payroll" Tax Engagement carve-out.
+    One row per (user, permission_key); absence means "use the role
+    default" rather than any stored allow/deny."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    permission_key = db.Column(db.String(50), nullable=False)
+    allowed = db.Column(db.Boolean, default=False, nullable=False)
+
+    __table_args__ = (db.UniqueConstraint("user_id", "permission_key", name="uq_user_permission_override"),)
+
+    user = db.relationship("User", backref=db.backref("permission_overrides", lazy=True, cascade="all, delete-orphan"))
+
+    def __repr__(self):
+        return f"<UserPermissionOverride user={self.user_id} {self.permission_key}={self.allowed}>"
+
+
 # ---------- Review Queries ----------
 
 class EngagementQuery(db.Model):
@@ -6291,6 +6420,22 @@ DEFAULT_WORKPAPER_NARRATIVE_BODIES = {
     "it_audit_report_summary": "\n".join([
         "[Summarise, in a few sentences, the scope (Cyber Security, Information Security, IT/ICT, AML/CFT), the overall control environment observed, the key findings and their significance, and the overall conclusion - the detail behind each point is set out in the sections that follow.]",
     ]),
+    # The Business Intelligence and IT Engagements variant of "rep_letter"
+    # above - see default_workpaper_narrative_body below for why this
+    # engagement type needs its own set of management representations
+    # rather than the financial-statements-worded default (which refers to
+    # "the financial statements", "fair value", "uncorrected misstatements",
+    # none of which apply to an IT & Cyber Assurance engagement).
+    "rep_letter_business_it": "\n".join([
+        "We have fulfilled our responsibilities for establishing and maintaining an effective system of IT governance, cyber security and information security controls relevant to the scope of this engagement.",
+        "We have disclosed to you all known cyber security incidents, data breaches, and material control weaknesses identified during the period, whether or not previously reported to a regulator.",
+        "We have provided you with full and unrestricted access to system and security logs, source code repositories, system configuration documentation, database schemas, and all other records and information relevant to your procedures.",
+        "We have disclosed to you all known instances of non-compliance or suspected non-compliance with applicable AML/CFT laws and regulations, and with other laws and regulations whose effects should be considered in the scope of this engagement.",
+        "The access controls, change and release management, and data protection policies and procedures described to you are the same as those actually in operation during the period.",
+        "Related party access privileges and any use of privileged/administrative access outside the normal course of business have been appropriately disclosed.",
+        "We have disclosed to you the identity of all known regulatory findings, notices or correspondence (POTRAZ, RBZ, FIU or equivalent) relevant to the scope of this engagement.",
+        "There have been no irregularities involving management or employees who have a significant role in IT, security or AML/CFT controls that could have a material effect on the control environment reported on.",
+    ]),
 }
 # Short "[to be completed: ...]" placeholder wording for each of the Tax
 # Opinion's 14 parts and the Tax Health Check Report's 15 parts (see
@@ -6307,6 +6452,19 @@ for _key, _label in TAX_HEALTH_CHECK_PARTS:
 # pre-fill for a specific client's figures/commentary either.
 for _key, _label in MANAGEMENT_ACCOUNTS_REPORT_PARTS:
     DEFAULT_WORKPAPER_NARRATIVE_BODIES[_key] = f"[To be completed: {_label}.]"
+
+
+def default_workpaper_narrative_body(kind, engagement=None):
+    """Picks the default starting wording for a narrative workpaper - same
+    as looking it up in DEFAULT_WORKPAPER_NARRATIVE_BODIES directly, except
+    for "rep_letter" on a Business Intelligence and IT Engagements, which
+    gets the IT/cyber-tailored "rep_letter_business_it" wording above
+    instead of the financial-statements-worded default (see
+    financials.default_directors_statement_text for the same idea applied
+    to the Directors' Statement)."""
+    if kind == "rep_letter" and engagement and engagement.type == "Business Intelligence and IT Engagements":
+        return DEFAULT_WORKPAPER_NARRATIVE_BODIES.get("rep_letter_business_it", "")
+    return DEFAULT_WORKPAPER_NARRATIVE_BODIES.get(kind, "")
 
 
 class WorkpaperNarrative(db.Model):

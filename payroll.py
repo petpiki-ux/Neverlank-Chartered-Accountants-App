@@ -8,7 +8,7 @@ Access is gated on the "manage_payroll" permission everywhere in this
 blueprint (defaults to Partner/Admin only, since salary data is sensitive)
 - there is no partial/read-only tier in this first version.
 """
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_file
 from flask_login import login_required, current_user
@@ -16,7 +16,7 @@ from flask_login import login_required, current_user
 from extensions import db
 from models import (
     Client, User, PayrollTaxSettings, PayrollTaxBand, PayrollEmployee,
-    PayrollPeriod, Payslip, PayslipItem,
+    PayrollPeriod, Payslip, PayslipItem, TimeSheet,
     PAYROLL_SCOPES, PAYROLL_PAY_FREQUENCIES, PAYROLL_PERIOD_STATUSES,
     PAYSLIP_ITEM_CATEGORIES, PAYROLL_TAX_CAVEAT,
     user_has_permission,
@@ -55,6 +55,33 @@ def _parse_float(value, default=0.0):
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _timesheet_summary_for(employee, period):
+    """Links Time Sheets (hr.py) to internal payroll: for an 'internal'
+    PayrollEmployee linked to a User account, the Approved timesheets whose
+    week overlaps this payroll period's date range, with the usual
+    regular/overtime split (see models.TimeSheet). Read-only information -
+    there's no house policy in this app for an overtime pay rate, so this
+    surfaces the hours for the preparer to price via an Allowance line item
+    themselves rather than guessing a rate. Returns None when there's
+    nothing to link (a client-scope employee, no linked User, or the
+    period has no date range yet)."""
+    if employee.scope != "internal" or not employee.user_id or not period.period_start or not period.period_end:
+        return None
+    sheets = (
+        TimeSheet.query.filter_by(user_id=employee.user_id, status="Approved")
+        .filter(TimeSheet.week_start <= period.period_end)
+        .order_by(TimeSheet.week_start)
+        .all()
+    )
+    in_range = [s for s in sheets if (s.week_start + timedelta(days=6)) >= period.period_start]
+    return {
+        "sheets": in_range,
+        "regular_hours": round(sum(s.regular_hours for s in in_range), 2),
+        "overtime_hours": round(sum(s.overtime_hours for s in in_range), 2),
+        "total_hours": round(sum(s.total_hours for s in in_range), 2),
+    }
 
 
 # --------------------------------------------------------------- Dashboard
@@ -420,7 +447,11 @@ def delete_period(period_id):
 def view_payslip(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
-    return render_template("payroll/payslip_detail.html", payslip=payslip, item_categories=PAYSLIP_ITEM_CATEGORIES)
+    timesheet_summary = _timesheet_summary_for(payslip.employee, payslip.period)
+    return render_template(
+        "payroll/payslip_detail.html", payslip=payslip, item_categories=PAYSLIP_ITEM_CATEGORIES,
+        timesheet_summary=timesheet_summary,
+    )
 
 
 @payroll_bp.route("/payslips/<int:payslip_id>/recalculate", methods=["POST"])

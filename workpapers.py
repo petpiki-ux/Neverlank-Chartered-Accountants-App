@@ -33,7 +33,7 @@ from reportlab.platypus import (
     SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, PageBreak,
 )
 
-from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS, filing_reference, CASH_FLOW_METHOD_LABELS
+from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, default_workpaper_narrative_body, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS, filing_reference, CASH_FLOW_METHOD_LABELS
 from config import Config
 import financials as fin
 
@@ -338,9 +338,9 @@ def _client_details_and_toc_page(doc, engagement, client_key_people, toc_section
     doc.add_page_break()
 
 
-def _directors_statement_section(doc, directors_statement):
+def _directors_statement_section(doc, directors_statement, engagement=None):
     _add_heading(doc, "Directors' Statement", level=1)
-    doc.add_paragraph((directors_statement.statement_text if directors_statement else None) or fin.DEFAULT_DIRECTORS_STATEMENT_TEXT)
+    doc.add_paragraph((directors_statement.statement_text if directors_statement else None) or fin.default_directors_statement_text(engagement))
     doc.add_paragraph()
     sig_table = doc.add_table(rows=3, cols=2)
     d1_name = (directors_statement.director1_name if directors_statement else None) or "_______________________"
@@ -400,7 +400,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     ]
     _client_details_and_toc_page(doc, engagement, client_key_people, toc_sections)
 
-    _directors_statement_section(doc, directors_statement)
+    _directors_statement_section(doc, directors_statement, engagement)
     if show_opinion:
         _audit_opinion_section(doc, audit_opinion)
 
@@ -774,21 +774,32 @@ def build_rep_letter_docx(engagement, statements, narrative=None):
     client_name = engagement.client.name if engagement.client else "[Client]"
     period_end = _fmt_date(engagement.period_end)
 
+    is_business_it = engagement.type == "Business Intelligence and IT Engagements"
+
     doc.add_paragraph(f"To: {FIRM_NAME}")
     doc.add_paragraph(f"Date: {_fmt_date(date.today())}")
     doc.add_paragraph()
-    doc.add_paragraph(
-        f"This representation letter is provided in connection with your engagement in respect of the financial "
-        f"statements of {client_name} for the period ended {period_end}, for the purpose of expressing an opinion "
-        f"as to whether the financial statements give a true and fair view (or present fairly, in all material "
-        f"respects) in accordance with the applicable financial reporting framework."
-    )
+    if is_business_it:
+        doc.add_paragraph(
+            f"This representation letter is provided in connection with your engagement in respect of the IT "
+            f"governance, cyber security, information security and AML/CFT control environment of {client_name} "
+            f"for the period ended {period_end}, for the purpose of expressing a conclusion on the matters within "
+            f"the scope of that engagement."
+        )
+    else:
+        doc.add_paragraph(
+            f"This representation letter is provided in connection with your engagement in respect of the financial "
+            f"statements of {client_name} for the period ended {period_end}, for the purpose of expressing an opinion "
+            f"as to whether the financial statements give a true and fair view (or present fairly, in all material "
+            f"respects) in accordance with the applicable financial reporting framework."
+        )
     doc.add_paragraph("We confirm that, to the best of our knowledge and belief, having made such inquiries as we considered necessary for the purpose of appropriately informing ourselves:")
 
     # The body of representations is a persistent, editable workpaper (see
     # models.WorkpaperNarrative, kind="rep_letter") rather than fixed text -
-    # fall back to the firm's default wording if nothing has been saved yet.
-    body = (narrative.body if narrative and narrative.body else None) or DEFAULT_WORKPAPER_NARRATIVE_BODIES["rep_letter"]
+    # fall back to the firm's (type-appropriate) default wording if nothing
+    # has been saved yet - see models.default_workpaper_narrative_body.
+    body = (narrative.body if narrative and narrative.body else None) or default_workpaper_narrative_body("rep_letter", engagement)
     for line in body.split("\n"):
         line = line.strip()
         if line:
@@ -1062,6 +1073,8 @@ def build_it_audit_report_docx(engagement, narrative=None):
         line = line.strip()
         if line:
             doc.add_paragraph(line)
+
+    _directors_statement_section(doc, engagement.directors_statement, engagement)
 
     _add_heading(doc, "1. Scope and Engagement Acceptance")
     if ca:

@@ -3,7 +3,7 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required, current_user
 
 from extensions import db
-from models import User, Permission, PERMISSIONS, USER_ROLES, user_has_permission
+from models import User, Permission, PERMISSIONS, USER_ROLES, user_has_permission, UserPermissionOverride
 
 users_bp = Blueprint("users", __name__, url_prefix="/team")
 
@@ -92,10 +92,31 @@ def edit_user(user_id):
         new_password = request.form.get("password")
         if new_password:
             person.set_password(new_password)
+        # Per-user Access Rights overrides (see models.UserPermissionOverride)
+        # - admin-only, same reasoning as manage_permissions below: someone
+        # merely delegated "Manage Team Members" must never be able to grant
+        # capabilities (including to themselves) beyond what an actual admin
+        # intended, so a non-admin's submission of these fields is ignored
+        # rather than trusted.
+        if current_user.role == "admin":
+            existing_overrides = {o.permission_key: o for o in person.permission_overrides}
+            for key, _, _, _ in PERMISSIONS:
+                choice = request.form.get(f"access__{key}", "default")
+                override = existing_overrides.get(key)
+                if choice == "default":
+                    if override:
+                        db.session.delete(override)
+                    continue
+                allowed = choice == "allow"
+                if not override:
+                    override = UserPermissionOverride(user_id=person.id, permission_key=key)
+                    db.session.add(override)
+                override.allowed = allowed
         db.session.commit()
         flash(f"Updated {person.name}.", "success")
         return redirect(url_for("users.list_users"))
-    return render_template("users/form.html", person=person)
+    overrides_by_key = {o.permission_key: o for o in person.permission_overrides} if person else {}
+    return render_template("users/form.html", person=person, permissions=PERMISSIONS, overrides_by_key=overrides_by_key)
 
 
 @users_bp.route("/permissions", methods=["GET", "POST"])

@@ -28,6 +28,23 @@
 <div class="flash info">This payslip's period is Finalized, so it's read-only. Reopen the period to make changes.</div>
 {% endif %}
 
+{% if timesheet_summary %}
+<div class="card" style="max-width:520px;">
+  <h2 style="margin-top:0;font-size:16px;">Time Sheets this period</h2>
+  <p class="muted" style="font-size:12px;">Approved <a href="{{ url_for('hr.list_timesheets') }}">Time Sheets</a> for {{ payslip.employee.full_name }} overlapping {{ payslip.period.period_start.strftime('%d %b') if payslip.period.period_start else '?' }} - {{ payslip.period.period_end.strftime('%d %b %Y') if payslip.period.period_end else '?' }}. This app has no fixed overtime rate, so add an Allowance line item below to price any overtime yourself.</p>
+  {% if timesheet_summary.sheets %}
+  <div class="stat-grid">
+    <div class="stat-card"><div class="num">{{ timesheet_summary.regular_hours }}</div><div class="label">Regular hours</div></div>
+    <div class="stat-card"><div class="num">{{ timesheet_summary.overtime_hours }}</div><div class="label">Overtime hours</div></div>
+    <div class="stat-card"><div class="num">{{ timesheet_summary.total_hours }}</div><div class="label">Total hours</div></div>
+  </div>
+  <p class="muted" style="font-size:11px;">From {{ timesheet_summary.sheets|length }} approved timesheet(s), week(s) commencing {{ timesheet_summary.sheets|map(attribute='week_start')|map('string')|join(', ') }}.</p>
+  {% else %}
+  <div class="empty-state">No approved timesheets overlap this period yet.</div>
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card" style="max-width:520px;">
   <h2 style="margin-top:0;font-size:16px;">Allowances &amp; Deductions</h2>
   <table>

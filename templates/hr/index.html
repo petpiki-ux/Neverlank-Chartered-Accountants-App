@@ -20,6 +20,12 @@
     <h3 class="mt-0">Planner</h3>
     <p class="muted" style="font-size:13px;">A firm-wide audit timetable (spot clashing deadlines at a glance) and a staffing grid showing who's booked on what each week.</p>
   </a>
+  {% if user_has_permission(current_user, 'manage_payroll') %}
+  <a href="{{ url_for('payroll.dashboard') }}" class="card" style="text-decoration:none;color:inherit;">
+    <h3 class="mt-0">Payroll</h3>
+    <p class="muted" style="font-size:13px;">Neverlank's own staff payroll, and a payroll service run for clients - employees, payroll periods, payslips and PAYE/NSSA/AIDS levy tax settings.</p>
+  </a>
+  {% endif %}
   <a href="{{ url_for('tax.list_legislative_updates') }}" class="card" style="text-decoration:none;color:inherit;">
     <h3 class="mt-0">Tax Legislative Updates</h3>
     <p class="muted" style="font-size:13px;">Firm-wide log of tax legislation/practice changes and their assessed impact - feeds every engagement's Tax tab.</p>

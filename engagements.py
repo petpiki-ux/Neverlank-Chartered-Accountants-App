@@ -14,6 +14,7 @@ from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation, TimeSheet, TimeEntry,
     RiskAssessment, MaterialityCalculation, EntityUnderstanding, AuditStrategy, AUDIT_STRATEGY_PHASE_STATUSES,
+    QualitativeMaterialityFactor, QUALITATIVE_MATERIALITY_FACTORS, QUALITATIVE_MATERIALITY_RATINGS,
     SecretarialPlan,
     AnalyticalReview, AnalyticalReviewLine, SECRETARIAL_ANALYTICAL_REVIEW_POINTS, BUSINESS_IT_ANALYTICAL_REVIEW_POINTS,
     ITChangePlanItem, IT_CHANGE_PLAN_RISK_LEVELS,
@@ -47,7 +48,7 @@ from models import (
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
     Tickmark, WORKPAPER_SECTIONS, workpaper_reference, filing_reference, effectively_reviewed,
     WorkpaperNarrative, WORKPAPER_NARRATIVE_KINDS, WORKPAPER_NARRATIVE_KIND_KEYS,
-    DEFAULT_WORKPAPER_NARRATIVE_BODIES, FilingIndexSection,
+    DEFAULT_WORKPAPER_NARRATIVE_BODIES, default_workpaper_narrative_body, FilingIndexSection,
     PPEAssetClass, PPEAsset, PPE_DEPRECIATION_METHODS,
     DirectorsStatement, AuditOpinion, AUDIT_OPINION_BASES, AUDIT_OPINION_BASIS_LABELS,
     OPINION_MODIFICATIONS, OPINION_MODIFICATION_LABELS,
@@ -552,6 +553,10 @@ def view_engagement(engagement_id):
         likelihood_questions = RISK_LIKELIHOOD_QUESTIONS
         impact_questions = RISK_IMPACT_QUESTIONS
     materiality = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
+    qualitative_materiality_factors = {
+        f.factor_key: f for f in QualitativeMaterialityFactor.query.filter_by(engagement_id=engagement_id).all()
+    }
+    qualitative_materiality_index = QualitativeMaterialityFactor.overall_rating_for(qualitative_materiality_factors.values())
     audit_strategy = AuditStrategy.query.filter_by(engagement_id=engagement_id).first() if is_forensic_risk else None
     # The Secretarial Engagement Plan - what the Planning tab is replaced
     # with on a Secretarial engagement, exactly like audit_strategy above
@@ -734,7 +739,7 @@ def view_engagement(engagement_id):
     ]
     for kind, _label, _section in seedable_kinds:
         if kind not in workpaper_narratives:
-            workpaper_narratives[kind] = _get_or_seed_workpaper_narrative(engagement_id, kind)
+            workpaper_narratives[kind] = _get_or_seed_workpaper_narrative(engagement_id, kind, engagement)
 
     # Review Queries, grouped for the template: by section for every plain
     # section, and separately by audit area for "substantive" (which has one
@@ -859,6 +864,10 @@ def view_engagement(engagement_id):
         is_forensic_risk=is_forensic_risk,
         is_secretarial=is_secretarial,
         materiality=materiality,
+        qualitative_materiality_factors=qualitative_materiality_factors,
+        qualitative_materiality_index=qualitative_materiality_index,
+        qualitative_materiality_factor_defs=QUALITATIVE_MATERIALITY_FACTORS,
+        qualitative_materiality_ratings=QUALITATIVE_MATERIALITY_RATINGS,
         audit_strategy=audit_strategy,
         audit_strategy_phase_statuses=AUDIT_STRATEGY_PHASE_STATUSES,
         secretarial_plan=secretarial_plan,
@@ -928,7 +937,7 @@ def view_engagement(engagement_id):
         ppe_movement=ppe_movement,
         directors_statement=directors_statement,
         suggested_directors=suggested_directors,
-        default_directors_statement_text=fin.DEFAULT_DIRECTORS_STATEMENT_TEXT,
+        default_directors_statement_text=fin.default_directors_statement_text(engagement),
         audit_opinion=audit_opinion,
         default_opinion_paragraphs=default_opinion_paragraphs,
         audit_opinion_bases=AUDIT_OPINION_BASES,
@@ -2470,6 +2479,7 @@ def save_materiality(engagement_id):
     basis = request.form.get("basis", "highest")
     calc.basis = basis if basis in ("revenue", "pbt", "assets", "highest", "lowest") else "highest"
     calc.notes = request.form.get("notes", "").strip()
+    calc.quantitative_important = request.form.get("quantitative_important") == "on"
     calc.updated_by_id = current_user.id
     # Changing the calculation invalidates any earlier review/partner sign-off.
     calc.reviewed_by_id = None
@@ -2548,6 +2558,39 @@ def partner_unsign_materiality(calc_id):
     db.session.commit()
     flash("Partner sign-off removed.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=calc.engagement_id, tab="planning"))
+
+
+# ---------- Planning: Qualitative Materiality Index ----------
+# See models.QualitativeMaterialityFactor/QUALITATIVE_MATERIALITY_FACTORS -
+# a judgement-based complement to the dollar-figure materiality calculator
+# above, for matters that can be material regardless of size. One form
+# saves every factor's rating/notes at once (there are only 5 of them),
+# rather than a separate save action per factor.
+
+@engagements_bp.route("/<int:engagement_id>/qualitative-materiality/save", methods=["POST"])
+@login_required
+def save_qualitative_materiality(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    existing = {f.factor_key: f for f in QualitativeMaterialityFactor.query.filter_by(engagement_id=engagement_id).all()}
+    for factor_key, _label, _help in QUALITATIVE_MATERIALITY_FACTORS:
+        rating = request.form.get(f"rating__{factor_key}", "").strip()
+        if rating not in QUALITATIVE_MATERIALITY_RATINGS:
+            rating = ""
+        notes = request.form.get(f"notes__{factor_key}", "").strip()
+        factor = existing.get(factor_key)
+        if not factor:
+            if not rating and not notes:
+                continue  # nothing to save - don't create an empty row
+            factor = QualitativeMaterialityFactor(engagement_id=engagement_id, factor_key=factor_key)
+            db.session.add(factor)
+        factor.rating = rating
+        factor.notes = notes
+        factor.updated_by_id = current_user.id
+        factor.updated_at = datetime.utcnow()
+    db.session.commit()
+    flash("Qualitative Materiality Index saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
 
 
 # ---------- Audit Strategy (Investigative Engagements only - replaces the ordinary Planning tab content) ----------
@@ -3854,14 +3897,17 @@ def partner_unsign_financial_statements(fs_id):
 # Investigation Report's Executive Summary - see models.WorkpaperNarrative)
 # ----------
 
-def _get_or_seed_workpaper_narrative(engagement_id, kind):
+def _get_or_seed_workpaper_narrative(engagement_id, kind, engagement=None):
     """The existing WorkpaperNarrative row for (engagement, kind), or a new
     unsaved one pre-filled with the firm's default starting wording - so the
     edit form always has sensible text to start from rather than a blank
-    box, the first time this narrative is opened on an engagement."""
+    box, the first time this narrative is opened on an engagement. engagement
+    is optional (only needed so default_workpaper_narrative_body can pick a
+    type-appropriate default, e.g. "rep_letter" on a Business Intelligence
+    and IT Engagement) - pass it when already in scope to avoid a query."""
     narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind=kind).first()
     if not narrative:
-        narrative = WorkpaperNarrative(engagement_id=engagement_id, kind=kind, body=DEFAULT_WORKPAPER_NARRATIVE_BODIES.get(kind, ""))
+        narrative = WorkpaperNarrative(engagement_id=engagement_id, kind=kind, body=default_workpaper_narrative_body(kind, engagement))
     return narrative
 
 
@@ -4194,7 +4240,7 @@ def _get_or_create_directors_statement(engagement):
     if not record:
         directors = ClientKeyPerson.query.filter_by(client_id=engagement.client_id, role="Director", status="Confirmed").order_by(ClientKeyPerson.id).all()
         record = DirectorsStatement(
-            engagement_id=engagement.id, statement_text=fin.DEFAULT_DIRECTORS_STATEMENT_TEXT,
+            engagement_id=engagement.id, statement_text=fin.default_directors_statement_text(engagement),
             director1_name=directors[0].full_name if len(directors) > 0 else None,
             director2_name=directors[1].full_name if len(directors) > 1 else None,
             statement_date=engagement.period_end,

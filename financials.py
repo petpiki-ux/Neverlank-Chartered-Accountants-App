@@ -742,6 +742,36 @@ DEFAULT_DIRECTORS_STATEMENT_TEXT = (
     "signed on its behalf by:"
 )
 
+# The Business Intelligence and IT Engagements variant of the Directors'
+# Statement above - this engagement type has no financial statements (see
+# the IT & Cyber Assurance Report instead), so the standard IAS 1/Companies
+# Act wording above (which refers to "the accompanying financial
+# statements") doesn't fit. This is the equivalent statement of
+# responsibility for the IT governance, cyber security and AML/CFT control
+# environment the IT & Cyber Assurance Report reports on.
+DEFAULT_DIRECTORS_STATEMENT_TEXT_IT = (
+    "The directors are responsible for establishing and maintaining an effective system of information "
+    "technology governance, cyber security and information security controls, and for the design, "
+    "implementation and operation of internal controls over the entity's IT environment relevant to the "
+    "scope of this engagement. This responsibility includes maintaining adequate change management, "
+    "access control and data protection practices, ensuring compliance with applicable AML/CFT and other "
+    "regulatory requirements, and promptly disclosing to us any known cyber security incidents, breaches "
+    "or material control weaknesses. The directors have made an assessment of the entity's ability to "
+    "continue to operate its IT environment and related controls effectively and have no reason to "
+    "believe otherwise in the year ahead. This statement has been approved by the board of directors and "
+    "is signed on its behalf by:"
+)
+
+
+def default_directors_statement_text(engagement):
+    """Picks the Directors' Statement default wording for this engagement's
+    type - see DEFAULT_DIRECTORS_STATEMENT_TEXT_IT above for why Business
+    Intelligence and IT Engagements needs its own wording rather than the
+    financial-statements-worded default."""
+    if engagement and engagement.type == "Business Intelligence and IT Engagements":
+        return DEFAULT_DIRECTORS_STATEMENT_TEXT_IT
+    return DEFAULT_DIRECTORS_STATEMENT_TEXT
+
 
 # The four report paragraphs, and their standard ISA 700 (audit)/ISRE 2400
 # (review) wording by modification type - see models.AuditOpinion. Kept as

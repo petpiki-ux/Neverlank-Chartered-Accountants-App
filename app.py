@@ -116,6 +116,7 @@ def _add_missing_columns():
         "materiality_calculation": [
             ("reviewed_by_id", "INTEGER"),
             ("reviewed_at", "DATETIME"),
+            ("quantitative_important", "BOOLEAN DEFAULT 1"),
         ] + partner_signoff_cols,
         "entity_understanding": list(partner_signoff_cols),
         "analytical_review": list(partner_signoff_cols) + [

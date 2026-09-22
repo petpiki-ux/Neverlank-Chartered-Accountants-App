@@ -1204,6 +1204,10 @@
     <h3 class="mt-0">Materiality calculator</h3>
     <p class="muted" style="font-size:12.5px;">Enter the client's key figures for the period - the system calculates suggested overall materiality, performance materiality and a "clearly trivial" threshold from them. The % benchmarks are common starting points in practice, not a fixed rule - adjust them and apply professional judgement for this specific engagement.</p>
     <form method="post" action="{{ url_for('engagements.save_materiality', engagement_id=engagement.id) }}">
+      <label style="display:block;margin-bottom:12px;"><input type="checkbox" name="quantitative_important" style="width:auto;display:inline-block;" {% if not materiality or materiality.quantitative_important %}checked{% endif %}> Quantitative (financial-figure-based) materiality is relevant for this engagement</label>
+      {% if materiality and not materiality.quantitative_important %}
+      <div class="empty-state" style="margin-bottom:12px;">Marked as not relevant for this engagement - see the Qualitative Materiality Index below instead. The figures below can still be filled in for reference, but aren't required.</div>
+      {% endif %}
       <div class="form-row">
         <div><label for="total_revenue">Total revenue</label><input type="number" step="0.01" id="total_revenue" name="total_revenue" value="{{ materiality.total_revenue if materiality and materiality.total_revenue is not none else '' }}"></div>
         <div><label for="revenue_pct">% of revenue</label><input type="number" step="0.1" id="revenue_pct" name="revenue_pct" value="{{ materiality.revenue_pct if materiality else 1.0 }}"></div>
@@ -1275,6 +1279,34 @@
     {% endif %}
   </div>
   {% endif %}
+  {% endif %}
+
+  {% if engagement.type not in ('Investigative Engagement', 'Secretarial') %}
+  <div class="card">
+    <h3 class="mt-0">Qualitative Materiality Index{% if qualitative_materiality_index %} <span class="badge risk-{{ qualitative_materiality_index }}">{{ qualitative_materiality_index }}</span>{% endif %}</h3>
+    <p class="muted" style="font-size:12.5px;">A judgement-based complement to the dollar-figure calculator above - a matter can be material regardless of size (e.g. it reveals a regulatory breach, or turns a profit into a loss). Rate whichever factors are relevant below; the Index shown is the highest rating recorded, not an average, since qualitative materiality is normally driven by the single most significant factor rather than a blend of all of them.</p>
+    <form method="post" action="{{ url_for('engagements.save_qualitative_materiality', engagement_id=engagement.id) }}">
+      <table>
+        <thead><tr><th style="min-width:260px;">Factor</th><th style="width:130px;">Rating</th><th>Notes</th></tr></thead>
+        <tbody>
+        {% for factor_key, label, help_text in qualitative_materiality_factor_defs %}
+        {% set factor = qualitative_materiality_factors.get(factor_key) %}
+        <tr>
+          <td><strong>{{ label }}</strong><div class="muted" style="font-size:11px;">{{ help_text }}</div></td>
+          <td>
+            <select name="rating__{{ factor_key }}">
+              <option value="" {% if not factor or not factor.rating %}selected{% endif %}>—</option>
+              {% for r in qualitative_materiality_ratings %}<option value="{{ r }}" {% if factor and factor.rating==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </td>
+          <td><input type="text" name="notes__{{ factor_key }}" value="{{ factor.notes if factor and factor.notes else '' }}" style="width:100%;margin-bottom:0;"></td>
+        </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <button type="submit" class="btn gold" style="margin-top:10px;">Save Qualitative Materiality Index</button>
+    </form>
+  </div>
   {% endif %}
 
   {% if engagement.type not in ('Investigative Engagement', 'Secretarial') %}
@@ -3634,7 +3666,11 @@
 
   <div class="card">
     <h3 class="mt-0">Directors' Statement</h3>
+    {% if engagement.type == 'Business Intelligence and IT Engagements' %}
+    <p class="muted" style="font-size:12.5px;">Goes into the IT &amp; Cyber Assurance Report itself, right after the cover page - the directors' statement of responsibility for the IT governance, cyber security and AML/CFT control environment reported on - with space for two directors to sign. Tailor the wording below to the entity, then keep the director names and date current.</p>
+    {% else %}
     <p class="muted" style="font-size:12.5px;">Goes into the Financial Statements themselves - right after the Client Details / Table of Contents page and before the Audit Opinion/Review Report (if any) - with space for two directors to sign. Tailor the wording below to the entity, then keep the director names and date current.</p>
+    {% endif %}
     <form method="post" action="{{ url_for('engagements.save_directors_statement', engagement_id=engagement.id) }}">
       <label for="ds_statement_text">Statement text</label>
       <textarea id="ds_statement_text" name="statement_text" rows="8">{{ directors_statement.statement_text if directors_statement and directors_statement.statement_text else default_directors_statement_text }}</textarea>

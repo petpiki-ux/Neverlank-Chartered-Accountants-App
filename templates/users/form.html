@@ -2,7 +2,7 @@
 {% block title %}{% if person %}Edit Team Member{% else %}New Team Member{% endif %} - {{ firm_name }}{% endblock %}
 {% block content %}
 <div class="page-header"><h1>{% if person %}Edit {{ person.name }}{% else %}New Team Member{% endif %}</h1></div>
-<div class="card" style="max-width:480px;">
+<div class="card" style="max-width:{% if person and current_user.role == 'admin' %}760{% else %}480{% endif %}px;">
   <form method="post">
     {% if not person %}
     <label for="username">Username *</label>
@@ -27,7 +27,29 @@
     {% endif %}
     <label for="password">{% if person %}Reset password (leave blank to keep current){% else %}Password{% endif %}</label>
     <input type="password" id="password" name="password" {% if not person %}placeholder="default: changeme123"{% endif %}>
-    <button type="submit" class="btn gold">{% if person %}Save changes{% else %}Create team member{% endif %}</button>
+    {% if person and current_user.role == 'admin' %}
+    <h3 style="font-size:14px;margin:18px 0 4px;">Access Rights</h3>
+    <p class="muted" style="font-size:11.5px;margin:0 0 10px;">Override a capability for {{ person.name }} specifically, regardless of what their role ({{ person.role|capitalize }}) defaults to (Team &gt; Permissions) - useful to limit access to a sensitive module (e.g. Payroll) for one person, or to grant one person a capability without changing their role. Leave "Use role default" unless you need a named exception.</p>
+    <table>
+      <thead><tr><th style="min-width:220px;">Capability</th><th style="width:170px;">Access for {{ person.name }}</th></tr></thead>
+      <tbody>
+      {% for key, label, description, default_roles in permissions %}
+      {% set override = overrides_by_key.get(key) %}
+      <tr>
+        <td><strong>{{ label }}</strong><div class="muted" style="font-size:11px;">{{ description }}</div></td>
+        <td>
+          <select name="access__{{ key }}">
+            <option value="default" {% if not override %}selected{% endif %}>Use role default</option>
+            <option value="allow" {% if override and override.allowed %}selected{% endif %}>Always allow</option>
+            <option value="deny" {% if override and not override.allowed %}selected{% endif %}>Always deny</option>
+          </select>
+        </td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    <button type="submit" class="btn gold" style="margin-top:14px;">{% if person %}Save changes{% else %}Create team member{% endif %}</button>
     <a href="{{ url_for('users.list_users') }}" class="btn secondary">Cancel</a>
   </form>
 </div>
