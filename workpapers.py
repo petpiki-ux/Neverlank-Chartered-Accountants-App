@@ -1064,13 +1064,19 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
         if items:
             # A Secretarial Execution Plan gets three extra columns
             # (Trigger/Event, Lead Responsible, Target Output) matching the
-            # firm's Practical Secretarial Execution Plan Schedule - every
-            # other engagement type keeps the original 5-column layout.
-            cols = 8 if is_secretarial else 5
+            # firm's Practical Secretarial Execution Plan Schedule; a
+            # Business Intelligence and IT Engagement gets one extra column
+            # (Kind - ITGC or Substantive, see BUSINESS_IT_PROCEDURE_KIND) so
+            # the filed programme reads as the ITGC/Substantive table the
+            # methodology calls for. Every other engagement type keeps the
+            # original 5-column layout.
+            cols = 8 if is_secretarial else (6 if is_business_it else 5)
             table = doc.add_table(rows=1, cols=cols)
             hdr = table.rows[0].cells
             if is_secretarial:
                 headers = ["Task", "Trigger / Event", "Lead Responsible", "Target Output", "Source", "Status", "Notes", "Tickmark"]
+            elif is_business_it:
+                headers = ["Procedure", "Kind", "Source", "Status", "Notes", "Tickmark"]
             else:
                 headers = ["Procedure", "Source", "Status", "Notes", "Tickmark"]
             for i, h in enumerate(headers):
@@ -1087,6 +1093,13 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
                     row[5].text = item.status
                     row[6].text = item.notes or ""
                     row[7].text = item.tickmark.symbol if item.tickmark else ""
+                elif is_business_it:
+                    row[0].text = item.procedure_text
+                    row[1].text = item.procedure_kind or ""
+                    row[2].text = item.source
+                    row[3].text = item.status
+                    row[4].text = item.notes or ""
+                    row[5].text = item.tickmark.symbol if item.tickmark else ""
                 else:
                     row[0].text = item.procedure_text
                     row[1].text = item.source
@@ -1126,6 +1139,8 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
     row = 7
     if is_secretarial:
         headers = ["Ref.", "Workstream", "Task", "Trigger / Event", "Lead Responsible", "Target Output", "Source", "Status", "Notes", "Tickmark"]
+    elif is_business_it:
+        headers = ["Ref.", "Area", "Procedure", "Kind", "Source", "Status", "Notes", "Tickmark"]
     else:
         headers = ["Ref.", "Area", "Procedure", "Source", "Status", "Notes", "Tickmark"]
     row = _header_row(ws, row, headers)
@@ -1154,6 +1169,12 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
                 ws.cell(row=row, column=8, value=item.status).border = _BORDER
                 ws.cell(row=row, column=9, value=item.notes or "").border = _BORDER
                 ws.cell(row=row, column=10, value=item.tickmark.symbol if item.tickmark else "").border = _BORDER
+            elif is_business_it:
+                ws.cell(row=row, column=4, value=item.procedure_kind or "").border = _BORDER
+                ws.cell(row=row, column=5, value=item.source).border = _BORDER
+                ws.cell(row=row, column=6, value=item.status).border = _BORDER
+                ws.cell(row=row, column=7, value=item.notes or "").border = _BORDER
+                ws.cell(row=row, column=8, value=item.tickmark.symbol if item.tickmark else "").border = _BORDER
             else:
                 ws.cell(row=row, column=4, value=item.source).border = _BORDER
                 ws.cell(row=row, column=5, value=item.status).border = _BORDER
@@ -1163,6 +1184,8 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
 
     if is_secretarial:
         _autofit(ws, [8, 24, 45, 22, 16, 30, 12, 14, 26, 10])
+    elif is_business_it:
+        _autofit(ws, [8, 24, 55, 14, 12, 14, 30, 10])
     else:
         _autofit(ws, [8, 28, 55, 12, 14, 30, 10])
     return _finish_wb(wb)

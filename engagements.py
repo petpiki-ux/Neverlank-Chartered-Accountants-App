@@ -40,7 +40,7 @@ from models import (
     BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS, SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
     FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES,
-    BUSINESS_IT_SUBSTANTIVE_AREAS, BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES,
+    BUSINESS_IT_SUBSTANTIVE_AREAS, BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES, BUSINESS_IT_PROCEDURE_KIND,
     SECRETARIAL_SUBSTANTIVE_AREAS, SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES, SECRETARIAL_EXECUTION_TASK_DETAILS,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
@@ -3968,6 +3968,8 @@ def sync_substantive_procedures(engagement):
                     details = SECRETARIAL_EXECUTION_TASK_DETAILS.get(text)
                     if details:
                         item.trigger_event, item.responsible_role, item.target_output = details
+                if is_business_it:
+                    item.procedure_kind = BUSINESS_IT_PROCEDURE_KIND.get(text)
                 db.session.add(item)
                 next_order += 1
                 added_count += 1
@@ -4744,7 +4746,10 @@ def add_substantive_procedure_item(engagement_id, area_name):
         flash("Please enter the procedure text.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
     area = _get_or_create_substantive_area(engagement_id, area_name)
-    db.session.add(SubstantiveProcedureItem(area_id=area.id, procedure_text=text, source="manual", order=len(area.items)))
+    procedure_kind = request.form.get("procedure_kind", "").strip() or None
+    if procedure_kind not in ("ITGC", "Substantive", None):
+        procedure_kind = None
+    db.session.add(SubstantiveProcedureItem(area_id=area.id, procedure_text=text, source="manual", order=len(area.items), procedure_kind=procedure_kind))
     _touch_substantive_area(area)
     db.session.commit()
     flash("Procedure added.", "success")
@@ -4768,6 +4773,9 @@ def update_substantive_procedure_item(item_id):
         item.responsible_role = request.form.get("responsible_role", "").strip() or None
     if "target_output" in request.form:
         item.target_output = request.form.get("target_output", "").strip() or None
+    if "procedure_kind" in request.form:
+        procedure_kind = request.form.get("procedure_kind", "").strip() or None
+        item.procedure_kind = procedure_kind if procedure_kind in ("ITGC", "Substantive") else None
     _touch_substantive_area(area)
     db.session.commit()
     flash("Procedure updated." if area.engagement.type != "Secretarial" else "Task updated.", "success")

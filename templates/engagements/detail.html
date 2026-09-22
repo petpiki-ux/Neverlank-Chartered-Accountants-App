@@ -841,7 +841,7 @@
   </div>
 
   {% set entity_forensic_sections = ['Objectives & Scope of the Engagement', 'Legal, Regulatory & Governance Context', 'Data, Systems & Access Checklist', 'Stakeholders, Logistics & Timeline', 'Risk Assessment & Safety'] %}
-  {% set entity_business_it_sections = ['IT Environment & Infrastructure Overview', 'Data Holdings & Classification', 'Cyber Security Posture & Incident History', 'Information Security & Access Management', 'ICT Governance & Operations', 'AML/CFT Framework & Regulatory Context'] %}
+  {% set entity_business_it_sections = ['IT Environment & Infrastructure Overview', 'Data Holdings & Classification', 'Cyber Security Posture & Incident History', 'Information Security & Access Management', 'ICT Governance & Operations', 'AML/CFT Framework & Regulatory Context', 'Regulatory Landscape & Standards Alignment'] %}
   {% set entity_secretarial_sections = ['Entity Classification & Scope', 'Constitutional Documents & Corporate Governance', 'Statutory Registers & Ownership Transparency', 'Capital Structure, Distributions & Solvency', 'Board Operations, Meetings & Documentation', 'Statutory Filings & Registry Compliance'] %}
   {% set entity_default_sections = ['Nature of the Entity', 'Industry, Regulatory and Other External Factors', 'Accounting Policies', 'Objectives, Strategies and Related Business Risks', 'Measurement and Review of Financial Performance'] %}
   {% if engagement.type == 'Business Intelligence and IT Engagements' %}{% set entity_sections = entity_business_it_sections %}
@@ -4208,6 +4208,11 @@
     <p class="muted" style="font-size:12.5px;">
       Replaces the ordinary Substantive Procedures with five operational workstreams: Onboarding &amp; Diagnostics, Board &amp; General Meeting Cycle, Annual Returns &amp; Filings Log, Statutory Register Audit, and Corporate Actions. "Generate suggested procedures" seeds each workstream with its baseline tasks, each carrying its Trigger/Event, Lead Responsible and Target Output where applicable. Safe to re-run any time - it only adds what's missing. Add your own tasks under any workstream this engagement calls for.
     </p>
+    {% elif engagement.type == 'Business Intelligence and IT Engagements' %}
+    <h3 class="mt-0">Phase 3: IT &amp; cyber assurance procedures</h3>
+    <p class="muted" style="font-size:12.5px;">
+      One section per scoped domain: Cyber Security (network defense, penetration testing oversight, incident response, perimeter security), Information Security (data classification, encryption at rest and in transit, DLP, IAM), Information Technology/ICT (IT governance, change management, disaster recovery/BCP, hardware/software lifecycle), and AML/CFT Compliance (transaction monitoring, PEP/sanctions screening tuning, data ingestion integrity, system-generated audit trails). Every procedure carries a <strong>Kind</strong> - <span class="badge">ITGC</span> for a test of the underlying control environment (policy/design review, walkthroughs), or <span class="badge">Substantive</span> for a data-driven or technical validation procedure - so the programme reads as the two-column ITGC/Substantive table the methodology calls for. "Generate suggested procedures" seeds each domain with its baseline set, each already tagged. Safe to re-run any time - it only adds what's missing, never duplicates or removes anything.
+    </p>
     {% else %}
     <h3 class="mt-0">Substantive procedures</h3>
     <p class="muted" style="font-size:12.5px;">
@@ -4268,6 +4273,38 @@
       {% endfor %}
       </tbody>
     </table>
+    {% elif engagement.type == 'Business Intelligence and IT Engagements' %}
+    <table>
+      <thead><tr><th>Procedure</th><th>Kind</th><th>Source</th><th>Notes</th><th>Status</th><th>Tickmark</th><th></th></tr></thead>
+      <tbody>
+      {% for item in area.items %}
+        <form method="post" action="{{ url_for('engagements.update_substantive_procedure_item', item_id=item.id) }}" class="inline">
+        <tr>
+          <td style="max-width:320px;"><input type="text" name="procedure_text" value="{{ item.procedure_text }}" style="width:100%;margin-bottom:0;"></td>
+          <td>
+            <select name="procedure_kind" style="width:110px;">
+              <option value="" {% if not item.procedure_kind %}selected{% endif %}>—</option>
+              <option value="ITGC" {% if item.procedure_kind=='ITGC' %}selected{% endif %}>ITGC</option>
+              <option value="Substantive" {% if item.procedure_kind=='Substantive' %}selected{% endif %}>Substantive</option>
+            </select>
+          </td>
+          <td><span class="badge">{{ item.source }}</span></td>
+          <td><input type="text" name="notes" value="{{ item.notes or '' }}" placeholder="Notes" style="width:140px;margin-bottom:0;"></td>
+          <td>
+            <select name="status">
+              {% for s in checklist_statuses %}<option value="{{ s }}" {% if item.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+            </select>
+          </td>
+          <td>{{ tickmark_picker(item.tickmark_id) }}</td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_substantive_procedure_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this procedure?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
     {% else %}
     <table>
       <thead><tr><th>Procedure</th><th>Source</th><th>Notes</th><th>Status</th><th>Tickmark</th><th></th></tr></thead>
@@ -4300,6 +4337,16 @@
 
     <form method="post" action="{{ url_for('engagements.add_substantive_procedure_item', engagement_id=engagement.id, area_name=area_name) }}" class="form-row" style="align-items:flex-end;">
       <div style="grid-column: span 3;"><label>Add a {% if engagement.type == 'Secretarial' %}task{% else %}procedure{% endif %}</label><input type="text" name="procedure_text" placeholder="{% if engagement.type == 'Secretarial' %}Describe the task{% else %}Describe the procedure{% endif %}" required></div>
+      {% if engagement.type == 'Business Intelligence and IT Engagements' %}
+      <div>
+        <label>Kind</label>
+        <select name="procedure_kind">
+          <option value="">—</option>
+          <option value="ITGC">ITGC</option>
+          <option value="Substantive">Substantive</option>
+        </select>
+      </div>
+      {% endif %}
       <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add</button></div>
     </form>
 

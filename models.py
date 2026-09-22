@@ -882,6 +882,9 @@ BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
     ("IT Environment & Infrastructure Overview", "Which core business systems (ERP, banking platforms, core application systems) does the entity rely on, and who are the key vendors/service providers?"),
     ("IT Environment & Infrastructure Overview", "Has the IT environment changed materially in the period under review (new system implementations, cloud migration, mergers/acquisitions, outsourcing changes)?"),
     ("IT Environment & Infrastructure Overview", "Is there a documented IT governance structure (IT steering committee, CIO/IT Manager, board-level IT oversight)?"),
+    ("IT Environment & Infrastructure Overview", "Is there up-to-date network architecture/topology documentation (network diagrams) covering the entity's on-premise and cloud environments?"),
+    ("IT Environment & Infrastructure Overview", "If cloud platforms are used (e.g. AWS, Azure, Google Cloud Platform), which services/regions are in use, and is there a documented cloud architecture diagram?"),
+    ("IT Environment & Infrastructure Overview", "Have the data flows between the entity's critical financial and operational applications been mapped (source systems, integration points, and where financial data ultimately resides)?"),
     ("Data Holdings & Classification", "What categories of data does the entity hold or process (customer personal information, financial data, employee data, trade secrets/intellectual property)?"),
     ("Data Holdings & Classification", "Is data classified by sensitivity, and is there a documented data retention and disposal policy?"),
     ("Data Holdings & Classification", "Where is data physically/logically stored (on-premise servers, local cloud provider, offshore cloud provider), and does this raise any cross-border data transfer considerations under the Cyber and Data Protection Act [Chapter 12:07]?"),
@@ -896,11 +899,17 @@ BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
     ("ICT Governance & Operations", "What change and release management process is followed for system changes, and how are new systems developed or acquired?"),
     ("ICT Governance & Operations", "What backup and disaster recovery arrangements are in place, and have they been tested?"),
     ("ICT Governance & Operations", "Is there a documented and tested business continuity plan covering IT-dependent operations?"),
+    ("ICT Governance & Operations", "Based on the above, what are the entity's baseline inherent IT risks - system downtime/availability, unauthorised or poorly controlled changes, and data integrity - and how significant is each considered to be?"),
     ("AML/CFT Framework & Regulatory Context", "Does the entity fall within a sector subject to AML/CFT obligations under the Money Laundering and Proceeds of Crime Act [Chapter 9:24], and if so, is there a designated Money Laundering Reporting Officer?"),
     ("AML/CFT Framework & Regulatory Context", "What customer due diligence (CDD)/know-your-customer procedures are in place, including for higher-risk customers or channels?"),
     ("AML/CFT Framework & Regulatory Context", "What transaction monitoring and screening arrangements are in place (sanctions screening, unusual-activity monitoring)?"),
     ("AML/CFT Framework & Regulatory Context", "Has the entity filed any suspicious transaction reports with the Financial Intelligence Unit, or received any regulatory findings/guidance relevant to AML/CFT compliance?"),
     ("AML/CFT Framework & Regulatory Context", "What record-keeping arrangements are in place for CDD information and transaction records, and for how long are they retained?"),
+    ("Regulatory Landscape & Standards Alignment", "Has the entity adopted, or aligned itself to, any recognised information security/IT control framework or standard (e.g. ISO/IEC 27001, the NIST Cybersecurity Framework/NIST SP 800-53), whether formally certified or only informally applied?"),
+    ("Regulatory Landscape & Standards Alignment", "Is the entity registered/licensed with, or otherwise subject to oversight by, the Postal and Telecommunications Regulatory Authority of Zimbabwe (POTRAZ) or another sector-specific ICT/telecoms regulator?"),
+    ("Regulatory Landscape & Standards Alignment", "How does the entity's data protection practice map to the Cyber and Data Protection Act [Chapter 12:07] and, where the entity has cross-border operations or customers, to equivalent data protection regimes (e.g. GDPR) that may also apply?"),
+    ("Regulatory Landscape & Standards Alignment", "Has the entity received any guidance, directive or finding from the Reserve Bank of Zimbabwe (RBZ), the Financial Intelligence Unit, or another regulator specifically relating to its IT, cyber security or AML/CFT systems?"),
+    ("Regulatory Landscape & Standards Alignment", "Are there any pending or upcoming regulatory changes (local or, where relevant, international) that could affect the entity's IT, cyber security, information security or AML/CFT compliance posture?"),
 ]
 
 # Seeded instead of the five free-text ENTITY_UNDERSTANDING_FIELDS above when
@@ -1263,12 +1272,18 @@ BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES = {
         "Assess security monitoring and logging arrangements - what is logged, for how long, who reviews it, and how alerts are escalated - and test operation for a sample period.",
         "Evaluate the incident response and recovery plan for completeness and currency, and test it against a sample of actual incidents (if any) or a walkthrough of the response process.",
         "Confirm whether an independent penetration test or vulnerability assessment has been performed in the period, and review the findings and remediation status.",
+        "Review the entity's network defense architecture documentation (firewall rule sets, network segmentation, DMZ design) and assess whether it reflects the risk profile of internet-facing and critical systems.",
+        "For a sample of periods/systems, obtain evidence of penetration test or vulnerability scan execution and test that critical/high findings were remediated within the entity's defined SLA.",
     ],
     "Information Security": [
         "Test the information/data classification and handling policy against a sample of actual data holdings to assess whether classification is applied in practice.",
         "Test user access and privilege management - new user provisioning, periodic access reviews, and timely revocation for a sample of leavers - for a sample of critical systems.",
         "Assess data protection and privacy compliance arrangements against the requirements of the Cyber and Data Protection Act [Chapter 12:07], including any data subject/consent processes and breach notification arrangements.",
         "Review third-party and cloud security arrangements - contracts, security clauses/SLAs, and any independent assurance reports (e.g. SOC 2) obtained over key providers - for a sample of critical third parties.",
+        "Evaluate the entity's encryption policy/standard for data at rest and in transit (e.g. database/disk encryption, TLS enforcement) and confirm it has been formally approved.",
+        "Test encryption configuration for a sample of critical systems/databases holding sensitive data (at rest) and key data transmission channels (in transit) against the entity's encryption standard.",
+        "Evaluate Data Loss Prevention (DLP) arrangements - policy coverage and any DLP tooling over sensitive data egress channels (email, removable media, cloud upload) - for design adequacy.",
+        "Test Identity & Access Management (IAM) controls for a sample of critical systems - authentication strength (including multi-factor authentication for privileged/remote access), privileged access management, and segregation of duties.",
     ],
     "Information Technology (ICT)": [
         "Review the ICT governance and strategy documentation and assess whether it is approved, current, and aligned to the entity's objectives.",
@@ -1277,6 +1292,8 @@ BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES = {
         "Test IT operations controls (job scheduling, incident/problem management, capacity management) for a sample period.",
         "Test backup and disaster recovery arrangements, including evidence of successful backup completion and a recent restore/recovery test.",
         "Review the business continuity plan for IT-dependent operations and assess whether it has been tested within a reasonable period.",
+        "Review the entity's IT asset and software lifecycle management process - hardware/software inventory, patch management, end-of-life/end-of-support tracking, and software licensing compliance.",
+        "Test a sample of IT assets against the asset register/inventory and confirm patch levels and support status, in particular for any end-of-life hardware or software identified.",
     ],
     "AML/CFT Compliance": [
         "Evaluate the entity's AML/CFT policies and procedures against the Money Laundering and Proceeds of Crime Act [Chapter 9:24] and applicable Financial Intelligence Unit guidance.",
@@ -1284,7 +1301,57 @@ BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES = {
         "Test transaction monitoring and sanctions screening arrangements for a sample period, including follow-up of any alerts generated.",
         "Review suspicious transaction reporting arrangements and, for any reports filed in the period, assess timeliness and record-keeping.",
         "Test record-keeping of CDD information and transaction records for a sample of customers/transactions against the entity's retention policy and statutory requirements.",
+        "Evaluate the configuration of the automated transaction monitoring and sanctions/PEP screening system - rule/scenario library, name-matching thresholds and fuzzy-matching logic - and assess whether calibration is periodically reviewed and approved.",
+        "Test a sample of system-generated alerts for evidence of false-positive/false-negative tuning effectiveness, including review of any threshold or rule changes made in the period and their authorisation.",
+        "Test the completeness and integrity of data ingested into the transaction monitoring/screening system from core banking or other source systems for a sample period (e.g. reconciling transaction counts/values between the source system and the monitoring system).",
+        "Evaluate the system's audit trail/logging of screening decisions, alert dispositions and manual overrides for completeness, and confirm it is tamper-evident/access-restricted.",
     ],
+}
+
+# Tags each BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES entry above as either
+# an "ITGC" (a test of the underlying control environment - policy/design
+# review, walkthroughs, configuration standards) or a "Substantive" audit
+# procedure (data-driven/technical validation - sampling, reconciliation,
+# technical testing) - the Phase 3 distinction requested for the IT Audit
+# methodology. Looked up by sync_substantive_procedures (engagements.py) and
+# written to SubstantiveProcedureItem.procedure_kind for each Business
+# Intelligence and IT Engagement procedure as it's seeded; shown as a "Kind"
+# column on the Substantive Procedures tab and in the generated Word/Excel
+# programme, for this engagement type only. A procedure with no entry here
+# (i.e. any procedure added manually) is left untagged.
+BUSINESS_IT_PROCEDURE_KIND = {
+    "Evaluate the entity's threat and vulnerability management process, including the frequency and remediation of vulnerability scans/penetration tests over a sample period.": "ITGC",
+    "Test perimeter and endpoint protection controls (firewalls, intrusion detection/prevention, endpoint protection/EDR) for a sample of critical systems.": "Substantive",
+    "Assess security monitoring and logging arrangements - what is logged, for how long, who reviews it, and how alerts are escalated - and test operation for a sample period.": "ITGC",
+    "Evaluate the incident response and recovery plan for completeness and currency, and test it against a sample of actual incidents (if any) or a walkthrough of the response process.": "ITGC",
+    "Confirm whether an independent penetration test or vulnerability assessment has been performed in the period, and review the findings and remediation status.": "ITGC",
+    "Review the entity's network defense architecture documentation (firewall rule sets, network segmentation, DMZ design) and assess whether it reflects the risk profile of internet-facing and critical systems.": "ITGC",
+    "For a sample of periods/systems, obtain evidence of penetration test or vulnerability scan execution and test that critical/high findings were remediated within the entity's defined SLA.": "Substantive",
+    "Test the information/data classification and handling policy against a sample of actual data holdings to assess whether classification is applied in practice.": "Substantive",
+    "Test user access and privilege management - new user provisioning, periodic access reviews, and timely revocation for a sample of leavers - for a sample of critical systems.": "Substantive",
+    "Assess data protection and privacy compliance arrangements against the requirements of the Cyber and Data Protection Act [Chapter 12:07], including any data subject/consent processes and breach notification arrangements.": "ITGC",
+    "Review third-party and cloud security arrangements - contracts, security clauses/SLAs, and any independent assurance reports (e.g. SOC 2) obtained over key providers - for a sample of critical third parties.": "ITGC",
+    "Evaluate the entity's encryption policy/standard for data at rest and in transit (e.g. database/disk encryption, TLS enforcement) and confirm it has been formally approved.": "ITGC",
+    "Test encryption configuration for a sample of critical systems/databases holding sensitive data (at rest) and key data transmission channels (in transit) against the entity's encryption standard.": "Substantive",
+    "Evaluate Data Loss Prevention (DLP) arrangements - policy coverage and any DLP tooling over sensitive data egress channels (email, removable media, cloud upload) - for design adequacy.": "ITGC",
+    "Test Identity & Access Management (IAM) controls for a sample of critical systems - authentication strength (including multi-factor authentication for privileged/remote access), privileged access management, and segregation of duties.": "Substantive",
+    "Review the ICT governance and strategy documentation and assess whether it is approved, current, and aligned to the entity's objectives.": "ITGC",
+    "Test the change and release management process for a sample of system changes, including authorisation, testing, and segregation between development and production environments.": "Substantive",
+    "For a sample of systems developed or acquired in the period, assess whether appropriate project governance, testing, and user acceptance procedures were followed.": "Substantive",
+    "Test IT operations controls (job scheduling, incident/problem management, capacity management) for a sample period.": "Substantive",
+    "Test backup and disaster recovery arrangements, including evidence of successful backup completion and a recent restore/recovery test.": "Substantive",
+    "Review the business continuity plan for IT-dependent operations and assess whether it has been tested within a reasonable period.": "ITGC",
+    "Review the entity's IT asset and software lifecycle management process - hardware/software inventory, patch management, end-of-life/end-of-support tracking, and software licensing compliance.": "ITGC",
+    "Test a sample of IT assets against the asset register/inventory and confirm patch levels and support status, in particular for any end-of-life hardware or software identified.": "Substantive",
+    "Evaluate the entity's AML/CFT policies and procedures against the Money Laundering and Proceeds of Crime Act [Chapter 9:24] and applicable Financial Intelligence Unit guidance.": "ITGC",
+    "Test customer due diligence (CDD) procedures for a sample of new customer onboardings, including identification, verification, and risk-rating.": "Substantive",
+    "Test transaction monitoring and sanctions screening arrangements for a sample period, including follow-up of any alerts generated.": "Substantive",
+    "Review suspicious transaction reporting arrangements and, for any reports filed in the period, assess timeliness and record-keeping.": "ITGC",
+    "Test record-keeping of CDD information and transaction records for a sample of customers/transactions against the entity's retention policy and statutory requirements.": "Substantive",
+    "Evaluate the configuration of the automated transaction monitoring and sanctions/PEP screening system - rule/scenario library, name-matching thresholds and fuzzy-matching logic - and assess whether calibration is periodically reviewed and approved.": "ITGC",
+    "Test a sample of system-generated alerts for evidence of false-positive/false-negative tuning effectiveness, including review of any threshold or rule changes made in the period and their authorisation.": "Substantive",
+    "Test the completeness and integrity of data ingested into the transaction monitoring/screening system from core banking or other source systems for a sample period (e.g. reconciling transaction counts/values between the source system and the monitoring system).": "Substantive",
+    "Evaluate the system's audit trail/logging of screening decisions, alert dispositions and manual overrides for completeness, and confirm it is tamper-evident/access-restricted.": "ITGC",
 }
 
 BUSINESS_IT_AREA_REFERENCES = {
@@ -3344,6 +3411,15 @@ class SubstantiveProcedureItem(db.Model):
     trigger_event = db.Column(db.String(200))
     responsible_role = db.Column(db.String(100))
     target_output = db.Column(db.String(200))
+
+    # Only populated on a Business Intelligence and IT Engagement (see
+    # BUSINESS_IT_PROCEDURE_KIND above) - "ITGC" for a test of the underlying
+    # IT general control environment, "Substantive" for a data-driven/
+    # technical validation procedure. Left blank (and not shown) on every
+    # other engagement type, same "reuse a generic column for one type's
+    # extra detail" approach as trigger_event/responsible_role/target_output
+    # above for Secretarial.
+    procedure_kind = db.Column(db.String(20))
 
     def __repr__(self):
         return f"<SubstantiveProcedureItem area={self.area_id}>"
@@ -5406,6 +5482,8 @@ BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS = [
     ("Background check", "Has the entity had any publicly reported cyber security incidents, data breaches, or regulatory findings relating to IT, information security or AML/CFT compliance?"),
     ("Background check", "Is there evidence of a mature (or, conversely, an absent/ad hoc) IT governance and control environment based on preliminary enquiry?"),
     ("Background check", "Are there indicators of significant IT change (system migrations, outsourcing, M&A/integration) that could heighten engagement risk?"),
+    ("Background check", "Does the entity rely on legacy or end-of-life systems for any critical financial or operational processes?"),
+    ("Background check", "Does the entity rely on third-party vendor hosting (SaaS/cloud) for critical systems, and if so, is there visibility over that vendor's own security/compliance posture?"),
     ("Independence", "Does the firm or any engagement team member have a financial interest in, or a close relationship with, the entity's IT service providers, cloud vendors, or cyber security vendors?"),
     ("Independence", "Has the firm previously provided IT implementation, cyber security remediation, or AML/CFT advisory services to this entity that would create a self-review threat over the same subject matter now being assessed?"),
     ("Independence", "Are the proposed engagement team members free of any relationship that could compromise objectivity when assessing the entity's own IT/security/AML controls?"),
@@ -5415,6 +5493,11 @@ BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS = [
     ("Competence", "Is the team familiar with the relevant Zimbabwean legal/regulatory framework - the Cyber and Data Protection Act [Chapter 12:07], the Money Laundering and Proceeds of Crime Act [Chapter 9:24], and applicable FIU guidance?"),
     ("Competence", "Has the logistics of accessing the entity's systems been agreed (read-only access levels, supervised access, remote vs on-site testing, timing to avoid disrupting live operations)?"),
     ("Competence", "Can the firm resource this engagement without overextending the specialists required, given other concurrent commitments?"),
+    ("Competence - Management Integrity & Cooperativeness", "Has management indicated a willingness to grant the engagement team full read-only administrative access to system and security logs (e.g. SIEM, firewall, access control logs) for the period under review?"),
+    ("Competence - Management Integrity & Cooperativeness", "Has management indicated a willingness to provide access to relevant source code repositories (for in-house developed systems) for review, where applicable?"),
+    ("Competence - Management Integrity & Cooperativeness", "Has management indicated a willingness to provide system configuration exports/documentation for key infrastructure and application components?"),
+    ("Competence - Management Integrity & Cooperativeness", "Has management indicated a willingness to provide database schema documentation and appropriate read-only database access for testing purposes?"),
+    ("Competence - Management Integrity & Cooperativeness", "Based on preliminary engagement with management, is there any indication of reluctance, evasiveness, or resistance to independent scrutiny of the IT environment that should factor into the accept/decline decision?"),
     ("Regulatory", "Have appropriate confidentiality and data-handling arrangements been agreed for any highly sensitive data (personal information, security configurations, vulnerability findings) that will be accessed or generated during the engagement?"),
     ("Regulatory", "Does the scope of testing (e.g. any vulnerability scanning or penetration testing) require a formal rules-of-engagement/authorisation letter to avoid any suggestion of unauthorised system access?"),
     ("Regulatory", "Are there sector-specific regulatory considerations (e.g. POTRAZ, RBZ) that apply to this entity's IT/cyber/AML obligations and should shape the scope?"),

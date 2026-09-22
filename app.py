@@ -74,6 +74,7 @@ def _add_missing_columns():
         "substantive_procedure_item": [
             ("tickmark_id", "INTEGER"),
             ("trigger_event", "VARCHAR(200)"), ("responsible_role", "VARCHAR(100)"), ("target_output", "VARCHAR(200)"),
+            ("procedure_kind", "VARCHAR(20)"),
         ],
         "engagement_task": [
             ("completed_by_id", "INTEGER"),
