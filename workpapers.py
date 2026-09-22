@@ -980,10 +980,13 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
     area_refs: {area_name: reference code string}"""
     is_forensic = engagement.type == "Investigative Engagement"
     is_business_it = engagement.type == "Business Intelligence and IT Engagements"
+    is_secretarial = engagement.type == "Secretarial"
     if is_forensic:
         title, ref_prefix = "Investigative Procedures Programme", "IP"
     elif is_business_it:
         title, ref_prefix = "IT & Cyber Assurance Procedures Programme", "ITP"
+    elif is_secretarial:
+        title, ref_prefix = "Secretarial Execution Plan", "EXE"
     else:
         title, ref_prefix = "Substantive Procedures Programme", "SP"
     doc = _new_document(title, engagement, subtitle=f"Ref. {ref_prefix}-1")
@@ -994,17 +997,37 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
         _add_heading(doc, f"{ref} — {area_name}" if ref else area_name, level=1)
         items = area.items if area else []
         if items:
-            table = doc.add_table(rows=1, cols=5)
+            # A Secretarial Execution Plan gets three extra columns
+            # (Trigger/Event, Lead Responsible, Target Output) matching the
+            # firm's Practical Secretarial Execution Plan Schedule - every
+            # other engagement type keeps the original 5-column layout.
+            cols = 8 if is_secretarial else 5
+            table = doc.add_table(rows=1, cols=cols)
             hdr = table.rows[0].cells
-            hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text, hdr[4].text = "Procedure", "Source", "Status", "Notes", "Tickmark"
+            if is_secretarial:
+                headers = ["Task", "Trigger / Event", "Lead Responsible", "Target Output", "Source", "Status", "Notes", "Tickmark"]
+            else:
+                headers = ["Procedure", "Source", "Status", "Notes", "Tickmark"]
+            for i, h in enumerate(headers):
+                hdr[i].text = h
             _style_table(table)
             for item in items:
                 row = table.add_row().cells
-                row[0].text = item.procedure_text
-                row[1].text = item.source
-                row[2].text = item.status
-                row[3].text = item.notes or ""
-                row[4].text = item.tickmark.symbol if item.tickmark else ""
+                if is_secretarial:
+                    row[0].text = item.procedure_text
+                    row[1].text = item.trigger_event or ""
+                    row[2].text = item.responsible_role or ""
+                    row[3].text = item.target_output or ""
+                    row[4].text = item.source
+                    row[5].text = item.status
+                    row[6].text = item.notes or ""
+                    row[7].text = item.tickmark.symbol if item.tickmark else ""
+                else:
+                    row[0].text = item.procedure_text
+                    row[1].text = item.source
+                    row[2].text = item.status
+                    row[3].text = item.notes or ""
+                    row[4].text = item.tickmark.symbol if item.tickmark else ""
         else:
             doc.add_paragraph("No procedures recorded for this area.")
         if area:
@@ -1024,25 +1047,33 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
 def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, area_refs):
     is_forensic = engagement.type == "Investigative Engagement"
     is_business_it = engagement.type == "Business Intelligence and IT Engagements"
+    is_secretarial = engagement.type == "Secretarial"
     if is_forensic:
         sheet_title = "Investigative Procedures Programme — Ref. IP-1"
     elif is_business_it:
         sheet_title = "IT & Cyber Assurance Procedures Programme — Ref. ITP-1"
+    elif is_secretarial:
+        sheet_title = "Secretarial Execution Plan — Ref. EXE-1"
     else:
         sheet_title = "Substantive Procedures Programme — Ref. SP-1"
     wb, ws = _new_workbook_sheet(sheet_title, engagement, "Programme")
 
     row = 7
-    row = _header_row(ws, row, ["Ref.", "Area", "Procedure", "Source", "Status", "Notes", "Tickmark"])
+    if is_secretarial:
+        headers = ["Ref.", "Workstream", "Task", "Trigger / Event", "Lead Responsible", "Target Output", "Source", "Status", "Notes", "Tickmark"]
+    else:
+        headers = ["Ref.", "Area", "Procedure", "Source", "Status", "Notes", "Tickmark"]
+    row = _header_row(ws, row, headers)
     for area_name in area_order:
         area = areas_by_name.get(area_name)
         ref = area_refs.get(area_name, "")
         items = area.items if area else []
+        last_col = len(headers)
         if not items:
             ws.cell(row=row, column=1, value=ref).border = _BORDER
             ws.cell(row=row, column=2, value=area_name).border = _BORDER
             ws.cell(row=row, column=3, value="(no procedures recorded)").border = _BORDER
-            for col in (4, 5, 6, 7):
+            for col in range(4, last_col + 1):
                 ws.cell(row=row, column=col, value="").border = _BORDER
             row += 1
             continue
@@ -1050,13 +1081,25 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
             ws.cell(row=row, column=1, value=ref if i == 0 else "").border = _BORDER
             ws.cell(row=row, column=2, value=area_name if i == 0 else "").border = _BORDER
             ws.cell(row=row, column=3, value=item.procedure_text).border = _BORDER
-            ws.cell(row=row, column=4, value=item.source).border = _BORDER
-            ws.cell(row=row, column=5, value=item.status).border = _BORDER
-            ws.cell(row=row, column=6, value=item.notes or "").border = _BORDER
-            ws.cell(row=row, column=7, value=item.tickmark.symbol if item.tickmark else "").border = _BORDER
+            if is_secretarial:
+                ws.cell(row=row, column=4, value=item.trigger_event or "").border = _BORDER
+                ws.cell(row=row, column=5, value=item.responsible_role or "").border = _BORDER
+                ws.cell(row=row, column=6, value=item.target_output or "").border = _BORDER
+                ws.cell(row=row, column=7, value=item.source).border = _BORDER
+                ws.cell(row=row, column=8, value=item.status).border = _BORDER
+                ws.cell(row=row, column=9, value=item.notes or "").border = _BORDER
+                ws.cell(row=row, column=10, value=item.tickmark.symbol if item.tickmark else "").border = _BORDER
+            else:
+                ws.cell(row=row, column=4, value=item.source).border = _BORDER
+                ws.cell(row=row, column=5, value=item.status).border = _BORDER
+                ws.cell(row=row, column=6, value=item.notes or "").border = _BORDER
+                ws.cell(row=row, column=7, value=item.tickmark.symbol if item.tickmark else "").border = _BORDER
             row += 1
 
-    _autofit(ws, [8, 28, 55, 12, 14, 30, 10])
+    if is_secretarial:
+        _autofit(ws, [8, 24, 45, 22, 16, 30, 12, 14, 26, 10])
+    else:
+        _autofit(ws, [8, 28, 55, 12, 14, 30, 10])
     return _finish_wb(wb)
 
 

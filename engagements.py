@@ -14,7 +14,8 @@ from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation, TimeSheet, TimeEntry,
     RiskAssessment, MaterialityCalculation, EntityUnderstanding, AuditStrategy, AUDIT_STRATEGY_PHASE_STATUSES,
-    AnalyticalReview, AnalyticalReviewLine,
+    SecretarialPlan,
+    AnalyticalReview, AnalyticalReviewLine, SECRETARIAL_ANALYTICAL_REVIEW_POINTS,
     ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     RISK_CATEGORIES,
     SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
@@ -25,19 +26,21 @@ from models import (
     CASH_FLOW_METHODS, CASH_FLOW_METHOD_LABELS, PIE_CRITERIA, SME_ACT_SECTORS, SME_ACT_SIZE_BANDS,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
     FinalisationChecklist, FinalisationChecklistItem, DEFAULT_FINALISATION_CHECKLIST_ITEMS, FORENSIC_FINALISATION_CHECKLIST_ITEMS,
-    BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS,
-    AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES, BUSINESS_IT_AREA_REFERENCES,
+    BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS, SECRETARIAL_FINALISATION_CHECKLIST_ITEMS,
+    AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES, BUSINESS_IT_AREA_REFERENCES, SECRETARIAL_AREA_REFERENCES,
     EngagementQuery, QueryReply,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
-    SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
+    SECRETARIAL_SUBDIVISIONS, SECRETARIAL_ACTIVITIES, SECRETARIAL_ACTIVITY_LABELS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS,
     FORENSIC_RISK_LIKELIHOOD_QUESTIONS, FORENSIC_RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
     BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS, BUSINESS_IT_RISK_IMPACT_QUESTIONS,
+    SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS, SECRETARIAL_RISK_IMPACT_QUESTIONS,
     ENTITY_UNDERSTANDING_FIELDS, EntityUnderstandingChecklistItem, FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
-    BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
+    BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS, SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
     FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES,
     BUSINESS_IT_SUBSTANTIVE_AREAS, BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES,
+    SECRETARIAL_SUBSTANTIVE_AREAS, SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES, SECRETARIAL_EXECUTION_TASK_DETAILS,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
     Tickmark, WORKPAPER_SECTIONS, workpaper_reference, filing_reference, effectively_reviewed,
@@ -156,14 +159,16 @@ def new_engagement():
             flash("Please select a client.", "danger")
             return render_template("engagements/form.html", engagement=None, clients=clients, users=users,
                                     templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
-                                    subdivisions=SECRETARIAL_SUBDIVISIONS)
+                                    subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES)
 
         engagement_type = request.form.get("type", "Audit")
+        selected_activities = request.form.getlist("secretarial_activities")
         engagement = Engagement(
             client_id=int(client_id),
             title=request.form.get("title", "").strip(),
             type=engagement_type,
             subdivision=(request.form.get("subdivision", "").strip() or None) if engagement_type == "Secretarial" else None,
+            secretarial_activities=(",".join(selected_activities) or None) if engagement_type == "Secretarial" else None,
             status=request.form.get("status", "Planning"),
             description=request.form.get("description", "").strip(),
             partner_id=request.form.get("partner_id") or None,
@@ -202,7 +207,7 @@ def new_engagement():
 
     return render_template("engagements/form.html", engagement=None, clients=clients, users=users,
                             templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
-                            subdivisions=SECRETARIAL_SUBDIVISIONS)
+                            subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES)
 
 
 @engagements_bp.route("/<int:engagement_id>/edit", methods=["GET", "POST"])
@@ -218,6 +223,7 @@ def edit_engagement(engagement_id):
         engagement.title = request.form.get("title", "").strip()
         engagement.type = request.form.get("type", "Audit")
         engagement.subdivision = (request.form.get("subdivision", "").strip() or None) if engagement.type == "Secretarial" else None
+        engagement.secretarial_activities = (",".join(request.form.getlist("secretarial_activities")) or None) if engagement.type == "Secretarial" else None
         engagement.status = request.form.get("status", "Planning")
         engagement.description = request.form.get("description", "").strip()
         engagement.partner_id = request.form.get("partner_id") or None
@@ -240,7 +246,7 @@ def edit_engagement(engagement_id):
 
     return render_template("engagements/form.html", engagement=engagement, clients=clients, users=users,
                             templates=[], types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
-                            subdivisions=SECRETARIAL_SUBDIVISIONS)
+                            subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES)
 
 
 @engagements_bp.route("/<int:engagement_id>/delete", methods=["POST"])
@@ -255,6 +261,35 @@ def delete_engagement(engagement_id):
     db.session.commit()
     flash("Engagement deleted.", "info")
     return redirect(url_for("clients.view_client", client_id=client_id))
+
+
+def _secretarial_compliance_calendar_suggestions(period_end):
+    """Suggested (never auto-filled) dates for the four Annual Statutory
+    Compliance Calendar milestones on the Secretarial Engagement Plan's
+    Pillar 2, anchored on the client's financial year-end - see
+    SecretarialPlan.draft_financials_target etc. Returns None if the
+    engagement has no period_end set yet, same "nothing to suggest until
+    there's a real date to anchor on" behaviour as elsewhere in this app.
+    Purely a hint shown next to each date field; the preparer always types
+    (or overrides) the actual date themselves."""
+    if not period_end:
+        return None
+
+    def _add_months(d, months):
+        month = d.month - 1 + months
+        year = d.year + month // 12
+        month = month % 12 + 1
+        day = min(d.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
+                          31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
+        return date(year, month, day)
+
+    agm_target = _add_months(period_end, 6)
+    return {
+        "draft_financials_target": _add_months(period_end, 4),
+        "agm_notice_target": agm_target - timedelta(days=21),
+        "agm_target": agm_target,
+        "annual_return_target": agm_target + timedelta(days=42),
+    }
 
 
 @engagements_bp.route("/<int:engagement_id>")
@@ -290,6 +325,12 @@ def view_engagement(engagement_id):
     client_key_people = ClientKeyPerson.query.filter_by(client_id=engagement.client_id, status="Confirmed").order_by(ClientKeyPerson.full_name).all()
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
     tab = request.args.get("tab", "overview")
+    # Trial Balance is removed entirely for Secretarial engagements (per the
+    # firm's instruction) - there's no nav link to it (see base template),
+    # but guard the tab param directly too in case an old link/bookmark
+    # still points at it.
+    if tab == "trial_balance" and engagement.type == "Secretarial":
+        tab = "overview"
     # Document Templates matching this engagement's type (Audit/Assurance/
     # Consulting) - shown on the Documents tab so the right blank
     # letters/workpapers for this client's engagement are one click away,
@@ -308,17 +349,26 @@ def view_engagement(engagement_id):
     # mirrors.
     is_forensic_risk = engagement.type == "Investigative Engagement"
     is_business_it_risk = engagement.type == "Business Intelligence and IT Engagements"
+    is_secretarial = engagement.type == "Secretarial"
     if is_forensic_risk:
         likelihood_questions = FORENSIC_RISK_LIKELIHOOD_QUESTIONS
         impact_questions = FORENSIC_RISK_IMPACT_QUESTIONS
     elif is_business_it_risk:
         likelihood_questions = BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS
         impact_questions = BUSINESS_IT_RISK_IMPACT_QUESTIONS
+    elif is_secretarial:
+        likelihood_questions = SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS
+        impact_questions = SECRETARIAL_RISK_IMPACT_QUESTIONS
     else:
         likelihood_questions = RISK_LIKELIHOOD_QUESTIONS
         impact_questions = RISK_IMPACT_QUESTIONS
     materiality = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
     audit_strategy = AuditStrategy.query.filter_by(engagement_id=engagement_id).first() if is_forensic_risk else None
+    # The Secretarial Engagement Plan - what the Planning tab is replaced
+    # with on a Secretarial engagement, exactly like audit_strategy above
+    # replaces it for an Investigative Engagement.
+    secretarial_plan = SecretarialPlan.query.filter_by(engagement_id=engagement_id).first() if is_secretarial else None
+    secretarial_compliance_suggestions = _secretarial_compliance_calendar_suggestions(engagement.period_end) if is_secretarial else None
     entity_understanding = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
     # Public-information scans live on the Client (see models.
     # EntityPublicResearch/company_documents.run_public_research) since the
@@ -436,6 +486,9 @@ def view_engagement(engagement_id):
     elif is_business_it_risk:
         substantive_area_names = BUSINESS_IT_SUBSTANTIVE_AREAS
         substantive_area_refs = BUSINESS_IT_AREA_REFERENCES
+    elif is_secretarial:
+        substantive_area_names = SECRETARIAL_SUBSTANTIVE_AREAS
+        substantive_area_refs = SECRETARIAL_AREA_REFERENCES
     else:
         substantive_area_names = AUDIT_AREAS
         substantive_area_refs = AUDIT_AREA_REFERENCES
@@ -497,9 +550,13 @@ def view_engagement(engagement_id):
         likelihood_questions=likelihood_questions,
         impact_questions=impact_questions,
         is_forensic_risk=is_forensic_risk,
+        is_secretarial=is_secretarial,
         materiality=materiality,
         audit_strategy=audit_strategy,
         audit_strategy_phase_statuses=AUDIT_STRATEGY_PHASE_STATUSES,
+        secretarial_plan=secretarial_plan,
+        secretarial_compliance_suggestions=secretarial_compliance_suggestions,
+        secretarial_activities=SECRETARIAL_ACTIVITIES,
         scope_suggestion=scope_suggestion,
         entity_understanding=entity_understanding,
         entity_fields=ENTITY_UNDERSTANDING_FIELDS,
@@ -819,21 +876,31 @@ def _get_or_create_entity_understanding(engagement_id):
 @login_required
 def seed_entity_checklist(engagement_id):
     """Populate the Understanding Business/Assignment checklist with the
-    firm's Forensic Audit questions (Investigative Engagements) or its
+    firm's Forensic Audit questions (Investigative Engagements), its
     cyber/IT/AML-CFT entity-understanding questions (Business Intelligence
-    and IT Engagements) - mirrors acceptance.seed_acceptance_checklist: only
-    does anything the first time, so it's safe to expose as a single
-    button."""
+    and IT Engagements), or its COBE-based Secretarial Client Business
+    Understanding Questionnaire (Secretarial engagements, filtered to the
+    engagement's selected Activities - see Engagement.secretarial_activities
+    and SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS) - mirrors
+    acceptance.seed_acceptance_checklist: only does anything the first time,
+    so it's safe to expose as a single button."""
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     record = _get_or_create_entity_understanding(engagement_id)
     if record.checklist_items:
         flash("The checklist already has items on it.", "info")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
-    checklist_items = (
-        BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS if engagement.type == "Business Intelligence and IT Engagements"
-        else FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
-    )
+    if engagement.type == "Business Intelligence and IT Engagements":
+        checklist_items = BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+    elif engagement.type == "Secretarial":
+        selected_activities = set(engagement.secretarial_activity_list)
+        checklist_items = [
+            (section, item_text)
+            for section, item_text, activities in SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+            if not selected_activities or selected_activities & set(activities)
+        ]
+    else:
+        checklist_items = FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
     for order, (section, item_text) in enumerate(checklist_items, start=1):
         db.session.add(EntityUnderstandingChecklistItem(
             entity_understanding_id=record.id,
@@ -998,6 +1065,59 @@ def save_analytical_review_threshold(engagement_id):
     _touch_analytical_review(review)
     db.session.commit()
     flash("Significance threshold updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
+
+@engagements_bp.route("/<int:engagement_id>/analytical-review/necessity", methods=["POST"])
+@login_required
+def save_analytical_review_necessity(engagement_id):
+    """Records whether Analytical Review has been ticked as NOT necessary
+    for this assignment - only offered on Secretarial engagements (per the
+    firm's Secretarial Analytical Review guidance: a one-off filing may not
+    warrant a full governance/compliance review), but the route itself
+    works for any engagement type since the underlying column is generic
+    (see AnalyticalReview.not_necessary)."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    review = _get_or_create_analytical_review(engagement_id)
+    review.not_necessary = request.form.get("not_necessary") == "on"
+    review.not_necessary_reason = request.form.get("not_necessary_reason", "").strip()
+    _touch_analytical_review(review)
+    db.session.commit()
+    if review.not_necessary:
+        flash("Analytical Review marked as not necessary for this assignment.", "info")
+    else:
+        flash("Analytical Review marked as necessary for this assignment.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
+
+@engagements_bp.route("/<int:engagement_id>/analytical-review/seed-secretarial", methods=["POST"])
+@login_required
+def seed_secretarial_analytical_review(engagement_id):
+    """Populate the Analytical Review with the firm's Secretarial
+    governance/compliance analytical points (see SECRETARIAL_ANALYTICAL_
+    REVIEW_POINTS) - the Secretarial equivalent of generate_analytical_
+    review_from_trial_balance above, seeding plain label + narrative-
+    explanation lines (no $ amounts) instead of TB-derived figures, since
+    secretarial analytical procedures look at compliance trends and
+    governance metrics rather than financial ratios. Only adds points not
+    already present (matched by label), so it's safe to run again."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    review = _get_or_create_analytical_review(engagement_id)
+    existing_labels = {l.label for l in review.lines}
+    added = 0
+    for section, point_text in SECRETARIAL_ANALYTICAL_REVIEW_POINTS:
+        label = f"{section} - {point_text}"
+        if label not in existing_labels:
+            db.session.add(AnalyticalReviewLine(analytical_review_id=review.id, label=label, source="manual"))
+            added += 1
+    if added:
+        _touch_analytical_review(review)
+        db.session.commit()
+        flash(f"Added {added} secretarial analytical review point(s) - write up the narrative explanation for each.", "success")
+    else:
+        flash("The default secretarial analytical review points are already there below.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
 
 
@@ -1193,6 +1313,8 @@ def save_risk_assessment(engagement_id):
         questions = FORENSIC_RISK_LIKELIHOOD_QUESTIONS + FORENSIC_RISK_IMPACT_QUESTIONS
     elif engagement.type == "Business Intelligence and IT Engagements":
         questions = BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS + BUSINESS_IT_RISK_IMPACT_QUESTIONS
+    elif engagement.type == "Secretarial":
+        questions = SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS + SECRETARIAL_RISK_IMPACT_QUESTIONS
     else:
         questions = RISK_LIKELIHOOD_QUESTIONS + RISK_IMPACT_QUESTIONS
 
@@ -2119,6 +2241,118 @@ def partner_unsign_audit_strategy(strategy_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=strategy.engagement_id, tab="planning"))
 
 
+# ---------- Secretarial Engagement Plan (Secretarial engagements only - replaces the ordinary Planning tab content) ----------
+
+@engagements_bp.route("/<int:engagement_id>/secretarial-plan/save", methods=["POST"])
+@login_required
+def save_secretarial_plan(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    plan = SecretarialPlan.query.filter_by(engagement_id=engagement_id).first()
+    if not plan:
+        plan = SecretarialPlan(engagement_id=engagement_id)
+        db.session.add(plan)
+
+    plan.entity_categorization = request.form.get("entity_categorization", "").strip()
+    plan.sector_regulators = request.form.get("sector_regulators", "").strip()
+    plan.constitutional_constraints = request.form.get("constitutional_constraints", "").strip()
+
+    for field in ("draft_financials_target", "agm_notice_target", "agm_target", "annual_return_target"):
+        raw = request.form.get(field, "").strip()
+        setattr(plan, field, datetime.strptime(raw, "%Y-%m-%d").date() if raw else None)
+    plan.compliance_calendar_notes = request.form.get("compliance_calendar_notes", "").strip()
+
+    plan.meeting_schedule_notes = request.form.get("meeting_schedule_notes", "").strip()
+    plan.agenda_preplanning_notes = request.form.get("agenda_preplanning_notes", "").strip()
+    plan.document_deadline_notes = request.form.get("document_deadline_notes", "").strip()
+
+    plan.transactional_trigger_notes = request.form.get("transactional_trigger_notes", "").strip()
+
+    plan.onboarding_risk_integration_notes = request.form.get("onboarding_risk_integration_notes", "").strip()
+    plan.remediation_milestones_notes = request.form.get("remediation_milestones_notes", "").strip()
+    plan.register_reconciliation_notes = request.form.get("register_reconciliation_notes", "").strip()
+
+    plan.completed_by_id = current_user.id
+    plan.completed_at = datetime.utcnow()
+    # Re-saving the plan invalidates any earlier review/partner sign-off.
+    plan.reviewed_by_id = None
+    plan.reviewed_at = None
+    plan.partner_signed_by_id = None
+    plan.partner_signed_at = None
+
+    db.session.commit()
+    flash("Secretarial Engagement Plan saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/secretarial-plan/<int:plan_id>/review", methods=["POST"])
+@login_required
+def review_secretarial_plan(plan_id):
+    plan = SecretarialPlan.query.get_or_404(plan_id)
+    _ensure_engagement_access(plan.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if not plan.is_complete:
+        flash("Fill in the Entity Profile, Board Cycle, Trigger Mapping and Risk & Quality fields before this can be reviewed.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=plan.engagement_id, tab="planning"))
+    if plan.completed_by_id == current_user.id:
+        flash("You can't review a secretarial plan you prepared yourself - ask another supervisor/partner to review it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=plan.engagement_id, tab="planning"))
+    plan.reviewed_by_id = current_user.id
+    plan.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Secretarial Engagement Plan marked as reviewed.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=plan.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/secretarial-plan/<int:plan_id>/unreview", methods=["POST"])
+@login_required
+def unreview_secretarial_plan(plan_id):
+    plan = SecretarialPlan.query.get_or_404(plan_id)
+    _ensure_engagement_access(plan.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    plan.reviewed_by_id = None
+    plan.reviewed_at = None
+    db.session.commit()
+    flash("Review sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=plan.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/secretarial-plan/<int:plan_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_secretarial_plan(plan_id):
+    plan = SecretarialPlan.query.get_or_404(plan_id)
+    _ensure_engagement_access(plan.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if not plan.is_complete:
+        flash("Fill in the Entity Profile, Board Cycle, Trigger Mapping and Risk & Quality fields before the partner can sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=plan.engagement_id, tab="planning"))
+    if plan.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a plan you prepared yourself - ask another partner to sign off.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=plan.engagement_id, tab="planning"))
+    plan.partner_signed_by_id = current_user.id
+    plan.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=plan.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/secretarial-plan/<int:plan_id>/partner-unsign", methods=["POST"])
+@login_required
+def partner_unsign_secretarial_plan(plan_id):
+    plan = SecretarialPlan.query.get_or_404(plan_id)
+    _ensure_engagement_access(plan.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    plan.partner_signed_by_id = None
+    plan.partner_signed_at = None
+    db.session.commit()
+    flash("Partner sign-off removed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=plan.engagement_id, tab="planning"))
+
+
 # ---------- Finalisation checklist ("what's left to close this engagement") ----------
 
 def _get_or_create_finalisation_checklist(engagement_id):
@@ -2137,10 +2371,11 @@ def seed_finalisation_checklist(engagement_id):
     the forensic set (see FORENSIC_FINALISATION_CHECKLIST_ITEMS) on an
     Investigative Engagement, the cyber/IT/AML-CFT set (see BUSINESS_IT_
     FINALISATION_CHECKLIST_ITEMS) on a Business Intelligence and IT
-    Engagement, the ordinary close-out set (see DEFAULT_
-    FINALISATION_CHECKLIST_ITEMS) otherwise. Mirrors seed_entity_checklist:
-    only does anything the first time, so it's safe to expose as a single
-    button."""
+    Engagement, the COBE-compliant five-phase set (see SECRETARIAL_
+    FINALISATION_CHECKLIST_ITEMS) on a Secretarial engagement, the ordinary
+    close-out set (see DEFAULT_FINALISATION_CHECKLIST_ITEMS) otherwise.
+    Mirrors seed_entity_checklist: only does anything the first time, so
+    it's safe to expose as a single button."""
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     record = _get_or_create_finalisation_checklist(engagement_id)
@@ -2151,6 +2386,8 @@ def seed_finalisation_checklist(engagement_id):
         source_items = FORENSIC_FINALISATION_CHECKLIST_ITEMS
     elif engagement.type == "Business Intelligence and IT Engagements":
         source_items = BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS
+    elif engagement.type == "Secretarial":
+        source_items = SECRETARIAL_FINALISATION_CHECKLIST_ITEMS
     else:
         source_items = DEFAULT_FINALISATION_CHECKLIST_ITEMS
     for order, (section, item_text) in enumerate(source_items, start=1):
@@ -3231,15 +3468,19 @@ def partner_unsign_workpaper_narrative(narrative_id):
 
 def _substantive_areas_for(engagement):
     """The area names valid for this engagement's Substantive Procedures tab
-    - the four forensic evidence-type categories on an Investigative
-    Engagement, the four cyber/IT/AML-CFT assurance domains on a Business
-    Intelligence and IT Engagement, or the ordinary financial-statement
-    audit areas otherwise. Used wherever an area name submitted from a form
-    needs validating against whichever set is actually in play."""
+    (Execution Plan, on a Secretarial engagement) - the four forensic
+    evidence-type categories on an Investigative Engagement, the four
+    cyber/IT/AML-CFT assurance domains on a Business Intelligence and IT
+    Engagement, the five Execution Plan workstreams on a Secretarial
+    engagement, or the ordinary financial-statement audit areas otherwise.
+    Used wherever an area name submitted from a form needs validating
+    against whichever set is actually in play."""
     if engagement.type == "Investigative Engagement":
         return FORENSIC_SUBSTANTIVE_AREAS
     if engagement.type == "Business Intelligence and IT Engagements":
         return BUSINESS_IT_SUBSTANTIVE_AREAS
+    if engagement.type == "Secretarial":
+        return SECRETARIAL_SUBSTANTIVE_AREAS
     return AUDIT_AREAS
 
 
@@ -3269,6 +3510,7 @@ def sync_substantive_procedures(engagement):
     added."""
     is_forensic = engagement.type == "Investigative Engagement"
     is_business_it = engagement.type == "Business Intelligence and IT Engagements"
+    is_secretarial = engagement.type == "Secretarial"
     if is_forensic:
         areas = FORENSIC_SUBSTANTIVE_AREAS
         baseline = FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES
@@ -3277,6 +3519,11 @@ def sync_substantive_procedures(engagement):
     elif is_business_it:
         areas = BUSINESS_IT_SUBSTANTIVE_AREAS
         baseline = BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES
+        high_risk = False
+        industry_map = {}
+    elif is_secretarial:
+        areas = SECRETARIAL_SUBSTANTIVE_AREAS
+        baseline = SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES
         high_risk = False
         industry_map = {}
     else:
@@ -3304,7 +3551,12 @@ def sync_substantive_procedures(engagement):
         area_changed = False
         for text, source in desired:
             if text not in existing_texts:
-                db.session.add(SubstantiveProcedureItem(area_id=area.id, procedure_text=text, source=source, order=next_order))
+                item = SubstantiveProcedureItem(area_id=area.id, procedure_text=text, source=source, order=next_order)
+                if is_secretarial:
+                    details = SECRETARIAL_EXECUTION_TASK_DETAILS.get(text)
+                    if details:
+                        item.trigger_event, item.responsible_role, item.target_output = details
+                db.session.add(item)
                 next_order += 1
                 added_count += 1
                 area_changed = True
@@ -3353,6 +3605,11 @@ def generate_substantive_procedures(engagement_id):
             flash(f"Generated {added_count} suggested procedure(s) across the four cyber/IT/AML-CFT assurance domains.", "success")
         else:
             flash("No new suggested procedures to add - the full baseline procedure list is already there below.", "info")
+    elif engagement.type == "Secretarial":
+        if added_count:
+            flash(f"Generated {added_count} Execution Plan task(s) across the five secretarial workstreams.", "success")
+        else:
+            flash("No new Execution Plan tasks to add - the full baseline task list is already there below.", "info")
     else:
         risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
         high_risk = bool(risk_assessment and risk_assessment.rating == "High")
@@ -4093,9 +4350,15 @@ def update_substantive_procedure_item(item_id):
     item.notes = request.form.get("notes", item.notes or "").strip()
     tickmark_id = request.form.get("tickmark_id", "").strip()
     item.tickmark_id = int(tickmark_id) if tickmark_id.isdigit() else None
+    if "trigger_event" in request.form:
+        item.trigger_event = request.form.get("trigger_event", "").strip() or None
+    if "responsible_role" in request.form:
+        item.responsible_role = request.form.get("responsible_role", "").strip() or None
+    if "target_output" in request.form:
+        item.target_output = request.form.get("target_output", "").strip() or None
     _touch_substantive_area(area)
     db.session.commit()
-    flash("Procedure updated.", "success")
+    flash("Procedure updated." if area.engagement.type != "Secretarial" else "Task updated.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=area.engagement_id, tab="substantive"))
 
 
@@ -4625,10 +4888,13 @@ def _substantive_programme_context(engagement):
     (see view_engagement), so the generated file always matches the screen."""
     is_forensic = engagement.type == "Investigative Engagement"
     is_business_it = engagement.type == "Business Intelligence and IT Engagements"
+    is_secretarial = engagement.type == "Secretarial"
     if is_forensic:
         area_order, area_refs = FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_AREA_REFERENCES
     elif is_business_it:
         area_order, area_refs = BUSINESS_IT_SUBSTANTIVE_AREAS, BUSINESS_IT_AREA_REFERENCES
+    elif is_secretarial:
+        area_order, area_refs = SECRETARIAL_SUBSTANTIVE_AREAS, SECRETARIAL_AREA_REFERENCES
     else:
         area_order, area_refs = AUDIT_AREAS, AUDIT_AREA_REFERENCES
     areas_by_name = {
@@ -4645,6 +4911,8 @@ def _procedures_programme_label(engagement):
         return "Investigative_Procedures_Programme"
     if engagement.type == "Business Intelligence and IT Engagements":
         return "IT_Cyber_Assurance_Procedures_Programme"
+    if engagement.type == "Secretarial":
+        return "Secretarial_Execution_Plan"
     return "Substantive_Procedures_Programme"
 
 

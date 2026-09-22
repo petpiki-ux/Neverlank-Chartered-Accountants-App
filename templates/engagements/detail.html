@@ -92,9 +92,11 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='entity') }}" class="{% if tab=='entity' %}active{% endif %}">Understanding the Entity{% if entity_understanding and entity_understanding.is_complete %} &#10003;{% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='analytical') }}" class="{% if tab=='analytical' %}active{% endif %}">Analytical Review{% if analytical_review and analytical_review.significant_lines %} ({{ analytical_review.significant_lines|length }} flagged){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}" class="{% if tab=='risks' %}active{% endif %}">Risk Assessment{% if risk_assessment and risk_assessment.rating %} ({{ risk_assessment.rating }}){% else %} (Not started){% endif %}</a>
-  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}" class="{% if tab=='planning' %}active{% endif %}">{% if engagement.type == 'Investigative Engagement' %}Audit Strategy{% else %}Planning{% endif %}</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}" class="{% if tab=='planning' %}active{% endif %}">{% if engagement.type == 'Investigative Engagement' %}Audit Strategy{% elif engagement.type == 'Secretarial' %}Engagement Plan{% else %}Planning{% endif %}</a>
+  {% if engagement.type != 'Secretarial' %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}" class="{% if tab=='trial_balance' %}active{% endif %}">Trial Balance{% if trial_balance and trial_balance.lines %} ({{ trial_balance.lines|length }} accounts){% elif trial_balance and trial_balance.not_applicable %} (N/A){% endif %}</a>
-  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}" class="{% if tab=='substantive' %}active{% endif %}">Substantive Procedures{% if substantive_areas %} ({{ substantive_areas|length }}/{{ audit_areas|length }} areas){% endif %}</a>
+  {% endif %}
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}" class="{% if tab=='substantive' %}active{% endif %}">{% if engagement.type == 'Secretarial' %}Execution Plan{% else %}Substantive Procedures{% endif %}{% if substantive_areas %} ({{ substantive_areas|length }}/{{ audit_areas|length }} areas){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
@@ -231,7 +233,13 @@
     </div>
   {% endmacro %}
 
-  {% set known_prefixes = ['Conflict of Interest & Threat Assessment', 'Enhanced Due Diligence (EDD)', 'Legal Framework & Evidence Control', 'Competence & Scope Realism', 'Engagement letter'] if engagement.type == 'Investigative Engagement' else ['Background check', 'Independence', 'Predecessor', 'Competence', 'Regulatory', 'Engagement letter'] %}
+  {% if engagement.type == 'Investigative Engagement' %}
+  {% set known_prefixes = ['Conflict of Interest & Threat Assessment', 'Enhanced Due Diligence (EDD)', 'Legal Framework & Evidence Control', 'Competence & Scope Realism', 'Engagement letter'] %}
+  {% elif engagement.type == 'Secretarial' %}
+  {% set known_prefixes = ['KYC & Ultimate Beneficial Ownership', 'Authority, Integrity & Client Background', 'Nature of Business & Risk Profile', 'Conflict of Interest & Dispute Assessment', 'Operational Capacity & Commercial Feasibility', 'Engagement letter'] %}
+  {% else %}
+  {% set known_prefixes = ['Background check', 'Independence', 'Predecessor', 'Competence', 'Regulatory', 'Engagement letter'] %}
+  {% endif %}
   {% macro checklist_other(items, prefixes, responses) %}
     {% set leftover = [] %}
     {% for item in items %}
@@ -253,6 +261,8 @@
     <p class="muted" style="font-size:12.5px;">
       {% if engagement.type == 'Investigative Engagement' %}
       Before forensic work starts, the firm works through the Forensic Audit Client Acceptance Questionnaire below and the Engagement Partner records an accept/decline decision.
+      {% elif engagement.type == 'Secretarial' %}
+      Before corporate secretarial work starts, the firm works through the Secretarial Client Acceptance Checklist below (KYC &amp; Ultimate Beneficial Ownership, Authority/Integrity/Client Background, Nature of Business &amp; Risk Profile, Conflict of Interest &amp; Dispute Assessment, and Operational Capacity &amp; Commercial Feasibility) and the Engagement Partner records an accept/decline decision.
       {% else %}
       Before any audit work starts, the firm works through these six items and the Engagement Partner records an accept/decline decision.
       {% endif %}
@@ -317,6 +327,67 @@
     </div>
   </form>
   {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Competence & Scope Realism', engagement, acceptance_checklist_responses) }}{% endif %}
+  {% elif engagement.type == 'Secretarial' %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_kyc_ubo', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">1. KYC &amp; Ultimate Beneficial Ownership</h3>
+      <p class="muted" style="font-size:12px;">Identify the UBO(s), screen for PEP status and sanctions exposure, and confirm source of funds and identity documents.</p>
+      <label><input type="checkbox" name="kyc_ubo_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.kyc_ubo_satisfactory %}checked{% endif %}> Satisfactory - no concerns identified</label>
+      <label for="kyc_ubo_notes">Notes</label>
+      <textarea id="kyc_ubo_notes" name="kyc_ubo_notes" rows="2">{{ client_acceptance.kyc_ubo_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save KYC &amp; Ultimate Beneficial Ownership</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'KYC & Ultimate Beneficial Ownership', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_authority_background', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">2. Authority, Integrity &amp; Client Background</h3>
+      <p class="muted" style="font-size:12px;">Confirm the instructing individual's authority, and check the client's reputation and reasons for the engagement/change of agent.</p>
+      <label><input type="checkbox" name="authority_background_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.authority_background_satisfactory %}checked{% endif %}> Satisfactory - no concerns identified</label>
+      <label for="authority_background_notes">Notes</label>
+      <textarea id="authority_background_notes" name="authority_background_notes" rows="2">{{ client_acceptance.authority_background_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save authority, integrity &amp; client background</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Authority, Integrity & Client Background', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_nature_of_business', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">3. Nature of Business &amp; Risk Profile</h3>
+      <p class="muted" style="font-size:12px;">Assess the intended principal activity, sector risk, licensing needs, and geographical footprint.</p>
+      <label><input type="checkbox" name="nature_of_business_risk_acceptable" style="width:auto;" {% if client_acceptance and client_acceptance.nature_of_business_risk_acceptable %}checked{% endif %}> Acceptable - no concerns identified</label>
+      <label for="nature_of_business_risk_notes">Notes</label>
+      <textarea id="nature_of_business_risk_notes" name="nature_of_business_risk_notes" rows="2">{{ client_acceptance.nature_of_business_risk_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save nature of business &amp; risk profile</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Nature of Business & Risk Profile', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_conflict_dispute', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">4. Conflict of Interest &amp; Dispute Assessment</h3>
+      <p class="muted" style="font-size:12px;">Check for competing/adversarial parties we already represent, and any internal shareholder or director dispute.</p>
+      <label><input type="checkbox" name="conflict_dispute_clear" style="width:auto;" {% if client_acceptance and client_acceptance.conflict_dispute_clear %}checked{% endif %}> Clear - no conflicts or unresolved disputes identified</label>
+      <label for="conflict_dispute_notes">Notes</label>
+      <textarea id="conflict_dispute_notes" name="conflict_dispute_notes" rows="2">{{ client_acceptance.conflict_dispute_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save conflict of interest &amp; dispute assessment</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Conflict of Interest & Dispute Assessment', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_operational_capacity', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">5. Operational Capacity &amp; Commercial Feasibility</h3>
+      <p class="muted" style="font-size:12px;">Confirm we have the expertise/licensing for this structure, a realistic registry timeline, and agreement on fees/retainer.</p>
+      <label><input type="checkbox" name="operational_capacity_confirmed" style="width:auto;" {% if client_acceptance and client_acceptance.operational_capacity_confirmed %}checked{% endif %}> Confirmed - capacity and fee terms are in order</label>
+      <label for="operational_capacity_notes">Notes</label>
+      <textarea id="operational_capacity_notes" name="operational_capacity_notes" rows="2">{{ client_acceptance.operational_capacity_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save operational capacity &amp; commercial feasibility</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Operational Capacity & Commercial Feasibility', engagement, acceptance_checklist_responses) }}{% endif %}
   {% else %}
 
   <form method="post" action="{{ url_for('acceptance.save_acceptance_background', engagement_id=engagement.id) }}">
@@ -680,7 +751,7 @@
     </p>
   </div>
 
-  {% if engagement.type in ('Investigative Engagement', 'Business Intelligence and IT Engagements') %}
+  {% if engagement.type in ('Investigative Engagement', 'Business Intelligence and IT Engagements', 'Secretarial') %}
   {% macro entity_checklist_row(item, responses) %}
     <form method="post" action="{{ url_for('engagements.update_entity_checklist_item', item_id=item.id) }}" class="checklist-row">
       <span class="item-text">{{ item.item_text }}</span>
@@ -719,6 +790,13 @@
       Questions covering the IT environment and infrastructure, data holdings and classification, cyber security posture
       and incident history, information security and access management, ICT governance and operations, and the AML/CFT
       framework and regulatory context - work through each section below before planning fieldwork.
+      {% elif engagement.type == 'Secretarial' %}
+      The firm's Secretarial Client Business Understanding Questionnaire, mapped to the Companies and Other Business
+      Entities Act [Chapter 24:31] (COBE Act) - entity classification and scope, constitutional documents and corporate
+      governance, statutory registers and ownership transparency, capital structure/distributions/solvency, board
+      operations/meetings/documentation, and statutory filings and registry compliance. "Add the firm's default
+      checklist" below seeds only the sections relevant to this engagement's selected Activities (see the Edit
+      Engagement form) - or every section, if none were selected.
       {% else %}
       Forensic Audit questions covering the objectives and scope of the engagement, the legal/regulatory context,
       data and systems access, stakeholders and logistics, and risk and safety - work through each section below
@@ -739,7 +817,11 @@
 
   {% set entity_forensic_sections = ['Objectives & Scope of the Engagement', 'Legal, Regulatory & Governance Context', 'Data, Systems & Access Checklist', 'Stakeholders, Logistics & Timeline', 'Risk Assessment & Safety'] %}
   {% set entity_business_it_sections = ['IT Environment & Infrastructure Overview', 'Data Holdings & Classification', 'Cyber Security Posture & Incident History', 'Information Security & Access Management', 'ICT Governance & Operations', 'AML/CFT Framework & Regulatory Context'] %}
-  {% for section in (entity_business_it_sections if engagement.type == 'Business Intelligence and IT Engagements' else entity_forensic_sections) %}
+  {% set entity_secretarial_sections = ['Entity Classification & Scope', 'Constitutional Documents & Corporate Governance', 'Statutory Registers & Ownership Transparency', 'Capital Structure, Distributions & Solvency', 'Board Operations, Meetings & Documentation', 'Statutory Filings & Registry Compliance'] %}
+  {% if engagement.type == 'Business Intelligence and IT Engagements' %}{% set entity_sections = entity_business_it_sections %}
+  {% elif engagement.type == 'Secretarial' %}{% set entity_sections = entity_secretarial_sections %}
+  {% else %}{% set entity_sections = entity_forensic_sections %}{% endif %}
+  {% for section in entity_sections %}
     {% if entity_understanding %}{{ entity_checklist_section(entity_understanding.checklist_items, section, engagement, acceptance_checklist_responses) }}{% endif %}
   {% endfor %}
   {% else %}
@@ -797,6 +879,21 @@
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
 {% else %}
+  {% if engagement.type == 'Secretarial' %}
+  <div class="card">
+    <h3 class="mt-0">Is Analytical Review necessary for this assignment?</h3>
+    <p class="muted" style="font-size:12.5px;">Not every secretarial assignment warrants a full Analytical Review (e.g. a single-purpose filing job). Tick below to record that it isn't needed for this engagement and note why - otherwise use the governance-focused points below (Board &amp; Governance Activity Trends, Ownership &amp; Capital Structure Analytics, Statutory Filing &amp; Timeline Variance Analysis, Charge &amp; Encumbrance Reconciliation).</p>
+    <form method="post" action="{{ url_for('engagements.save_analytical_review_necessity', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div style="grid-column: span 2;"><label><input type="checkbox" name="not_necessary" style="width:auto;" {% if analytical_review and analytical_review.not_necessary %}checked{% endif %}> Not necessary for this assignment</label></div>
+      <div style="grid-column: span 2;"><label for="not_necessary_reason">Reason</label><input type="text" id="not_necessary_reason" name="not_necessary_reason" placeholder="e.g. Single CR6 filing only - no ongoing governance/compliance scope" value="{{ analytical_review.not_necessary_reason if analytical_review else '' }}"></div>
+      <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Save</button></div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if not (engagement.type == 'Secretarial' and analytical_review and analytical_review.not_necessary) %}
+
+  {% if engagement.type != 'Secretarial' %}
   <div class="card">
     <h3 class="mt-0">Significance threshold</h3>
     <p class="muted" style="font-size:12.5px;">Any line item whose year-on-year variance is at or above this percentage is automatically flagged as significant and worth an explanation. 10% is a common general starting point - adjust per engagement.</p>
@@ -821,9 +918,27 @@
     <div class="empty-state">No preliminary trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">enter or import it on the Trial Balance tab</a> to generate these figures automatically instead of typing them in below.</div>
     {% endif %}
   </div>
+  {% else %}
+  <div class="card">
+    <h3 class="mt-0">Secretarial Analytical Review points</h3>
+    <p class="muted" style="font-size:12.5px;">Governance and compliance-focused analytical points, not financial ratios: Board &amp; Governance Activity Trends, Ownership &amp; Capital Structure Analytics, Statutory Filing &amp; Timeline Variance Analysis, and Charge &amp; Encumbrance Reconciliation.</p>
+    <form method="post" action="{{ url_for('engagements.seed_secretarial_analytical_review', engagement_id=engagement.id) }}" class="inline">
+      <button type="submit" class="btn gold">Add the firm's default secretarial analytical review points</button>
+    </form>
+    <p class="muted" style="font-size:11px;">Safe to click again later - it only adds points that aren't already on the list below.</p>
+  </div>
+  {% endif %}
 
   <div class="card">
-    <h3 class="mt-0">Add line item</h3>
+    <h3 class="mt-0">Add {% if engagement.type == 'Secretarial' %}point{% else %}line item{% endif %}</h3>
+    {% if engagement.type == 'Secretarial' %}
+    <p class="muted" style="font-size:12.5px;">Add a governance/compliance point not covered by the firm's default list above.</p>
+    <form method="post" action="{{ url_for('engagements.add_analytical_review_line', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div style="grid-column: span 2;"><label for="label">Point *</label><input type="text" id="label" name="label" placeholder="e.g. Statutory Filing &amp; Timeline Variance Analysis - late CR6 filings this period" required></div>
+      <div style="grid-column: span 2;"><label for="explanation">Explanation / findings (optional)</label><input type="text" id="explanation" name="explanation"></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add point</button></div>
+    </form>
+    {% else %}
     <p class="muted" style="font-size:12.5px;">Pick a specific account from the trial balance to analyse (its prior/current year figures are filled in automatically from the trial balance), or leave "Manual entry" selected and type a line in by hand - for a rolled-up figure like "Revenue" or "Gross profit" that isn't a single account.</p>
     <form method="post" action="{{ url_for('engagements.add_analytical_review_line', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
       {% if trial_balance and trial_balance.lines %}
@@ -844,10 +959,30 @@
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add line</button></div>
     </form>
     <p class="muted" style="font-size:11px;">Picking an account ignores anything typed into Line item/Prior year/Current year above and uses the account's own figures instead.</p>
+    {% endif %}
   </div>
 
   <div class="card">
     {% if analytical_review and analytical_review.lines %}
+    {% if engagement.type == 'Secretarial' %}
+    <table>
+      <thead><tr><th>Point</th><th>Explanation / findings</th><th></th></tr></thead>
+      <tbody>
+      {% for line in analytical_review.lines %}
+        <tr>
+          <form method="post" action="{{ url_for('engagements.update_analytical_review_line', line_id=line.id) }}" class="inline">
+          <td><input type="text" name="label" value="{{ line.label }}" style="width:320px;margin-bottom:0;">{% if line.source == 'manual' %} <span class="badge" style="font-size:10px;">Firm default</span>{% endif %}</td>
+          <td><input type="text" name="explanation" value="{{ line.explanation or '' }}" style="width:320px;margin-bottom:0;"></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_analytical_review_line', line_id=line.id) }}" class="btn small danger" onclick="return confirm('Delete this point?')">Delete</button>
+          </td>
+          </form>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
     <table>
       <thead><tr><th>Line item</th><th>Prior year</th><th>Current year</th><th>Variance</th><th>Variance %</th><th>Explanation</th><th></th></tr></thead>
       <tbody>
@@ -869,8 +1004,9 @@
       {% endfor %}
       </tbody>
     </table>
+    {% endif %}
     {% else %}
-    <div class="empty-state">No line items yet. Add key figures (revenue, gross profit, expenses, etc.) above to compare current vs prior year.</div>
+    <div class="empty-state">{% if engagement.type == 'Secretarial' %}No points yet. Click "Add the firm's default secretarial analytical review points" above, or add your own.{% else %}No line items yet. Add key figures (revenue, gross profit, expenses, etc.) above to compare current vs prior year.{% endif %}</div>
     {% endif %}
   </div>
 
@@ -903,6 +1039,8 @@
       {% endif %}
     {% endif %}
   </div>
+  {% endif %}
+
   {% endif %}
 
   {{ qmacros.render_queries(engagement, 'analytical', queries_by_section.get('analytical', [])) }}
@@ -1037,7 +1175,7 @@
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
 {% else %}
-  {% if engagement.type != 'Investigative Engagement' %}
+  {% if engagement.type not in ('Investigative Engagement', 'Secretarial') %}
   <div class="card">
     <h3 class="mt-0">Materiality calculator</h3>
     <p class="muted" style="font-size:12.5px;">Enter the client's key figures for the period - the system calculates suggested overall materiality, performance materiality and a "clearly trivial" threshold from them. The % benchmarks are common starting points in practice, not a fixed rule - adjust them and apply professional judgement for this specific engagement.</p>
@@ -1115,7 +1253,7 @@
   {% endif %}
   {% endif %}
 
-  {% if engagement.type != 'Investigative Engagement' %}
+  {% if engagement.type not in ('Investigative Engagement', 'Secretarial') %}
   <div class="card">
     <h3 class="mt-0">Suggested audit approach</h3>
     {% if scope_suggestion %}
@@ -1271,11 +1409,109 @@
     {% endif %}
   </div>
   {% endif %}
+
+  {% elif engagement.type == 'Secretarial' %}
+  <form method="post" action="{{ url_for('engagements.save_secretarial_plan', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">Secretarial Engagement Plan</h3>
+      <p class="muted" style="font-size:12.5px;">Replaces the standard materiality-based Planning tools for a Secretarial engagement - governance and statutory-compliance work is driven by an entity profile, a statutory calendar and a meeting/trigger cadence, not materiality.</p>
+
+      <p class="section-title">1. Entity Profile &amp; Scope Map</p>
+      <label for="entity_categorization">Entity categorisation (private/public company, PBC, cooperative, etc. - COBE Act classification)</label>
+      <textarea id="entity_categorization" name="entity_categorization" rows="2">{{ secretarial_plan.entity_categorization if secretarial_plan else '' }}</textarea>
+      <label for="sector_regulators">Sector &amp; sector-specific regulators (if any)</label>
+      <textarea id="sector_regulators" name="sector_regulators" rows="2">{{ secretarial_plan.sector_regulators if secretarial_plan else '' }}</textarea>
+      <label for="constitutional_constraints">Constitutional constraints (Memorandum/Articles or Constitution restrictions relevant to scope)</label>
+      <textarea id="constitutional_constraints" name="constitutional_constraints" rows="2">{{ secretarial_plan.constitutional_constraints if secretarial_plan else '' }}</textarea>
+
+      <p class="section-title">2. Annual Statutory Compliance Calendar</p>
+      {% if not engagement.period_end %}
+      <p class="muted" style="font-size:11.5px;">Set the engagement's period end (Overview tab) to see suggested dates below - they're a starting point only, never filled in automatically.</p>
+      {% endif %}
+      <div class="form-row">
+        <div>
+          <label for="draft_financials_target">Draft financial statements target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.draft_financials_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
+          <input type="date" id="draft_financials_target" name="draft_financials_target" value="{{ secretarial_plan.draft_financials_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.draft_financials_target else '' }}">
+        </div>
+        <div>
+          <label for="agm_notice_target">AGM notice target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.agm_notice_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
+          <input type="date" id="agm_notice_target" name="agm_notice_target" value="{{ secretarial_plan.agm_notice_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.agm_notice_target else '' }}">
+        </div>
+      </div>
+      <div class="form-row">
+        <div>
+          <label for="agm_target">AGM target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.agm_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
+          <input type="date" id="agm_target" name="agm_target" value="{{ secretarial_plan.agm_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.agm_target else '' }}">
+        </div>
+        <div>
+          <label for="annual_return_target">Annual return (CR6) filing target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.annual_return_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
+          <input type="date" id="annual_return_target" name="annual_return_target" value="{{ secretarial_plan.annual_return_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.annual_return_target else '' }}">
+        </div>
+      </div>
+      <label for="compliance_calendar_notes">Compliance calendar notes (other statutory deadlines - charges, share allotments, director changes, etc.)</label>
+      <textarea id="compliance_calendar_notes" name="compliance_calendar_notes" rows="2">{{ secretarial_plan.compliance_calendar_notes if secretarial_plan else '' }}</textarea>
+
+      <p class="section-title">3. Board &amp; Committee Meeting Cycle</p>
+      <label for="meeting_schedule_notes">Planned board/committee meeting schedule for the period</label>
+      <textarea id="meeting_schedule_notes" name="meeting_schedule_notes" rows="2">{{ secretarial_plan.meeting_schedule_notes if secretarial_plan else '' }}</textarea>
+      <label for="agenda_preplanning_notes">Agenda pre-planning notes (recurring items, known resolutions expected)</label>
+      <textarea id="agenda_preplanning_notes" name="agenda_preplanning_notes" rows="2">{{ secretarial_plan.agenda_preplanning_notes if secretarial_plan else '' }}</textarea>
+      <label for="document_deadline_notes">Minute/document turnaround deadlines</label>
+      <textarea id="document_deadline_notes" name="document_deadline_notes" rows="2">{{ secretarial_plan.document_deadline_notes if secretarial_plan else '' }}</textarea>
+
+      <p class="section-title">4. Operational &amp; Transactional Trigger Mapping</p>
+      <label for="transactional_trigger_notes">Anticipated corporate actions/transactions this period (share issues, charges, restructuring, director changes) and the secretarial work they'll trigger</label>
+      <textarea id="transactional_trigger_notes" name="transactional_trigger_notes" rows="3">{{ secretarial_plan.transactional_trigger_notes if secretarial_plan else '' }}</textarea>
+
+      <p class="section-title">5. Risk Assessment &amp; Quality Control</p>
+      <label for="onboarding_risk_integration_notes">How the Secretarial Risk Analysis (Risk Assessment tab) feeds into this plan</label>
+      <textarea id="onboarding_risk_integration_notes" name="onboarding_risk_integration_notes" rows="2">{{ secretarial_plan.onboarding_risk_integration_notes if secretarial_plan else '' }}</textarea>
+      <label for="remediation_milestones_notes">Remediation milestones (for any known non-compliance/back-filing to clear)</label>
+      <textarea id="remediation_milestones_notes" name="remediation_milestones_notes" rows="2">{{ secretarial_plan.remediation_milestones_notes if secretarial_plan else '' }}</textarea>
+      <label for="register_reconciliation_notes">Statutory register reconciliation / quality control notes</label>
+      <textarea id="register_reconciliation_notes" name="register_reconciliation_notes" rows="2">{{ secretarial_plan.register_reconciliation_notes if secretarial_plan else '' }}</textarea>
+
+      <button type="submit" class="btn gold">{% if secretarial_plan %}Save / update plan{% else %}Save secretarial engagement plan{% endif %}</button>
+    </div>
+  </form>
+
+  {% if secretarial_plan and secretarial_plan.is_complete %}
+  <div class="card">
+    <h3 class="mt-0">Sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ secretarial_plan.completed_by.name if secretarial_plan.completed_by else '—' }} on {{ secretarial_plan.completed_at.strftime('%d %b %Y') if secretarial_plan.completed_at else '—' }}.
+      {% if secretarial_plan.is_reviewed %}Reviewed by {{ secretarial_plan.reviewed_by.name }} on {{ secretarial_plan.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+      {% if secretarial_plan.is_partner_signed %}Partner sign-off by {{ secretarial_plan.partner_signed_by.name }} on {{ secretarial_plan.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if secretarial_plan.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_secretarial_plan', plan_id=secretarial_plan.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif secretarial_plan.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_secretarial_plan', plan_id=secretarial_plan.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(secretarial_plan) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if secretarial_plan.is_partner_signed %}
+      <form method="post" action="{{ url_for('engagements.partner_unsign_secretarial_plan', plan_id=secretarial_plan.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif secretarial_plan.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_secretarial_plan', plan_id=secretarial_plan.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
   {% endif %}
 
+  {% if engagement.type != 'Secretarial' %}
   <div class="card">
     <p class="muted" style="font-size:12.5px;margin:0;">The preliminary trial balance now has its own <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab, right after this one - import or enter it there (it drives Analytical Review below and, later, the Financial Statements on Finalisation).</p>
   </div>
+  {% endif %}
 
   {{ qmacros.render_queries(engagement, 'planning', queries_by_section.get('planning', [])) }}
 
@@ -2052,7 +2288,7 @@
   <div class="card">
     <h3 class="mt-0">Finalisation checklist</h3>
     <p class="muted" style="font-size:12.5px;">
-      {% if engagement.type == 'Investigative Engagement' %}What's left to close out this investigation - findings and conclusions, reporting and referral decisions, evidence and chain-of-custody wrap-up, and file completion.{% elif engagement.type == 'Business Intelligence and IT Engagements' %}What's left to close this engagement - consolidating findings and recommendations, reporting and communication, evidence and documentation, and file completion.{% else %}What's left to close this engagement - subsequent events and going concern, overall conclusions, management communication, and file completion/archiving.{% endif %}
+      {% if engagement.type == 'Investigative Engagement' %}What's left to close out this investigation - findings and conclusions, reporting and referral decisions, evidence and chain-of-custody wrap-up, and file completion.{% elif engagement.type == 'Business Intelligence and IT Engagements' %}What's left to close this engagement - consolidating findings and recommendations, reporting and communication, evidence and documentation, and file completion.{% elif engagement.type == 'Secretarial' %}What's left to close this COBE-compliant secretarial engagement - registry &amp; reconciliations, the board &amp; governance audit trail, UBO &amp; capital reconciliation, the final deliverable reporting pack, and billing &amp; archiving.{% else %}What's left to close this engagement - subsequent events and going concern, overall conclusions, management communication, and file completion/archiving.{% endif %}
     </p>
     {% if finalisation_checklist and finalisation_checklist.checklist_assessment %}
     <div class="flash {{ finalisation_checklist.checklist_assessment.level }}" style="margin-bottom:4px;">
@@ -2068,6 +2304,8 @@
   {% set finalisation_sections = ['Findings & Conclusions', 'Reporting & Referral', 'Evidence & Chain of Custody', 'File Completion'] %}
   {% elif engagement.type == 'Business Intelligence and IT Engagements' %}
   {% set finalisation_sections = ['Findings & Recommendations', 'Reporting & Communication', 'Evidence & Documentation', 'File Completion'] %}
+  {% elif engagement.type == 'Secretarial' %}
+  {% set finalisation_sections = ['Registry & Reconciliations', 'Board & Governance Audit Trail', 'UBO & Capital Reconciliation', 'Final Deliverable Reporting Pack', 'Billing & Archiving'] %}
   {% else %}
   {% set finalisation_sections = ['Subsequent Events & Going Concern', 'Overall Conclusions', 'Management Communication', 'File Completion & Archiving'] %}
   {% endif %}
@@ -2738,6 +2976,11 @@
     <p class="muted" style="font-size:12.5px;">
       Grouped into the four buckets investigative procedures generally fall into, by the type of evidence required: Advanced Data Analytics &amp; Forensic Technology, Asset Tracing &amp; Financial Reconstruction, Document Examination &amp; Verification, and Physical &amp; Observational Procedures. "Generate suggested procedures" seeds each category with a baseline set of procedures. Safe to re-run any time - it only adds what's missing, never duplicates or removes anything, and won't disturb a category that's already signed off unless it actually has something new to add. Add your own procedures under any category where this engagement calls for it - these are a professionally-informed starting point, not a substitute for your own judgement.
     </p>
+    {% elif engagement.type == 'Secretarial' %}
+    <h3 class="mt-0">Secretarial Execution Plan</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Replaces the ordinary Substantive Procedures with five operational workstreams: Onboarding &amp; Diagnostics, Board &amp; General Meeting Cycle, Annual Returns &amp; Filings Log, Statutory Register Audit, and Corporate Actions. "Generate suggested procedures" seeds each workstream with its baseline tasks, each carrying its Trigger/Event, Lead Responsible and Target Output where applicable. Safe to re-run any time - it only adds what's missing. Add your own tasks under any workstream this engagement calls for.
+    </p>
     {% else %}
     <h3 class="mt-0">Substantive procedures</h3>
     <p class="muted" style="font-size:12.5px;">
@@ -2755,11 +2998,11 @@
     <p class="muted" style="font-size:12.5px;">
       Generate the whole programme above as a working paper, with each area's reference code carried through - it's filed under Documents (Ref. {{ filing_reference('substantive') }}) rather than downloaded immediately; download the filed copy whenever you need the file.
     </p>
-    <h4 class="mt-0" style="margin-bottom:4px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% elif engagement.type == 'Business Intelligence and IT Engagements' %}IT &amp; cyber assurance procedures programme{% else %}Substantive procedures programme{% endif %} (Word)</h4>
+    <h4 class="mt-0" style="margin-bottom:4px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% elif engagement.type == 'Business Intelligence and IT Engagements' %}IT &amp; cyber assurance procedures programme{% elif engagement.type == 'Secretarial' %}Secretarial Execution Plan{% else %}Substantive procedures programme{% endif %} (Word)</h4>
     <form method="post" action="{{ url_for('engagements.generate_substantive_procedures_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
     {{ filed_workpapers('substantive_procedures_docx') }}
 
-    <h4 style="margin-bottom:4px;margin-top:16px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% elif engagement.type == 'Business Intelligence and IT Engagements' %}IT &amp; cyber assurance procedures programme{% else %}Substantive procedures programme{% endif %} (Excel)</h4>
+    <h4 style="margin-bottom:4px;margin-top:16px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% elif engagement.type == 'Business Intelligence and IT Engagements' %}IT &amp; cyber assurance procedures programme{% elif engagement.type == 'Secretarial' %}Secretarial Execution Plan{% else %}Substantive procedures programme{% endif %} (Excel)</h4>
     <form method="post" action="{{ url_for('engagements.generate_substantive_procedures_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
     {{ filed_workpapers('substantive_procedures_xlsx') }}
   </div>
@@ -2770,6 +3013,35 @@
   <div class="card">
     <h3 class="mt-0"><span class="badge" style="margin-right:6px;">{{ substantive_area_refs.get(area_name, '') }}</span>{{ area_name }}</h3>
     {% if area and area.items %}
+    {% if engagement.type == 'Secretarial' %}
+    <table>
+      <thead><tr><th>Task</th><th>Trigger / Event</th><th>Lead Responsible</th><th>Target Output</th><th>Source</th><th>Notes</th><th>Status</th><th>Tickmark</th><th></th></tr></thead>
+      <tbody>
+      {% for item in area.items %}
+        <form method="post" action="{{ url_for('engagements.update_substantive_procedure_item', item_id=item.id) }}" class="inline">
+        <tr>
+          <td style="max-width:280px;"><input type="text" name="procedure_text" value="{{ item.procedure_text }}" style="width:100%;margin-bottom:0;"></td>
+          <td><input type="text" name="trigger_event" value="{{ item.trigger_event or '' }}" style="width:140px;margin-bottom:0;"></td>
+          <td><input type="text" name="responsible_role" value="{{ item.responsible_role or '' }}" style="width:110px;margin-bottom:0;"></td>
+          <td><input type="text" name="target_output" value="{{ item.target_output or '' }}" style="width:140px;margin-bottom:0;"></td>
+          <td><span class="badge">{{ item.source }}</span></td>
+          <td><input type="text" name="notes" value="{{ item.notes or '' }}" placeholder="Notes" style="width:120px;margin-bottom:0;"></td>
+          <td>
+            <select name="status">
+              {% for s in checklist_statuses %}<option value="{{ s }}" {% if item.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+            </select>
+          </td>
+          <td>{{ tickmark_picker(item.tickmark_id) }}</td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_substantive_procedure_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this task?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
     <table>
       <thead><tr><th>Procedure</th><th>Source</th><th>Notes</th><th>Status</th><th>Tickmark</th><th></th></tr></thead>
       <tbody>
@@ -2794,12 +3066,13 @@
       {% endfor %}
       </tbody>
     </table>
+    {% endif %}
     {% else %}
-    <div class="empty-state">No procedures for this area yet - generate suggestions above, or add one manually below.</div>
+    <div class="empty-state">No {% if engagement.type == 'Secretarial' %}tasks{% else %}procedures{% endif %} for this area yet - generate suggestions above, or add one manually below.</div>
     {% endif %}
 
     <form method="post" action="{{ url_for('engagements.add_substantive_procedure_item', engagement_id=engagement.id, area_name=area_name) }}" class="form-row" style="align-items:flex-end;">
-      <div style="grid-column: span 3;"><label>Add a procedure</label><input type="text" name="procedure_text" placeholder="Describe the procedure" required></div>
+      <div style="grid-column: span 3;"><label>Add a {% if engagement.type == 'Secretarial' %}task{% else %}procedure{% endif %}</label><input type="text" name="procedure_text" placeholder="{% if engagement.type == 'Secretarial' %}Describe the task{% else %}Describe the procedure{% endif %}" required></div>
       <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add</button></div>
     </form>
 

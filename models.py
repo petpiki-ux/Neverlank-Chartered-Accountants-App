@@ -72,6 +72,26 @@ SME_ACT_SIZE_BANDS = [
 SME_ACT_SIZE_BAND_LABELS = dict(SME_ACT_SIZE_BANDS)
 
 SECRETARIAL_SUBDIVISIONS = ["Company Registrations", "Trusts", "PVOs"]
+
+# Selectable "Activities" for a Secretarial engagement (Engagement.
+# secretarial_activities, a comma-separated list of the keys below) - what
+# the client has actually engaged the firm to do, under the Companies and
+# Other Business Entities Act [Chapter 24:31] (COBE Act). Used to filter
+# which Understanding the Business/Assignment questionnaire questions are
+# seeded for the engagement (see SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_
+# ITEMS below and engagements.seed_entity_checklist) - so a client engaged
+# only for annual compliance work isn't shown questionnaire sections about
+# share capital restructuring, and vice versa. Leaving none selected seeds
+# every section (the safe, unfiltered default).
+SECRETARIAL_ACTIVITIES = [
+    ("incorporation", "Incorporation & Entity Maintenance"),
+    ("directorship", "Directorship & Governance Structure"),
+    ("share_capital", "Share Capital & Ownership Transactions"),
+    ("meetings", "Board & General Meeting Secretarial Support"),
+    ("constitutional", "Constitutional Amendments & Corporate Restructuring"),
+    ("statutory_records", "Statutory Record Management & Good Standing"),
+]
+SECRETARIAL_ACTIVITY_LABELS = dict(SECRETARIAL_ACTIVITIES)
 ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"]
 TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
 CHECKLIST_STATUSES = ["Not Started", "In Progress", "Done", "N/A"]
@@ -562,6 +582,90 @@ BUSINESS_IT_RISK_IMPACT_QUESTIONS = [
     ]),
 ]
 
+# Secretarial-specific answers (1-5 each), used instead of the ten standard
+# fields above on a "Secretarial" engagement - built around the four pillars
+# of secretarial risk under the Companies and Other Business Entities Act
+# [Chapter 24:31] (COBE Act): (1) Statutory Non-Compliance & Penalty Risk,
+# (2) Procedural & Governance Invalidity Risk, (3) Ownership, Capital &
+# Solvency Risk, and (4) Transactional & Change-of-Control Risk. Kept as
+# separate columns, same reasoning as the forensic/BI-IT-specific fields
+# above.
+SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS = [
+    ("q_filing_compliance_history", "What is this entity's track record of lodging Annual Returns (Sec 165) and notifying director/officer changes (Sec 215) within the statutory windows?", [
+        "Consistently on time, no history of late or missed filings",
+        "Mostly on time, isolated minor delays",
+        "Some history of late filings",
+        "Frequent late filings, or at least one lapse into defunct/struck-off status previously remedied",
+        "Currently overdue on Annual Returns, or at imminent risk of being struck off (Sec 310)",
+    ]),
+    ("q_governance_procedural_rigor", "How rigorous are the entity's board/general meeting procedures (quorum compliance under Sec 195/206, notice periods under Sec 170, no director proxies under Sec 196)?", [
+        "Well-documented, consistently compliant meeting procedures",
+        "Generally sound, only minor procedural gaps",
+        "Noticeable procedural weaknesses (e.g. occasional quorum or notice issues)",
+        "Significant procedural weaknesses across multiple meetings",
+        "Minute books incomplete/unsigned, or meetings routinely held without proper quorum or notice",
+    ]),
+    ("q_ownership_capital_complexity", "How complex or frequent are this entity's ownership and capital events (share allotments, transfers, beneficial ownership changes under Sec 72, distributions or buybacks under Sec 102/104)?", [
+        "Simple, stable ownership structure, no capital events pending",
+        "Occasional, straightforward capital events",
+        "Moderate complexity - several shareholders/classes, or an event in progress",
+        "Significant complexity - multiple classes, nominee arrangements, or frequent capital events",
+        "Highly complex ownership/capital structure with unresolved beneficial ownership questions",
+    ]),
+    ("q_transactional_activity", "How much transactional or change-of-control activity (charge/mortgage creation under Sec 163, constitutional amendments, restructurings under Sec 227-232) is anticipated or under way?", [
+        "None anticipated",
+        "Limited, routine activity only",
+        "Some non-routine activity anticipated (e.g. a single charge registration)",
+        "Significant activity anticipated (e.g. a restructuring or multiple charges)",
+        "Major, time-critical transactional activity already under way",
+    ]),
+    ("q_registry_standing", "What is this entity's current standing with the Registrar of Companies (up to date vs at risk of deregistration/striking-off under Sec 310)?", [
+        "Fully up to date and in good standing",
+        "Up to date, one historical lapse since remedied",
+        "One or more filings currently outstanding but within a curable window",
+        "Multiple filings outstanding, approaching the striking-off threshold",
+        "Already subject to (or at imminent risk of) Registrar deregistration proceedings",
+    ]),
+]
+
+SECRETARIAL_RISK_IMPACT_QUESTIONS = [
+    ("q_penalty_exposure", "If a filing or deadline is missed, what is the likely exposure to administrative fines, late-filing penalties, or Registrar default notices?", [
+        "Minimal - unlikely to attract any penalty",
+        "Limited - a small, one-off penalty at most",
+        "Moderate - a meaningful penalty or formal Registrar notice",
+        "Significant - substantial penalties across multiple lapses",
+        "Severe - deregistration/striking-off exposure (Sec 310)",
+    ]),
+    ("q_governance_invalidity", "If a board or shareholder resolution were later challenged for a quorum, notice, or proxy defect (Sec 170/196), how significant would the consequences be?", [
+        "Minimal - no material decisions at risk",
+        "Limited - only routine matters potentially affected",
+        "Moderate - some commercially significant decisions could be challenged",
+        "Significant - key resolutions (allotments, borrowings) could be voided",
+        "Severe - ultra vires exposure across major corporate actions, litigation risk",
+    ]),
+    ("q_solvency_director_liability", "If a distribution, share buyback, or director loan were found not to have followed the statutory Solvency and Liquidity Test (Sec 102) or disclosure requirements (Sec 216), what is the exposure?", [
+        "Minimal - no distributions/buybacks/director loans in the period",
+        "Limited - small, well-documented transactions only",
+        "Moderate - some transactions without full contemporaneous documentation",
+        "Significant - material distributions/buybacks with weak solvency evidence",
+        "Severe - unlawful distribution exposure and personal director liability",
+    ]),
+    ("q_encumbrance_control_risk", "If a charge/mortgage were left unregistered past the 30-day window (Sec 163), or a change-of-control step were taken without required consents, what is the exposure?", [
+        "Minimal - no charges or change-of-control steps in the period",
+        "Limited - registrations well within statutory deadlines",
+        "Moderate - some risk of a registration slipping past deadline",
+        "Significant - security could be rendered void against liquidators/competing creditors",
+        "Severe - a material charge or change-of-control step already outside the statutory window",
+    ]),
+    ("q_overall_significance", "Overall, if a secretarial compliance failure in this area were to occur, how significant would the combined statutory, financial and reputational impact be for the entity and its directors?", [
+        "Minor",
+        "Limited",
+        "Moderate",
+        "Serious",
+        "Severe",
+    ]),
+]
+
 # A starting-point suggested audit approach per overall risk rating, shown on
 # the Planning tab. Deliberately general - always apply professional
 # judgement and your firm's own methodology on top of this.
@@ -673,6 +777,38 @@ BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
     ("AML/CFT Framework & Regulatory Context", "What transaction monitoring and screening arrangements are in place (sanctions screening, unusual-activity monitoring)?"),
     ("AML/CFT Framework & Regulatory Context", "Has the entity filed any suspicious transaction reports with the Financial Intelligence Unit, or received any regulatory findings/guidance relevant to AML/CFT compliance?"),
     ("AML/CFT Framework & Regulatory Context", "What record-keeping arrangements are in place for CDD information and transaction records, and for how long are they retained?"),
+]
+
+# Seeded instead of the five free-text ENTITY_UNDERSTANDING_FIELDS above when
+# the engagement's type is "Secretarial" - the firm's Secretarial Client
+# Business Understanding Questionnaire, mapped to the Companies and Other
+# Business Entities Act [Chapter 24:31] (COBE Act). Same Yes/No/N-A +
+# comment presentation as FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS /
+# BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS above, with one addition:
+# each item also carries a tuple of SECRETARIAL_ACTIVITIES keys it's
+# relevant to, so engagements.seed_entity_checklist can seed only the
+# sections relevant to the Activities selected for this engagement (see
+# Engagement.secretarial_activities) - or every item, if none were selected.
+SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
+    ("Entity Classification & Scope", "Is the entity registered as a Private Limited Company, Public Limited Company, Company Limited by Guarantee, Private Business Corporation (PBC), or Foreign Company under Section 5?", ("incorporation",)),
+    ("Entity Classification & Scope", "Does the entity operate in banking, building societies, insurance, or microfinance - noting that these financial institutions are excluded from the COBE Act under Section 4 and governed by sector-specific statutes?", ("incorporation",)),
+    ("Constitutional Documents & Corporate Governance", "Does the Memorandum clearly specify all authorised share types and classes pursuant to the disclosure standards for share capital?", ("constitutional", "share_capital")),
+    ("Constitutional Documents & Corporate Governance", "What are the specific rules and thresholds set out in the Articles regarding board powers, borrowing limits (Section 196), execution of documents, and pre-emption rights?", ("constitutional", "directorship")),
+    ("Constitutional Documents & Corporate Governance", "Does a private company meet the minimum statutory director requirements under Section 195 (minimum 2 directors if under 10 members; minimum 3 directors if over 10 members)?", ("directorship",)),
+    ("Constitutional Documents & Corporate Governance", "For public companies, does the board meet the requirement of 7 to 15 directors, including at least 3 independent non-executive directors (Section 206)?", ("directorship",)),
+    ("Constitutional Documents & Corporate Governance", "Are directors aware of their statutory duty of care, skill, and good faith (Section 54) and duty of loyalty (Section 55)?", ("directorship",)),
+    ("Statutory Registers & Ownership Transparency", "Does the company maintain an up-to-date Register of Beneficial Ownership under Section 72, identifying natural persons who directly or indirectly hold 20% or more of shares or voting rights?", ("statutory_records", "share_capital")),
+    ("Statutory Registers & Ownership Transparency", "Does any nominee shareholding comply with the statutory cap under Section 72, which restricts nominee holdings to no more than 20% of shares on behalf of a beneficial owner?", ("statutory_records", "share_capital")),
+    ("Statutory Registers & Ownership Transparency", "Are the Register of Members (Section 157), Register of Directors and Secretaries (Section 215), Register of Directors' Interests and Conflicts (Section 211), and Register of Mortgages and Debentures/Charges (Section 162) maintained at the registered office and reconciled?", ("statutory_records",)),
+    ("Capital Structure, Distributions & Solvency", "Have any variations of share rights, share allotments, or capital changes been executed in accordance with board powers and properly reflected in the Memorandum/Articles?", ("share_capital",)),
+    ("Capital Structure, Distributions & Solvency", "Before making any distribution, share buyback, or financial assistance, has the board formally evaluated and certified that the company meets the statutory Solvency and Liquidity Test (Section 102)?", ("share_capital",)),
+    ("Capital Structure, Distributions & Solvency", "Are there any proposed structural changes or class variations that might trigger minority shareholder appraisal remedies (Section 143 or Section 228)?", ("share_capital", "constitutional")),
+    ("Board Operations, Meetings & Documentation", "Are all loans, guarantees, or security provided by the company for directors or officers fully disclosed and approved under Section 216?", ("directorship", "meetings")),
+    ("Board Operations, Meetings & Documentation", "Is the board aligned with Section 196, which prohibits directors from acting or voting by proxy at board meetings?", ("meetings",)),
+    ("Board Operations, Meetings & Documentation", "Are minute books kept up-to-date for all board meetings, committee meetings, and AGMs/EGMs, capturing key commercial decisions, risk evaluations, and conflict disclosures?", ("meetings",)),
+    ("Statutory Filings & Registry Compliance", "Is the company compliant with filing its Annual Return (Section 165) within the statutory timeframe following its financial year-end?", ("incorporation", "statutory_records")),
+    ("Statutory Filings & Registry Compliance", "Have changes in directors/secretaries, registered office address, or share capital updates been lodged with the Registrar within the required statutory notification periods?", ("statutory_records", "directorship")),
+    ("Statutory Filings & Registry Compliance", "Has the entity completed its mandatory administrative re-registration process under the COBE Act framework?", ("incorporation", "statutory_records")),
 ]
 
 
@@ -1034,6 +1170,101 @@ BUSINESS_IT_AREA_REFERENCES = {
     "AML/CFT Compliance": "AC",
 }
 
+# The Secretarial Execution Plan - what the Substantive Procedures tab is
+# replaced with on a "Secretarial" engagement (per the firm's instruction to
+# change Substantive Procedures under Secretarial to an Execution Plan).
+# Reuses the SubstantiveProcedureArea/SubstantiveProcedureItem machinery
+# exactly like FORENSIC_SUBSTANTIVE_AREAS/BUSINESS_IT_SUBSTANTIVE_AREAS
+# above (same sync/generate/sign-off/Word-Excel-export engine) - only the
+# five "areas" (here, Operational Workstreams) and their baseline tasks
+# differ. Each workstream becomes one section of the Execution Plan, built
+# around statutory filing deadlines and deliverables under the Companies
+# and Other Business Entities Act [Chapter 24:31] (COBE Act) rather than
+# financial-statement assertions.
+SECRETARIAL_SUBSTANTIVE_AREAS = [
+    "Onboarding & Diagnostics",
+    "Board & General Meeting Cycle",
+    "Annual Returns & Filings Log",
+    "Statutory Register Audit",
+    "Corporate Actions",
+]
+
+SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES = {
+    "Onboarding & Diagnostics": [
+        "Perform initial search with the Registrar of Companies.",
+        "Reconcile the Memorandum and Articles of Association for borrowing limits (Sec 196) and share capital authorisation.",
+        "Run the Secretarial Risk Assessment Matrix (see the Risk Assessment tab) to flag overdue filings or missing records.",
+        "Compile the Client Statutory Diagnostic & Baseline Report.",
+    ],
+    "Board & General Meeting Cycle": [
+        "Draft and circulate the annual governance calendar to board members.",
+        "Issue formal Notice of AGM (Sec 170) at least 21 days prior to the meeting.",
+        "Compile, collate and dispatch board packs 7-10 days prior to scheduled meetings.",
+        "Attend meetings, record proceedings, and produce draft minute books (Sec 176) within 5 working days post-meeting.",
+        "File the signed board packs, approved minute books and action trackers.",
+    ],
+    "Annual Returns & Filings Log": [
+        "Lodge the Annual Return (Form CR11) with the Registrar within 42 days of the AGM (Sec 165).",
+        "File Form CR6 for any change in directors or secretaries within 14 days (Sec 215).",
+        "Lodge Form CR14 for changes in registered office address within 14 days (Sec 160).",
+        "File returns of allotment of shares within statutory timelines following board approval (Sec 93 & 95).",
+        "File the stamped registry certificates and official filing acknowledgments.",
+    ],
+    "Statutory Register Audit": [
+        "Maintain and update the Register of Beneficial Ownership (Sec 72), verifying no unapproved nominee shareholding exceeds the 20% statutory cap.",
+        "Update the Register of Members (Sec 157) following executed share transfers (Sec 149).",
+        "Reconcile the Register of Charges and Mortgages (Sec 162) against outstanding corporate debt facilities.",
+        "File the up-to-date statutory register file and the annual UBO verification declaration.",
+    ],
+    "Corporate Actions": [
+        "Coordinate board evaluation and drafting of the statutory Solvency and Liquidity Test Certificate (Sec 102) prior to executing distributions or share buybacks (Sec 104).",
+        "Draft special resolutions for constitutional amendments (Sec 16 & 25) or company name changes.",
+        "File mortgage/debenture registration forms with the Registrar within 30 days of creation (Sec 163).",
+        "File the executed solvency certificates, filed special resolutions and registered security extracts.",
+    ],
+}
+
+SECRETARIAL_AREA_REFERENCES = {
+    "Onboarding & Diagnostics": "W1",
+    "Board & General Meeting Cycle": "W2",
+    "Annual Returns & Filings Log": "W3",
+    "Statutory Register Audit": "W4",
+    "Corporate Actions": "W5",
+}
+
+# Trigger/Event, Lead Responsible and Target Output/Deliverable metadata for
+# each SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES task above, from the
+# firm's Practical Secretarial Execution Plan Schedule - keyed by the exact
+# procedure_text so sync_substantive_procedures (engagements.py) can attach
+# it to the SubstantiveProcedureItem it creates, populating that item's
+# trigger_event/responsible_role/target_output columns (see
+# SubstantiveProcedureItem below). Only used for Secretarial engagements;
+# every other engagement type leaves those three columns blank.
+SECRETARIAL_EXECUTION_TASK_DETAILS = {
+    "Perform initial search with the Registrar of Companies.": ("Engagement start", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
+    "Reconcile the Memorandum and Articles of Association for borrowing limits (Sec 196) and share capital authorisation.": ("Engagement start", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
+    "Run the Secretarial Risk Assessment Matrix (see the Risk Assessment tab) to flag overdue filings or missing records.": ("T+14 days from onboarding", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
+    "Compile the Client Statutory Diagnostic & Baseline Report.": ("T+14 days from onboarding", "Senior Secretariat", "Client Statutory Diagnostic & Baseline Report"),
+    "Draft and circulate the annual governance calendar to board members.": ("FYE + 5 months", "Corporate Secretary", "Annual governance calendar"),
+    "Issue formal Notice of AGM (Sec 170) at least 21 days prior to the meeting.": ("FYE + 5 months", "Corporate Secretary", "Notice Pack & Proxy Forms"),
+    "Compile, collate and dispatch board packs 7-10 days prior to scheduled meetings.": ("Each board/committee meeting", "Corporate Secretary", "Board pack dispatched"),
+    "Attend meetings, record proceedings, and produce draft minute books (Sec 176) within 5 working days post-meeting.": ("FYE + 6 months (AGM) / each meeting", "Lead Secretary", "Signed AGM/board minutes"),
+    "File the signed board packs, approved minute books and action trackers.": ("Post-meeting", "Minutes Secretary", "Signed Board Packs, Approved Minute Books & Action Trackers"),
+    "Lodge the Annual Return (Form CR11) with the Registrar within 42 days of the AGM (Sec 165).": ("Post-AGM", "Compliance Officer", "Stamped Form CR11 receipt"),
+    "File Form CR6 for any change in directors or secretaries within 14 days (Sec 215).": ("Director/secretary resignation or appointment", "Assistant Secretary", "Certified Form CR6 copy"),
+    "Lodge Form CR14 for changes in registered office address within 14 days (Sec 160).": ("Registered office change", "Assistant Secretary", "Certified Form CR14 copy"),
+    "File returns of allotment of shares within statutory timelines following board approval (Sec 93 & 95).": ("Share allotment approved", "Secretariat Staff", "Stamped Return of Allotment"),
+    "File the stamped registry certificates and official filing acknowledgments.": ("On receipt from Registrar", "Compliance Officer", "Stamped Registry Certificates & Filing Acknowledgments"),
+    "Maintain and update the Register of Beneficial Ownership (Sec 72), verifying no unapproved nominee shareholding exceeds the 20% statutory cap.": ("Annual review / update within 14 days of change", "Compliance Officer", "Reconciled Register of Beneficial Owners"),
+    "Update the Register of Members (Sec 157) following executed share transfers (Sec 149).": ("Share transfer executed", "Compliance Officer", "Updated Register of Members"),
+    "Reconcile the Register of Charges and Mortgages (Sec 162) against outstanding corporate debt facilities.": ("Debt creation / annual review", "Legal/Secretariat", "Reconciled Register of Charges"),
+    "File the up-to-date statutory register file and the annual UBO verification declaration.": ("Annual", "Compliance Officer", "Up-to-date Statutory Register File & Annual UBO Verification Declaration"),
+    "Coordinate board evaluation and drafting of the statutory Solvency and Liquidity Test Certificate (Sec 102) prior to executing distributions or share buybacks (Sec 104).": ("Distribution/buyback proposed", "Engagement Partner", "Signed Board Solvency Declaration"),
+    "Draft special resolutions for constitutional amendments (Sec 16 & 25) or company name changes.": ("Ad-hoc - constitutional amendment", "Corporate Secretary", "Filed Special Resolutions"),
+    "File mortgage/debenture registration forms with the Registrar within 30 days of creation (Sec 163).": ("Debt/charge creation", "Legal/Secretariat", "Stamped Certificate of Mortgage/Charge"),
+    "File the executed solvency certificates, filed special resolutions and registered security extracts.": ("Ad-hoc", "Legal/Secretariat", "Executed Solvency Certificates, Filed Special Resolutions & Registered Security Extracts"),
+}
+
 
 engagement_team = db.Table(
     "engagement_team",
@@ -1102,6 +1333,15 @@ class Engagement(db.Model):
     title = db.Column(db.String(200), nullable=False)
     type = db.Column(db.String(30), nullable=False, default="Audit")
     subdivision = db.Column(db.String(50))  # only meaningful when type == "Secretarial"
+
+    # Comma-separated SECRETARIAL_ACTIVITIES keys - which corporate
+    # secretarial activities this engagement covers (only meaningful when
+    # type == "Secretarial"). Used to filter which Understanding the
+    # Business/Assignment questionnaire sections get seeded - see
+    # SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS and
+    # engagements.seed_entity_checklist. Blank/None means "no filter", i.e.
+    # every section is seeded.
+    secretarial_activities = db.Column(db.Text)
     status = db.Column(db.String(30), nullable=False, default="Planning")
     period_end = db.Column(db.Date)
     start_date = db.Column(db.Date, default=date.today)
@@ -1201,6 +1441,16 @@ class Engagement(db.Model):
         Financial reporting framework dropdown below it; this never changes
         reporting_framework on its own."""
         return "full_ifrs" if self.is_public_interest_entity else "ifrs_for_smes"
+
+    @property
+    def secretarial_activity_list(self):
+        """The selected SECRETARIAL_ACTIVITIES keys for this engagement, as
+        a plain list - only meaningful when type == "Secretarial". Empty
+        list means "no filter selected" (every questionnaire section is
+        seeded)."""
+        if not self.secretarial_activities:
+            return []
+        return [a for a in self.secretarial_activities.split(",") if a]
 
     def __repr__(self):
         return f"<Engagement {self.title}>"
@@ -1846,6 +2096,26 @@ class RiskAssessment(db.Model):
     q_reputational = db.Column(db.Integer)
     q_overall_significance = db.Column(db.Integer)
 
+    # Secretarial-specific answers (1-5 each), used instead of the ten
+    # standard fields above on a "Secretarial" engagement - see
+    # SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS / SECRETARIAL_RISK_IMPACT_
+    # QUESTIONS above. Kept as separate columns, same reasoning as the
+    # forensic/BI-IT-specific fields above. Note q_overall_significance is
+    # shared with the Business Intelligence and IT Engagements impact
+    # questions above (both use it as their final "overall" question, and
+    # since only one engagement type's question set is ever active for a
+    # given record, reusing the column is safe).
+    q_filing_compliance_history = db.Column(db.Integer)
+    q_governance_procedural_rigor = db.Column(db.Integer)
+    q_ownership_capital_complexity = db.Column(db.Integer)
+    q_transactional_activity = db.Column(db.Integer)
+    q_registry_standing = db.Column(db.Integer)
+
+    q_penalty_exposure = db.Column(db.Integer)
+    q_governance_invalidity = db.Column(db.Integer)
+    q_solvency_director_liability = db.Column(db.Integer)
+    q_encumbrance_control_risk = db.Column(db.Integer)
+
     notes = db.Column(db.Text)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -1869,18 +2139,25 @@ class RiskAssessment(db.Model):
         return bool(self.engagement and self.engagement.type == "Business Intelligence and IT Engagements")
 
     @property
+    def _is_secretarial(self):
+        return bool(self.engagement and self.engagement.type == "Secretarial")
+
+    @property
     def likelihood_questions(self):
         """The question set actually in play for this record - the Fraud
         Triangle questionnaire on an Investigative Engagement, the cyber/IT/
         AML-CFT control questionnaire on a Business Intelligence and IT
-        Engagement, the ordinary audit questionnaire otherwise. Everything
-        below (likelihood_answers, is_complete, likelihood/impact/score/
-        rating) is driven from this and impact_questions, so the three
-        engagement flavours never mix."""
+        Engagement, the COBE-based four-pillar secretarial questionnaire on
+        a Secretarial engagement, the ordinary audit questionnaire
+        otherwise. Everything below (likelihood_answers, is_complete,
+        likelihood/impact/score/rating) is driven from this and
+        impact_questions, so the four engagement flavours never mix."""
         if self._is_forensic:
             return FORENSIC_RISK_LIKELIHOOD_QUESTIONS
         if self._is_business_it:
             return BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS
+        if self._is_secretarial:
+            return SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS
         return RISK_LIKELIHOOD_QUESTIONS
 
     @property
@@ -1889,6 +2166,8 @@ class RiskAssessment(db.Model):
             return FORENSIC_RISK_IMPACT_QUESTIONS
         if self._is_business_it:
             return BUSINESS_IT_RISK_IMPACT_QUESTIONS
+        if self._is_secretarial:
+            return SECRETARIAL_RISK_IMPACT_QUESTIONS
         return RISK_IMPACT_QUESTIONS
 
     @property
@@ -2059,7 +2338,7 @@ class EntityUnderstanding(db.Model):
         five free-text fields aren't shown at all - completion instead means
         every detailed checklist question has been answered. Every other
         engagement type keeps the original all-fields-filled-in check."""
-        if self.engagement and self.engagement.type in ("Investigative Engagement", "Business Intelligence and IT Engagements"):
+        if self.engagement and self.engagement.type in ("Investigative Engagement", "Business Intelligence and IT Engagements", "Secretarial"):
             items = list(self.checklist_items)
             return bool(items) and all(i.response for i in items)
         return all((v or "").strip() for v in self.field_values)
@@ -2124,6 +2403,28 @@ class EntityUnderstandingChecklistItem(db.Model):
         return f"<EntityUnderstandingChecklistItem {self.item_text!r} response={self.response!r}>"
 
 
+# Governance/compliance analytical points for a Secretarial engagement's
+# Analytical Review - seeded as plain AnalyticalReviewLine rows (label only,
+# no prior/current $ amounts, since secretarial analytical procedures look
+# at compliance trends and governance metrics rather than financial
+# ratios - see AnalyticalReviewLine.explanation, used here as the narrative
+# write-up rather than a variance explanation) when a Secretarial engagement
+# ticks Analytical Review as necessary. Mirrors the firm's Secretarial
+# Analytical Review guidance under the Companies and Other Business
+# Entities Act [Chapter 24:31] (COBE Act).
+SECRETARIAL_ANALYTICAL_REVIEW_POINTS = [
+    ("Board & Governance Activity Trends", "Meeting frequency vs. business events - compare board/committee meeting frequency against major operational events (acquisitions, debt issuances, capital expenditure)."),
+    ("Board & Governance Activity Trends", "Attendance & quorum patterns - verify statutory quorum compliance (e.g. independent director presence under Section 206) and identify persistent non-attendance risks."),
+    ("Board & Governance Activity Trends", "Resolution volume vs. statutory triggers - track circular/written resolutions vs. physical meetings to check management isn't bypassing formal board deliberation on restricted matters."),
+    ("Ownership & Capital Structure Analytics", "Share allotment vs. authorised capital ratios - variance check between issued share capital, share premium, and authorised limits in the Memorandum/Articles before processing new allotments (Section 93 & 95)."),
+    ("Ownership & Capital Structure Analytics", "Beneficial ownership threshold analysis - analyse voting rights/shareholding aggregation to identify individuals crossing the 20% beneficial ownership threshold (Section 72)."),
+    ("Ownership & Capital Structure Analytics", "Dividend & distribution vs. solvency - cross-analyse cash/reserves against proposed distributions to check compliance with the statutory Solvency and Liquidity Test (Section 102)."),
+    ("Statutory Filing & Timeline Variance Analysis", "Filing lag analysis - measure the time gap between corporate triggers (director appointments, share allotments, charge creations) and their actual filing dates with the Registrar."),
+    ("Statutory Filing & Timeline Variance Analysis", "Annual Return vs. financial year-end deadlines - track AGM dates against the statutory requirement (within 6 months of financial year-end) and Annual Return submission deadlines (Section 165)."),
+    ("Charge & Encumbrance Reconciliation", "Debt/security analytics - compare total registered mortgages, charges and debentures in the Register of Charges (Section 162) against outstanding borrowing facilities to identify unregistered or unfiled charges (Section 163-164)."),
+]
+
+
 class AnalyticalReview(db.Model):
     """System-based analytical review for one engagement: log current vs
     prior year figures for whichever line items matter and the app computes
@@ -2135,6 +2436,16 @@ class AnalyticalReview(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
     threshold_pct = db.Column(db.Float, default=10.0)  # flag |variance %| >= this as significant
+
+    # Whether the preparer has ticked Analytical Review as NOT necessary for
+    # this assignment - only offered as a choice on Secretarial engagements
+    # (per the firm's Secretarial Analytical Review guidance: not every
+    # secretarial assignment, e.g. a one-off filing, warrants a full
+    # governance/compliance analytical review), but kept as a plain column
+    # (default False) rather than a Secretarial-only field so it behaves
+    # like every other sign-off flag on this model.
+    not_necessary = db.Column(db.Boolean, default=False, nullable=False)
+    not_necessary_reason = db.Column(db.Text)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     completed_at = db.Column(db.DateTime)
@@ -2745,6 +3056,16 @@ class SubstantiveProcedureItem(db.Model):
     tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
     tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
 
+    # Only populated on a Secretarial engagement's Execution Plan (see
+    # SECRETARIAL_EXECUTION_TASK_DETAILS above) - the Trigger/Event, Lead
+    # Responsible and Target Output columns of the firm's Practical
+    # Secretarial Execution Plan Schedule. Left blank (and not shown) on
+    # every other engagement type's Substantive Procedures, where `status`
+    # above already serves as the "Status Tracking" column.
+    trigger_event = db.Column(db.String(200))
+    responsible_role = db.Column(db.String(100))
+    target_output = db.Column(db.String(200))
+
     def __repr__(self):
         return f"<SubstantiveProcedureItem area={self.area_id}>"
 
@@ -2935,6 +3256,95 @@ class AuditStrategy(db.Model):
 
     def __repr__(self):
         return f"<AuditStrategy engagement={self.engagement_id}>"
+
+
+class SecretarialPlan(db.Model):
+    """The Secretarial Engagement Plan for one Secretarial engagement -
+    what the "Planning" tab is replaced with for that engagement type
+    (mirrors AuditStrategy above, which does the same job for Investigative
+    Engagements). One row per engagement.
+
+    Built around the five pillars of a secretarial engagement plan under
+    the Companies and Other Business Entities Act [Chapter 24:31] (COBE
+    Act): (1) Entity Profile & Scope Map, (2) the Annual Statutory
+    Compliance Calendar anchored on the client's financial year-end, (3)
+    Board & Committee Meeting Cycle planning, (4) Operational &
+    Transactional Trigger Mapping, and (5) Risk Assessment & Quality
+    Control - unlike audit planning (financial materiality, sampling,
+    account balances), secretarial planning centres on statutory deadlines,
+    governance calendars, capital events and registry filings, so it does
+    not reuse MaterialityCalculation at all.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    # Pillar 1: Entity Profile & Scope Map
+    entity_categorization = db.Column(db.Text)
+    sector_regulators = db.Column(db.Text)
+    constitutional_constraints = db.Column(db.Text)
+
+    # Pillar 2: The Annual Statutory Compliance Calendar - four milestones
+    # anchored on the client's financial year-end (Engagement.period_end).
+    # Left blank by default (never auto-filled) - the Planning tab shows a
+    # suggested date computed live from period_end next to each field (see
+    # engagements._secretarial_compliance_calendar_suggestions), which the
+    # preparer can accept by typing it in, same "suggested, never
+    # fabricated" pattern as scope_suggestion/suggested_categories
+    # elsewhere in this app.
+    draft_financials_target = db.Column(db.Date)  # FYE + 3-4 months
+    agm_notice_target = db.Column(db.Date)  # FYE + 5 months (21 days before AGM, Sec 170)
+    agm_target = db.Column(db.Date)  # FYE + 6 months (Sec 167)
+    annual_return_target = db.Column(db.Date)  # AGM + 42 days (Sec 165, Form CR11/CR23)
+    compliance_calendar_notes = db.Column(db.Text)
+
+    # Pillar 3: Board & Committee Meeting Cycle
+    meeting_schedule_notes = db.Column(db.Text)
+    agenda_preplanning_notes = db.Column(db.Text)
+    document_deadline_notes = db.Column(db.Text)
+
+    # Pillar 4: Operational & Transactional Trigger Mapping
+    transactional_trigger_notes = db.Column(db.Text)
+
+    # Pillar 5: Risk Assessment & Quality Control
+    onboarding_risk_integration_notes = db.Column(db.Text)
+    remediation_milestones_notes = db.Column(db.Text)
+    register_reconciliation_notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("secretarial_plan", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def is_complete(self):
+        """One representative narrative field per pillar filled in - the
+        compliance calendar dates and the more operational notes fields are
+        expected to keep evolving through the engagement so aren't part of
+        this gate, same reasoning as AuditStrategy.is_complete above."""
+        core_fields = [
+            self.entity_categorization, self.sector_regulators,
+            self.meeting_schedule_notes, self.transactional_trigger_notes,
+            self.onboarding_risk_integration_notes,
+        ]
+        return all((v or "").strip() for v in core_fields)
+
+    def __repr__(self):
+        return f"<SecretarialPlan engagement={self.engagement_id}>"
 
 
 class Permission(db.Model):
@@ -3185,6 +3595,26 @@ class ClientAcceptance(db.Model):
     competence_scope_confirmed = db.Column(db.Boolean)  # 4. Competence & Scope Realism
     competence_scope_notes = db.Column(db.Text)
 
+    # Secretarial Client Acceptance Checklist - on engagements of type
+    # "Secretarial" these five sections REPLACE sections 1-5 above
+    # (Background check / Independence / Predecessor / Competence /
+    # Regulatory), same reasoning and pattern as the forensic columns
+    # above: KYC & Ultimate Beneficial Ownership, Authority Integrity &
+    # Client Background, Nature of Business & Risk Profile, Conflict of
+    # Interest & Dispute Assessment, and Operational Capacity & Commercial
+    # Feasibility - the corporate-secretarial-specific considerations a
+    # generic financial-statement acceptance checklist doesn't cover.
+    kyc_ubo_satisfactory = db.Column(db.Boolean)  # 1. KYC & Ultimate Beneficial Ownership
+    kyc_ubo_notes = db.Column(db.Text)
+    authority_background_satisfactory = db.Column(db.Boolean)  # 2. Authority, Integrity & Client Background
+    authority_background_notes = db.Column(db.Text)
+    nature_of_business_risk_acceptable = db.Column(db.Boolean)  # 3. Nature of Business & Risk Profile
+    nature_of_business_risk_notes = db.Column(db.Text)
+    conflict_dispute_clear = db.Column(db.Boolean)  # 4. Conflict of Interest & Dispute Assessment
+    conflict_dispute_notes = db.Column(db.Text)
+    operational_capacity_confirmed = db.Column(db.Boolean)  # 5. Operational Capacity & Commercial Feasibility
+    operational_capacity_notes = db.Column(db.Text)
+
     # 6. Engagement letter - scope/timeline/responsibilities/fees, signed by
     # the client. The signed copy is filed as an ordinary Document (see
     # acceptance.py's upload route) and linked here.
@@ -3238,14 +3668,24 @@ class ClientAcceptance(db.Model):
         Partner can record the decision as sign-off. Investigative
         Engagements use the four Forensic Audit Client Acceptance
         Questionnaire sections instead of the five generic ones (see the
-        columns above) - every other engagement type keeps the original
-        six-item check."""
+        columns above), and Secretarial engagements use the five-section
+        Secretarial Client Acceptance Checklist - every other engagement
+        type keeps the original six-item check."""
         if self.engagement and self.engagement.type == "Investigative Engagement":
             return all([
                 self.conflict_threat_clear is not None,
                 self.edd_completed is not None,
                 self.legal_evidence_satisfactory is not None,
                 self.competence_scope_confirmed is not None,
+                self.engagement_letter_signed_at is not None,
+            ])
+        if self.engagement and self.engagement.type == "Secretarial":
+            return all([
+                self.kyc_ubo_satisfactory is not None,
+                self.authority_background_satisfactory is not None,
+                self.nature_of_business_risk_acceptable is not None,
+                self.conflict_dispute_clear is not None,
+                self.operational_capacity_confirmed is not None,
                 self.engagement_letter_signed_at is not None,
             ])
         predecessor_done = self.predecessor_not_applicable or self.predecessor_contacted is not None
@@ -3393,25 +3833,35 @@ class ClientAcceptance(db.Model):
                 issues.append({"key": f"screening:{screening.id}", "label": f"Sanctions screening — {screening.individual_name}", "detail": detail})
 
         is_forensic = self.engagement and self.engagement.type == "Investigative Engagement"
-        section_checks = (
-            [
+        is_secretarial = self.engagement and self.engagement.type == "Secretarial"
+        if is_forensic:
+            section_checks = [
                 ("conflict_threat_clear", False, "Conflict of Interest & Threat Assessment", "conflict_threat_notes"),
                 ("edd_completed", False, "Enhanced Due Diligence", "edd_notes"),
                 ("legal_evidence_satisfactory", False, "Legal Framework & Evidence Control", "legal_evidence_notes"),
                 ("competence_scope_confirmed", False, "Competence & Scope Realism", "competence_scope_notes"),
-            ] if is_forensic else [
+            ]
+        elif is_secretarial:
+            section_checks = [
+                ("kyc_ubo_satisfactory", False, "KYC & Ultimate Beneficial Ownership", "kyc_ubo_notes"),
+                ("authority_background_satisfactory", False, "Authority, Integrity & Client Background", "authority_background_notes"),
+                ("nature_of_business_risk_acceptable", False, "Nature of Business & Risk Profile", "nature_of_business_risk_notes"),
+                ("conflict_dispute_clear", False, "Conflict of Interest & Dispute Assessment", "conflict_dispute_notes"),
+                ("operational_capacity_confirmed", False, "Operational Capacity & Commercial Feasibility", "operational_capacity_notes"),
+            ]
+        else:
+            section_checks = [
                 ("background_check_satisfactory", False, "Background check", "background_check_notes"),
                 ("independence_threats_identified", True, "Independence assessment — threats identified", "independence_notes"),
                 ("competence_confirmed", False, "Competence check", "competence_notes"),
                 ("aml_kyc_completed", False, "Regulatory checks (AML/KYC)", "aml_kyc_notes"),
             ]
-        )
         for field, flag_value, label, notes_field in section_checks:
             if getattr(self, field) == flag_value:
                 detail = (getattr(self, notes_field) or "").strip() or "No further notes recorded."
                 issues.append({"key": f"section:{field}", "label": label, "detail": detail})
 
-        if not is_forensic and not self.predecessor_not_applicable:
+        if not is_forensic and not is_secretarial and not self.predecessor_not_applicable:
             if self.client_permission_obtained is False:
                 issues.append({"key": "section:predecessor_permission", "label": "Predecessor communication", "detail": "Client permission to contact the predecessor auditor was not obtained."})
             elif self.predecessor_contacted is False:
@@ -3600,6 +4050,39 @@ BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS = [
     ("Regulatory", "Will any findings need to be reported to, or may trigger obligations with, a regulator or the Financial Intelligence Unit, and has this been discussed with the client in advance?"),
     ("Fee & quality", "The expected fee is commensurate with the specialist skill and time required, without compromising the quality of the engagement."),
     ("Engagement letter", "The client has agreed to the scope (which domains - cyber security, information security, ICT, AML/CFT - are covered), timeline, responsibilities, access arrangements, and fee basis set out in the engagement letter."),
+]
+
+# Seeded instead of DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS when the engagement's
+# type is "Secretarial" (see acceptance.seed_acceptance_checklist) -
+# corporate secretarial / company registration work raises acceptance
+# considerations a financial-statement checklist doesn't cover (Ultimate
+# Beneficial Ownership, filing-agent authority, registry/company-formation
+# risk). Section names match the five Secretarial Client Acceptance
+# Checklist sections that REPLACE the five generic narrative sections for
+# this engagement type (see ClientAcceptance.kyc_ubo_satisfactory etc. and
+# items_complete above).
+SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS = [
+    ("KYC & Ultimate Beneficial Ownership", "Who is the Ultimate Beneficial Owner (UBO) holding more than 20-25% of shares or voting rights?"),
+    ("KYC & Ultimate Beneficial Ownership", "Are any of the directors, shareholders, or UBOs classified as a Politically Exposed Person (PEP) or close associates of a PEP?"),
+    ("KYC & Ultimate Beneficial Ownership", "Do any names appear on international sanctions lists, anti-money laundering (AML) watchlists, or terrorist financing databases?"),
+    ("KYC & Ultimate Beneficial Ownership", "What is the source of wealth and source of funds being used to capitalize the new company or fund the transaction?"),
+    ("KYC & Ultimate Beneficial Ownership", "Have certified/notarized government-issued IDs and proof of residential address been obtained for all key stakeholders?"),
+    ("Authority, Integrity & Client Background", "Does the individual providing the instructions have the legal capacity and explicit authority (e.g. Board Resolution or Power of Attorney) to act on behalf of the entity?"),
+    ("Authority, Integrity & Client Background", "What is the client's reputation and history - are there past involvements in bankruptcies, corporate fraud, or regulatory penalties?"),
+    ("Authority, Integrity & Client Background", "Why is the client looking to register a new company or change structures at this specific time?"),
+    ("Authority, Integrity & Client Background", "If taking over an existing company, why are they changing service providers, and are there outstanding fees or disputes with the previous agent?"),
+    ("Nature of Business & Risk Profile", "What is the detailed intended principal activity of the company?"),
+    ("Nature of Business & Risk Profile", "Does the business operate in a high-risk sector (e.g. cryptocurrency, gambling, arms trade, precious metals, offshore banking)?"),
+    ("Nature of Business & Risk Profile", "Will the company require a specialized regulatory license to operate (e.g. financial services, telecom, mining)?"),
+    ("Nature of Business & Risk Profile", "What is the geographical footprint of the business - where are its main markets, suppliers, and bank accounts located?"),
+    ("Conflict of Interest & Dispute Assessment", "Do we currently represent any competitors, adversaries, or conflicting parties related to this client or transaction?"),
+    ("Conflict of Interest & Dispute Assessment", "Is there an internal dispute or deadlock among the current shareholders or directors regarding the proposed changes?"),
+    ("Conflict of Interest & Dispute Assessment", "Will executing these corporate changes benefit one group of shareholders to the detriment of another?"),
+    ("Conflict of Interest & Dispute Assessment", "Is there any risk that this entity is being created or altered to evade taxes, existing legal liabilities, or court orders?"),
+    ("Operational Capacity & Commercial Feasibility", "Do we have the technical expertise and local licensing to handle this specific corporate structure (e.g. public listed companies, trusts, offshore entities)?"),
+    ("Operational Capacity & Commercial Feasibility", "Is the timeline demanded by the client realistic given local registry (e.g. Companies Office) processing times?"),
+    ("Operational Capacity & Commercial Feasibility", "Has the client agreed to our fee structure, billing terms, and retainer requirements?"),
+    ("Operational Capacity & Commercial Feasibility", "Are the client's expectations regarding our role clearly defined - specifically, do they understand we are acting as a filing agent and not providing formal tax or legal advice?"),
 ]
 
 
@@ -4064,6 +4547,34 @@ BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS = [
     ("Evidence & Documentation", "Have any highly sensitive artefacts (e.g. vulnerability details, access credentials used during testing) been securely disposed of or returned once no longer required?"),
     ("File Completion", "Have all working papers been reviewed and cleared, with every review point resolved?"),
     ("File Completion", "Is the engagement file assembled and ready for the archiving deadline, with confidentiality/access restrictions reconfirmed?"),
+]
+
+# Finalisation checklist for "Secretarial" engagements - the COBE-compliant
+# five-phase Secretarial Finalisation Stage (Registry & Reconciliations;
+# Board & Governance Audit Trail; UBO & Capital Reconciliation; Final
+# Deliverable Reporting Pack; Billing & Archiving), using the updated
+# statutory form names under the Companies and Other Business Entities Act
+# [Chapter 24:31] (COBE Act) - replaces DEFAULT_FINALISATION_CHECKLIST_ITEMS
+# entirely for this engagement type, same pattern as FORENSIC_FINALISATION_
+# CHECKLIST_ITEMS / BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS above.
+SECRETARIAL_FINALISATION_CHECKLIST_ITEMS = [
+    ("Registry & Reconciliations", "Final registry search executed via Form CR2 (Search Application) to verify all lodgments processed during the period reflect on the public register? [SEC-FIN-01]"),
+    ("Registry & Reconciliations", "Annual/Statutory Return reconciled and stamped - Form CR23 (Statutory/Annual Return) and Form CR17 (Declaration of AGM) filed under Sec 165/166? [SEC-FIN-03]"),
+    ("Registry & Reconciliations", "Director/Secretary changes confirmed - all appointments, resignations, or address changes lodged on Form CR6 under Sec 217/241? [SEC-FIN-04]"),
+    ("Registry & Reconciliations", "Registered office changes verified on Form CR5 (Notice of Registered Office) under Sec 240? [SEC-FIN-05]"),
+    ("Registry & Reconciliations", "Share allotments verified on Form CR11 (Return of Allotments) under Sec 93 & 95?"),
+    ("Board & Governance Audit Trail", "Board/AGM minutes signed and bound - all draft minutes from Board, Committee, and General Meetings reviewed, signed by the Board Chairperson, and entered into the master minute book (Sec 170 & 176)? [SEC-FIN-02]"),
+    ("Board & Governance Audit Trail", "Special resolutions indexed and filed - Form CR8 returns bear CIPO stamp confirmations for all Special Resolutions passed during the year (Sec 176 & 178)? [SEC-FIN-07]"),
+    ("Board & Governance Audit Trail", "Board action tracker closed out - a final summary of all action items compiled, completed tasks noted and unresolved matters rolled into the next period's planning cycle?"),
+    ("UBO & Capital Reconciliation", "UBO register and declarations reconciled - the confidential Register of Beneficial Ownership (Sec 72) reconciled and Form CR16 (Beneficial Ownership Declaration) confirmed submitted for any natural person holding more than 20% voting rights, direct/indirect interest, or control? [SEC-FIN-06]"),
+    ("UBO & Capital Reconciliation", "Register of Members and capital structure reconciled - share certificates issued or transferred (Sec 149 & 157) reconciled against authorised nominal share capital changes filed via Form CR10 (Increase of Nominal Capital) or Form CR9 (Conversion/Buy-Back of Shares)?"),
+    ("UBO & Capital Reconciliation", "Register of Charges and Debentures reconciled - all charges, mortgages, or satisfactions created or discharged during the year (Sec 162-164) matched against filings on Form CR12 (Satisfaction/Register of Mortgages & Charges)?"),
+    ("Final Deliverable Reporting Pack", "Annual Corporate Governance & Compliance Report issued (COBE statutory returns completed; governance meeting attendance matrix; solvency and liquidity compliance checks performed under Sec 102; high-risk governance or non-compliance gaps identified)? [SEC-FIN-08]"),
+    ("Final Deliverable Reporting Pack", "Secretarial Management Letter issued, documenting administrative weaknesses and corrective action recommendations?"),
+    ("Final Deliverable Reporting Pack", "Annual Governance Calendar draft provided to management for the upcoming financial year?"),
+    ("Billing & Archiving", "Document archiving and custody handover completed - original documents returned under formal receipt and electronic files securely archived per the firm's record retention guidelines?"),
+    ("Billing & Archiving", "WIP and billing closed out - time recordings finalised, disbursements (CIPO registry fees, stamp duties, statutory filing fees) passed, and the final fee note issued?"),
+    ("Billing & Archiving", "Quality Assurance & Engagement Sign-Off - the Engagement Quality Control Review checklist completed, with final sign-off by the Engagement Partner/Lead Corporate Secretary? [SEC-FIN-09]"),
 ]
 
 

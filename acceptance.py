@@ -28,7 +28,7 @@ from models import (
     Engagement, Document, ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS,
     ClientAcceptanceChecklistItem, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS,
-    BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS,
+    BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS, SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS,
     RISK_CATEGORIES,
     SanctionsScreening, SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, RegulatoryNotice,
@@ -239,6 +239,76 @@ def save_acceptance_competence_scope(engagement_id):
     _touch(record)
     db.session.commit()
     flash("Competence & Scope Realism saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/kyc-ubo/save", methods=["POST"])
+@login_required
+def save_acceptance_kyc_ubo(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.kyc_ubo_satisfactory = _bool("kyc_ubo_satisfactory")
+    record.kyc_ubo_notes = request.form.get("kyc_ubo_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("KYC & Ultimate Beneficial Ownership saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/authority-background/save", methods=["POST"])
+@login_required
+def save_acceptance_authority_background(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.authority_background_satisfactory = _bool("authority_background_satisfactory")
+    record.authority_background_notes = request.form.get("authority_background_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Authority, Integrity & Client Background saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/nature-of-business/save", methods=["POST"])
+@login_required
+def save_acceptance_nature_of_business(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.nature_of_business_risk_acceptable = _bool("nature_of_business_risk_acceptable")
+    record.nature_of_business_risk_notes = request.form.get("nature_of_business_risk_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Nature of Business & Risk Profile saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/conflict-dispute/save", methods=["POST"])
+@login_required
+def save_acceptance_conflict_dispute(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.conflict_dispute_clear = _bool("conflict_dispute_clear")
+    record.conflict_dispute_notes = request.form.get("conflict_dispute_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Conflict of Interest & Dispute Assessment saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/operational-capacity/save", methods=["POST"])
+@login_required
+def save_acceptance_operational_capacity(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.operational_capacity_confirmed = _bool("operational_capacity_confirmed")
+    record.operational_capacity_notes = request.form.get("operational_capacity_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Operational Capacity & Commercial Feasibility saved.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 
@@ -455,6 +525,8 @@ def seed_acceptance_checklist(engagement_id):
         default_items = FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS
     elif engagement.type == "Business Intelligence and IT Engagements":
         default_items = BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS
+    elif engagement.type == "Secretarial":
+        default_items = SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS
     else:
         default_items = DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS
     for order, (section, item_text) in enumerate(default_items, start=1):
