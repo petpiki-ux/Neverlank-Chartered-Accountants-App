@@ -105,6 +105,9 @@
   {% if engagement.has_tax_module %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax') }}" class="{% if tab=='tax' %}active{% endif %}">Tax</a>
   {% endif %}
+  {% if engagement.has_accounting_module %}
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='accounting') }}" class="{% if tab=='accounting' %}active{% endif %}">Accounting</a>
+  {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}" class="{% if tab=='finalisation' %}active{% endif %}">Finalisation</a>
 </div>
 
@@ -2872,6 +2875,598 @@
 
   <!-- ---------- Review Queries on this tab ---------- -->
   {{ qmacros.render_queries(engagement, 'tax', queries_by_section.get('tax', [])) }}
+
+{% endif %}
+
+{% elif tab == 'accounting' %}
+{% if not engagement.has_accounting_module %}
+  <div class="card"><div class="empty-state">No Accounting service is turned on for this engagement - turn one on from <a href="{{ url_for('engagements.edit_engagement', engagement_id=engagement.id) }}">Edit Engagement</a> first.</div></div>
+{% else %}
+
+  <div class="card">
+    <h3 class="mt-0">Financial Accounting, Cost Accounting &amp; Management Accounting</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Services on this engagement:
+      {% for key, label in accounting_services %}{% if key in engagement.accounting_service_list %}<span class="badge status-Completed" style="margin-right:4px;">{{ label }}</span>{% endif %}{% endfor %}
+      {% if not engagement.accounting_service_list %}<span class="muted">none explicitly ticked - shown because this is a dedicated {{ engagement.type }} engagement.</span>{% endif %}
+    </p>
+    <p class="muted" style="font-size:11.5px;">
+      The Accounting Risk Register below reuses the same likelihood x impact register as everywhere else in this app; the write-up/close-out Execution Plan (one section per work area) lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas; once the General Ledger is rolled up below, the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab's mapping and the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}">Finalisation</a> tab's financial statements take over unchanged from there; and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Documents</a> tab, tagged with a Filing Index reference like any other working paper.
+    </p>
+  </div>
+
+  <!-- ---------- Chart of Accounts ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Chart of Accounts</h3>
+    {% if gl_accounts %}
+    <table>
+      <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Normal balance</th><th>Opening balance</th><th>Active?</th><th></th></tr></thead>
+      <tbody>
+        {% for a in gl_accounts %}
+        <tr>
+          <td>{{ a.code or '—' }}</td>
+          <td>{{ a.name }}</td>
+          <td>{{ a.account_type }}</td>
+          <td>{{ a.normal_balance }}</td>
+          <td>{{ '%.2f'|format(a.opening_balance) if a.opening_balance is not none else '0.00' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('accounting.update_gl_account', account_id=a.id) }}" class="inline">
+              <input type="hidden" name="code" value="{{ a.code or '' }}"><input type="hidden" name="name" value="{{ a.name }}"><input type="hidden" name="account_type" value="{{ a.account_type }}"><input type="hidden" name="opening_balance" value="{{ a.opening_balance }}">
+              <input type="checkbox" name="is_active" onchange="this.form.submit()" {% if a.is_active %}checked{% endif %} style="width:auto;">
+            </form>
+          </td>
+          <td><form method="post" action="{{ url_for('accounting.delete_gl_account', account_id=a.id) }}" class="inline" onsubmit="return confirm('Delete this account?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No accounts yet - add the client's Chart of Accounts below.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_gl_account', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div><label for="gl_code">Code</label><input type="text" id="gl_code" name="code"></div>
+      <div style="flex:2;"><label for="gl_name">Account name *</label><input type="text" id="gl_name" name="name" required></div>
+      <div>
+        <label for="gl_account_type">Type</label>
+        <select id="gl_account_type" name="account_type">
+          {% for t in gl_account_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="gl_opening_balance">Opening balance</label><input type="number" step="0.01" id="gl_opening_balance" name="opening_balance" value="0"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Journal Entries / General Ledger ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Journal Entries (General Ledger)</h3>
+    {% if journal_entries %}
+    {% for je in journal_entries %}
+    <details style="margin-bottom:8px;">
+      <summary>{{ je.entry_date.strftime('%d %b %Y') }} - {{ je.reference or 'No reference' }} ({{ je.source }}) - Dr {{ '%.2f'|format(je.total_debit) }} / Cr {{ '%.2f'|format(je.total_credit) }} {% if je.is_balanced %}<span class="badge status-Completed">Balanced</span>{% else %}<span class="badge overdue">Unbalanced</span>{% endif %}{% if je.is_partner_signed %} &#10003;{% endif %}</summary>
+      {% if je.narration %}<p class="muted" style="font-size:12px;">{{ je.narration }}</p>{% endif %}
+      {% if je.lines %}
+      <table>
+        <thead><tr><th>Account</th><th>Description</th><th>Debit</th><th>Credit</th><th></th></tr></thead>
+        <tbody>
+          {% for line in je.lines %}
+          <tr>
+            <td>{{ line.gl_account.code + ' - ' if line.gl_account.code else '' }}{{ line.gl_account.name }}</td>
+            <td>{{ line.description or '—' }}</td>
+            <td>{{ '%.2f'|format(line.debit) if line.debit else '—' }}</td>
+            <td>{{ '%.2f'|format(line.credit) if line.credit else '—' }}</td>
+            <td><form method="post" action="{{ url_for('accounting.delete_journal_entry_line', line_id=line.id) }}" class="inline" onsubmit="return confirm('Delete this line?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <form method="post" action="{{ url_for('accounting.add_journal_entry_line', entry_id=je.id) }}" class="form-row" style="flex-wrap:wrap;">
+        <div>
+          <select name="gl_account_id" required>
+            <option value="">Account...</option>
+            {% for a in gl_accounts %}<option value="{{ a.id }}">{{ a.code + ' - ' if a.code else '' }}{{ a.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><input type="text" name="description" placeholder="Description"></div>
+        <div><input type="number" step="0.01" name="debit" placeholder="Debit"></div>
+        <div><input type="number" step="0.01" name="credit" placeholder="Credit"></div>
+        <div><button type="submit" class="btn small secondary">Add line</button></div>
+      </form>
+      <p class="muted" style="font-size:11.5px;margin-top:8px;">
+        {% if je.completed_by %}Posted by {{ je.completed_by.name }} on {{ je.completed_at.strftime('%d %b %Y') }}.{% else %}Not yet posted.{% endif %}
+        {% if je.is_reviewed %}Reviewed by {{ je.reviewed_by.name }}.{% endif %}
+        {% if je.is_partner_signed %}Partner sign-off by {{ je.partner_signed_by.name }}.{% endif %}
+      </p>
+      {% if not je.completed_by %}
+      <form method="post" action="{{ url_for('accounting.post_journal_entry', entry_id=je.id) }}" class="inline"><button type="submit" class="btn small gold">Post entry</button></form>
+      {% endif %}
+      {% if je.completed_by and current_user.role in ('supervisor', 'partner', 'admin') and not je.is_reviewed and je.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('accounting.review_journal_entry', entry_id=je.id) }}" class="inline"><button type="submit" class="btn small secondary">Mark reviewed</button></form>
+      {% endif %}
+      {% if je.completed_by and current_user.role in ('partner', 'admin') and not je.is_partner_signed and je.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('accounting.partner_sign_journal_entry', entry_id=je.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% endif %}
+      <form method="post" action="{{ url_for('accounting.delete_journal_entry', entry_id=je.id) }}" class="inline" onsubmit="return confirm('Delete this whole journal entry?')"><button type="submit" class="btn small danger">Delete entry</button></form>
+    </details>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">No journal entries posted yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_journal_entry', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div><label for="je_entry_date">Date</label><input type="date" id="je_entry_date" name="entry_date"></div>
+      <div><label for="je_reference">Reference</label><input type="text" id="je_reference" name="reference"></div>
+      <div>
+        <label for="je_source">Source</label>
+        <select id="je_source" name="source">
+          {% for s in journal_entry_sources %}<option value="{{ s }}">{{ s }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="je_narration">Narration</label><input type="text" id="je_narration" name="narration"></div>
+      <div><button type="submit" class="btn small gold">New journal entry</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- General Ledger roll-up ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Roll up to Trial Balance</h3>
+    <p class="muted" style="font-size:12px;">Rolls every account's net balance (opening balance + posted journal activity) into this engagement's Trial Balance, ready for mapping and the Financial Statements on the Finalisation tab. Safe to re-run after posting more journals - existing IAS 1 category mappings are kept, matched by account code.</p>
+    <form method="post" action="{{ url_for('accounting.roll_up_to_trial_balance', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn gold">Roll up General Ledger to Trial Balance</button></form>
+  </div>
+
+  <!-- ---------- Bank Reconciliations ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Bank Reconciliations</h3>
+    {% if bank_reconciliations %}
+    {% for br in bank_reconciliations %}
+    <details style="margin-bottom:8px;">
+      <summary>{{ br.statement_date.strftime('%d %b %Y') }}{% if br.gl_account %} - {{ br.gl_account.name }}{% endif %} - {% if br.is_reconciled %}<span class="badge status-Completed">Reconciled</span>{% else %}<span class="badge overdue">Not reconciled</span>{% endif %}{% if br.is_partner_signed %} &#10003;{% endif %}</summary>
+      <p style="font-size:13px;">Bank statement balance: {{ '%.2f'|format(br.bank_statement_balance) }} (adjusted: {{ '%.2f'|format(br.adjusted_bank_balance) }}) &middot; Book balance: {{ '%.2f'|format(br.book_balance) }} (adjusted: {{ '%.2f'|format(br.adjusted_book_balance) }})</p>
+      {% if br.notes %}<p class="muted" style="font-size:12px;">{{ br.notes }}</p>{% endif %}
+      {% if br.items %}
+      <table>
+        <thead><tr><th>Side</th><th>Type</th><th>Description</th><th>Date</th><th>Amount</th><th></th></tr></thead>
+        <tbody>
+          {% for item in br.items %}
+          <tr>
+            <td>{{ item.side }}</td>
+            <td>{{ item.item_type }}</td>
+            <td>{{ item.description or '—' }}</td>
+            <td>{{ item.item_date.strftime('%d %b %Y') if item.item_date else '—' }}</td>
+            <td>{{ '%.2f'|format(item.amount) }}</td>
+            <td><form method="post" action="{{ url_for('accounting.delete_bank_reconciliation_item', item_id=item.id) }}" class="inline" onsubmit="return confirm('Delete this item?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <form method="post" action="{{ url_for('accounting.add_bank_reconciliation_item', recon_id=br.id) }}" class="form-row" style="flex-wrap:wrap;">
+        <div>
+          <select name="side">
+            <option value="bank">Bank side</option>
+            <option value="book">Book side</option>
+          </select>
+        </div>
+        <div>
+          <select name="item_type">
+            {% for t in bank_reconciliation_item_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><input type="text" name="description" placeholder="Description"></div>
+        <div><input type="date" name="item_date"></div>
+        <div><input type="number" step="0.01" name="amount" placeholder="Amount (signed)"></div>
+        <div><button type="submit" class="btn small secondary">Add item</button></div>
+      </form>
+      <p class="muted" style="font-size:11.5px;margin-top:8px;">
+        Prepared by {{ br.completed_by.name if br.completed_by else '—' }} on {{ br.completed_at.strftime('%d %b %Y') if br.completed_at else '—' }}.
+        {% if br.is_reviewed %}Reviewed by {{ br.reviewed_by.name }}.{% endif %}
+        {% if br.is_partner_signed %}Partner sign-off by {{ br.partner_signed_by.name }}.{% endif %}
+      </p>
+      {% if current_user.role in ('supervisor', 'partner', 'admin') and not br.is_reviewed and br.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('accounting.review_bank_reconciliation', recon_id=br.id) }}" class="inline"><button type="submit" class="btn small secondary">Mark reviewed</button></form>
+      {% endif %}
+      {% if current_user.role in ('partner', 'admin') and not br.is_partner_signed and br.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('accounting.partner_sign_bank_reconciliation', recon_id=br.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% endif %}
+      <form method="post" action="{{ url_for('accounting.delete_bank_reconciliation', recon_id=br.id) }}" class="inline" onsubmit="return confirm('Delete this reconciliation?')"><button type="submit" class="btn small danger">Delete</button></form>
+    </details>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">No bank reconciliations yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_bank_reconciliation', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div>
+        <label for="br_gl_account">Bank account</label>
+        <select id="br_gl_account" name="gl_account_id">
+          <option value="">—</option>
+          {% for a in gl_accounts %}<option value="{{ a.id }}">{{ a.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="br_statement_date">Statement date</label><input type="date" id="br_statement_date" name="statement_date"></div>
+      <div><label for="br_bank_balance">Bank statement balance</label><input type="number" step="0.01" id="br_bank_balance" name="bank_statement_balance"></div>
+      <div><label for="br_book_balance">Book balance</label><input type="number" step="0.01" id="br_book_balance" name="book_balance"></div>
+      <div style="flex:2;"><label for="br_notes">Notes</label><input type="text" id="br_notes" name="notes"></div>
+      <div><button type="submit" class="btn small gold">Start reconciliation</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Accounting Risk Register ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Accounting Risk Register</h3>
+    {% if accounting_risk_items %}
+    <table>
+      <thead><tr><th>Category</th><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Rating</th><th>Owner</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for r in accounting_risk_items %}
+        <tr>
+          <td>{{ r.category or '—' }}</td>
+          <td>{{ r.risk_description }}{% if r.mitigation %}<div class="muted" style="font-size:11px;">Mitigation: {{ r.mitigation }}</div>{% endif %}</td>
+          <td>{{ r.likelihood }}</td>
+          <td>{{ r.impact }}</td>
+          <td><span class="badge risk-{{ r.rating }}">{{ r.rating }} ({{ r.score }})</span></td>
+          <td>{{ r.owner.name if r.owner else '—' }}</td>
+          <td>{{ r.status }}</td>
+          <td><form method="post" action="{{ url_for('accounting.delete_accounting_risk', risk_id=r.id) }}" class="inline" onsubmit="return confirm('Delete this risk?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No accounting risks logged yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_accounting_risk', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div><label for="acc_risk_category">Category</label><input type="text" id="acc_risk_category" name="category" placeholder="e.g. Segregation of duties"></div>
+      <div style="flex:2;"><label for="acc_risk_description">Risk *</label><input type="text" id="acc_risk_description" name="risk_description" required></div>
+      <div><label for="acc_risk_likelihood">Likelihood (1-5)</label><input type="number" min="1" max="5" id="acc_risk_likelihood" name="likelihood" value="3"></div>
+      <div><label for="acc_risk_impact">Impact (1-5)</label><input type="number" min="1" max="5" id="acc_risk_impact" name="impact" value="3"></div>
+      <div>
+        <label for="acc_risk_owner">Owner</label>
+        <select id="acc_risk_owner" name="owner_id">
+          <option value="">—</option>
+          {% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="acc_risk_mitigation">Mitigation</label><input type="text" id="acc_risk_mitigation" name="mitigation"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  {% if engagement.has_cost_accounting %}
+  <!-- ---------- Cost Accounting ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Cost Centres</h3>
+    {% if cost_centres %}
+    <table>
+      <thead><tr><th>Code</th><th>Name</th><th>Type</th><th>Notes</th><th></th></tr></thead>
+      <tbody>
+        {% for c in cost_centres %}
+        <tr>
+          <td>{{ c.code or '—' }}</td>
+          <td>{{ c.name }}</td>
+          <td>{{ c.centre_type }}</td>
+          <td>{{ c.notes or '—' }}</td>
+          <td><form method="post" action="{{ url_for('accounting.delete_cost_centre', centre_id=c.id) }}" class="inline" onsubmit="return confirm('Delete this cost centre?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No cost centres yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_cost_centre', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div><label for="cc_code">Code</label><input type="text" id="cc_code" name="code"></div>
+      <div style="flex:2;"><label for="cc_name">Name *</label><input type="text" id="cc_name" name="name" required></div>
+      <div>
+        <label for="cc_type">Type</label>
+        <select id="cc_type" name="centre_type">
+          {% for t in cost_centre_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Job / Process / Standard Costing</h3>
+    {% if costing_records %}
+    <table>
+      <thead><tr><th>Reference</th><th>Method</th><th>Cost centre</th><th>Units</th><th>Material</th><th>Labour</th><th>Var. OH</th><th>Fixed OH</th><th>Total cost</th><th>Unit cost</th><th></th></tr></thead>
+      <tbody>
+        {% for cr in costing_records %}
+        <tr>
+          <td>{{ cr.reference }}</td>
+          <td>{{ cr.costing_method }}</td>
+          <td>{{ cr.cost_centre.name if cr.cost_centre else '—' }}</td>
+          <td>{{ cr.units_produced }}</td>
+          <td>{{ '%.2f'|format(cr.direct_material_cost) }}</td>
+          <td>{{ '%.2f'|format(cr.direct_labour_cost) }}</td>
+          <td>{{ '%.2f'|format(cr.variable_overhead_cost) }}</td>
+          <td>{{ '%.2f'|format(cr.fixed_overhead_cost) }}</td>
+          <td>{{ '%.2f'|format(cr.total_cost) }}</td>
+          <td>{{ '%.2f'|format(cr.unit_cost) if cr.unit_cost is not none else '—' }}</td>
+          <td><form method="post" action="{{ url_for('accounting.delete_costing_record', record_id=cr.id) }}" class="inline" onsubmit="return confirm('Delete this cost card?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No cost cards yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_costing_record', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div><label for="cr_reference">Job/batch/process *</label><input type="text" id="cr_reference" name="reference" required></div>
+      <div>
+        <label for="cr_method">Method</label>
+        <select id="cr_method" name="costing_method">
+          {% for m in costing_methods %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="cr_cost_centre">Cost centre</label>
+        <select id="cr_cost_centre" name="cost_centre_id">
+          <option value="">—</option>
+          {% for c in cost_centres %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="cr_units">Units produced</label><input type="number" step="0.01" id="cr_units" name="units_produced" value="1"></div>
+      <div><label for="cr_material">Direct material</label><input type="number" step="0.01" id="cr_material" name="direct_material_cost" value="0"></div>
+      <div><label for="cr_labour">Direct labour</label><input type="number" step="0.01" id="cr_labour" name="direct_labour_cost" value="0"></div>
+      <div><label for="cr_var_oh">Variable overhead</label><input type="number" step="0.01" id="cr_var_oh" name="variable_overhead_cost" value="0"></div>
+      <div><label for="cr_fixed_oh">Fixed overhead</label><input type="number" step="0.01" id="cr_fixed_oh" name="fixed_overhead_cost" value="0"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Standard Cost Variances</h3>
+    {% if standard_cost_variances %}
+    <table>
+      <thead><tr><th>Type</th><th>Job/batch</th><th>Standard</th><th>Actual</th><th>Variance</th><th>Explanation</th><th></th></tr></thead>
+      <tbody>
+        {% for v in standard_cost_variances %}
+        <tr>
+          <td>{{ v.variance_type }}</td>
+          <td>{{ v.costing_record.reference if v.costing_record else '—' }}</td>
+          <td>{{ '%.2f'|format(v.standard_amount) }}</td>
+          <td>{{ '%.2f'|format(v.actual_amount) }}</td>
+          <td>{{ '%.2f'|format(v.variance) }} {% if v.is_favourable %}<span class="badge status-Completed">Favourable</span>{% else %}<span class="badge overdue">Adverse</span>{% endif %}</td>
+          <td>{{ v.explanation or '—' }}</td>
+          <td><form method="post" action="{{ url_for('accounting.delete_standard_cost_variance', variance_id=v.id) }}" class="inline" onsubmit="return confirm('Delete this variance?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No variances recorded yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_standard_cost_variance', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div>
+        <label for="var_type">Variance type</label>
+        <select id="var_type" name="variance_type">
+          {% for t in variance_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="var_record">Job/batch</label>
+        <select id="var_record" name="costing_record_id">
+          <option value="">—</option>
+          {% for cr in costing_records %}<option value="{{ cr.id }}">{{ cr.reference }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="var_standard">Standard amount</label><input type="number" step="0.01" id="var_standard" name="standard_amount"></div>
+      <div><label for="var_actual">Actual amount</label><input type="number" step="0.01" id="var_actual" name="actual_amount"></div>
+      <div style="flex:2;"><label for="var_explanation">Explanation</label><input type="text" id="var_explanation" name="explanation"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Cost-Volume-Profit (Break-even) Analysis</h3>
+    {% if cvp_analyses %}
+    <table>
+      <thead><tr><th>Segment</th><th>Selling price</th><th>Variable cost</th><th>Contribution margin</th><th>CM ratio</th><th>Fixed costs</th><th>Break-even units</th><th>Break-even revenue</th><th></th></tr></thead>
+      <tbody>
+        {% for cvp in cvp_analyses %}
+        <tr>
+          <td>{{ cvp.segment_name }}{% if cvp.notes %}<div class="muted" style="font-size:11px;">{{ cvp.notes }}</div>{% endif %}</td>
+          <td>{{ '%.2f'|format(cvp.selling_price_per_unit) }}</td>
+          <td>{{ '%.2f'|format(cvp.variable_cost_per_unit) }}</td>
+          <td>{{ '%.2f'|format(cvp.contribution_margin_per_unit) }}</td>
+          <td>{{ '%.1f'|format(cvp.contribution_margin_ratio * 100) + '%' if cvp.contribution_margin_ratio is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(cvp.fixed_costs) }}</td>
+          <td>{{ '%.1f'|format(cvp.break_even_units) if cvp.break_even_units is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(cvp.break_even_revenue) if cvp.break_even_revenue is not none else '—' }}</td>
+          <td><form method="post" action="{{ url_for('accounting.delete_cvp_analysis', analysis_id=cvp.id) }}" class="inline" onsubmit="return confirm('Delete this analysis?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No CVP analyses yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_cvp_analysis', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div style="flex:2;"><label for="cvp_segment">Product/segment *</label><input type="text" id="cvp_segment" name="segment_name" required></div>
+      <div><label for="cvp_price">Selling price/unit</label><input type="number" step="0.01" id="cvp_price" name="selling_price_per_unit"></div>
+      <div><label for="cvp_variable">Variable cost/unit</label><input type="number" step="0.01" id="cvp_variable" name="variable_cost_per_unit"></div>
+      <div><label for="cvp_fixed">Fixed costs</label><input type="number" step="0.01" id="cvp_fixed" name="fixed_costs"></div>
+      <div><label for="cvp_target">Target profit</label><input type="number" step="0.01" id="cvp_target" name="target_profit"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if engagement.has_management_accounting %}
+  <!-- ---------- Budgets ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Budgets</h3>
+    {% if budgets %}
+    {% for b in budgets %}
+    <details style="margin-bottom:8px;">
+      <summary>{{ b.name }} ({{ b.budget_type }}){% if b.period_start and b.period_end %} - {{ b.period_start.strftime('%d %b %Y') }} to {{ b.period_end.strftime('%d %b %Y') }}{% endif %} - Budgeted {{ '%.2f'|format(b.total_budgeted) }} / Actual {{ '%.2f'|format(b.total_actual) }}{% if b.is_partner_signed %} &#10003;{% endif %}</summary>
+      {% if b.lines %}
+      <table>
+        <thead><tr><th>Category</th><th>Budgeted</th><th>Actual</th><th>Variance</th><th>Variance %</th><th>Notes</th><th></th></tr></thead>
+        <tbody>
+          {% for line in b.lines %}
+          <tr>
+            <td>{{ line.category }}</td>
+            <td>{{ '%.2f'|format(line.budgeted_amount) }}</td>
+            <td>{{ '%.2f'|format(line.actual_amount) if line.actual_amount is not none else '—' }}</td>
+            <td>{{ '%.2f'|format(line.variance) if line.variance is not none else '—' }}</td>
+            <td>{{ '%.1f'|format(line.variance_pct) + '%' if line.variance_pct is not none else '—' }}</td>
+            <td>{{ line.notes or '—' }}</td>
+            <td><form method="post" action="{{ url_for('accounting.delete_budget_line', line_id=line.id) }}" class="inline" onsubmit="return confirm('Delete this line?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      <form method="post" action="{{ url_for('accounting.add_budget_line', budget_id=b.id) }}" class="form-row" style="flex-wrap:wrap;">
+        <div style="flex:2;"><input type="text" name="category" placeholder="Category *" required></div>
+        <div><input type="number" step="0.01" name="budgeted_amount" placeholder="Budgeted"></div>
+        <div><input type="number" step="0.01" name="actual_amount" placeholder="Actual"></div>
+        <div><input type="text" name="notes" placeholder="Notes"></div>
+        <div><button type="submit" class="btn small secondary">Add line</button></div>
+      </form>
+      <p class="muted" style="font-size:11.5px;margin-top:8px;">
+        Prepared by {{ b.completed_by.name if b.completed_by else '—' }} on {{ b.completed_at.strftime('%d %b %Y') if b.completed_at else '—' }}.
+        {% if b.is_reviewed %}Reviewed by {{ b.reviewed_by.name }}.{% endif %}
+        {% if b.is_partner_signed %}Partner sign-off by {{ b.partner_signed_by.name }}.{% endif %}
+      </p>
+      {% if current_user.role in ('supervisor', 'partner', 'admin') and not b.is_reviewed and b.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('accounting.review_budget', budget_id=b.id) }}" class="inline"><button type="submit" class="btn small secondary">Mark reviewed</button></form>
+      {% endif %}
+      {% if current_user.role in ('partner', 'admin') and not b.is_partner_signed and b.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('accounting.partner_sign_budget', budget_id=b.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% endif %}
+      <form method="post" action="{{ url_for('accounting.delete_budget', budget_id=b.id) }}" class="inline" onsubmit="return confirm('Delete this whole budget?')"><button type="submit" class="btn small danger">Delete budget</button></form>
+    </details>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">No budgets yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_budget', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div style="flex:2;"><label for="budget_name">Name *</label><input type="text" id="budget_name" name="name" required></div>
+      <div>
+        <label for="budget_type">Type</label>
+        <select id="budget_type" name="budget_type">
+          {% for t in budget_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="budget_period_start">Period start</label><input type="date" id="budget_period_start" name="period_start"></div>
+      <div><label for="budget_period_end">Period end</label><input type="date" id="budget_period_end" name="period_end"></div>
+      <div><button type="submit" class="btn small gold">New budget</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- KPI Dashboard ---------- -->
+  <div class="card">
+    <h3 class="mt-0">KPI Dashboard</h3>
+    <p class="muted" style="font-size:11.5px;">Every figure below is entered by the preparer, not auto-computed from the Trial Balance - pick the KPIs that matter for this client.</p>
+    {% if kpi_metrics %}
+    <table>
+      <thead><tr><th>Metric</th><th>Category</th><th>Period</th><th>Target</th><th>Actual</th><th>Variance</th><th>Unit</th><th></th></tr></thead>
+      <tbody>
+        {% for k in kpi_metrics %}
+        <tr>
+          <td>{{ k.metric_name }}{% if k.notes %}<div class="muted" style="font-size:11px;">{{ k.notes }}</div>{% endif %}</td>
+          <td>{{ k.category }}</td>
+          <td>{{ k.period_label or '—' }}</td>
+          <td>{{ k.target_value if k.target_value is not none else '—' }}</td>
+          <td>{{ k.actual_value if k.actual_value is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(k.variance) if k.variance is not none else '—' }}</td>
+          <td>{{ k.unit or '—' }}</td>
+          <td><form method="post" action="{{ url_for('accounting.delete_kpi_metric', kpi_id=k.id) }}" class="inline" onsubmit="return confirm('Delete this KPI?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No KPIs tracked yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('accounting.add_kpi_metric', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div style="flex:2;"><label for="kpi_name">Metric *</label><input type="text" id="kpi_name" name="metric_name" required></div>
+      <div>
+        <label for="kpi_category">Category</label>
+        <select id="kpi_category" name="category">
+          {% for c in kpi_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="kpi_period">Period</label><input type="text" id="kpi_period" name="period_label" placeholder="e.g. Q1 2026"></div>
+      <div><label for="kpi_target">Target</label><input type="number" step="0.01" id="kpi_target" name="target_value"></div>
+      <div><label for="kpi_actual">Actual</label><input type="number" step="0.01" id="kpi_actual" name="actual_value"></div>
+      <div><label for="kpi_unit">Unit</label><input type="text" id="kpi_unit" name="unit" placeholder="%, days, x, $"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+  {% endif %}
+
+  <!-- ---------- Accounting Checklist / Quality Gates ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Accounting Checklist &amp; Quality Gates</h3>
+    {% if not accounting_checklist_by_area %}
+    <form method="post" action="{{ url_for('accounting.seed_accounting_checklist', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small gold">Add the firm's default accounting checklist</button></form>
+    {% endif %}
+    {% for area, items in accounting_checklist_by_area.items() %}
+    <h4 style="margin-bottom:4px;margin-top:14px;">{{ area }}</h4>
+    {% for item in items %}
+    <form method="post" action="{{ url_for('accounting.update_accounting_checklist_item', item_id=item.id) }}" class="checklist-row">
+      <span class="item-text">{{ item.item_text }}</span>
+      <select name="response">
+        <option value="" {% if not item.response %}selected{% endif %}>—</option>
+        <option value="Yes" {% if item.response=='Yes' %}selected{% endif %}>Yes</option>
+        <option value="No" {% if item.response=='No' %}selected{% endif %}>No</option>
+        <option value="N/A" {% if item.response=='N/A' %}selected{% endif %}>N/A</option>
+      </select>
+      <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Save</button>
+      <button type="submit" formaction="{{ url_for('accounting.delete_accounting_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+    </form>
+    {% endfor %}
+    {% endfor %}
+    <form method="post" action="{{ url_for('accounting.add_accounting_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+      <div><label for="acc_checklist_area">Area</label><input type="text" id="acc_checklist_area" name="area" placeholder="e.g. Bookkeeping"></div>
+      <div style="flex:2;"><label for="acc_checklist_item_text">Add a checklist item</label><input type="text" id="acc_checklist_item_text" name="item_text" required></div>
+      <div><button type="submit" class="btn small secondary">Add item</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Management Accounts Report ---------- -->
+  {% if engagement.has_management_accounting %}
+  {% macro accounting_narrative_editor(kind, index, label, narrative) %}
+    <details style="margin-bottom:6px;">
+      <summary>{{ index }}. {{ label }}{% if narrative and narrative.is_partner_signed %} &#10003;{% endif %}</summary>
+      <form method="post" action="{{ url_for('engagements.save_workpaper_narrative', engagement_id=engagement.id, kind=kind) }}">
+        <textarea name="body" rows="5">{{ narrative.body if narrative else '' }}</textarea>
+        <button type="submit" class="btn small gold">Save</button>
+      </form>
+      {% if narrative and narrative.id %}
+      <p class="muted" style="font-size:11.5px;margin-top:6px;">
+        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ narrative.completed_at.strftime('%d %b %Y') if narrative.completed_at else '—' }}.
+        {% if narrative.is_reviewed %}Reviewed by {{ narrative.reviewed_by.name }}.{% endif %}
+        {% if narrative.is_partner_signed %}Partner sign-off by {{ narrative.partner_signed_by.name }}.{% endif %}
+      </p>
+      {% if current_user.role in ('supervisor', 'partner', 'admin') and not narrative.is_reviewed and narrative.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small secondary">Mark reviewed</button></form>
+      {% endif %}
+      {% if current_user.role in ('partner', 'admin') and not narrative.is_partner_signed and narrative.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% endif %}
+      {% endif %}
+    </details>
+  {% endmacro %}
+
+  <div class="card">
+    <h3 class="mt-0">Management Accounts Report (10 parts, Ref. {{ filing_reference('management_accounts_report') }})</h3>
+    <form method="post" action="{{ url_for('engagements.generate_management_accounts_report_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file as Word</button></form>
+    {{ filed_workpapers('management_accounts_report') }}
+    <div style="margin-top:10px;">
+      {% for key, label in management_report_parts %}{{ accounting_narrative_editor(key, loop.index, label, management_report_narratives.get(key)) }}{% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- ---------- Review Queries on this tab ---------- -->
+  {{ qmacros.render_queries(engagement, 'accounting', queries_by_section.get('accounting', [])) }}
 
 {% endif %}
 

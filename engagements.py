@@ -62,6 +62,18 @@ from models import (
     TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
     LegislativeUpdate, TaxChecklistItem, DEFAULT_TAX_CHECKLIST_ITEMS,
     TAX_REGISTRATION_RECORD_TYPES, TAX_ENTITY_CLASSIFICATIONS,
+    ACCOUNTING_SERVICES, ACCOUNTING_SERVICE_LABELS, ACCOUNTING_AREAS,
+    MANAGEMENT_ACCOUNTS_REPORT_PARTS,
+    GLAccount, GL_ACCOUNT_TYPES,
+    JournalEntry, JournalEntryLine, JOURNAL_ENTRY_SOURCES,
+    BankReconciliation, BankReconciliationItem, BANK_RECONCILIATION_ITEM_TYPES,
+    CostCentre, COST_CENTRE_TYPES,
+    CostingRecord, COSTING_METHODS,
+    StandardCostVariance, VARIANCE_TYPES,
+    CVPAnalysis,
+    Budget, BudgetLine, BUDGET_TYPES,
+    KPIMetric, KPI_CATEGORIES,
+    AccountingChecklistItem, DEFAULT_ACCOUNTING_CHECKLIST_ITEMS,
 )
 import financials as fin
 import workpapers as wp
@@ -171,11 +183,12 @@ def new_engagement():
             return render_template("engagements/form.html", engagement=None, clients=clients, users=users,
                                     templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
                                     subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES,
-                                    tax_service_options=TAX_SERVICES)
+                                    tax_service_options=TAX_SERVICES, accounting_service_options=ACCOUNTING_SERVICES)
 
         engagement_type = request.form.get("type", "Audit")
         selected_activities = request.form.getlist("secretarial_activities")
         selected_tax_services = request.form.getlist("tax_services")
+        selected_accounting_services = request.form.getlist("accounting_services")
         engagement = Engagement(
             client_id=int(client_id),
             title=request.form.get("title", "").strip(),
@@ -188,6 +201,8 @@ def new_engagement():
             # ticked still gets the Tax tab (see Engagement.has_tax_module),
             # so this is purely "which services", never "whether at all".
             tax_services=",".join(selected_tax_services) or None,
+            # Combinable on ANY engagement type, same as tax_services above.
+            accounting_services=",".join(selected_accounting_services) or None,
             status=request.form.get("status", "Planning"),
             description=request.form.get("description", "").strip(),
             partner_id=request.form.get("partner_id") or None,
@@ -227,7 +242,7 @@ def new_engagement():
     return render_template("engagements/form.html", engagement=None, clients=clients, users=users,
                             templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
                             subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES,
-                            tax_service_options=TAX_SERVICES)
+                            tax_service_options=TAX_SERVICES, accounting_service_options=ACCOUNTING_SERVICES)
 
 
 @engagements_bp.route("/<int:engagement_id>/edit", methods=["GET", "POST"])
@@ -245,6 +260,7 @@ def edit_engagement(engagement_id):
         engagement.subdivision = (request.form.get("subdivision", "").strip() or None) if engagement.type == "Secretarial" else None
         engagement.secretarial_activities = (",".join(request.form.getlist("secretarial_activities")) or None) if engagement.type == "Secretarial" else None
         engagement.tax_services = ",".join(request.form.getlist("tax_services")) or None
+        engagement.accounting_services = ",".join(request.form.getlist("accounting_services")) or None
         engagement.status = request.form.get("status", "Planning")
         engagement.description = request.form.get("description", "").strip()
         engagement.partner_id = request.form.get("partner_id") or None
@@ -268,7 +284,7 @@ def edit_engagement(engagement_id):
     return render_template("engagements/form.html", engagement=engagement, clients=clients, users=users,
                             templates=[], types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
                             subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES,
-                            tax_service_options=TAX_SERVICES)
+                            tax_service_options=TAX_SERVICES, accounting_service_options=ACCOUNTING_SERVICES)
 
 
 @engagements_bp.route("/<int:engagement_id>/delete", methods=["POST"])
@@ -526,6 +542,13 @@ def view_engagement(engagement_id):
     if engagement.has_tax_module:
         substantive_area_names = list(substantive_area_names) + [h for h in TAX_HEADS if h not in substantive_area_names]
 
+    # Same reuse technique for the Accounting module's write-up/close-out
+    # Execution Plan - one area per ACCOUNTING_AREAS entry, appended on top
+    # of whatever this engagement type's own areas already are, whenever
+    # Engagement.has_accounting_module is True.
+    if engagement.has_accounting_module:
+        substantive_area_names = list(substantive_area_names) + [a for a in ACCOUNTING_AREAS if a not in substantive_area_names]
+
     substantive_areas_by_name = {
         a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).all()
     }
@@ -555,7 +578,8 @@ def view_engagement(engagement_id):
     # engagement, unchanged from before the Tax module existed.
     seedable_kinds = [
         (kind, label, section) for kind, label, section in WORKPAPER_NARRATIVE_KINDS
-        if engagement.has_tax_module or section not in ("tax_opinion", "tax_health_check")
+        if (engagement.has_tax_module or section not in ("tax_opinion", "tax_health_check"))
+        and (engagement.has_accounting_module or section != "management_accounts_report")
     ]
     for kind, _label, _section in seedable_kinds:
         if kind not in workpaper_narratives:
@@ -626,6 +650,48 @@ def view_engagement(engagement_id):
     tax_penalty_calculations = PenaltyInterestCalculation.query.filter_by(engagement_id=engagement_id).order_by(PenaltyInterestCalculation.calculated_at.desc()).all() if engagement.has_tax_module else []
     tax_opinion_narratives = {k: workpaper_narratives.get(k) for k, _ in TAX_OPINION_PARTS} if engagement.has_tax_module else {}
     tax_health_check_narratives = {k: workpaper_narratives.get(k) for k, _ in TAX_HEALTH_CHECK_PARTS} if engagement.has_tax_module else {}
+
+    # ---------- Accounting tab (Financial/Cost/Management Accounting module) ----------
+    # Only actually queried when the Accounting tab could be shown - see
+    # Engagement.has_accounting_module / the module comment in models.py for
+    # what's reused (RiskItem, SubstantiveProcedureArea/Item, TrialBalance/
+    # TrialBalanceLine, WorkpaperNarrative) vs. genuinely new here.
+    gl_accounts = []
+    journal_entries = []
+    bank_reconciliations = []
+    accounting_risk_items = []
+    cost_centres = []
+    costing_records = []
+    standard_cost_variances = []
+    cvp_analyses = []
+    budgets = []
+    kpi_metrics = []
+    accounting_checklist_items = []
+    accounting_checklist_by_area = {}
+    accounting_execution_areas_by_name = {}
+    if engagement.has_accounting_module:
+        gl_accounts = GLAccount.query.filter_by(engagement_id=engagement_id).order_by(GLAccount.order, GLAccount.code).all()
+        journal_entries = JournalEntry.query.filter_by(engagement_id=engagement_id).order_by(JournalEntry.entry_date.desc(), JournalEntry.id.desc()).all()
+        bank_reconciliations = BankReconciliation.query.filter_by(engagement_id=engagement_id).order_by(BankReconciliation.statement_date.desc()).all()
+        accounting_risk_items = RiskItem.query.filter_by(engagement_id=engagement_id, module="accounting").order_by(RiskItem.id).all()
+        if engagement.has_cost_accounting:
+            cost_centres = CostCentre.query.filter_by(engagement_id=engagement_id).order_by(CostCentre.name).all()
+            costing_records = CostingRecord.query.filter_by(engagement_id=engagement_id).order_by(CostingRecord.id.desc()).all()
+            standard_cost_variances = StandardCostVariance.query.filter_by(engagement_id=engagement_id).order_by(StandardCostVariance.id.desc()).all()
+            cvp_analyses = CVPAnalysis.query.filter_by(engagement_id=engagement_id).order_by(CVPAnalysis.id.desc()).all()
+        if engagement.has_management_accounting:
+            budgets = Budget.query.filter_by(engagement_id=engagement_id).order_by(Budget.id.desc()).all()
+            kpi_metrics = KPIMetric.query.filter_by(engagement_id=engagement_id).order_by(KPIMetric.id.desc()).all()
+        accounting_checklist_items = AccountingChecklistItem.query.filter_by(engagement_id=engagement_id).order_by(AccountingChecklistItem.order, AccountingChecklistItem.id).all()
+        for item in accounting_checklist_items:
+            accounting_checklist_by_area.setdefault(item.area or "General", []).append(item)
+        # The Execution Plan - one SubstantiveProcedureArea per
+        # ACCOUNTING_AREAS entry, exactly like the Tax module's own
+        # Execution Plan reuses this same model (see TAX_HEADS above).
+        accounting_execution_areas_by_name = {
+            a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).filter(SubstantiveProcedureArea.area.in_(ACCOUNTING_AREAS)).all()
+        }
+    management_report_narratives = {k: workpaper_narratives.get(k) for k, _ in MANAGEMENT_ACCOUNTS_REPORT_PARTS} if engagement.has_accounting_module else {}
 
     return render_template(
         "engagements/detail.html",
@@ -761,6 +827,30 @@ def view_engagement(engagement_id):
         tax_opinion_narratives=tax_opinion_narratives,
         tax_health_check_parts=TAX_HEALTH_CHECK_PARTS,
         tax_health_check_narratives=tax_health_check_narratives,
+        accounting_services=ACCOUNTING_SERVICES,
+        accounting_service_labels=ACCOUNTING_SERVICE_LABELS,
+        gl_accounts=gl_accounts,
+        gl_account_types=GL_ACCOUNT_TYPES,
+        journal_entries=journal_entries,
+        journal_entry_sources=JOURNAL_ENTRY_SOURCES,
+        bank_reconciliations=bank_reconciliations,
+        bank_reconciliation_item_types=BANK_RECONCILIATION_ITEM_TYPES,
+        accounting_risk_items=accounting_risk_items,
+        cost_centres=cost_centres,
+        cost_centre_types=COST_CENTRE_TYPES,
+        costing_records=costing_records,
+        costing_methods=COSTING_METHODS,
+        standard_cost_variances=standard_cost_variances,
+        variance_types=VARIANCE_TYPES,
+        cvp_analyses=cvp_analyses,
+        budgets=budgets,
+        budget_types=BUDGET_TYPES,
+        kpi_metrics=kpi_metrics,
+        kpi_categories=KPI_CATEGORIES,
+        accounting_checklist_by_area=accounting_checklist_by_area,
+        accounting_execution_areas_by_name=accounting_execution_areas_by_name,
+        management_report_parts=MANAGEMENT_ACCOUNTS_REPORT_PARTS,
+        management_report_narratives=management_report_narratives,
     )
 
 
@@ -3533,11 +3623,14 @@ def _narrative_tab(kind):
     """Which engagement-detail tab a WorkpaperNarrative's own Save/Review/
     Partner-sign actions should redirect back to - "tax" for a Tax Opinion/
     Tax Health Check part (see models.TAX_OPINION_PARTS/TAX_HEALTH_CHECK_
-    PARTS), "finalisation" for every other kind (rep_letter, report_to_
-    management, forensic_executive_summary), unchanged from before the Tax
-    module existed."""
+    PARTS), "accounting" for a Management Accounts Report part (see
+    models.MANAGEMENT_ACCOUNTS_REPORT_PARTS), "finalisation" for every other
+    kind (rep_letter, report_to_management, forensic_executive_summary),
+    unchanged from before the Tax/Accounting modules existed."""
     if kind.startswith("tax_opinion") or kind.startswith("tax_health_check"):
         return "tax"
+    if kind.startswith("mgmt_report"):
+        return "accounting"
     return "finalisation"
 
 
@@ -5025,6 +5118,24 @@ def generate_tax_health_check_docx(engagement_id):
     doc = _file_generated_workpaper(engagement, "tax_health_check", "Tax Health Check Report", None, "Tax_Health_Check_Report", "docx", buf, reference_override=filing_reference("tax_health_check"))
     flash(f"Tax Health Check Report filed (v{doc.version}).", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax"))
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/management-accounts-report/generate", methods=["POST"])
+@login_required
+def generate_management_accounts_report_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    if not engagement.has_accounting_module:
+        flash("The Management Accounts Report is only available on an engagement with an Accounting service turned on.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="accounting"))
+    narratives_by_kind = {
+        wn.kind: wn for wn in WorkpaperNarrative.query.filter_by(engagement_id=engagement_id).all()
+        if wn.kind.startswith("mgmt_report")
+    }
+    buf = wp.build_management_accounts_report_docx(engagement, narratives_by_kind)
+    doc = _file_generated_workpaper(engagement, "management_accounts_report", "Management Accounts Report", None, "Management_Accounts_Report", "docx", buf, reference_override=filing_reference("management_accounts_report"))
+    flash(f"Management Accounts Report filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="accounting"))
 
 
 @engagements_bp.route("/<int:engagement_id>/workpapers/file-summary/generate", methods=["POST"])

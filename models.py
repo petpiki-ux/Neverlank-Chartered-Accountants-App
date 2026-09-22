@@ -9,6 +9,7 @@ from extensions import db
 ENGAGEMENT_TYPES = [
     "Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement",
     "Business Intelligence and IT Engagements", "Tax Compliance", "Tax Advisory & Health Check",
+    "Accounting & Bookkeeping",
 ]
 
 # The financial reporting framework the client's Financial Statements are
@@ -118,6 +119,31 @@ TAX_SERVICES = [
 ]
 TAX_SERVICE_LABELS = dict(TAX_SERVICES)
 
+# Selectable "Services" for the Financial Accounting, Cost Accounting &
+# Management Accounting module (Engagement.accounting_services, a
+# comma-separated list of the keys below) - what the firm has been engaged
+# to do on the accounting side, for a client whose books/costing/management
+# reporting Neverlank itself prepares (as distinct from an Audit/Assurance
+# engagement, which forms an opinion on figures someone else prepared).
+# Deliberately combinable onto ANY engagement type, exactly like
+# TAX_SERVICES above - a firm might bundle a bookkeeping clean-up into an
+# Audit engagement, as well as this being the natural default for the
+# dedicated "Accounting & Bookkeeping" engagement type. The whole
+# Accounting tab (see accounting.py / templates referenced from
+# templates/engagements/detail.html) only appears once at least one of
+# these is selected, or the engagement type is dedicated - see
+# Engagement.has_accounting_module. "costing"/"budgeting" each gate their
+# own sections of that tab further - see has_cost_accounting/
+# has_management_accounting below, since not every bookkeeping client also
+# needs job costing or a formal budget.
+ACCOUNTING_SERVICES = [
+    ("bookkeeping", "Financial Accounting / Bookkeeping (write-up & GL maintenance)"),
+    ("statements", "Financial Statement Preparation (compiled / management accounts)"),
+    ("costing", "Cost Accounting (job/process/standard costing & variance analysis)"),
+    ("budgeting", "Management Accounting (budgets, forecasts & management reports)"),
+]
+ACCOUNTING_SERVICE_LABELS = dict(ACCOUNTING_SERVICES)
+
 # The tax heads tracked throughout the Tax module (Registrations, the
 # Statutory Compliance Calendar, the Execution Plan, Return Records, the
 # Penalty & Interest Engine, and the Exposure Dashboard all key off this
@@ -128,6 +154,19 @@ TAX_HEADS = [
     "Corporate Income Tax (CIT)", "Value Added Tax (VAT)", "PAYE",
     "Withholding Tax (WHT)", "Capital Gains Tax (CGT)", "Customs & Excise",
     "Provisional Tax (QPDs)",
+]
+
+# The write-up/close-out work areas tracked on the Accounting module's
+# Execution Plan - reuses SubstantiveProcedureArea/Item exactly like
+# TAX_HEADS does above (one area per entry, appended onto whatever this
+# engagement type's own areas already are, whenever Engagement.
+# has_accounting_module is True) - see the append in engagements.
+# view_engagement(). Kept as a plain, editable-in-code list for the same
+# reason TAX_HEADS is.
+ACCOUNTING_AREAS = [
+    "Bank & Cash Reconciliations", "Receivables & Payables Write-up",
+    "Inventory & Costing Records", "Payroll Postings",
+    "Fixed Asset Register Maintenance", "Management Reporting Pack",
 ]
 
 ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"]
@@ -164,6 +203,7 @@ QUERY_SECTIONS = [
     ("tasks", "Tasks"),
     ("finalisation", "Finalisation (Trial Balance / Financial Statements)"),
     ("tax", "Tax Advisory & Compliance"),
+    ("accounting", "Financial, Cost & Management Accounting"),
 ]
 QUERY_SECTION_KEYS = {key for key, _ in QUERY_SECTIONS}
 QUERY_SECTION_LABELS = dict(QUERY_SECTIONS)
@@ -201,6 +241,7 @@ WORKPAPER_SECTIONS = [
     ("L", "forensic_report", "Forensic Investigation Report", None),
     ("M", "tax_opinion", "Tax Opinion / Advisory Report", None),
     ("N", "tax_health_check", "Tax Health Check Report", None),
+    ("O", "management_accounts_report", "Management Accounts Report", None),
 ]
 WORKPAPER_SECTION_BY_KEY = {key: (code, label, filing_code) for code, key, label, filing_code in WORKPAPER_SECTIONS}
 
@@ -1391,6 +1432,13 @@ class Engagement(db.Model):
     # below. Blank/None means the Tax tab is hidden entirely for this
     # engagement.
     tax_services = db.Column(db.Text)
+
+    # Comma-separated ACCOUNTING_SERVICES keys - which Financial Accounting,
+    # Cost Accounting & Management Accounting services this engagement
+    # covers. Combinable onto ANY engagement type, exactly like tax_services
+    # above - see ACCOUNTING_SERVICES and has_accounting_module/
+    # has_cost_accounting/has_management_accounting below.
+    accounting_services = db.Column(db.Text)
     status = db.Column(db.String(30), nullable=False, default="Planning")
     period_end = db.Column(db.Date)
     start_date = db.Column(db.Date, default=date.today)
@@ -1528,6 +1576,42 @@ class Engagement(db.Model):
         is."""
         services = self.tax_service_list
         return "advisory" in services or "representation" in services or self.type == "Tax Advisory & Health Check"
+
+    @property
+    def accounting_service_list(self):
+        """The selected ACCOUNTING_SERVICES keys for this engagement, as a
+        plain list. Empty on every engagement until an Accounting service is
+        explicitly turned on (see form.html) - same "empty means off"
+        convention as tax_service_list, not secretarial_activity_list's
+        "empty means unfiltered"."""
+        if not self.accounting_services:
+            return []
+        return [s for s in self.accounting_services.split(",") if s]
+
+    @property
+    def has_accounting_module(self):
+        """Whether the Accounting tab should appear on this engagement at
+        all - either the dedicated Accounting & Bookkeeping engagement type,
+        or any Accounting service explicitly turned on for another
+        engagement type (e.g. a bookkeeping clean-up bundled into an Audit
+        engagement)."""
+        return self.type == "Accounting & Bookkeeping" or bool(self.accounting_service_list)
+
+    @property
+    def has_cost_accounting(self):
+        """Whether the Accounting tab's Cost Accounting sections (Cost
+        Centres, Job/Process/Standard Costing, Variance Analysis, CVP
+        Analysis) should be shown - only when the Cost Accounting service is
+        actually on, never just because some other Accounting service is."""
+        return "costing" in self.accounting_service_list
+
+    @property
+    def has_management_accounting(self):
+        """Whether the Accounting tab's Management Accounting sections
+        (Budgets, KPI Dashboard, the Management Accounts Report) should be
+        shown - only when the Management Accounting service is actually
+        on."""
+        return "budgeting" in self.accounting_service_list
 
     def __repr__(self):
         return f"<Engagement {self.title}>"
@@ -1782,14 +1866,14 @@ class EngagementChecklistItem(db.Model):
 
 
 class RiskItem(db.Model):
-    """A single likelihood x impact risk register entry. Currently used only
-    by the Tax module's Risk Register (Engagement detail page, Tax tab -
-    see tax.py) - `module` tags which register a row belongs to ("tax" for
-    every row created there) so a future second register on the same
-    engagement (e.g. a general one) can never mix rows with this one."""
+    """A single likelihood x impact risk register entry. Used by the Tax
+    module's Risk Register ("tax") and the Accounting module's Risk
+    Register ("accounting") - `module` tags which register a row belongs to
+    so the two (and any future register on the same engagement) can never
+    mix rows with each other."""
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
-    module = db.Column(db.String(20))  # "tax" - see docstring above
+    module = db.Column(db.String(20))  # "tax" | "accounting" - see docstring above
     category = db.Column(db.String(120))
     risk_description = db.Column(db.Text, nullable=False)
     likelihood = db.Column(db.Integer, default=3)  # 1-5
@@ -4053,6 +4137,545 @@ DEFAULT_TAX_CHECKLIST_ITEMS = [
 ]
 
 
+# ---------- Financial Accounting, Cost Accounting & Management Accounting module ----------
+#
+# Shown on an engagement's "Accounting" tab whenever Engagement.
+# has_accounting_module is True (a dedicated Accounting & Bookkeeping
+# engagement, or any other engagement type with an Accounting service
+# explicitly turned on - see ACCOUNTING_SERVICES above) - see accounting.py
+# for the routes. This module covers work where Neverlank itself prepares
+# a client's books/costing/management reports, as distinct from an Audit/
+# Assurance engagement forming an opinion on figures someone else prepared.
+#
+# Reuses existing machinery wherever it already fits, exactly like the Tax
+# module does (see the module comment above "Tax Advisory & Tax Compliance
+# module"):
+#   - the Accounting Risk Register reuses RiskItem (module="accounting")
+#   - the write-up/close-out Execution Plan reuses SubstantiveProcedureArea/
+#     Item, one area per ACCOUNTING_AREAS entry
+#   - the General Ledger rolls up into the existing TrialBalance/
+#     TrialBalanceLine models, so the existing Trial Balance tab's mapping
+#     UI and the existing financials.py statement-generation pipeline
+#     (Statement of Financial Position, Comprehensive Income, Cash Flow,
+#     IFRS Notes) take over unchanged from there - see
+#     accounting.roll_up_to_trial_balance
+#   - Accounting Document Management reuses the existing Documents/Filing
+#     Index rather than a new document model
+#   - the Management Accounts Report's 10 parts reuse WorkpaperNarrative,
+#     one row per named part - see MANAGEMENT_ACCOUNTS_REPORT_PARTS below
+#   - the Accounting Checklist / Quality Gates reuses the same lightweight
+#     response/comment/completed_by shape as TaxChecklistItem above
+# The models below are the genuinely new pieces that nothing existing
+# already covers: a General Ledger (this app previously had no double-entry
+# bookkeeping model at all - Trial Balance was always a flat imported
+# balances list), Bank Reconciliations, and the Cost/Management Accounting
+# working papers (Cost Centres, Job/Process/Standard Costing, Variance
+# Analysis, CVP Analysis, Budgets, KPI tracking).
+
+GL_ACCOUNT_TYPES = ["Asset", "Liability", "Equity", "Income", "Expense"]
+GL_DEBIT_NORMAL_TYPES = ("Asset", "Expense")  # the rest (Liability/Equity/Income) are credit-normal
+
+
+class GLAccount(db.Model):
+    """One line of an engagement's Chart of Accounts (Financial Accounting/
+    Bookkeeping). Engagement-scoped, like everything else in this app,
+    rather than a continuous multi-period ledger - each accounting
+    engagement/period gets its own chart, opened with whatever
+    opening_balance the preparer brings forward from the prior period's
+    closing trial balance. normal_balance is derived from account_type
+    (never stored separately, so it can never drift out of sync) and is
+    only ever used to decide which side of the rolled-up Trial Balance line
+    an account's net balance lands on - see roll_up_to_trial_balance."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    code = db.Column(db.String(30), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    account_type = db.Column(db.String(20), nullable=False, default="Expense")
+    opening_balance = db.Column(db.Float, default=0.0)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("gl_accounts", lazy=True, cascade="all, delete-orphan", order_by="GLAccount.order, GLAccount.code"))
+    created_by = db.relationship("User")
+
+    @property
+    def normal_balance(self):
+        return "Debit" if self.account_type in GL_DEBIT_NORMAL_TYPES else "Credit"
+
+    def __repr__(self):
+        return f"<GLAccount {self.code} {self.name!r} engagement={self.engagement_id}>"
+
+
+JOURNAL_ENTRY_SOURCES = ["Manual", "Bank", "Sales", "Purchases", "Payroll", "Adjustment"]
+
+
+class JournalEntry(db.Model):
+    """One double-entry journal entry (header) posted to the General
+    Ledger - the genuinely new bookkeeping primitive this app didn't have
+    before (Trial Balance was always a flat imported balances list; see the
+    module comment above). Carries the standard Preparer/Reviewer/Partner
+    sign-off, same as every other workpaper in this app - reviewing a
+    journal here is a bookkeeping quality-control step, distinct from an
+    audit adjustment (AuditAdjustment), which is an auditor's proposed
+    correction to a client-prepared trial balance."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    entry_date = db.Column(db.Date, nullable=False, default=date.today)
+    reference = db.Column(db.String(100))
+    narration = db.Column(db.Text)
+    source = db.Column(db.String(20), default="Manual")
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("journal_entries", lazy=True, cascade="all, delete-orphan", order_by="JournalEntry.entry_date, JournalEntry.id"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    lines = db.relationship("JournalEntryLine", backref="journal_entry", lazy=True, cascade="all, delete-orphan", order_by="JournalEntryLine.id")
+
+    @property
+    def total_debit(self):
+        return sum(l.debit or 0 for l in self.lines)
+
+    @property
+    def total_credit(self):
+        return sum(l.credit or 0 for l in self.lines)
+
+    @property
+    def is_balanced(self):
+        return len(self.lines) > 0 and abs(self.total_debit - self.total_credit) < 0.01
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<JournalEntry {self.reference!r} engagement={self.engagement_id}>"
+
+
+class JournalEntryLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    journal_entry_id = db.Column(db.Integer, db.ForeignKey("journal_entry.id"), nullable=False)
+    gl_account_id = db.Column(db.Integer, db.ForeignKey("gl_account.id"), nullable=False)
+    description = db.Column(db.String(200))
+    debit = db.Column(db.Float, default=0.0)
+    credit = db.Column(db.Float, default=0.0)
+
+    gl_account = db.relationship("GLAccount")
+
+    def __repr__(self):
+        return f"<JournalEntryLine account={self.gl_account_id} dr={self.debit} cr={self.credit}>"
+
+
+BANK_RECONCILIATION_ITEM_TYPES = [
+    "Outstanding Deposit", "Outstanding Cheque", "Bank Error", "Book Error", "Other",
+]
+
+
+class BankReconciliation(db.Model):
+    """One statement-date bank reconciliation working paper - one per
+    engagement per statement date (an engagement typically has several over
+    its history, one per period/month reconciled), rather than one per
+    engagement, since reconciling a bank account is a recurring monthly
+    procedure, not a single point-in-time record like TaxEntityProfile."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    gl_account_id = db.Column(db.Integer, db.ForeignKey("gl_account.id"))
+    statement_date = db.Column(db.Date, nullable=False, default=date.today)
+    bank_statement_balance = db.Column(db.Float, default=0.0)
+    book_balance = db.Column(db.Float, default=0.0)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("bank_reconciliations", lazy=True, cascade="all, delete-orphan", order_by="BankReconciliation.statement_date.desc()"))
+    gl_account = db.relationship("GLAccount")
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    items = db.relationship("BankReconciliationItem", backref="reconciliation", lazy=True, cascade="all, delete-orphan", order_by="BankReconciliationItem.id")
+
+    @property
+    def adjusted_bank_balance(self):
+        return (self.bank_statement_balance or 0) + sum(i.amount or 0 for i in self.items if i.side == "bank")
+
+    @property
+    def adjusted_book_balance(self):
+        return (self.book_balance or 0) + sum(i.amount or 0 for i in self.items if i.side == "book")
+
+    @property
+    def is_reconciled(self):
+        return abs(self.adjusted_bank_balance - self.adjusted_book_balance) < 0.01
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<BankReconciliation {self.statement_date} engagement={self.engagement_id}>"
+
+
+class BankReconciliationItem(db.Model):
+    """One reconciling item - side is which balance it adjusts ("bank" for
+    an item explaining the gap on the bank statement's side, e.g. an
+    outstanding cheque/deposit or a bank error; "book" for an item
+    explaining the gap on the client's own books, e.g. an unrecorded bank
+    charge). amount is signed by the preparer (positive to add, negative to
+    subtract) rather than the model inferring a sign from item_type, since
+    which way an item moves the balance is a judgement call the preparer
+    is best placed to make for that specific item."""
+    id = db.Column(db.Integer, primary_key=True)
+    reconciliation_id = db.Column(db.Integer, db.ForeignKey("bank_reconciliation.id"), nullable=False)
+    side = db.Column(db.String(10), nullable=False, default="bank")  # "bank" | "book"
+    item_type = db.Column(db.String(30), default="Other")
+    description = db.Column(db.String(200))
+    item_date = db.Column(db.Date)
+    amount = db.Column(db.Float, default=0.0)
+
+    def __repr__(self):
+        return f"<BankReconciliationItem {self.item_type} {self.amount} side={self.side}>"
+
+
+COST_CENTRE_TYPES = ["Production", "Service", "Administration"]
+
+
+class CostCentre(db.Model):
+    """One cost centre/department for Cost Accounting - a light grouping
+    tag that CostingRecord entries can optionally be attributed to, not a
+    full departmental-allocation engine."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    code = db.Column(db.String(30))
+    name = db.Column(db.String(150), nullable=False)
+    centre_type = db.Column(db.String(20), default="Production")
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("cost_centres", lazy=True, cascade="all, delete-orphan", order_by="CostCentre.name"))
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<CostCentre {self.name!r} engagement={self.engagement_id}>"
+
+
+COSTING_METHODS = ["Job Order Costing", "Process Costing", "Standard Costing"]
+
+
+class CostingRecord(db.Model):
+    """One job/batch/process cost card - the Cost Accounting service's core
+    working paper. Which of the three classical costing methods it's using
+    is costing_method (a label only - all three share the same "four cost
+    components -> total -> unit cost" shape, so there's no reason to give
+    them three separate tables, same reasoning as TaxRegistration's
+    record_type above)."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    costing_method = db.Column(db.String(30), nullable=False, default="Job Order Costing")
+    reference = db.Column(db.String(150), nullable=False)  # job/batch number or product/process name
+    cost_centre_id = db.Column(db.Integer, db.ForeignKey("cost_centre.id"))
+    units_produced = db.Column(db.Float, default=1.0)
+    direct_material_cost = db.Column(db.Float, default=0.0)
+    direct_labour_cost = db.Column(db.Float, default=0.0)
+    variable_overhead_cost = db.Column(db.Float, default=0.0)
+    fixed_overhead_cost = db.Column(db.Float, default=0.0)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("costing_records", lazy=True, cascade="all, delete-orphan", order_by="CostingRecord.id"))
+    cost_centre = db.relationship("CostCentre")
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def total_cost(self):
+        return (self.direct_material_cost or 0) + (self.direct_labour_cost or 0) + (self.variable_overhead_cost or 0) + (self.fixed_overhead_cost or 0)
+
+    @property
+    def unit_cost(self):
+        return self.total_cost / self.units_produced if self.units_produced else None
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<CostingRecord {self.reference!r} {self.costing_method} engagement={self.engagement_id}>"
+
+
+VARIANCE_TYPES = [
+    "Material Price", "Material Usage", "Labour Rate", "Labour Efficiency",
+    "Variable Overhead Expenditure", "Variable Overhead Efficiency",
+    "Fixed Overhead Expenditure", "Fixed Overhead Volume",
+]
+
+
+class StandardCostVariance(db.Model):
+    """One standard-costing variance calculation. variance is always
+    actual_amount - standard_amount (never the other way round) so its sign
+    is consistent across every variance type; for every type in
+    VARIANCE_TYPES, a cost that came in at or under standard (variance <=
+    0) is favourable - see is_favourable. Optionally linked to a
+    CostingRecord (the job/batch the variance relates to), but can also
+    stand alone (e.g. a period-level overhead variance not tied to one
+    specific job)."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    costing_record_id = db.Column(db.Integer, db.ForeignKey("costing_record.id"))
+    variance_type = db.Column(db.String(40), nullable=False)
+    standard_amount = db.Column(db.Float, nullable=False, default=0.0)
+    actual_amount = db.Column(db.Float, nullable=False, default=0.0)
+    explanation = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("standard_cost_variances", lazy=True, cascade="all, delete-orphan", order_by="StandardCostVariance.id"))
+    costing_record = db.relationship("CostingRecord")
+    created_by = db.relationship("User")
+
+    @property
+    def variance(self):
+        return (self.actual_amount or 0) - (self.standard_amount or 0)
+
+    @property
+    def is_favourable(self):
+        return self.variance <= 0
+
+    def __repr__(self):
+        return f"<StandardCostVariance {self.variance_type} {self.variance} engagement={self.engagement_id}>"
+
+
+class CVPAnalysis(db.Model):
+    """One Cost-Volume-Profit (break-even) analysis for a product/segment -
+    every downstream figure (contribution margin, break-even point, units
+    needed for a target profit) is computed live from the four inputs
+    below, never stored separately, so it can never drift out of sync with
+    them."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    segment_name = db.Column(db.String(150), nullable=False)
+    selling_price_per_unit = db.Column(db.Float, nullable=False, default=0.0)
+    variable_cost_per_unit = db.Column(db.Float, nullable=False, default=0.0)
+    fixed_costs = db.Column(db.Float, nullable=False, default=0.0)
+    target_profit = db.Column(db.Float)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("cvp_analyses", lazy=True, cascade="all, delete-orphan", order_by="CVPAnalysis.id"))
+    created_by = db.relationship("User")
+
+    @property
+    def contribution_margin_per_unit(self):
+        return (self.selling_price_per_unit or 0) - (self.variable_cost_per_unit or 0)
+
+    @property
+    def contribution_margin_ratio(self):
+        cm = self.contribution_margin_per_unit
+        return (cm / self.selling_price_per_unit) if self.selling_price_per_unit else None
+
+    @property
+    def break_even_units(self):
+        cm = self.contribution_margin_per_unit
+        return (self.fixed_costs / cm) if cm else None
+
+    @property
+    def break_even_revenue(self):
+        units = self.break_even_units
+        return (units * self.selling_price_per_unit) if units is not None else None
+
+    @property
+    def required_units_for_target_profit(self):
+        cm = self.contribution_margin_per_unit
+        if not cm or self.target_profit is None:
+            return None
+        return (self.fixed_costs + self.target_profit) / cm
+
+    def __repr__(self):
+        return f"<CVPAnalysis {self.segment_name!r} engagement={self.engagement_id}>"
+
+
+BUDGET_TYPES = ["Operating", "Capital", "Cash"]
+
+
+class Budget(db.Model):
+    """One budget (header) for the Management Accounting service - Budget/
+    BudgetLine mirrors TrialBalance/TrialBalanceLine's header+lines shape.
+    An engagement can hold more than one budget over time (e.g. an original
+    budget and a mid-year reforecast), unlike the single-per-engagement
+    working papers elsewhere in this app."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    name = db.Column(db.String(150), nullable=False)
+    budget_type = db.Column(db.String(20), default="Operating")
+    period_start = db.Column(db.Date)
+    period_end = db.Column(db.Date)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("budgets", lazy=True, cascade="all, delete-orphan", order_by="Budget.id"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    lines = db.relationship("BudgetLine", backref="budget", lazy=True, cascade="all, delete-orphan", order_by="BudgetLine.id")
+
+    @property
+    def total_budgeted(self):
+        return sum(l.budgeted_amount or 0 for l in self.lines)
+
+    @property
+    def total_actual(self):
+        return sum(l.actual_amount or 0 for l in self.lines if l.actual_amount is not None)
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<Budget {self.name!r} engagement={self.engagement_id}>"
+
+
+class BudgetLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    budget_id = db.Column(db.Integer, db.ForeignKey("budget.id"), nullable=False)
+    category = db.Column(db.String(150), nullable=False)
+    budgeted_amount = db.Column(db.Float, default=0.0)
+    actual_amount = db.Column(db.Float)
+    notes = db.Column(db.String(200))
+
+    @property
+    def variance(self):
+        return (self.actual_amount - self.budgeted_amount) if self.actual_amount is not None else None
+
+    @property
+    def variance_pct(self):
+        v = self.variance
+        return (v / self.budgeted_amount * 100) if v is not None and self.budgeted_amount else None
+
+    def __repr__(self):
+        return f"<BudgetLine {self.category!r} budgeted={self.budgeted_amount}>"
+
+
+KPI_CATEGORIES = ["Liquidity", "Profitability", "Efficiency", "Leverage", "Other"]
+
+
+class KPIMetric(db.Model):
+    """One tracked KPI on the Management Accounting KPI Dashboard - a plain
+    preparer-entered target/actual pair, not an auto-computed ratio (no
+    figure here is derived from the Trial Balance automatically - the
+    preparer decides which KPIs matter for this client and enters both
+    sides), consistent with this app's "system prompts, preparer concludes"
+    pattern used throughout the analytical review tabs."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    metric_name = db.Column(db.String(150), nullable=False)
+    category = db.Column(db.String(20), default="Other")
+    period_label = db.Column(db.String(50))
+    target_value = db.Column(db.Float)
+    actual_value = db.Column(db.Float)
+    unit = db.Column(db.String(20))  # e.g. "%", "days", "x", "$" - display only
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("kpi_metrics", lazy=True, cascade="all, delete-orphan", order_by="KPIMetric.id"))
+    created_by = db.relationship("User")
+
+    @property
+    def variance(self):
+        if self.target_value is None or self.actual_value is None:
+            return None
+        return self.actual_value - self.target_value
+
+    def __repr__(self):
+        return f"<KPIMetric {self.metric_name!r} engagement={self.engagement_id}>"
+
+
+class AccountingChecklistItem(db.Model):
+    """One tick + comment line of the Accounting module's configurable
+    Checklist / Quality Gates - the accounting-module equivalent of
+    TaxChecklistItem above (same lightweight shape, same reasoning: the
+    engagement's own Finalisation checklist already covers formal overall
+    sign-off, so this is the working checklist itself, not a second layer
+    of formal sign-off). Grouped by `area` on the Accounting tab."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    area = db.Column(db.String(80))
+    item_text = db.Column(db.Text, nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("accounting_checklist_items", lazy=True, cascade="all, delete-orphan", order_by="AccountingChecklistItem.order"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    def __repr__(self):
+        return f"<AccountingChecklistItem {self.item_text!r} response={self.response!r} engagement={self.engagement_id}>"
+
+
+# Seeded onto every engagement's Accounting Checklist the first time its
+# Accounting tab is opened (see accounting._seed_accounting_checklist) -
+# same "system drafts, preparer tailors" pattern as DEFAULT_TAX_CHECKLIST_
+# ITEMS above.
+DEFAULT_ACCOUNTING_CHECKLIST_ITEMS = [
+    (None, "Has the Chart of Accounts been agreed with the client and is it appropriate for the business?"),
+    ("Bookkeeping", "Have all journal entries for the period been posted and reviewed?"),
+    ("Bookkeeping", "Has the General Ledger been rolled up to the Trial Balance and does it balance?"),
+    ("Bookkeeping", "Has the bank account been reconciled for every month in the period?"),
+    ("Costing", "Has each job/batch cost card been agreed to source documents (material requisitions, timesheets)?"),
+    ("Costing", "Have significant standard cost variances been investigated and explained?"),
+    ("Management Accounting", "Has actual performance been compared to budget and material variances explained?"),
+    ("Management Accounting", "Has the Management Accounts Report been reviewed for consistency with the underlying figures?"),
+    (None, "Has the Quality Control review of the accounting working papers been completed before sign-off?"),
+]
+
+
 class Permission(db.Model):
     """One (role, permission_key) toggle - see PERMISSIONS/user_has_permission
     above. Seeded with defaults on first install/upgrade (see seed.py); an
@@ -5431,10 +6054,30 @@ for _key, _label in TAX_OPINION_PARTS:
 for _key, _label in TAX_HEALTH_CHECK_PARTS:
     WORKPAPER_NARRATIVE_KINDS.append((_key, f"Tax Health Check - {_label}", "tax_health_check"))
 
+# The Management Accounts Report's 10 parts (Accounting module) are, same as
+# the Tax Opinion/Health Check above, just more WorkpaperNarrative kinds -
+# zero new model or route code needed. Only ever seeded/shown when
+# Engagement.has_accounting_module is True - see accounting.py.
+MANAGEMENT_ACCOUNTS_REPORT_PARTS = [
+    ("mgmt_report_01_exec_summary", "Executive Summary"),
+    ("mgmt_report_02_basis", "Basis of Preparation & Scope"),
+    ("mgmt_report_03_performance", "Financial Performance Review"),
+    ("mgmt_report_04_position", "Financial Position Review"),
+    ("mgmt_report_05_budget_variance", "Budget vs Actual Analysis"),
+    ("mgmt_report_06_cost_variance", "Cost & Variance Analysis"),
+    ("mgmt_report_07_cash_flow", "Cash Flow & Working Capital Commentary"),
+    ("mgmt_report_08_kpi", "KPI Dashboard Commentary"),
+    ("mgmt_report_09_risks", "Risks, Issues & Recommendations"),
+    ("mgmt_report_10_conclusion", "Conclusion & Next Steps"),
+]
+for _key, _label in MANAGEMENT_ACCOUNTS_REPORT_PARTS:
+    WORKPAPER_NARRATIVE_KINDS.append((_key, f"Management Accounts Report - {_label}", "management_accounts_report"))
+
 WORKPAPER_NARRATIVE_KIND_KEYS = {kind for kind, _, _ in WORKPAPER_NARRATIVE_KINDS}
 WORKPAPER_NARRATIVE_KIND_LABELS = {kind: label for kind, label, _ in WORKPAPER_NARRATIVE_KINDS}
 TAX_OPINION_KIND_KEYS = [k for k, _ in TAX_OPINION_PARTS]
 TAX_HEALTH_CHECK_KIND_KEYS = [k for k, _ in TAX_HEALTH_CHECK_PARTS]
+MANAGEMENT_ACCOUNTS_REPORT_KIND_KEYS = [k for k, _ in MANAGEMENT_ACCOUNTS_REPORT_PARTS]
 
 # Starting wording for each narrative workpaper the first time it's opened on
 # an engagement - editable from there on (see WorkpaperNarrative above). Kept
@@ -5471,6 +6114,11 @@ DEFAULT_WORKPAPER_NARRATIVE_BODIES = {
 for _key, _label in TAX_OPINION_PARTS:
     DEFAULT_WORKPAPER_NARRATIVE_BODIES[_key] = f"[To be completed: {_label}.]"
 for _key, _label in TAX_HEALTH_CHECK_PARTS:
+    DEFAULT_WORKPAPER_NARRATIVE_BODIES[_key] = f"[To be completed: {_label}.]"
+# Same "[to be completed: ...]" placeholder approach for the Management
+# Accounts Report's 10 parts - no safe firm-wide default position to
+# pre-fill for a specific client's figures/commentary either.
+for _key, _label in MANAGEMENT_ACCOUNTS_REPORT_PARTS:
     DEFAULT_WORKPAPER_NARRATIVE_BODIES[_key] = f"[To be completed: {_label}.]"
 
 

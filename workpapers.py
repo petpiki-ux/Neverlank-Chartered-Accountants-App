@@ -918,6 +918,17 @@ def build_tax_health_check_docx(engagement, narratives_by_kind):
     return _build_tax_sections_docx(engagement, "Tax Health Check Report", "tax_health_check", TAX_HEALTH_CHECK_PARTS, narratives_by_kind)
 
 
+def build_management_accounts_report_docx(engagement, narratives_by_kind):
+    """The Management Accounts Report (Accounting module) - its 10 parts
+    are each a persistent WorkpaperNarrative (see models.
+    MANAGEMENT_ACCOUNTS_REPORT_PARTS); reuses the same shared section-by-
+    section builder as the Tax Opinion/Health Check above, since the shape
+    (an ordered set of named, independently signed-off narrative sections)
+    is identical."""
+    from models import MANAGEMENT_ACCOUNTS_REPORT_PARTS
+    return _build_tax_sections_docx(engagement, "Management Accounts Report", "management_accounts_report", MANAGEMENT_ACCOUNTS_REPORT_PARTS, narratives_by_kind)
+
+
 # ================================================================= Forensic investigation report (Word)
 
 def build_forensic_report_docx(engagement, narrative=None):

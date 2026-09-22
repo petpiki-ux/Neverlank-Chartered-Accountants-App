@@ -59,6 +59,7 @@ def _add_missing_columns():
             ("sme_annual_turnover", "FLOAT"), ("sme_gross_assets", "FLOAT"), ("sme_staff_headcount", "INTEGER"),
             ("secretarial_activities", "TEXT"),
             ("tax_services", "TEXT"),
+            ("accounting_services", "TEXT"),
         ],
         "risk_item": [
             ("module", "VARCHAR(20)"),
@@ -345,6 +346,7 @@ def create_app():
     from filing_index import filing_index_bp
     from permanent_file import permanent_file_bp
     from tax import tax_bp
+    from accounting import accounting_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -363,6 +365,7 @@ def create_app():
     app.register_blueprint(filing_index_bp)
     app.register_blueprint(permanent_file_bp)
     app.register_blueprint(tax_bp)
+    app.register_blueprint(accounting_bp)
 
     @app.route("/")
     def index():
