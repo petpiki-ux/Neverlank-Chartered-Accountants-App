@@ -36,6 +36,7 @@ from models import (
     BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS, BUSINESS_IT_RISK_IMPACT_QUESTIONS,
     SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS, SECRETARIAL_RISK_IMPACT_QUESTIONS,
     ENTITY_UNDERSTANDING_FIELDS, EntityUnderstandingChecklistItem, FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
+    DEFAULT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
     BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS, SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
     FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES,
@@ -1237,19 +1238,24 @@ def seed_entity_checklist(engagement_id):
     """Populate the Understanding Business/Assignment checklist with the
     firm's Forensic Audit questions (Investigative Engagements), its
     cyber/IT/AML-CFT entity-understanding questions (Business Intelligence
-    and IT Engagements), or its COBE-based Secretarial Client Business
+    and IT Engagements), its COBE-based Secretarial Client Business
     Understanding Questionnaire (Secretarial engagements, filtered to the
     engagement's selected Activities - see Engagement.secretarial_activities
-    and SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS) - mirrors
-    acceptance.seed_acceptance_checklist: only does anything the first time,
-    so it's safe to expose as a single button."""
+    and SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS), or - for every
+    other engagement type (Audit, Assurance, Consulting, Tax, Accounting &
+    Bookkeeping) - the general ISA 315-style DEFAULT_ENTITY_UNDERSTANDING_
+    CHECKLIST_ITEMS, seeded alongside (not instead of) the five free-text
+    fields. Mirrors acceptance.seed_acceptance_checklist: only does
+    anything the first time, so it's safe to expose as a single button."""
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     record = _get_or_create_entity_understanding(engagement_id)
     if record.checklist_items:
         flash("The checklist already has items on it.", "info")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
-    if engagement.type == "Business Intelligence and IT Engagements":
+    if engagement.type == "Investigative Engagement":
+        checklist_items = FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+    elif engagement.type == "Business Intelligence and IT Engagements":
         checklist_items = BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
     elif engagement.type == "Secretarial":
         selected_activities = set(engagement.secretarial_activity_list)
@@ -1259,7 +1265,7 @@ def seed_entity_checklist(engagement_id):
             if not selected_activities or selected_activities & set(activities)
         ]
     else:
-        checklist_items = FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+        checklist_items = DEFAULT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
     for order, (section, item_text) in enumerate(checklist_items, start=1):
         db.session.add(EntityUnderstandingChecklistItem(
             entity_understanding_id=record.id,

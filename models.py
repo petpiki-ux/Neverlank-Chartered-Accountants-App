@@ -791,6 +791,48 @@ ENTITY_UNDERSTANDING_FIELDS = [
      "Key performance indicators, budgets, variance analysis, employee performance measures, and other information management itself uses to assess results."),
 ]
 
+# Seeded ALONGSIDE the five free-text ENTITY_UNDERSTANDING_FIELDS above (not
+# instead of them, unlike the three type-specific checklists below) for
+# every engagement type that isn't "Investigative Engagement", "Business
+# Intelligence and IT Engagements" or "Secretarial" - i.e. Audit, Assurance,
+# Consulting, the two Tax types, and "Accounting & Bookkeeping". Same
+# presentation and same ISA 315 (Revised)-style five headings as
+# ENTITY_UNDERSTANDING_FIELDS, but broken into individual Yes/No/N-A +
+# comment questions - the "Client Acceptance" tab pairs a single top-level
+# narrative/checkbox with a per-section "Detailed checklist" underneath it
+# (see DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS below); this gives Understanding
+# the Entity the same two-layer treatment: the five free-text write-ups
+# stay as the narrative record, and this is the itemised, tickable version
+# underneath, so nothing gets missed and progress is visible at a glance
+# (see EntityUnderstanding.checklist_assessment).
+DEFAULT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
+    ("Nature of the Entity", "Have the entity's principal business activities, products/services and key markets been identified and documented?"),
+    ("Nature of the Entity", "Has the ownership structure been established, including parent/subsidiary/related entities and any recent changes in ownership or group structure?"),
+    ("Nature of the Entity", "Has the entity's governance structure been documented (board composition, audit/risk committees, key management personnel)?"),
+    ("Nature of the Entity", "Have the entity's sources of financing been identified, including related-party financing and any recent or planned debt/equity transactions?"),
+    ("Nature of the Entity", "Have any recent or planned significant transactions been identified (acquisitions, disposals, restructurings, new product/service lines)?"),
+    ("Industry, Regulatory and Other External Factors", "Has the competitive and market environment been considered (demand, competition, cyclicality, seasonality)?"),
+    ("Industry, Regulatory and Other External Factors", "Has the applicable financial reporting framework been confirmed, along with any recent or pending changes to it?"),
+    ("Industry, Regulatory and Other External Factors", "Have the specific laws, regulations and licensing requirements applicable to the entity's industry been identified?"),
+    ("Industry, Regulatory and Other External Factors", "Have general economic conditions relevant to the entity been considered (inflation, exchange rate volatility, interest rates)?"),
+    ("Industry, Regulatory and Other External Factors", "Have any industry-specific risks been identified (e.g. technological change, supply chain disruption)?"),
+    ("Accounting Policies", "Have the entity's significant accounting policies been identified and assessed for appropriateness to the industry?"),
+    ("Accounting Policies", "Have any changes in accounting policy since the prior period been identified, along with the reasons for the change?"),
+    ("Accounting Policies", "Have areas involving significant management judgement or estimation uncertainty been identified?"),
+    ("Accounting Policies", "Has the accounting treatment of unusual or complex transactions during the period been considered?"),
+    ("Accounting Policies", "Has consistency of accounting policy application across the group (if applicable) been assessed?"),
+    ("Objectives, Strategies and Related Business Risks", "Have the entity's key business objectives and strategies been identified?"),
+    ("Objectives, Strategies and Related Business Risks", "Have the business risks that could result in a material misstatement of the financial statements been identified?"),
+    ("Objectives, Strategies and Related Business Risks", "Has management's process for identifying and responding to business risk been considered?"),
+    ("Objectives, Strategies and Related Business Risks", "Have any new products, services or markets being entered been identified, along with the associated risks?"),
+    ("Objectives, Strategies and Related Business Risks", "Has the entity's going concern status and any related uncertainties been considered?"),
+    ("Measurement and Review of Financial Performance", "Have the key performance indicators management uses to assess financial performance been identified?"),
+    ("Measurement and Review of Financial Performance", "Has the entity's budgeting and forecasting process been considered?"),
+    ("Measurement and Review of Financial Performance", "Have significant period-on-period variances in financial performance been identified and explained?"),
+    ("Measurement and Review of Financial Performance", "Have any performance measures tied to management or employee incentive schemes been identified?"),
+    ("Measurement and Review of Financial Performance", "Has external benchmarking against industry peers been considered, where relevant?"),
+]
+
 # Seeded instead of the five free-text ENTITY_UNDERSTANDING_FIELDS above when
 # the engagement's type is "Investigative Engagement" (see
 # engagements.seed_entity_checklist) - understanding the business for a

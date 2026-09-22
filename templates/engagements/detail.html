@@ -757,7 +757,6 @@
     </p>
   </div>
 
-  {% if engagement.type in ('Investigative Engagement', 'Business Intelligence and IT Engagements', 'Secretarial') %}
   {% macro entity_checklist_row(item, responses) %}
     <form method="post" action="{{ url_for('engagements.update_entity_checklist_item', item_id=item.id) }}" class="checklist-row">
       <span class="item-text">{{ item.item_text }}</span>
@@ -789,8 +788,23 @@
     </div>
   {% endmacro %}
 
+  {% if engagement.type not in ('Investigative Engagement', 'Business Intelligence and IT Engagements', 'Secretarial') %}
   <div class="card">
-    <h3 class="mt-0">Understanding the Business/Assignment</h3>
+    <h3 class="mt-0">Understanding the entity's business and industry</h3>
+    <p class="muted" style="font-size:12.5px;">Work through each section below to build a structured understanding of the client before assessing risk or planning the engagement. This is a general-purpose starting structure covering the areas practitioners typically consider - review and adjust the prompts to your own methodology. The detailed, tickable checklist further down covers the same five areas question-by-question, so you can complete and check through each one alongside this narrative write-up.</p>
+    <form method="post" action="{{ url_for('engagements.save_entity_understanding', engagement_id=engagement.id) }}">
+      {% for field, heading, description in entity_fields %}
+      <p class="section-title">{{ heading }}</p>
+      <p class="muted" style="font-size:12px;margin-top:-6px;">{{ description }}</p>
+      <textarea name="{{ field }}" rows="4">{{ entity_understanding[field] if entity_understanding else '' }}</textarea>
+      {% endfor %}
+      <button type="submit" class="btn gold">{% if entity_understanding %}Save{% else %}Save understanding of the entity{% endif %}</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h3 class="mt-0">Understanding the Business/Assignment{% if engagement.type not in ('Investigative Engagement', 'Business Intelligence and IT Engagements', 'Secretarial') %} - Detailed Checklist{% endif %}</h3>
     <p class="muted" style="font-size:12.5px;">
       {% if engagement.type == 'Business Intelligence and IT Engagements' %}
       Questions covering the IT environment and infrastructure, data holdings and classification, cyber security posture
@@ -803,10 +817,15 @@
       operations/meetings/documentation, and statutory filings and registry compliance. "Add the firm's default
       checklist" below seeds only the sections relevant to this engagement's selected Activities (see the Edit
       Engagement form) - or every section, if none were selected.
-      {% else %}
+      {% elif engagement.type == 'Investigative Engagement' %}
       Forensic Audit questions covering the objectives and scope of the engagement, the legal/regulatory context,
       data and systems access, stakeholders and logistics, and risk and safety - work through each section below
       before planning fieldwork.
+      {% else %}
+      The same five ISA 315-style areas as the narrative write-up above, broken into individual Yes/No/N-A questions
+      with a comment field on each - tick and comment your way through Nature of the Entity, Industry/Regulatory &amp;
+      Other External Factors, Accounting Policies, Objectives/Strategies &amp; Related Business Risks, and Measurement
+      &amp; Review of Financial Performance, so nothing gets missed.
       {% endif %}
     </p>
     {% if entity_understanding and entity_understanding.checklist_assessment %}
@@ -824,26 +843,14 @@
   {% set entity_forensic_sections = ['Objectives & Scope of the Engagement', 'Legal, Regulatory & Governance Context', 'Data, Systems & Access Checklist', 'Stakeholders, Logistics & Timeline', 'Risk Assessment & Safety'] %}
   {% set entity_business_it_sections = ['IT Environment & Infrastructure Overview', 'Data Holdings & Classification', 'Cyber Security Posture & Incident History', 'Information Security & Access Management', 'ICT Governance & Operations', 'AML/CFT Framework & Regulatory Context'] %}
   {% set entity_secretarial_sections = ['Entity Classification & Scope', 'Constitutional Documents & Corporate Governance', 'Statutory Registers & Ownership Transparency', 'Capital Structure, Distributions & Solvency', 'Board Operations, Meetings & Documentation', 'Statutory Filings & Registry Compliance'] %}
+  {% set entity_default_sections = ['Nature of the Entity', 'Industry, Regulatory and Other External Factors', 'Accounting Policies', 'Objectives, Strategies and Related Business Risks', 'Measurement and Review of Financial Performance'] %}
   {% if engagement.type == 'Business Intelligence and IT Engagements' %}{% set entity_sections = entity_business_it_sections %}
   {% elif engagement.type == 'Secretarial' %}{% set entity_sections = entity_secretarial_sections %}
-  {% else %}{% set entity_sections = entity_forensic_sections %}{% endif %}
+  {% elif engagement.type == 'Investigative Engagement' %}{% set entity_sections = entity_forensic_sections %}
+  {% else %}{% set entity_sections = entity_default_sections %}{% endif %}
   {% for section in entity_sections %}
     {% if entity_understanding %}{{ entity_checklist_section(entity_understanding.checklist_items, section, engagement, acceptance_checklist_responses) }}{% endif %}
   {% endfor %}
-  {% else %}
-  <div class="card">
-    <h3 class="mt-0">Understanding the entity's business and industry</h3>
-    <p class="muted" style="font-size:12.5px;">Work through each section below to build a structured understanding of the client before assessing risk or planning the engagement. This is a general-purpose starting structure covering the areas practitioners typically consider - review and adjust the prompts to your own methodology.</p>
-    <form method="post" action="{{ url_for('engagements.save_entity_understanding', engagement_id=engagement.id) }}">
-      {% for field, heading, description in entity_fields %}
-      <p class="section-title">{{ heading }}</p>
-      <p class="muted" style="font-size:12px;margin-top:-6px;">{{ description }}</p>
-      <textarea name="{{ field }}" rows="4">{{ entity_understanding[field] if entity_understanding else '' }}</textarea>
-      {% endfor %}
-      <button type="submit" class="btn gold">{% if entity_understanding %}Save{% else %}Save understanding of the entity{% endif %}</button>
-    </form>
-  </div>
-  {% endif %}
 
   {% if entity_understanding and entity_understanding.is_complete %}
   <div class="card">
