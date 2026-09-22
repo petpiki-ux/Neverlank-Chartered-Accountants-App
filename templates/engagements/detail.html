@@ -93,15 +93,17 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='analytical') }}" class="{% if tab=='analytical' %}active{% endif %}">Analytical Review{% if analytical_review and analytical_review.significant_lines %} ({{ analytical_review.significant_lines|length }} flagged){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}" class="{% if tab=='risks' %}active{% endif %}">Risk Assessment{% if risk_assessment and risk_assessment.rating %} ({{ risk_assessment.rating }}){% else %} (Not started){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}" class="{% if tab=='planning' %}active{% endif %}">{% if engagement.type == 'Investigative Engagement' %}Audit Strategy{% elif engagement.type == 'Secretarial' %}Engagement Plan{% else %}Planning{% endif %}</a>
-  {% if engagement.type != 'Secretarial' %}
+  {% if engagement.type not in ('Secretarial', 'Business Intelligence and IT Engagements') %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}" class="{% if tab=='trial_balance' %}active{% endif %}">Trial Balance{% if trial_balance and trial_balance.lines %} ({{ trial_balance.lines|length }} accounts){% elif trial_balance and trial_balance.not_applicable %} (N/A){% endif %}</a>
   {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}" class="{% if tab=='substantive' %}active{% endif %}">{% if engagement.type == 'Secretarial' %}Execution Plan{% else %}Substantive Procedures{% endif %}{% if substantive_areas %} ({{ substantive_areas|length }}/{{ audit_areas|length }} areas){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
+  {% if engagement.type != 'Business Intelligence and IT Engagements' %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}" class="{% if tab=='income_tax' %}active{% endif %}">Income Tax Computation</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}" class="{% if tab=='deferred_tax' %}active{% endif %}">Deferred Tax Computation</a>
+  {% endif %}
   {% if engagement.has_tax_module %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax') }}" class="{% if tab=='tax' %}active{% endif %}">Tax</a>
   {% endif %}
@@ -906,7 +908,7 @@
 
   {% if not (engagement.type == 'Secretarial' and analytical_review and analytical_review.not_necessary) %}
 
-  {% if engagement.type != 'Secretarial' %}
+  {% if engagement.type not in ('Secretarial', 'Business Intelligence and IT Engagements') %}
   <div class="card">
     <h3 class="mt-0">Significance threshold</h3>
     <p class="muted" style="font-size:12.5px;">Any line item whose year-on-year variance is at or above this percentage is automatically flagged as significant and worth an explanation. 10% is a common general starting point - adjust per engagement.</p>
@@ -931,7 +933,7 @@
     <div class="empty-state">No preliminary trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">enter or import it on the Trial Balance tab</a> to generate these figures automatically instead of typing them in below.</div>
     {% endif %}
   </div>
-  {% else %}
+  {% elif engagement.type == 'Secretarial' %}
   <div class="card">
     <h3 class="mt-0">Secretarial Analytical Review points</h3>
     <p class="muted" style="font-size:12.5px;">Governance and compliance-focused analytical points, not financial ratios: Board &amp; Governance Activity Trends, Ownership &amp; Capital Structure Analytics, Statutory Filing &amp; Timeline Variance Analysis, and Charge &amp; Encumbrance Reconciliation.</p>
@@ -940,14 +942,23 @@
     </form>
     <p class="muted" style="font-size:11px;">Safe to click again later - it only adds points that aren't already on the list below.</p>
   </div>
+  {% else %}
+  <div class="card">
+    <h3 class="mt-0">IT-Relevant Analytical Review points</h3>
+    <p class="muted" style="font-size:12.5px;">System-generated operational/technical trend indicators, not financial ratios: Access Review Completion &amp; Exception Trends, Change/Release Volume &amp; Failure Rate Trends, Security Alert Volume &amp; False-Positive Trends, Vulnerability &amp; Patch Remediation Aging, AML/CFT Alert Volume &amp; Disposition Trends, and System Availability &amp; Downtime Trends.</p>
+    <form method="post" action="{{ url_for('engagements.seed_business_it_analytical_review', engagement_id=engagement.id) }}" class="inline">
+      <button type="submit" class="btn gold">Add the firm's default IT-relevant analytical review points</button>
+    </form>
+    <p class="muted" style="font-size:11px;">Safe to click again later - it only adds points that aren't already on the list below.</p>
+  </div>
   {% endif %}
 
   <div class="card">
-    <h3 class="mt-0">Add {% if engagement.type == 'Secretarial' %}point{% else %}line item{% endif %}</h3>
-    {% if engagement.type == 'Secretarial' %}
-    <p class="muted" style="font-size:12.5px;">Add a governance/compliance point not covered by the firm's default list above.</p>
+    <h3 class="mt-0">Add {% if engagement.type in ('Secretarial', 'Business Intelligence and IT Engagements') %}point{% else %}line item{% endif %}</h3>
+    {% if engagement.type in ('Secretarial', 'Business Intelligence and IT Engagements') %}
+    <p class="muted" style="font-size:12.5px;">Add a {% if engagement.type == 'Secretarial' %}governance/compliance{% else %}technical/operational{% endif %} point not covered by the firm's default list above.</p>
     <form method="post" action="{{ url_for('engagements.add_analytical_review_line', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
-      <div style="grid-column: span 2;"><label for="label">Point *</label><input type="text" id="label" name="label" placeholder="e.g. Statutory Filing &amp; Timeline Variance Analysis - late CR6 filings this period" required></div>
+      <div style="grid-column: span 2;"><label for="label">Point *</label><input type="text" id="label" name="label" placeholder="{% if engagement.type == 'Secretarial' %}e.g. Statutory Filing &amp; Timeline Variance Analysis - late CR6 filings this period{% else %}e.g. Change/Release Volume &amp; Failure Rate Trends - change failure rate up this period{% endif %}" required></div>
       <div style="grid-column: span 2;"><label for="explanation">Explanation / findings (optional)</label><input type="text" id="explanation" name="explanation"></div>
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add point</button></div>
     </form>
@@ -977,7 +988,7 @@
 
   <div class="card">
     {% if analytical_review and analytical_review.lines %}
-    {% if engagement.type == 'Secretarial' %}
+    {% if engagement.type in ('Secretarial', 'Business Intelligence and IT Engagements') %}
     <table>
       <thead><tr><th>Point</th><th>Explanation / findings</th><th></th></tr></thead>
       <tbody>
@@ -1019,7 +1030,7 @@
     </table>
     {% endif %}
     {% else %}
-    <div class="empty-state">{% if engagement.type == 'Secretarial' %}No points yet. Click "Add the firm's default secretarial analytical review points" above, or add your own.{% else %}No line items yet. Add key figures (revenue, gross profit, expenses, etc.) above to compare current vs prior year.{% endif %}</div>
+    <div class="empty-state">{% if engagement.type == 'Secretarial' %}No points yet. Click "Add the firm's default secretarial analytical review points" above, or add your own.{% elif engagement.type == 'Business Intelligence and IT Engagements' %}No points yet. Click "Add the firm's default IT-relevant analytical review points" above, or add your own.{% else %}No line items yet. Add key figures (revenue, gross profit, expenses, etc.) above to compare current vs prior year.{% endif %}</div>
     {% endif %}
   </div>
 
@@ -1274,6 +1285,54 @@
     <p>{{ scope_suggestion }}</p>
     {% else %}
     <div class="empty-state">Complete the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}">Risk Assessment</a> questionnaire first to get a suggested audit approach here.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if engagement.type == 'Business Intelligence and IT Engagements' %}
+  <div class="card">
+    <h3 class="mt-0">Change &amp; Release Testing Plan</h3>
+    <p class="muted" style="font-size:12.5px;">Log the system/release changes known or planned for this period, so the team can decide which ones to pull into the change-management sample tested under <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures &gt; Information Technology (ICT)</a> ("Test the change and release management process for a sample of system changes..."). Ticking "Select for testing" here is a planning aid only - it doesn't create the test itself; record that under Substantive Procedures once performed.</p>
+    <form method="post" action="{{ url_for('engagements.add_it_change_plan_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div style="grid-column: span 2;"><label for="change_description">Change / release *</label><input type="text" id="change_description" name="change_description" placeholder="e.g. Core banking platform upgrade to v4.2" required></div>
+      <div><label for="planned_date">Planned/known date</label><input type="date" id="planned_date" name="planned_date"></div>
+      <div>
+        <label for="risk_level">Risk level</label>
+        <select id="risk_level" name="risk_level">
+          <option value="">—</option>
+          {% for r in it_change_plan_risk_levels %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add change</button></div>
+    </form>
+    {% if engagement.it_change_plan_items %}
+    <table>
+      <thead><tr><th>Change / release</th><th>Planned/known date</th><th>Risk</th><th>Select for testing</th><th>Notes</th><th></th></tr></thead>
+      <tbody>
+      {% for item in engagement.it_change_plan_items %}
+        <form method="post" action="{{ url_for('engagements.update_it_change_plan_item', item_id=item.id) }}" class="inline">
+        <tr>
+          <td style="max-width:320px;"><textarea name="change_description" rows="2" style="width:100%;margin-bottom:0;resize:vertical;">{{ item.change_description }}</textarea></td>
+          <td><input type="date" name="planned_date" value="{{ item.planned_date.strftime('%Y-%m-%d') if item.planned_date else '' }}" style="margin-bottom:0;"></td>
+          <td>
+            <select name="risk_level" style="width:100px;">
+              <option value="" {% if not item.risk_level %}selected{% endif %}>—</option>
+              {% for r in it_change_plan_risk_levels %}<option value="{{ r }}" {% if item.risk_level==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </td>
+          <td><label><input type="checkbox" name="selected_for_testing" style="width:auto;" {% if item.selected_for_testing %}checked{% endif %}> Selected</label></td>
+          <td><input type="text" name="notes" value="{{ item.notes or '' }}" style="width:160px;margin-bottom:0;"></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_it_change_plan_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Remove this change?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No changes logged yet - add the system/release changes known or planned for this period above.</div>
     {% endif %}
   </div>
   {% endif %}
@@ -3672,8 +3731,9 @@
 
   <div class="card">
     <h3 class="mt-0">Working papers</h3>
-    <p class="muted" style="font-size:12.5px;">Generate working papers directly from the data already captured on this engagement - each one is FILED under Documents (following the firm's Filing Index reference where one applies) rather than downloaded straight away; download the filed copy whenever you actually need the file. Regenerating keeps every earlier version on file rather than replacing it. References (see the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>): {{ filing_reference('financials') }} (financial statements), N1000 (trial balance &amp; adjustments), {{ filing_reference('rep_letter') }} (management representation letter), {{ filing_reference('report_to_management') }} (report to management), {{ filing_reference('finalisation') }} (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report - no filing-index code, outside the scope of the audit filing policy){% endif %}.</p>
+    <p class="muted" style="font-size:12.5px;">Generate working papers directly from the data already captured on this engagement - each one is FILED under Documents (following the firm's Filing Index reference where one applies) rather than downloaded straight away; download the filed copy whenever you actually need the file. Regenerating keeps every earlier version on file rather than replacing it. References (see the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>): {% if engagement.type != 'Business Intelligence and IT Engagements' %}{{ filing_reference('financials') }} (financial statements), N1000 (trial balance &amp; adjustments), {% endif %}{{ filing_reference('rep_letter') }} (management representation letter), {{ filing_reference('report_to_management') }} (report to management), {{ filing_reference('finalisation') }} (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report - no filing-index code, outside the scope of the audit filing policy){% elif engagement.type == 'Business Intelligence and IT Engagements' %}, ITR-1 (IT &amp; Cyber Assurance Report - no filing-index code, outside the scope of the audit filing policy){% endif %}.</p>
 
+    {% if engagement.type != 'Business Intelligence and IT Engagements' %}
     <h4 class="mt-0" style="margin-bottom:4px;">Financial statements (Word, Ref. {{ filing_reference('financials') }})</h4>
     <form method="post" action="{{ url_for('engagements.generate_financial_statements_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
     {{ filed_workpapers('financial_statements') }}
@@ -3681,8 +3741,9 @@
     <h4 style="margin-bottom:4px;margin-top:16px;">Trial balance &amp; adjustments (Excel, Ref. N1000)</h4>
     <form method="post" action="{{ url_for('engagements.generate_trial_balance_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
     {{ filed_workpapers('trial_balance_adjustments') }}
+    {% endif %}
 
-    <h4 style="margin-bottom:4px;margin-top:16px;">Finalisation checklist (Word, Ref. {{ filing_reference('finalisation') }})</h4>
+    <h4 {% if engagement.type == 'Business Intelligence and IT Engagements' %}class="mt-0" {% endif %}style="margin-bottom:4px;{% if engagement.type != 'Business Intelligence and IT Engagements' %}margin-top:16px;{% endif %}">Finalisation checklist (Word, Ref. {{ filing_reference('finalisation') }})</h4>
     <form method="post" action="{{ url_for('engagements.generate_finalisation_checklist_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
     {{ filed_workpapers('finalisation_checklist') }}
 
@@ -3698,6 +3759,12 @@
     <h4 style="margin-bottom:4px;margin-top:16px;">Forensic investigation report (Word, Ref. FR-1 - outside the filing policy's scope)</h4>
     <form method="post" action="{{ url_for('engagements.generate_forensic_report_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
     {{ filed_workpapers('forensic_report') }}
+    {% endif %}
+
+    {% if engagement.type == 'Business Intelligence and IT Engagements' %}
+    <h4 style="margin-bottom:4px;margin-top:16px;">IT &amp; Cyber Assurance Report (Word, Ref. ITR-1 - outside the filing policy's scope)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_it_audit_report_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('it_audit_report') }}
     {% endif %}
 
     <h4 style="margin-bottom:4px;margin-top:16px;">Engagement file summary (PDF)</h4>
@@ -3750,7 +3817,11 @@
   {% if engagement.type == 'Investigative Engagement' %}
   {{ narrative_editor('forensic_executive_summary', 'Forensic Investigation Report - Executive Summary (Ref. FR-1)') }}
   {% endif %}
+  {% if engagement.type == 'Business Intelligence and IT Engagements' %}
+  {{ narrative_editor('it_audit_report_summary', 'IT & Cyber Assurance Report - Executive Summary (Ref. ITR-1)') }}
+  {% endif %}
 
+  {% if engagement.type != 'Business Intelligence and IT Engagements' %}
   <div class="card">
     <h3 class="mt-0">Trial Balance</h3>
     <p class="muted" style="font-size:12.5px;">The preliminary trial balance is entered on its own <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab (so it can drive Analytical Review earlier in the engagement) - come back here once it exists to propose audit adjustments and generate the financial statements below.</p>
@@ -3865,6 +3936,7 @@
     <div class="empty-state">No adjustments proposed yet - the financial statements below are computed straight from the preliminary trial balance.</div>
     {% endif %}
   </div>
+  {% endif %}
   {% endif %}
 
   {% if statements %}
@@ -4252,7 +4324,7 @@
       {% for item in area.items %}
         <form method="post" action="{{ url_for('engagements.update_substantive_procedure_item', item_id=item.id) }}" class="inline">
         <tr>
-          <td style="max-width:280px;"><input type="text" name="procedure_text" value="{{ item.procedure_text }}" style="width:100%;margin-bottom:0;"></td>
+          <td style="min-width:260px;"><textarea name="procedure_text" rows="2" style="width:100%;min-width:240px;margin-bottom:0;resize:vertical;">{{ item.procedure_text }}</textarea></td>
           <td><input type="text" name="trigger_event" value="{{ item.trigger_event or '' }}" style="width:140px;margin-bottom:0;"></td>
           <td><input type="text" name="responsible_role" value="{{ item.responsible_role or '' }}" style="width:110px;margin-bottom:0;"></td>
           <td><input type="text" name="target_output" value="{{ item.target_output or '' }}" style="width:140px;margin-bottom:0;"></td>
@@ -4280,7 +4352,7 @@
       {% for item in area.items %}
         <form method="post" action="{{ url_for('engagements.update_substantive_procedure_item', item_id=item.id) }}" class="inline">
         <tr>
-          <td style="max-width:320px;"><input type="text" name="procedure_text" value="{{ item.procedure_text }}" style="width:100%;margin-bottom:0;"></td>
+          <td style="min-width:320px;"><textarea name="procedure_text" rows="2" style="width:100%;min-width:300px;margin-bottom:0;resize:vertical;">{{ item.procedure_text }}</textarea></td>
           <td>
             <select name="procedure_kind" style="width:110px;">
               <option value="" {% if not item.procedure_kind %}selected{% endif %}>—</option>
@@ -4312,7 +4384,7 @@
       {% for item in area.items %}
         <form method="post" action="{{ url_for('engagements.update_substantive_procedure_item', item_id=item.id) }}" class="inline">
         <tr>
-          <td style="max-width:320px;"><input type="text" name="procedure_text" value="{{ item.procedure_text }}" style="width:100%;margin-bottom:0;"></td>
+          <td style="min-width:320px;"><textarea name="procedure_text" rows="2" style="width:100%;min-width:300px;margin-bottom:0;resize:vertical;">{{ item.procedure_text }}</textarea></td>
           <td><span class="badge">{{ item.source }}</span></td>
           <td><input type="text" name="notes" value="{{ item.notes or '' }}" placeholder="Notes" style="width:140px;margin-bottom:0;"></td>
           <td>

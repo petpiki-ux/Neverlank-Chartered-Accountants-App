@@ -1037,6 +1037,104 @@ def build_forensic_report_docx(engagement, narrative=None):
     return _finish(doc)
 
 
+def build_it_audit_report_docx(engagement, narrative=None):
+    """The Business Intelligence and IT Engagements equivalent of
+    build_forensic_report_docx above - a standalone "IT & Cyber Assurance
+    Report" bringing together the engagement's own IT-specific data (Client
+    Acceptance's Management Integrity & Cooperativeness questions, the
+    Regulatory Landscape entity-understanding answers, the ITGC/Substantive
+    procedures actually performed grouped by the four scoped domains, and
+    the Finalisation checklist's Findings & Recommendations section) under
+    one persistent, editable Executive Summary - see models.
+    WorkpaperNarrative, kind="it_audit_report_summary"."""
+    ca = engagement.client_acceptance
+    entity = engagement.entity_understanding
+    finalisation = engagement.finalisation_checklist
+
+    doc = _new_document("IT & Cyber Assurance Report", engagement, subtitle="Confidential")
+
+    doc.add_paragraph("Confidential").runs[0].bold = True
+    doc.add_paragraph(f"Date of report: {_fmt_date(date.today())}")
+
+    _add_heading(doc, "Executive Summary")
+    summary_body = (narrative.body if narrative and narrative.body else None) or DEFAULT_WORKPAPER_NARRATIVE_BODIES["it_audit_report_summary"]
+    for line in summary_body.split("\n"):
+        line = line.strip()
+        if line:
+            doc.add_paragraph(line)
+
+    _add_heading(doc, "1. Scope and Engagement Acceptance")
+    if ca:
+        doc.add_paragraph(f"Decision: {ca.decision or 'Not yet decided'}")
+        mgmt_items = [i for i in ca.checklist_items if i.section == "Competence - Management Integrity & Cooperativeness"]
+        if mgmt_items:
+            doc.add_paragraph("Management integrity & cooperativeness (access to logs, source code, configurations, database schemas):")
+            for item in mgmt_items:
+                p = doc.add_paragraph(f"{item.item_text} — {item.response or 'Not yet assessed'}", style="List Bullet")
+                if item.comment:
+                    p.add_run(f" ({item.comment})").italic = True
+    else:
+        doc.add_paragraph("[Client Acceptance not yet recorded - see the Client Acceptance tab.]")
+
+    _add_heading(doc, "2. Regulatory Landscape & Standards Alignment")
+    reg_items = [i for i in entity.checklist_items if i.section == "Regulatory Landscape & Standards Alignment"] if entity else []
+    if reg_items:
+        for item in reg_items:
+            p = doc.add_paragraph(f"{item.item_text} — {item.response or 'Not yet assessed'}", style="List Bullet")
+            if item.comment:
+                p.add_run(f" ({item.comment})").italic = True
+    else:
+        doc.add_paragraph("[Not yet completed - see the Understanding the Entity tab's Regulatory Landscape & Standards Alignment section.]")
+
+    _add_heading(doc, "3. Procedures Performed and Results, by Domain")
+    areas = sorted(engagement.substantive_procedure_areas, key=lambda a: a.area) if engagement.substantive_procedure_areas else []
+    if areas:
+        for area in areas:
+            _add_heading(doc, area.area, level=2)
+            if area.items:
+                table = doc.add_table(rows=1, cols=4)
+                hdr = table.rows[0].cells
+                hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text = "Procedure", "Kind", "Status", "Notes / Findings"
+                _style_table(table)
+                for item in area.items:
+                    row = table.add_row().cells
+                    row[0].text = item.procedure_text
+                    row[1].text = item.procedure_kind or ""
+                    row[2].text = item.status
+                    row[3].text = item.notes or ""
+            else:
+                doc.add_paragraph("[No procedures recorded yet for this domain.]")
+            if area.notes:
+                p = doc.add_paragraph()
+                p.add_run("Domain findings: ").bold = True
+                p.add_run(area.notes)
+    else:
+        doc.add_paragraph("[No substantive procedures recorded yet - see the Substantive Procedures tab.]")
+
+    _add_heading(doc, "4. Findings, Recommendations and Conclusion")
+    if finalisation:
+        for section_name in ["Findings & Recommendations"]:
+            items = [i for i in finalisation.checklist_items if i.section == section_name]
+            for item in items:
+                p = doc.add_paragraph(f"{item.item_text} — {item.response or 'Not yet assessed'}", style="List Bullet")
+                if item.comment:
+                    p.add_run(f" ({item.comment})").italic = True
+    else:
+        doc.add_paragraph("[Finalisation checklist not yet seeded/completed - see the Finalisation tab.]")
+
+    _add_heading(doc, "5. Sign-off")
+    if narrative and narrative.completed_by:
+        doc.add_paragraph(f"Executive Summary prepared by {narrative.completed_by.name} on {_fmt_date(narrative.completed_at)}.")
+        if narrative.is_reviewed:
+            doc.add_paragraph(f"Executive Summary reviewed by {narrative.reviewed_by.name} on {_fmt_date(narrative.reviewed_at)}.")
+        if narrative.is_partner_signed:
+            doc.add_paragraph(f"Executive Summary partner sign-off by {narrative.partner_signed_by.name} on {_fmt_date(narrative.partner_signed_at)}.")
+    else:
+        doc.add_paragraph("[Executive Summary not yet prepared - see the Finalisation tab.]")
+
+    return _finish(doc)
+
+
 # ================================================================= Substantive Procedures programme (Word / Excel)
 
 def build_substantive_procedures_docx(engagement, areas_by_name, area_order, area_refs):
@@ -1108,6 +1206,14 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
                     row[4].text = item.tickmark.symbol if item.tickmark else ""
         else:
             doc.add_paragraph("No procedures recorded for this area.")
+        if area and area.notes:
+            # The editable "Area notes" free-text box on the Substantive
+            # Procedures tab (see engagements.save_substantive_area_notes) -
+            # previously captured in the app but never actually carried
+            # through into this generated/filed programme document.
+            notes_p = doc.add_paragraph()
+            notes_p.add_run("Notes: ").bold = True
+            notes_p.add_run(area.notes)
         if area:
             prep = f"Prepared by {area.completed_by.name if area.completed_by else '—'} on {_fmt_date(area.completed_at)}."
             if area.is_reviewed:
@@ -1180,6 +1286,15 @@ def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, are
                 ws.cell(row=row, column=5, value=item.status).border = _BORDER
                 ws.cell(row=row, column=6, value=item.notes or "").border = _BORDER
                 ws.cell(row=row, column=7, value=item.tickmark.symbol if item.tickmark else "").border = _BORDER
+            row += 1
+        if area and area.notes:
+            # Same editable "Area notes" gap fix as build_substantive_
+            # procedures_docx above - now carried into the Excel programme too.
+            ws.cell(row=row, column=1, value="").border = _BORDER
+            ws.cell(row=row, column=2, value="Notes").border = _BORDER
+            ws.cell(row=row, column=3, value=area.notes).border = _BORDER
+            for col in range(4, last_col + 1):
+                ws.cell(row=row, column=col, value="").border = _BORDER
             row += 1
 
     if is_secretarial:

@@ -242,6 +242,7 @@ WORKPAPER_SECTIONS = [
     ("M", "tax_opinion", "Tax Opinion / Advisory Report", None),
     ("N", "tax_health_check", "Tax Health Check Report", None),
     ("O", "management_accounts_report", "Management Accounts Report", None),
+    ("P", "it_audit_report", "IT & Cyber Assurance Report", None),
 ]
 WORKPAPER_SECTION_BY_KEY = {key: (code, label, filing_code) for code, key, label, filing_code in WORKPAPER_SECTIONS}
 
@@ -2770,6 +2771,28 @@ SECRETARIAL_ANALYTICAL_REVIEW_POINTS = [
     ("Charge & Encumbrance Reconciliation", "Debt/security analytics - compare total registered mortgages, charges and debentures in the Register of Charges (Section 162) against outstanding borrowing facilities to identify unregistered or unfiled charges (Section 163-164)."),
 ]
 
+# Same non-numeric label+narrative treatment as SECRETARIAL_ANALYTICAL_
+# REVIEW_POINTS above, but for a Business Intelligence and IT Engagement -
+# operational/technical trend indicators rather than financial ratios, since
+# an IT Audit's analytical review looks at system-generated metrics (change
+# volumes, alert counts, access-review completion) rather than P&L/balance
+# sheet variances. Seeded by seed_business_it_analytical_review
+# (engagements.py), the IT-Audit equivalent of seed_secretarial_analytical_
+# review above.
+BUSINESS_IT_ANALYTICAL_REVIEW_POINTS = [
+    ("Access Review Completion & Exception Trends", "Periodic user access review completion rate - the proportion of scheduled access reviews actually completed on time this period, and the volume/nature of access removed as a result."),
+    ("Access Review Completion & Exception Trends", "Privileged/admin account count trend - period-on-period movement in the number of privileged or administrative accounts, and whether growth is explained by legitimate business change."),
+    ("Change/Release Volume & Failure Rate Trends", "Change volume vs. prior period - the number of production changes/releases this period compared with the prior period, and whether the trend is consistent with the entity's stated pace of IT change."),
+    ("Change/Release Volume & Failure Rate Trends", "Change failure/rollback rate - the proportion of changes that failed, were rolled back, or required an emergency fix, and whether this rate is trending up or down."),
+    ("Security Alert Volume & False-Positive Trends", "Security alert volume trend - period-on-period movement in the number of security alerts/incidents raised, and whether it correlates with any known change in the threat environment or control weakening."),
+    ("Security Alert Volume & False-Positive Trends", "False-positive rate trend - the proportion of alerts closed as false positives, and whether persistent high false-positive rates suggest under-tuned detection controls."),
+    ("Vulnerability & Patch Remediation Aging", "Open vulnerability aging - the number and age profile of open critical/high vulnerabilities, and whether remediation is keeping pace with new findings."),
+    ("Vulnerability & Patch Remediation Aging", "Patch compliance rate trend - the proportion of in-scope systems patched within the entity's defined SLA, period-on-period."),
+    ("AML/CFT Alert Volume & Disposition Trends", "Transaction monitoring/screening alert volume trend - period-on-period movement in system-generated AML/CFT alerts, and whether volume changes correlate with business/customer growth or a system/rule change."),
+    ("AML/CFT Alert Volume & Disposition Trends", "Alert disposition and SAR/STR rate trend - the proportion of alerts escalated to a suspicious transaction report, and whether this rate has moved materially period-on-period."),
+    ("System Availability & Downtime Trends", "System availability/downtime trend - unplanned downtime (hours/incidents) for critical financial or operational systems this period compared with the prior period."),
+]
+
 
 class AnalyticalReview(db.Model):
     """System-based analytical review for one engagement: log current vs
@@ -2865,6 +2888,41 @@ class AnalyticalReviewLine(db.Model):
 
     def __repr__(self):
         return f"<AnalyticalReviewLine {self.label}>"
+
+
+IT_CHANGE_PLAN_RISK_LEVELS = ["Low", "Medium", "High"]
+
+
+class ITChangePlanItem(db.Model):
+    """A single known or planned system change during the audit period, on a
+    Business Intelligence and IT Engagement's Planning tab - the "Change
+    Planning" register the team uses to log what's changing in the client's
+    environment and decide which changes to pull into the ITGC change-
+    management sample tested under Substantive Procedures (see the "Test the
+    change and release management process for a sample of system changes..."
+    procedure in BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES). Purely a
+    planning aid - selecting an item here doesn't create or link to a
+    SubstantiveProcedureItem automatically; the team still records the test
+    itself under Substantive Procedures once performed."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    change_description = db.Column(db.Text, nullable=False)
+    planned_date = db.Column(db.Date)
+    risk_level = db.Column(db.String(10))  # "Low" | "Medium" | "High" | "" (not yet assessed)
+    selected_for_testing = db.Column(db.Boolean, default=False, nullable=False)
+    notes = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship(
+        "Engagement",
+        backref=db.backref("it_change_plan_items", lazy=True, cascade="all, delete-orphan", order_by="ITChangePlanItem.order"),
+    )
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<ITChangePlanItem engagement={self.engagement_id}>"
 
 
 # ---------- Trial Balance import & IAS 1 Financial Statements ----------
@@ -6129,6 +6187,7 @@ WORKPAPER_NARRATIVE_KINDS = [
     ("rep_letter", "Management Representation Letter", "rep_letter"),
     ("report_to_management", "Report to Management", "report_to_management"),
     ("forensic_executive_summary", "Forensic Investigation Report - Executive Summary", "forensic_report"),
+    ("it_audit_report_summary", "IT & Cyber Assurance Report - Executive Summary of Findings & Recommendations", "it_audit_report"),
 ]
 
 # The Tax Opinion's 14 parts and the Tax Health Check Report's 15 parts
@@ -6228,6 +6287,9 @@ DEFAULT_WORKPAPER_NARRATIVE_BODIES = {
     ]),
     "forensic_executive_summary": "\n".join([
         "[Summarise, in a few sentences, the mandate, the key findings, and the overall conclusion of this investigation - the detail behind each point is set out in the numbered sections that follow.]",
+    ]),
+    "it_audit_report_summary": "\n".join([
+        "[Summarise, in a few sentences, the scope (Cyber Security, Information Security, IT/ICT, AML/CFT), the overall control environment observed, the key findings and their significance, and the overall conclusion - the detail behind each point is set out in the sections that follow.]",
     ]),
 }
 # Short "[to be completed: ...]" placeholder wording for each of the Tax

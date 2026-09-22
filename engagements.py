@@ -15,7 +15,8 @@ from models import (
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation, TimeSheet, TimeEntry,
     RiskAssessment, MaterialityCalculation, EntityUnderstanding, AuditStrategy, AUDIT_STRATEGY_PHASE_STATUSES,
     SecretarialPlan,
-    AnalyticalReview, AnalyticalReviewLine, SECRETARIAL_ANALYTICAL_REVIEW_POINTS,
+    AnalyticalReview, AnalyticalReviewLine, SECRETARIAL_ANALYTICAL_REVIEW_POINTS, BUSINESS_IT_ANALYTICAL_REVIEW_POINTS,
+    ITChangePlanItem, IT_CHANGE_PLAN_RISK_LEVELS,
     ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     RISK_CATEGORIES,
     SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
@@ -886,6 +887,7 @@ def view_engagement(engagement_id):
         sme_act_size_thresholds=fin.SME_ACT_SIZE_THRESHOLDS,
         suggested_sme_size_band=fin.classify_sme_size(engagement.sme_staff_headcount, engagement.sme_annual_turnover, engagement.sme_gross_assets),
         category_choices=fin.category_choices(),
+        it_change_plan_risk_levels=IT_CHANGE_PLAN_RISK_LEVELS,
         category_label=fin.category_label,
         audit_areas=substantive_area_names,
         substantive_areas=substantive_areas_by_name,
@@ -1486,6 +1488,35 @@ def seed_secretarial_analytical_review(engagement_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
 
 
+@engagements_bp.route("/<int:engagement_id>/analytical-review/seed-business-it", methods=["POST"])
+@login_required
+def seed_business_it_analytical_review(engagement_id):
+    """Populate the Analytical Review with the firm's IT-relevant analytical
+    points (see BUSINESS_IT_ANALYTICAL_REVIEW_POINTS) - the Business
+    Intelligence and IT Engagements equivalent of seed_secretarial_
+    analytical_review above: system-generated operational/technical trend
+    indicators (change volumes, alert counts, access-review completion,
+    patch aging) rather than financial ratios. Only adds points not already
+    present (matched by label), so it's safe to run again."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    review = _get_or_create_analytical_review(engagement_id)
+    existing_labels = {l.label for l in review.lines}
+    added = 0
+    for section, point_text in BUSINESS_IT_ANALYTICAL_REVIEW_POINTS:
+        label = f"{section} - {point_text}"
+        if label not in existing_labels:
+            db.session.add(AnalyticalReviewLine(analytical_review_id=review.id, label=label, source="manual"))
+            added += 1
+    if added:
+        _touch_analytical_review(review)
+        db.session.commit()
+        flash(f"Added {added} IT-relevant analytical review point(s) - write up the narrative explanation for each.", "success")
+    else:
+        flash("The default IT-relevant analytical review points are already there below.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="analytical"))
+
+
 @engagements_bp.route("/<int:engagement_id>/analytical-review/lines/add", methods=["POST"])
 @login_required
 def add_analytical_review_line(engagement_id):
@@ -1970,6 +2001,7 @@ WORKPAPER_KIND_TABS = {
     "rep_letter": "finalisation",
     "report_to_management": "finalisation",
     "forensic_report": "finalisation",
+    "it_audit_report": "finalisation",
     "file_summary": "finalisation",
     "finalisation_checklist": "finalisation",
     "acceptance_checklist": "acceptance",
@@ -2748,6 +2780,65 @@ def partner_unsign_secretarial_plan(plan_id):
     db.session.commit()
     flash("Partner sign-off removed.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=plan.engagement_id, tab="planning"))
+
+
+# ---------- IT Change & Release Testing Plan (Business Intelligence and IT
+# Engagements only) - a Planning-tab register of known/planned system
+# changes during the audit period, used to decide which changes to pull
+# into the ITGC change-management sample tested under Substantive
+# Procedures. See models.ITChangePlanItem. ----------
+
+@engagements_bp.route("/<int:engagement_id>/it-change-plan/add", methods=["POST"])
+@login_required
+def add_it_change_plan_item(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    change_description = request.form.get("change_description", "").strip()
+    if not change_description:
+        flash("Describe the planned/known change before adding it.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
+    planned_date_str = request.form.get("planned_date", "").strip()
+    planned_date = datetime.strptime(planned_date_str, "%Y-%m-%d").date() if planned_date_str else None
+    risk_level = request.form.get("risk_level", "").strip()
+    if risk_level not in IT_CHANGE_PLAN_RISK_LEVELS:
+        risk_level = ""
+    max_order = max([i.order for i in engagement.it_change_plan_items], default=0)
+    db.session.add(ITChangePlanItem(
+        engagement_id=engagement_id, change_description=change_description, planned_date=planned_date,
+        risk_level=risk_level, order=max_order + 1, created_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash("Change added to the plan.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/it-change-plan/<int:item_id>/update", methods=["POST"])
+@login_required
+def update_it_change_plan_item(item_id):
+    item = ITChangePlanItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
+    item.change_description = request.form.get("change_description", item.change_description).strip() or item.change_description
+    planned_date_str = request.form.get("planned_date", "").strip()
+    item.planned_date = datetime.strptime(planned_date_str, "%Y-%m-%d").date() if planned_date_str else None
+    risk_level = request.form.get("risk_level", "").strip()
+    item.risk_level = risk_level if risk_level in IT_CHANGE_PLAN_RISK_LEVELS else ""
+    item.selected_for_testing = request.form.get("selected_for_testing") == "on"
+    item.notes = request.form.get("notes", "").strip()
+    db.session.commit()
+    flash("Change updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=item.engagement_id, tab="planning"))
+
+
+@engagements_bp.route("/it-change-plan/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_it_change_plan_item(item_id):
+    item = ITChangePlanItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
+    engagement_id = item.engagement_id
+    db.session.delete(item)
+    db.session.commit()
+    flash("Change removed from the plan.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
 
 
 # ---------- Finalisation checklist ("what's left to close this engagement") ----------
@@ -5139,6 +5230,21 @@ def generate_forensic_report_docx(engagement_id):
     buf = wp.build_forensic_report_docx(engagement, narrative)
     doc = _file_generated_workpaper(engagement, "forensic_report", "Forensic Investigation Report", None, "Forensic_Investigation_Report", "docx", buf, reference_override=filing_reference("forensic_report"))
     flash(f"Forensic investigation report filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/it-audit-report/generate", methods=["POST"])
+@login_required
+def generate_it_audit_report_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    if engagement.type != "Business Intelligence and IT Engagements":
+        flash("The IT & Cyber Assurance Report is only available on Business Intelligence and IT Engagements.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    narrative = WorkpaperNarrative.query.filter_by(engagement_id=engagement_id, kind="it_audit_report_summary").first()
+    buf = wp.build_it_audit_report_docx(engagement, narrative)
+    doc = _file_generated_workpaper(engagement, "it_audit_report", "IT & Cyber Assurance Report", None, "IT_Cyber_Assurance_Report", "docx", buf, reference_override=filing_reference("it_audit_report"))
+    flash(f"IT & Cyber Assurance Report filed (v{doc.version}).", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
 
 
