@@ -117,6 +117,25 @@ def _visible_to_current_user(engagement_list):
 @engagements_bp.route("/dashboard")
 @login_required
 def dashboard():
+    """The Practice Dashboard - the firm's single home page. This used to
+    be two separate pages/nav links (a personal "my work" dashboard and a
+    firm-wide analytics dashboard); they're combined here into one: this
+    user's own active engagements and open tasks, alongside firm-wide
+    portfolio health, review query aging, staff booking for the current
+    week, recent logged hours, and an Engagement Quality Index per active
+    engagement - all built entirely from data the app already captures,
+    no new database tables. There is deliberately no $-based WIP,
+    realization, or recovery figure here: no billing rate is captured
+    anywhere in this app (TimeEntry records hours only), so a $ figure
+    here would have to be invented rather than computed - see the
+    architecture roadmap document for what a full Practice/Audit
+    Intelligence platform with real billing data would add. Every list
+    below is filtered through the same confidentiality rule as the rest
+    of the app: a non-admin sees only what they're Partner/Manager/Team
+    on; Admin sees everything. `practice_dashboard()` below (the old
+    /engagements/analytics URL) just renders this same page, kept as an
+    alias for anyone with the old link bookmarked."""
+    today = date.today()
     all_engagements = _visible_to_current_user(
         Engagement.query.order_by(Engagement.deadline.asc().nullslast()).all()
     )
@@ -129,18 +148,103 @@ def dashboard():
         .limit(10)
         .all()
     )
+
     counts_by_status = {s: 0 for s in ENGAGEMENT_STATUSES}
+    counts_by_type = {t: 0 for t in ENGAGEMENT_TYPES}
     for e in all_engagements:
         counts_by_status[e.status] = counts_by_status.get(e.status, 0) + 1
+        counts_by_type[e.type] = counts_by_type.get(e.type, 0) + 1
+    counts_by_type = {t: c for t, c in counts_by_type.items() if c}
+
+    # ---- Engagement Quality Index, across every active engagement visible to this user
+    eqi_rows = []
+    for e in active:
+        idx = engagement_quality_index(e)
+        if idx:
+            eqi_rows.append({"engagement": e, "index": idx})
+    eqi_rows.sort(key=lambda r: r["index"]["reviewed_pct"])
+    firm_avg_reviewed_pct = round(sum(r["index"]["reviewed_pct"] for r in eqi_rows) / len(eqi_rows)) if eqi_rows else None
+
+    # ---- Review query aging (EngagementQuery - "no new data capture needed", it's all already there)
+    open_queries = EngagementQuery.query.filter_by(status="Open").order_by(EngagementQuery.raised_at.asc()).all()
+    if current_user.role != "admin":
+        open_queries = [q for q in open_queries if user_can_access_engagement(current_user, q.engagement)]
+    age_bucket_defs = [("0-7 days", 0, 7), ("8-14 days", 8, 14), ("15-30 days", 15, 30), ("30+ days", 31, None)]
+    query_aging = []
+    for label, lo, hi in age_bucket_defs:
+        matching = [
+            q for q in open_queries
+            if lo <= (today - q.raised_at.date()).days and (hi is None or (today - q.raised_at.date()).days <= hi)
+        ]
+        query_aging.append({"label": label, "count": len(matching)})
+    oldest_queries = sorted(open_queries, key=lambda q: q.raised_at)[:10]
+
+    # ---- Staffing: this week's booked capacity per active user (StaffAllocation - already captured for the HR Planner)
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    people = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
+    allocations_this_week = StaffAllocation.query.filter(
+        StaffAllocation.end_date >= week_start, StaffAllocation.start_date <= week_end
+    ).all()
+    if current_user.role != "admin":
+        allocations_this_week = [a for a in allocations_this_week if user_can_access_engagement(current_user, a.engagement)]
+    staffing = []
+    for person in people:
+        total_pct = sum(
+            a.allocation_pct for a in allocations_this_week
+            if a.user_id == person.id and a.overlaps(week_start, week_end)
+        )
+        if total_pct:
+            staffing.append({"user": person, "pct": total_pct})
+    staffing.sort(key=lambda r: r["pct"], reverse=True)
+    over_booked = [r for r in staffing if r["pct"] > 100]
+    under_booked = [r for r in staffing if r["pct"] < 50]
+
+    # ---- Hours logged in the last 30 days - a workload/activity signal only, never a $ figure (no billing rate exists anywhere in this app)
+    hours_window_days = 30
+    since = today - timedelta(days=hours_window_days)
+    recent_entries = (
+        db.session.query(TimeEntry, TimeSheet)
+        .join(TimeSheet, TimeEntry.timesheet_id == TimeSheet.id)
+        .filter(TimeEntry.work_date >= since)
+        .all()
+    )
+    if current_user.role != "admin":
+        recent_entries = [
+            (te, ts) for te, ts in recent_entries
+            if te.engagement is None or user_can_access_engagement(current_user, te.engagement)
+        ]
+    hours_by_user, hours_by_type = {}, {}
+    for te, ts in recent_entries:
+        hours_by_user[ts.user_id] = hours_by_user.get(ts.user_id, 0) + (te.hours or 0)
+        type_label = te.engagement.type if te.engagement else "Non-engagement / admin"
+        hours_by_type[type_label] = hours_by_type.get(type_label, 0) + (te.hours or 0)
+    user_by_id = {p.id: p for p in people}
+    hours_leaderboard = sorted(
+        [{"user": user_by_id[uid], "hours": round(h, 1)} for uid, h in hours_by_user.items() if uid in user_by_id],
+        key=lambda r: r["hours"], reverse=True,
+    )[:10]
+    hours_by_type_rows = sorted(
+        [{"type": t, "hours": round(h, 1)} for t, h in hours_by_type.items()],
+        key=lambda r: r["hours"], reverse=True,
+    )
 
     return render_template(
         "dashboard.html",
         active=active,
         overdue=overdue,
         my_tasks=my_tasks,
+        all_engagements=all_engagements,
         counts_by_status=counts_by_status,
+        counts_by_type=counts_by_type,
         total_clients=Client.query.count(),
         total_engagements=len(all_engagements),
+        eqi_rows=eqi_rows, firm_avg_reviewed_pct=firm_avg_reviewed_pct,
+        query_aging=query_aging, open_query_count=len(open_queries), oldest_queries=oldest_queries,
+        staffing=staffing, over_booked=over_booked, under_booked=under_booked,
+        week_start=week_start, week_end=week_end,
+        hours_leaderboard=hours_leaderboard, hours_by_type_rows=hours_by_type_rows,
+        hours_window_days=hours_window_days,
     )
 
 
@@ -161,6 +265,51 @@ def list_engagements():
     )
     return render_template(
         "engagements/list.html",
+        engagements=all_engagements,
+        statuses=ENGAGEMENT_STATUSES,
+        types=ENGAGEMENT_TYPES,
+        status_filter=status_filter,
+        type_filter=type_filter,
+    )
+
+
+@engagements_bp.route("/directory")
+@login_required
+def directory():
+    """Clients & Engagements - a single combined page with a tab switcher,
+    replacing what used to be two separate top-level nav pages (Clients
+    and Engagements). The original two pages (`clients.list_clients` /
+    `list_engagements` above) still exist and still work exactly as
+    before - they're what "Cancel" links, post-delete redirects, and
+    other internal navigation use - this route is purely the new combined
+    nav landing page, built from the same two queries."""
+    view = request.args.get("view", "clients")
+    if view not in ("clients", "engagements"):
+        view = "clients"
+
+    q = request.args.get("q", "").strip()
+    client_query = Client.query
+    if q:
+        client_query = client_query.filter(
+            db.or_(Client.name.ilike(f"%{q}%"), Client.company_number.ilike(f"%{q}%"))
+        )
+    all_clients = client_query.order_by(Client.name).all()
+
+    status_filter = request.args.get("status", "")
+    type_filter = request.args.get("type", "")
+    eng_query = Engagement.query
+    if status_filter:
+        eng_query = eng_query.filter_by(status=status_filter)
+    if type_filter:
+        eng_query = eng_query.filter_by(type=type_filter)
+    all_engagements = _visible_to_current_user(
+        eng_query.order_by(Engagement.deadline.asc().nullslast()).all()
+    )
+
+    return render_template(
+        "engagements/directory.html",
+        view=view,
+        clients=all_clients, q=q,
         engagements=all_engagements,
         statuses=ENGAGEMENT_STATUSES,
         types=ENGAGEMENT_TYPES,
@@ -4878,117 +5027,12 @@ def engagement_quality_index(engagement):
 @engagements_bp.route("/analytics")
 @login_required
 def practice_dashboard():
-    """Firm-wide Practice Dashboard - engagement portfolio health, review
-    query aging, staff booking for the current week, recent logged hours,
-    and an Engagement Quality Index per active engagement - built entirely
-    from data the app already captures, with no new database tables. There
-    is deliberately no $-based WIP, realization, or recovery figure here:
-    no billing rate is captured anywhere in this app (TimeEntry records
-    hours only), so a $ figure here would have to be invented rather than
-    computed - see the architecture roadmap document for what a full
-    Practice/Audit Intelligence platform with real billing data would add.
-    Every list below is filtered through the same confidentiality rule as
-    the rest of the app: a non-admin sees only what they're Partner/
-    Manager/Team on; Admin sees everything."""
-    today = date.today()
-    all_engagements = _visible_to_current_user(
-        Engagement.query.order_by(Engagement.deadline.asc().nullslast()).all()
-    )
-    active = [e for e in all_engagements if e.status != "Completed"]
-    overdue = [e for e in active if e.is_overdue]
-
-    counts_by_status = {s: 0 for s in ENGAGEMENT_STATUSES}
-    counts_by_type = {t: 0 for t in ENGAGEMENT_TYPES}
-    for e in all_engagements:
-        counts_by_status[e.status] = counts_by_status.get(e.status, 0) + 1
-        counts_by_type[e.type] = counts_by_type.get(e.type, 0) + 1
-    counts_by_type = {t: c for t, c in counts_by_type.items() if c}
-
-    # ---- Engagement Quality Index, across every active engagement visible to this user
-    eqi_rows = []
-    for e in active:
-        idx = engagement_quality_index(e)
-        if idx:
-            eqi_rows.append({"engagement": e, "index": idx})
-    eqi_rows.sort(key=lambda r: r["index"]["reviewed_pct"])
-    firm_avg_reviewed_pct = round(sum(r["index"]["reviewed_pct"] for r in eqi_rows) / len(eqi_rows)) if eqi_rows else None
-
-    # ---- Review query aging (EngagementQuery - "no new data capture needed", it's all already there)
-    open_queries = EngagementQuery.query.filter_by(status="Open").order_by(EngagementQuery.raised_at.asc()).all()
-    if current_user.role != "admin":
-        open_queries = [q for q in open_queries if user_can_access_engagement(current_user, q.engagement)]
-    age_bucket_defs = [("0-7 days", 0, 7), ("8-14 days", 8, 14), ("15-30 days", 15, 30), ("30+ days", 31, None)]
-    query_aging = []
-    for label, lo, hi in age_bucket_defs:
-        matching = [
-            q for q in open_queries
-            if lo <= (today - q.raised_at.date()).days and (hi is None or (today - q.raised_at.date()).days <= hi)
-        ]
-        query_aging.append({"label": label, "count": len(matching)})
-    oldest_queries = sorted(open_queries, key=lambda q: q.raised_at)[:10]
-
-    # ---- Staffing: this week's booked capacity per active user (StaffAllocation - already captured for the HR Planner)
-    week_start = today - timedelta(days=today.weekday())
-    week_end = week_start + timedelta(days=6)
-    people = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
-    allocations_this_week = StaffAllocation.query.filter(
-        StaffAllocation.end_date >= week_start, StaffAllocation.start_date <= week_end
-    ).all()
-    if current_user.role != "admin":
-        allocations_this_week = [a for a in allocations_this_week if user_can_access_engagement(current_user, a.engagement)]
-    staffing = []
-    for person in people:
-        total_pct = sum(
-            a.allocation_pct for a in allocations_this_week
-            if a.user_id == person.id and a.overlaps(week_start, week_end)
-        )
-        if total_pct:
-            staffing.append({"user": person, "pct": total_pct})
-    staffing.sort(key=lambda r: r["pct"], reverse=True)
-    over_booked = [r for r in staffing if r["pct"] > 100]
-    under_booked = [r for r in staffing if r["pct"] < 50]
-
-    # ---- Hours logged in the last 30 days - a workload/activity signal only, never a $ figure (no billing rate exists anywhere in this app)
-    hours_window_days = 30
-    since = today - timedelta(days=hours_window_days)
-    recent_entries = (
-        db.session.query(TimeEntry, TimeSheet)
-        .join(TimeSheet, TimeEntry.timesheet_id == TimeSheet.id)
-        .filter(TimeEntry.work_date >= since)
-        .all()
-    )
-    if current_user.role != "admin":
-        recent_entries = [
-            (te, ts) for te, ts in recent_entries
-            if te.engagement is None or user_can_access_engagement(current_user, te.engagement)
-        ]
-    hours_by_user, hours_by_type = {}, {}
-    for te, ts in recent_entries:
-        hours_by_user[ts.user_id] = hours_by_user.get(ts.user_id, 0) + (te.hours or 0)
-        type_label = te.engagement.type if te.engagement else "Non-engagement / admin"
-        hours_by_type[type_label] = hours_by_type.get(type_label, 0) + (te.hours or 0)
-    user_by_id = {p.id: p for p in people}
-    hours_leaderboard = sorted(
-        [{"user": user_by_id[uid], "hours": round(h, 1)} for uid, h in hours_by_user.items() if uid in user_by_id],
-        key=lambda r: r["hours"], reverse=True,
-    )[:10]
-    hours_by_type_rows = sorted(
-        [{"type": t, "hours": round(h, 1)} for t, h in hours_by_type.items()],
-        key=lambda r: r["hours"], reverse=True,
-    )
-
-    return render_template(
-        "engagements/analytics.html",
-        active=active, overdue=overdue, all_engagements=all_engagements,
-        counts_by_status=counts_by_status, counts_by_type=counts_by_type,
-        total_clients=Client.query.count(),
-        eqi_rows=eqi_rows, firm_avg_reviewed_pct=firm_avg_reviewed_pct,
-        query_aging=query_aging, open_query_count=len(open_queries), oldest_queries=oldest_queries,
-        staffing=staffing, over_booked=over_booked, under_booked=under_booked,
-        week_start=week_start, week_end=week_end,
-        hours_leaderboard=hours_leaderboard, hours_by_type_rows=hours_by_type_rows,
-        hours_window_days=hours_window_days,
-    )
+    """Retained as a URL alias for the merged Practice Dashboard (see
+    `dashboard()` above) - Dashboard and Practice Dashboard used to be two
+    separate pages/nav links; they're now one page at /engagements/dashboard,
+    and this old URL just renders the same thing, for anyone with it
+    bookmarked."""
+    return dashboard()
 
 
 # ---------- Working papers: Word/Excel generation (Finalisation + Substantive Procedures tabs) ----------

@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block title %}Clients & Engagements - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Clients &amp; Engagements</h1>
+    <div class="subtitle">{{ clients|length }} client(s), {{ engagements|length }} engagement(s) visible to you.</div>
+  </div>
+  <div>
+    <a href="{{ url_for('clients.new_client') }}" class="btn secondary">+ New Client</a>
+    <a href="{{ url_for('engagements.new_engagement') }}" class="btn gold">+ New Engagement</a>
+  </div>
+</div>
+
+<div class="tabs">
+  <a href="{{ url_for('engagements.directory', view='clients', q=q) }}" class="{% if view=='clients' %}active{% endif %}">Clients ({{ clients|length }})</a>
+  <a href="{{ url_for('engagements.directory', view='engagements', status=status_filter, type=type_filter) }}" class="{% if view=='engagements' %}active{% endif %}">Engagements ({{ engagements|length }})</a>
+</div>
+
+{% if view == 'clients' %}
+
+<div class="card">
+  <form method="get" style="margin-bottom:0;">
+    <input type="hidden" name="view" value="clients">
+    <input type="text" name="q" placeholder="Search clients by name or company number..." value="{{ q }}" style="margin-bottom:0;max-width:320px;display:inline-block;">
+    <button type="submit" class="btn secondary">Search</button>
+  </form>
+</div>
+
+<div class="card">
+  {% if clients %}
+  <table>
+    <thead><tr><th>Name</th><th>Contact</th><th>Industry</th><th>Engagements</th><th></th></tr></thead>
+    <tbody>
+      {% for c in clients %}
+      <tr>
+        <td>
+          <a href="{{ url_for('clients.view_client', client_id=c.id) }}">{{ c.name }}</a>
+          {% if c.company_number %}<div class="muted" style="font-size:11px;">{{ c.company_number }}</div>{% endif %}
+        </td>
+        <td>{{ c.contact_person or '—' }}{% if c.email %} &middot; {{ c.email }}{% endif %}</td>
+        <td>{{ c.industry or '—' }}</td>
+        <td>{{ c.engagements|length }}</td>
+        <td class="text-right"><a href="{{ url_for('clients.edit_client', client_id=c.id) }}" class="btn small secondary">Edit</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No clients found. <a href="{{ url_for('clients.new_client') }}">Add your first client</a>.</div>
+  {% endif %}
+</div>
+
+{% else %}
+
+<div class="card">
+  <form method="get" style="margin-bottom:0;" class="form-row">
+    <input type="hidden" name="view" value="engagements">
+    <div>
+      <label for="status">Status</label>
+      <select name="status" id="status" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for s in statuses %}<option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="type">Type</label>
+      <select name="type" id="type" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for t in types %}<option value="{{ t }}" {% if type_filter==t %}selected{% endif %}>{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  {% if engagements %}
+  <table>
+    <thead><tr><th>Engagement</th><th>Client</th><th>Type</th><th>Status</th><th>Deadline</th><th>Partner</th><th>Manager</th><th>Checklist</th></tr></thead>
+    <tbody>
+      {% for e in engagements %}
+      <tr>
+        <td><a href="{{ url_for('engagements.view_engagement', engagement_id=e.id) }}">{{ e.title }}</a></td>
+        <td><a href="{{ url_for('clients.view_client', client_id=e.client.id) }}">{{ e.client.name }}</a></td>
+        <td><span class="badge type-{{ e.type|replace(' ', '') }}">{{ e.type }}</span>{% if e.subdivision %}<div class="muted" style="font-size:11px;">{{ e.subdivision }}</div>{% endif %}</td>
+        <td><span class="badge status-{{ e.status|replace(' ', '') }}">{{ e.status }}</span></td>
+        <td>{{ e.deadline.strftime('%d %b %Y') if e.deadline else '—' }} {% if e.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
+        <td>{{ e.partner.name if e.partner else '—' }}</td>
+        <td>{{ e.manager.name if e.manager else '—' }}</td>
+        <td style="width:110px;"><div class="progress-bar"><div class="fill" style="width:{{ e.checklist_progress }}%;"></div></div></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No engagements match these filters.</div>
+  {% endif %}
+</div>
+
+{% endif %}
+{% endblock %}

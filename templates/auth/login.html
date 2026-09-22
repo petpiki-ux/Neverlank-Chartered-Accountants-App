@@ -9,30 +9,42 @@
 </head>
 <body>
   <div class="login-wrap">
-    <div class="login-card">
-      <div class="login-brand">
-        <img src="{{ url_for('static', filename='img/neverlank-logo.png') }}" alt="Neverlank" class="login-logo">
-        <h1>Neverlank</h1>
-        <div class="tag">Audit, Assurance &amp; Consulting workspace</div>
+    <div class="login-shell">
+      <div class="login-hero">
+        <img src="{{ url_for('static', filename='img/neverlank-logo.png') }}" alt="Neverlank Chartered Accountants" class="login-logo">
+        <div class="login-hero-tag">Chartered Accountants</div>
+        <h1>{{ firm_name }}</h1>
+        <div class="login-hero-strapline">Audit &amp; Assurance &middot; Tax &amp; Secretarial &middot; Financial, Cost &amp; Management Accounting &mdash; world-class financial services, built on trust.</div>
+
+        <div class="login-contact">
+          <div class="row"><span class="label">Address</span><span>2nd Floor, Michael House, 62 Nelson Mandela Avenue, Harare, Zimbabwe</span></div>
+          <div class="row"><span class="label">Web</span><span>www.neverlank.co.zw</span></div>
+        </div>
       </div>
 
-      {% with messages = get_flashed_messages(with_categories=true) %}
-        {% if messages %}
-          <div class="flash-list">
-          {% for category, message in messages %}
-            <div class="flash {{ category }}">{{ message }}</div>
-          {% endfor %}
-          </div>
-        {% endif %}
-      {% endwith %}
+      <div class="login-form-panel">
+        <div class="login-form-eyebrow">Practice Workspace</div>
+        <h2>Sign in to your account</h2>
+        <div class="login-sub">Enter your credentials to access engagements, clients and firm records.</div>
 
-      <form method="post">
-        <label for="username">Username</label>
-        <input type="text" id="username" name="username" autofocus required>
-        <label for="password">Password</label>
-        <input type="password" id="password" name="password" required>
-        <button type="submit" class="btn gold" style="width:100%;">Sign in</button>
-      </form>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            <div class="flash-list">
+            {% for category, message in messages %}
+              <div class="flash {{ category }}">{{ message }}</div>
+            {% endfor %}
+            </div>
+          {% endif %}
+        {% endwith %}
+
+        <form method="post">
+          <label for="username">Username</label>
+          <input type="text" id="username" name="username" autofocus required autocomplete="username">
+          <label for="password">Password</label>
+          <input type="password" id="password" name="password" required autocomplete="current-password">
+          <button type="submit" class="btn gold" style="width:100%;padding:10px 16px;">Sign in</button>
+        </form>
+      </div>
     </div>
   </div>
 </body>
