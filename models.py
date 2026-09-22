@@ -6,7 +6,10 @@ from flask_login import UserMixin
 from extensions import db
 
 
-ENGAGEMENT_TYPES = ["Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement", "Business Intelligence and IT Engagements"]
+ENGAGEMENT_TYPES = [
+    "Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement",
+    "Business Intelligence and IT Engagements", "Tax Compliance", "Tax Advisory & Health Check",
+]
 
 # The financial reporting framework the client's Financial Statements are
 # prepared under (Finalisation tab). Only "full_ifrs" and "ifrs_for_smes"
@@ -92,6 +95,41 @@ SECRETARIAL_ACTIVITIES = [
     ("statutory_records", "Statutory Record Management & Good Standing"),
 ]
 SECRETARIAL_ACTIVITY_LABELS = dict(SECRETARIAL_ACTIVITIES)
+
+# Selectable "Services" for the Tax Advisory & Tax Compliance module
+# (Engagement.tax_services, a comma-separated list of the keys below) -
+# what the firm has actually been engaged to do on the tax side. Unlike
+# SECRETARIAL_ACTIVITIES above (only meaningful on a Secretarial
+# engagement), this is deliberately combinable onto ANY engagement type -
+# a firm often bundles tax compliance work into an ordinary Audit
+# engagement rather than raising it separately - as well as being the
+# natural default for the two dedicated Tax engagement types above. The
+# whole Tax tab (see tax.py / templates/tax/*) only appears on an
+# engagement once at least one of these is selected - see
+# Engagement.has_tax_module. Advisory-only sections (Technical Research
+# Log, Structuring Options, Tax Dispute Management - Module 7B of the tax
+# module spec) only appear when "advisory" or "representation" is among
+# them - see Engagement.has_tax_advisory.
+TAX_SERVICES = [
+    ("compliance", "Tax Compliance (returns & statutory filings)"),
+    ("advisory", "Tax Advisory (planning & structuring)"),
+    ("health_check", "Tax Health Check / Due Diligence"),
+    ("representation", "Tax Representation & Dispute Support"),
+]
+TAX_SERVICE_LABELS = dict(TAX_SERVICES)
+
+# The tax heads tracked throughout the Tax module (Registrations, the
+# Statutory Compliance Calendar, the Execution Plan, Return Records, the
+# Penalty & Interest Engine, and the Exposure Dashboard all key off this
+# same list) - deliberately a plain, editable-in-code list rather than
+# anything hardcoded into a rate or a form, per the module's own "nothing
+# tax-specific is fabricated" rule (see PenaltyInterestRate below).
+TAX_HEADS = [
+    "Corporate Income Tax (CIT)", "Value Added Tax (VAT)", "PAYE",
+    "Withholding Tax (WHT)", "Capital Gains Tax (CGT)", "Customs & Excise",
+    "Provisional Tax (QPDs)",
+]
+
 ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"]
 TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
 CHECKLIST_STATUSES = ["Not Started", "In Progress", "Done", "N/A"]
@@ -125,6 +163,7 @@ QUERY_SECTIONS = [
     ("substantive", "Substantive Procedures"),
     ("tasks", "Tasks"),
     ("finalisation", "Finalisation (Trial Balance / Financial Statements)"),
+    ("tax", "Tax Advisory & Compliance"),
 ]
 QUERY_SECTION_KEYS = {key for key, _ in QUERY_SECTIONS}
 QUERY_SECTION_LABELS = dict(QUERY_SECTIONS)
@@ -160,6 +199,8 @@ WORKPAPER_SECTIONS = [
     ("J", "rep_letter", "Management Representation Letter", "N9006"),
     ("K", "report_to_management", "Report to Management", "N8300"),
     ("L", "forensic_report", "Forensic Investigation Report", None),
+    ("M", "tax_opinion", "Tax Opinion / Advisory Report", None),
+    ("N", "tax_health_check", "Tax Health Check Report", None),
 ]
 WORKPAPER_SECTION_BY_KEY = {key: (code, label, filing_code) for code, key, label, filing_code in WORKPAPER_SECTIONS}
 
@@ -1342,6 +1383,14 @@ class Engagement(db.Model):
     # engagements.seed_entity_checklist. Blank/None means "no filter", i.e.
     # every section is seeded.
     secretarial_activities = db.Column(db.Text)
+
+    # Comma-separated TAX_SERVICES keys - which Tax Advisory & Tax
+    # Compliance services this engagement covers. Unlike
+    # secretarial_activities, meaningful (and settable) on ANY engagement
+    # type - see TAX_SERVICES above and has_tax_module/has_tax_advisory
+    # below. Blank/None means the Tax tab is hidden entirely for this
+    # engagement.
+    tax_services = db.Column(db.Text)
     status = db.Column(db.String(30), nullable=False, default="Planning")
     period_end = db.Column(db.Date)
     start_date = db.Column(db.Date, default=date.today)
@@ -1451,6 +1500,34 @@ class Engagement(db.Model):
         if not self.secretarial_activities:
             return []
         return [a for a in self.secretarial_activities.split(",") if a]
+
+    @property
+    def tax_service_list(self):
+        """The selected TAX_SERVICES keys for this engagement, as a plain
+        list. Empty on every engagement until Tax services are explicitly
+        turned on (see form.html) - unlike secretarial_activities, an empty
+        list here means "no Tax module at all", not "no filter"."""
+        if not self.tax_services:
+            return []
+        return [s for s in self.tax_services.split(",") if s]
+
+    @property
+    def has_tax_module(self):
+        """Whether the Tax tab should appear on this engagement at all -
+        either a dedicated Tax engagement type, or any Tax service
+        explicitly turned on for another engagement type (e.g. tax
+        compliance work bundled into an Audit engagement)."""
+        return self.type in ("Tax Compliance", "Tax Advisory & Health Check") or bool(self.tax_service_list)
+
+    @property
+    def has_tax_advisory(self):
+        """Whether the Tax tab's advisory-only sections (Technical Research
+        Log, Structuring Options Analysis, Tax Dispute Management - Module
+        7B) should be shown - only when the Tax Advisory or Representation
+        service is actually on, never just because some other Tax service
+        is."""
+        services = self.tax_service_list
+        return "advisory" in services or "representation" in services or self.type == "Tax Advisory & Health Check"
 
     def __repr__(self):
         return f"<Engagement {self.title}>"
@@ -1705,8 +1782,14 @@ class EngagementChecklistItem(db.Model):
 
 
 class RiskItem(db.Model):
+    """A single likelihood x impact risk register entry. Currently used only
+    by the Tax module's Risk Register (Engagement detail page, Tax tab -
+    see tax.py) - `module` tags which register a row belongs to ("tax" for
+    every row created there) so a future second register on the same
+    engagement (e.g. a general one) can never mix rows with this one."""
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    module = db.Column(db.String(20))  # "tax" - see docstring above
     category = db.Column(db.String(120))
     risk_description = db.Column(db.Text, nullable=False)
     likelihood = db.Column(db.Integer, default=3)  # 1-5
@@ -1714,8 +1797,11 @@ class RiskItem(db.Model):
     mitigation = db.Column(db.Text)
     owner_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     status = db.Column(db.String(20), default="Open")
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    owner = db.relationship("User")
+    owner = db.relationship("User", foreign_keys=[owner_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
 
     @property
     def score(self):
@@ -1902,6 +1988,73 @@ class EngagementTask(db.Model):
     @property
     def is_partner_signed(self):
         return self.partner_signed_by_id is not None
+
+
+class PersonalTask(db.Model):
+    """A to-do item that isn't tied to any specific engagement - the "upload
+    work and tasks they are working on" side of the firm-wide Task / To-Do
+    List tab (see hr.project_board, which combines these with EngagementTask
+    rows into one view). Kept as its own table rather than making
+    EngagementTask.engagement_id nullable, so nothing about the existing
+    per-engagement Tasks tab or Project Management board changes for any
+    engagement already using it.
+
+    Deliberately lighter than EngagementTask: general/admin work ("book my
+    leave", "read the updated AML policy", "prep the training slides") isn't
+    audit-file evidence, so it gets a simple Preparer sign-off (completed_by/
+    completed_at, set automatically when marked Done) rather than the full
+    Reviewer/Partner sign-off chain.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    assigned_to_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    # Optional context link - e.g. "chase the PBC list for Client X" without
+    # this being a formal audit-file task on that engagement's own Tasks tab.
+    # Confidentiality is still respected: see hr.project_board's filtering.
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    due_date = db.Column(db.Date)
+    priority = db.Column(db.String(20), default="Normal")  # Low | Normal | High
+    status = db.Column(db.String(20), default="To Do")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    assigned_to = db.relationship("User", foreign_keys=[assigned_to_id])
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    engagement = db.relationship("Engagement")
+
+    @property
+    def is_overdue(self):
+        return bool(self.due_date and self.due_date < date.today() and self.status != "Done")
+
+    def __repr__(self):
+        return f"<PersonalTask {self.id} {self.title!r}>"
+
+
+def notify_task_assignment(actor, recipient_id, subject, body):
+    """Sends a one-off internal Message (see Message/MessageRecipient) from
+    `actor` to `recipient_id` - used whenever a task (EngagementTask or
+    PersonalTask) is created or changed in a way that affects someone other
+    than the person making the change, e.g. assigning a task to a colleague,
+    or updating the due date/status of a task assigned to someone else. This
+    is the notification mechanism for the Task / To-Do List tab: task
+    updates surface to the affected person the same way any other internal
+    message does (their Messages inbox, and its unread-count badge).
+
+    No-op if there's no recipient, or the recipient is the actor themselves
+    - nothing to notify anyone about in that case. Does not commit; the
+    caller's own db.session.commit() picks this up along with the task
+    change itself."""
+    if not recipient_id or recipient_id == actor.id:
+        return
+    message = Message(sender_id=actor.id, subject=subject, body=body)
+    db.session.add(message)
+    db.session.flush()
+    db.session.add(MessageRecipient(message_id=message.id, user_id=recipient_id))
 
 
 # ---------- HR & Administration ----------
@@ -3347,6 +3500,559 @@ class SecretarialPlan(db.Model):
         return f"<SecretarialPlan engagement={self.engagement_id}>"
 
 
+# ---------- Tax Advisory & Tax Compliance module ----------
+#
+# Shown on an engagement's "Tax" tab whenever Engagement.has_tax_module is
+# True (a dedicated Tax Compliance/Tax Advisory & Health Check engagement,
+# or any other engagement type with a Tax service explicitly turned on -
+# see TAX_SERVICES above) - see tax.py for the routes and
+# templates/tax/*.html for the tab itself. Deliberately reuses existing
+# machinery wherever it already fits rather than duplicating it:
+#   - the Tax Risk Register reuses RiskItem (module="tax") - see above
+#   - the tax-head-by-tax-head Execution Plan (Module 7) reuses
+#     SubstantiveProcedureArea/SubstantiveProcedureItem, exactly like the
+#     Secretarial engagement type's own Execution Plan does - one area per
+#     TAX_HEADS entry
+#   - the CIT computation (Module 6) reuses the existing
+#     IncomeTaxComputation/DeferredTaxComputation working papers
+#   - Tax Document Management (Module 9) reuses the existing
+#     Documents/Filing Index rather than a new document model
+#   - the Tax Opinion and Tax Health Check Report (Module 10) reuse
+#     WorkpaperNarrative, one row per named part - see TAX_OPINION_PARTS/
+#     TAX_HEALTH_CHECK_PARTS above
+# The models below are the genuinely new pieces that nothing existing
+# already covers.
+
+TAX_REGISTRATION_RECORD_TYPES = [
+    ("registration", "Tax head registration"),
+    ("clearance", "Tax clearance / representation status"),
+    ("portal_access", "Tax authority e-services portal access"),
+]
+
+
+class TaxRegistration(db.Model):
+    """One row of the Tax Client Profile's registration matrix, tax
+    clearance & representation status list, or tax authority portal access
+    log (Module 1) - which of the three it is is `record_type` (see
+    TAX_REGISTRATION_RECORD_TYPES above); all three share the same simple
+    shape (an identifier/reference, a status, and a couple of dates) so
+    there's no good reason to give them three separate tables.
+
+    SECURITY: portal_username is the only credential-shaped field this
+    model has, and deliberately the ONLY one - there is no password field,
+    and there must never be one added here. The tax authority portal
+    passwords/secrets themselves are explicitly never stored in this app;
+    see the "do not store passwords/secrets" note on the Tax tab's Portal
+    Access card."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    record_type = db.Column(db.String(20), nullable=False, default="registration")
+    tax_head = db.Column(db.String(80))  # one of TAX_HEADS, or blank for a general/whole-entity record
+    identifier = db.Column(db.String(150))  # registration number / clearance certificate number / portal name
+    status = db.Column(db.String(50))  # free text - e.g. "Registered", "Valid", "Expired", "Active", "Suspended"
+    issue_date = db.Column(db.Date)
+    expiry_date = db.Column(db.Date)
+    portal_username = db.Column(db.String(150))  # only meaningful when record_type == "portal_access" - NEVER a password, see docstring
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_registrations", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def is_expired(self):
+        return bool(self.expiry_date and self.expiry_date < date.today())
+
+    def __repr__(self):
+        return f"<TaxRegistration {self.record_type} {self.identifier!r} engagement={self.engagement_id}>"
+
+
+TAX_ENTITY_CLASSIFICATIONS = [
+    "Private Company", "Public Company", "Trust", "Partnership", "Sole Trader",
+    "Private Voluntary Organisation (PVO)", "Statutory Body", "Branch of a Foreign Entity", "Other",
+]
+
+
+class TaxEntityProfile(db.Model):
+    """The Tax Entity Understanding & Regulatory Profile (Module 2) - one
+    per engagement. tax_classification/tax_year_end drive nothing
+    automatically elsewhere in the app (there's no basis to infer statutory
+    consequences from them without current legislation to hand); they're
+    recorded here as the working paper of record. regulatory_matrix_notes
+    is the free-text "which regulators/obligations apply" note - a fixed
+    Zimbabwean-tax-authority matrix was deliberately not hardcoded here,
+    since which obligations apply is itself a judgement call that varies by
+    entity and changes with legislation, not a fixed lookup table."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    tax_classification = db.Column(db.String(60))
+    tax_year_end = db.Column(db.Date)
+    regulatory_matrix_notes = db.Column(db.Text)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_entity_profile", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<TaxEntityProfile engagement={self.engagement_id}>"
+
+
+class TaxDeadline(db.Model):
+    """One entry on the Statutory Tax Calendar (Module 2) - a filing/payment
+    deadline for a given tax head, with a 30/14/7/3-day reminder hierarchy
+    computed live from due_date (never stored, so it's never stale) -
+    see reminder_level below."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    description = db.Column(db.String(200), nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(20), default="Upcoming")  # "Upcoming" | "Filed" | "Not Applicable"
+    filed_date = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_deadlines", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def days_until_due(self):
+        return (self.due_date - date.today()).days
+
+    @property
+    def is_overdue(self):
+        return self.status == "Upcoming" and self.days_until_due < 0
+
+    @property
+    def reminder_level(self):
+        """Which rung of the 30/14/7/3-day reminder hierarchy this deadline
+        is currently at, or None if it's more than 30 days out, already
+        filed, or marked not applicable - purely a display hint (an
+        "Overdue"/"Due in N days" badge on the calendar), never anything
+        that sends an actual reminder on its own."""
+        if self.status != "Upcoming":
+            return None
+        days = self.days_until_due
+        if days < 0:
+            return "Overdue"
+        if days <= 3:
+            return "3-day"
+        if days <= 7:
+            return "7-day"
+        if days <= 14:
+            return "14-day"
+        if days <= 30:
+            return "30-day"
+        return None
+
+    def __repr__(self):
+        return f"<TaxDeadline {self.description!r} due={self.due_date} engagement={self.engagement_id}>"
+
+
+class TaxAnalyticalReview(db.Model):
+    """The Tax Analytical Review & Historical Exposure working paper
+    (Module 3) - one per engagement. Covers the Effective Tax Rate
+    analysis, a multi-year trend note, VAT input/output analytics, the PAYE
+    reconciliation, and a Red-Flag Engine note - every figure/finding here
+    is preparer-entered analysis, explicitly a review flag for further
+    investigation rather than a conclusion on its own (see red_flags_notes
+    below), same "system prompts, preparer concludes" pattern as the rest
+    of this app's analytical review tabs. is_necessary mirrors the
+    Secretarial Analytical Review's own necessity toggle - not every tax
+    engagement (e.g. a narrow single-issue Tax Opinion) needs a full
+    analytical review."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    is_necessary = db.Column(db.Boolean, default=True, nullable=False)
+    not_necessary_reason = db.Column(db.Text)
+
+    effective_tax_rate_percent = db.Column(db.Float)
+    expected_tax_rate_percent = db.Column(db.Float)
+    etr_variance_notes = db.Column(db.Text)
+    multi_year_trend_notes = db.Column(db.Text)
+    vat_analytics_notes = db.Column(db.Text)
+    paye_reconciliation_notes = db.Column(db.Text)
+    red_flags_notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_analytical_review", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def etr_variance(self):
+        if self.effective_tax_rate_percent is None or self.expected_tax_rate_percent is None:
+            return None
+        return self.effective_tax_rate_percent - self.expected_tax_rate_percent
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<TaxAnalyticalReview engagement={self.engagement_id}>"
+
+
+TAX_POSITION_CLASSIFICATIONS = ["Certain", "Probable", "Possible", "Remote"]
+TAX_POSITION_APPROVAL_STATUSES = ["Draft", "Pending Approval", "Approved", "Rejected"]
+
+
+class TaxPosition(db.Model):
+    """One entry in the Tax Position Register (Module 4) - a specific
+    technical position the firm/client is taking (e.g. "R&D costs treated
+    as fully deductible in the year incurred"), classified by likelihood of
+    the position being sustained and carrying its own approval workflow -
+    distinct from the Tax Risk Register (RiskItem, module="tax"), which
+    tracks entity-level risk factors rather than specific technical
+    positions."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    position_description = db.Column(db.Text, nullable=False)
+    classification = db.Column(db.String(20), default="Possible")
+    estimated_exposure = db.Column(db.Float)
+    approval_status = db.Column(db.String(20), default="Draft")
+    approved_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    approved_at = db.Column(db.DateTime)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_positions", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_id])
+
+    def __repr__(self):
+        return f"<TaxPosition {self.tax_head} {self.classification} engagement={self.engagement_id}>"
+
+
+PENALTY_INTEREST_RATE_TYPES = ["Penalty", "Interest"]
+
+
+class PenaltyInterestRate(db.Model):
+    """One effective-dated penalty or interest rate, firm-wide (not
+    per-engagement - a statutory rate doesn't vary by client) - the
+    Penalty & Interest Engine (Module 4) is built entirely on rates entered
+    here by a preparer, never a hardcoded percentage, for the same reason
+    IncomeTaxComputation.tax_rate_percent is never pre-filled (see the
+    module comment above IncomeTaxComputation): reliable current
+    Zimbabwean penalty/interest rates could not be sourced with confidence
+    at the time this was built, and they change with legislation. Managed
+    from the Tax > Penalty & Interest Rates settings screen; effective_to
+    left blank means "still the current rate" for that (tax_head,
+    rate_type)."""
+    id = db.Column(db.Integer, primary_key=True)
+    tax_head = db.Column(db.String(80), nullable=False)
+    rate_type = db.Column(db.String(10), nullable=False, default="Penalty")
+    rate_percent = db.Column(db.Float, nullable=False)
+    effective_from = db.Column(db.Date, nullable=False)
+    effective_to = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    entered_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    entered_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    entered_by = db.relationship("User")
+
+    @property
+    def is_current(self):
+        today = date.today()
+        return self.effective_from <= today and (self.effective_to is None or self.effective_to >= today)
+
+    def __repr__(self):
+        return f"<PenaltyInterestRate {self.tax_head} {self.rate_type} {self.rate_percent}% from={self.effective_from}>"
+
+
+class PenaltyInterestCalculation(db.Model):
+    """One saved run of the Penalty & Interest Engine (Module 4) for a
+    given engagement - a simple-interest/flat-penalty calculation from a
+    principal amount, days late, and the PenaltyInterestRate the preparer
+    selected, kept as a log entry (rather than overwritten) so a prior
+    exposure estimate isn't lost when circumstances/rates are recalculated
+    later. Purely arithmetic on preparer-supplied figures - see
+    financials.calculate_penalty_interest."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    principal_amount = db.Column(db.Float, nullable=False)
+    days_late = db.Column(db.Integer, nullable=False, default=0)
+    rate_id = db.Column(db.Integer, db.ForeignKey("penalty_interest_rate.id"))
+    rate_percent_used = db.Column(db.Float)  # snapshotted at calculation time, in case the rate record is later changed/retired
+    computed_amount = db.Column(db.Float)
+    notes = db.Column(db.Text)
+    calculated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    calculated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("penalty_interest_calculations", lazy=True, cascade="all, delete-orphan"))
+    rate = db.relationship("PenaltyInterestRate")
+    calculated_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<PenaltyInterestCalculation {self.tax_head} {self.computed_amount} engagement={self.engagement_id}>"
+
+
+TAX_INFO_REQUEST_STATUSES = ["Outstanding", "Received", "Not Applicable"]
+
+
+class TaxInformationRequest(db.Model):
+    """One line of the Dynamic Information Request List (Module 5) - the
+    tax equivalent of a PBC (prepared-by-client) list: an item requested
+    from the client, who it was requested from, and whether it's come back
+    yet. "Dynamic" in the module spec means preparer-curated per engagement
+    rather than a single fixed checklist - hence a plain add/edit/delete
+    list here rather than a seeded template."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    item_description = db.Column(db.String(300), nullable=False)
+    requested_from = db.Column(db.String(150))
+    status = db.Column(db.String(20), default="Outstanding")
+    date_requested = db.Column(db.Date)
+    date_received = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_information_requests", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<TaxInformationRequest {self.item_description!r} status={self.status} engagement={self.engagement_id}>"
+
+
+TAX_RETURN_STATUSES = ["Not Started", "In Preparation", "Filed", "Assessed", "Paid", "Overdue"]
+
+
+class TaxReturnRecord(db.Model):
+    """One tax return/filing being tracked through Tax Execution & Working
+    Papers (Module 7) - CIT, VAT, WHT, PAYE, Customs, or a Provisional Tax
+    (QPD) instalment, all sharing this one model via the `tax_head`
+    discriminator rather than five/six separate bespoke tables (mirrors how
+    Secretarial's Execution Plan reuses SubstantiveProcedureItem rather
+    than a new model - see the module comment at the top of this section).
+    assessed_amount/reconciliation_notes cover the E-Filing & Assessment
+    Reconciliation workflow (Module 10) - comparing what was filed/paid
+    against the tax authority's own assessment, on the same row rather than
+    a separate model."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80), nullable=False)
+    period_label = db.Column(db.String(80))  # e.g. "2026 Q1", "May 2026", "2026 Annual"
+    due_date = db.Column(db.Date)
+    filed_date = db.Column(db.Date)
+    status = db.Column(db.String(20), default="Not Started")
+    amount_due = db.Column(db.Float)
+    amount_paid = db.Column(db.Float)
+    assessed_amount = db.Column(db.Float)
+    reference = db.Column(db.String(100))  # ZIMRA/e-filing acknowledgement reference
+    reconciliation_notes = db.Column(db.Text)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_return_records", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def is_overdue(self):
+        return bool(self.due_date and self.due_date < date.today() and self.status not in ("Filed", "Assessed", "Paid"))
+
+    @property
+    def assessment_variance(self):
+        if self.assessed_amount is None or self.amount_due is None:
+            return None
+        return self.assessed_amount - self.amount_due
+
+    def __repr__(self):
+        return f"<TaxReturnRecord {self.tax_head} {self.period_label} status={self.status} engagement={self.engagement_id}>"
+
+
+class TaxResearchLogEntry(db.Model):
+    """One entry in the Technical Research Log (Module 7B - Tax Advisory
+    Workflow, only shown when Engagement.has_tax_advisory is True): a
+    technical question researched, the conclusion reached, and the
+    authorities relied on."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    topic = db.Column(db.String(200), nullable=False)
+    question = db.Column(db.Text)
+    research_notes = db.Column(db.Text)
+    conclusion = db.Column(db.Text)
+    references = db.Column(db.Text)  # legislation/case law/rulings relied on
+    prepared_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    prepared_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_research_log", lazy=True, cascade="all, delete-orphan"))
+    prepared_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<TaxResearchLogEntry {self.topic!r} engagement={self.engagement_id}>"
+
+
+class TaxStructuringOption(db.Model):
+    """One option within a Structuring Options Analysis scenario comparison
+    (Module 7B, advisory-only) - several rows on the same engagement, one
+    per option under consideration, compared side by side on the Tax tab."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    option_name = db.Column(db.String(150), nullable=False)
+    description = db.Column(db.Text)
+    estimated_tax_impact = db.Column(db.Float)
+    risk_rating = db.Column(db.String(10))  # "Low" | "Medium" | "High"
+    recommended = db.Column(db.Boolean, default=False)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_structuring_options", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<TaxStructuringOption {self.option_name!r} engagement={self.engagement_id}>"
+
+
+TAX_DISPUTE_STAGES = [
+    "Notice Received", "Objection Lodged", "Appeal - Fiscal Appeal Court",
+    "Appeal - Higher Court", "Resolved - Favourable", "Resolved - Unfavourable", "Withdrawn",
+]
+
+
+class TaxDispute(db.Model):
+    """One tax dispute being tracked through the Tax Dispute Management
+    workflow (Module 7B, advisory-only) - from the first notice received
+    through objection/appeal to resolution."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    issue_description = db.Column(db.Text, nullable=False)
+    stage = db.Column(db.String(40), default="Notice Received")
+    amount_in_dispute = db.Column(db.Float)
+    next_action = db.Column(db.String(300))
+    next_action_date = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_disputes", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def is_resolved(self):
+        return self.stage.startswith("Resolved") or self.stage == "Withdrawn"
+
+    def __repr__(self):
+        return f"<TaxDispute {self.tax_head} stage={self.stage} engagement={self.engagement_id}>"
+
+
+class LegislativeUpdate(db.Model):
+    """One entry in the firm-wide Legislative Update Control log (Module 8)
+    - a change in tax legislation/practice the firm has logged and
+    assessed the impact of. Firm-wide rather than per-engagement (a Finance
+    Act change isn't specific to one client) - see tax.py's
+    legislative_updates list page, reachable from the Tax tab of any
+    engagement with the Tax module on, and from HR & Administration."""
+    id = db.Column(db.Integer, primary_key=True)
+    tax_head = db.Column(db.String(80))
+    title = db.Column(db.String(200), nullable=False)
+    summary = db.Column(db.Text)
+    effective_date = db.Column(db.Date)
+    source_reference = db.Column(db.String(200))
+    impact_assessment = db.Column(db.Text)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    def __repr__(self):
+        return f"<LegislativeUpdate {self.title!r}>"
+
+
+class TaxChecklistItem(db.Model):
+    """One tick + comment line of the configurable Tax Head Checklists /
+    Quality Gates (Module 8) - a lightweight, single-preparer-tick list
+    (unlike FinalisationChecklist, this doesn't carry its own separate
+    3-tier sign-off - the engagement's own Finalisation checklist and the
+    Tax Opinion/Health Check's own sign-offs already cover formal
+    sign-off for tax work; this is the working checklist itself). Grouped
+    by tax_head on the Tax tab; add freely per engagement rather than being
+    seeded from a fixed template, since which quality gates matter varies
+    by which Tax services are on."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    item_text = db.Column(db.Text, nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_checklist_items", lazy=True, cascade="all, delete-orphan", order_by="TaxChecklistItem.order"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    def __repr__(self):
+        return f"<TaxChecklistItem {self.item_text!r} response={self.response!r} engagement={self.engagement_id}>"
+
+
+# Seeded onto every engagement's Tax Head Checklist the first time its Tax
+# tab is opened (see tax._seed_tax_checklist) - a starting quality-gate
+# checklist a preparer tailors from there, same "system drafts, preparer
+# tailors" pattern as every other seeded checklist in this app. Kept
+# general rather than ZIMRA-form-specific, since exact form numbers/steps
+# change with legislation (same reasoning as PenaltyInterestRate above).
+DEFAULT_TAX_CHECKLIST_ITEMS = [
+    (None, "Has the client's registration status been confirmed current for every applicable tax head?"),
+    (None, "Have all returns due for the period been identified against the Statutory Tax Calendar?"),
+    ("Corporate Income Tax (CIT)", "Has the CIT computation been agreed to the trial balance/financial statements?"),
+    ("Value Added Tax (VAT)", "Has output VAT been reconciled to recorded revenue for the period?"),
+    ("Value Added Tax (VAT)", "Has input VAT claimed been supported by valid tax invoices?"),
+    ("PAYE", "Has PAYE deducted been reconciled to the payroll records for the period?"),
+    ("Withholding Tax (WHT)", "Has withholding tax been correctly applied and remitted on applicable payments?"),
+    (None, "Have all known tax positions been logged on the Tax Position Register with an approval status?"),
+    (None, "Has any legislative change logged since the last review been assessed for impact on this engagement?"),
+    (None, "Has the Quality Control review of the tax working papers been completed before sign-off?"),
+]
+
+
 class Permission(db.Model):
     """One (role, permission_key) toggle - see PERMISSIONS/user_has_permission
     above. Seeded with defaults on first install/upgrade (see seed.py); an
@@ -4676,8 +5382,59 @@ WORKPAPER_NARRATIVE_KINDS = [
     ("report_to_management", "Report to Management", "report_to_management"),
     ("forensic_executive_summary", "Forensic Investigation Report - Executive Summary", "forensic_report"),
 ]
+
+# The Tax Opinion's 14 parts and the Tax Health Check Report's 15 parts
+# (Tax module, Module 10 - Finalisation & Deliverables) are each just more
+# WorkpaperNarrative kinds - every part gets its own persistent, editable
+# body of text with its own independent Preparer/Reviewer/Partner sign-off,
+# exactly like rep_letter/report_to_management/forensic_executive_summary
+# above, with zero new model or route code needed (see
+# engagements._get_or_seed_workpaper_narrative / save_workpaper_narrative /
+# review_workpaper_narrative / etc., and workpapers.build_tax_opinion_docx /
+# build_tax_health_check_docx for the combined Word exports). Both are only
+# ever seeded/shown when Engagement.has_tax_module is True - see tax.py.
+TAX_OPINION_PARTS = [
+    ("tax_opinion_01_scope", "Engagement Scope & Instructions"),
+    ("tax_opinion_02_exec_summary", "Executive Summary"),
+    ("tax_opinion_03_background", "Background & Facts"),
+    ("tax_opinion_04_legislation", "Applicable Legislation & Authorities"),
+    ("tax_opinion_05_issues", "Issue(s) for Opinion"),
+    ("tax_opinion_06_analysis", "Technical Analysis"),
+    ("tax_opinion_07_alternatives", "Alternative Interpretations Considered"),
+    ("tax_opinion_08_authority_position", "Tax Authority Position (if known)"),
+    ("tax_opinion_09_risk", "Risk Assessment of the Position"),
+    ("tax_opinion_10_conclusion", "Conclusion & Recommended Position"),
+    ("tax_opinion_11_reporting", "Reporting & Disclosure Implications"),
+    ("tax_opinion_12_implementation", "Implementation Steps"),
+    ("tax_opinion_13_limitations", "Limitations & Reliance"),
+    ("tax_opinion_14_signoff", "Sign-off & Distribution"),
+]
+TAX_HEALTH_CHECK_PARTS = [
+    ("tax_health_check_01_exec_summary", "Executive Summary"),
+    ("tax_health_check_02_scope", "Scope & Methodology"),
+    ("tax_health_check_03_entity_status", "Entity & Registration Status Review"),
+    ("tax_health_check_04_cit", "Corporate Income Tax (CIT) Review"),
+    ("tax_health_check_05_vat", "Value Added Tax (VAT) Review"),
+    ("tax_health_check_06_paye", "PAYE Review"),
+    ("tax_health_check_07_wht", "Withholding Taxes Review"),
+    ("tax_health_check_08_cgt", "Capital Gains Tax Review"),
+    ("tax_health_check_09_customs", "Customs & Excise Review (if applicable)"),
+    ("tax_health_check_10_transfer_pricing", "Transfer Pricing / Related Party Review"),
+    ("tax_health_check_11_penalties", "Penalties, Interest & Historical Exposure"),
+    ("tax_health_check_12_findings", "Key Findings & Risk Ratings"),
+    ("tax_health_check_13_recommendations", "Recommendations & Remediation Plan"),
+    ("tax_health_check_14_exposure_summary", "Quantified Exposure Summary"),
+    ("tax_health_check_15_conclusion", "Conclusion & Next Steps"),
+]
+for _key, _label in TAX_OPINION_PARTS:
+    WORKPAPER_NARRATIVE_KINDS.append((_key, f"Tax Opinion - {_label}", "tax_opinion"))
+for _key, _label in TAX_HEALTH_CHECK_PARTS:
+    WORKPAPER_NARRATIVE_KINDS.append((_key, f"Tax Health Check - {_label}", "tax_health_check"))
+
 WORKPAPER_NARRATIVE_KIND_KEYS = {kind for kind, _, _ in WORKPAPER_NARRATIVE_KINDS}
 WORKPAPER_NARRATIVE_KIND_LABELS = {kind: label for kind, label, _ in WORKPAPER_NARRATIVE_KINDS}
+TAX_OPINION_KIND_KEYS = [k for k, _ in TAX_OPINION_PARTS]
+TAX_HEALTH_CHECK_KIND_KEYS = [k for k, _ in TAX_HEALTH_CHECK_PARTS]
 
 # Starting wording for each narrative workpaper the first time it's opened on
 # an engagement - editable from there on (see WorkpaperNarrative above). Kept
@@ -4705,6 +5462,16 @@ DEFAULT_WORKPAPER_NARRATIVE_BODIES = {
         "[Summarise, in a few sentences, the mandate, the key findings, and the overall conclusion of this investigation - the detail behind each point is set out in the numbered sections that follow.]",
     ]),
 }
+# Short "[to be completed: ...]" placeholder wording for each of the Tax
+# Opinion's 14 parts and the Tax Health Check Report's 15 parts (see
+# TAX_OPINION_PARTS/TAX_HEALTH_CHECK_PARTS above) - deliberately just a
+# prompt rather than boilerplate legal/technical wording, since (unlike the
+# ISA 700 rep-letter/RTM wording above) there is no safe firm-wide default
+# position to pre-fill for a specific client's tax facts and conclusion.
+for _key, _label in TAX_OPINION_PARTS:
+    DEFAULT_WORKPAPER_NARRATIVE_BODIES[_key] = f"[To be completed: {_label}.]"
+for _key, _label in TAX_HEALTH_CHECK_PARTS:
+    DEFAULT_WORKPAPER_NARRATIVE_BODIES[_key] = f"[To be completed: {_label}.]"
 
 
 class WorkpaperNarrative(db.Model):

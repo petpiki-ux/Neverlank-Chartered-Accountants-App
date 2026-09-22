@@ -58,6 +58,12 @@ def _add_missing_columns():
             ("sme_sector", "VARCHAR(50)"), ("sme_size_band", "VARCHAR(10)"),
             ("sme_annual_turnover", "FLOAT"), ("sme_gross_assets", "FLOAT"), ("sme_staff_headcount", "INTEGER"),
             ("secretarial_activities", "TEXT"),
+            ("tax_services", "TEXT"),
+        ],
+        "risk_item": [
+            ("module", "VARCHAR(20)"),
+            ("created_by_id", "INTEGER"),
+            ("created_at", "DATETIME"),
         ],
         "analytical_review_line": [("source", "VARCHAR(10) DEFAULT 'manual'")],
         "engagement_checklist_item": [
@@ -338,6 +344,7 @@ def create_app():
     from tickmarks import tickmarks_bp
     from filing_index import filing_index_bp
     from permanent_file import permanent_file_bp
+    from tax import tax_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -355,6 +362,7 @@ def create_app():
     app.register_blueprint(tickmarks_bp)
     app.register_blueprint(filing_index_bp)
     app.register_blueprint(permanent_file_bp)
+    app.register_blueprint(tax_bp)
 
     @app.route("/")
     def index():
@@ -364,16 +372,23 @@ def create_app():
 
     @app.context_processor
     def inject_globals():
-        from models import user_has_permission, MessageRecipient
+        from models import user_has_permission, MessageRecipient, EngagementTask, PersonalTask
         unread = (
             MessageRecipient.query.filter_by(user_id=current_user.id, read_at=None).count()
             if current_user.is_authenticated
             else 0
         )
+        open_tasks = 0
+        if current_user.is_authenticated:
+            open_tasks = (
+                EngagementTask.query.filter_by(assigned_to_id=current_user.id).filter(EngagementTask.status != "Done").count()
+                + PersonalTask.query.filter_by(assigned_to_id=current_user.id).filter(PersonalTask.status != "Done").count()
+            )
         return {
             "firm_name": "Neverlank Chartered Accountants",
             "user_has_permission": user_has_permission,
             "unread_message_count": unread,
+            "my_open_task_count": open_tasks,
         }
 
     with app.app_context():

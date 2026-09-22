@@ -1,15 +1,22 @@
 {% extends "base.html" %}
-{% block title %}Project Management - {{ firm_name }}{% endblock %}
+{% block title %}Tasks - {{ firm_name }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>Project Management</h1>
-    <div class="subtitle">Every open task across all engagements, in one place.</div>
+    <h1>Tasks / To-Do List</h1>
+    <div class="subtitle">Work assigned to you on engagements, plus general to-dos - everything in one place.</div>
   </div>
 </div>
 
 <div class="card">
   <form method="get" style="margin-bottom:0;" class="form-row">
+    <div>
+      <label for="view_toggle">Show</label>
+      <select id="view_toggle" onchange="window.location.href=this.value">
+        <option value="{{ url_for('hr.project_board', status=status_filter, assigned_to=assignee_filter) }}" {% if not view %}selected{% endif %}>Everyone's tasks</option>
+        <option value="{{ url_for('hr.project_board', status=status_filter, assigned_to=assignee_filter, view='mine') }}" {% if view=='mine' %}selected{% endif %}>My tasks only</option>
+      </select>
+    </div>
     <div>
       <label for="status">Status</label>
       <select name="status" id="status" onchange="this.form.submit()">
@@ -24,15 +31,54 @@
         {% for p in people %}<option value="{{ p.id }}" {% if assignee_filter==p.id|string %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
       </select>
     </div>
+    <input type="hidden" name="view" value="{{ view }}">
   </form>
 </div>
 
 <div class="card">
-  {% if tasks %}
+  <h3 class="mt-0">Add a task</h3>
+  <p class="muted" style="font-size:12.5px;">This always adds a general to-do, not a formal engagement Task (for those, use the Tasks tab on the engagement itself, which has Preparer/Reviewer/Partner sign-off). Picking an engagement here just tags the to-do for context and keeps it confidential to people with access to that engagement; leave it on "General / not engagement-specific" for training, admin or other firm matters. Assigning a task to someone else sends them a notification (Messages inbox).</p>
+  <form method="post" action="{{ url_for('hr.add_personal_task') }}">
+    <div class="form-row">
+      <div style="grid-column: span 2;"><label for="title">Task *</label><input type="text" id="title" name="title" required></div>
+      <div>
+        <label for="engagement_id">Engagement</label>
+        <select id="engagement_id" name="engagement_id">
+          <option value="">General / not engagement-specific</option>
+          {% for e in engagements %}<option value="{{ e.id }}">{{ e.client.name }} - {{ e.title }}</option>{% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="assigned_to_id">Assign to</label>
+        <select id="assigned_to_id" name="assigned_to_id">
+          <option value="{{ current_user.id }}" selected>Myself</option>
+          {% for p in people %}{% if p.id != current_user.id %}<option value="{{ p.id }}">{{ p.name }}</option>{% endif %}{% endfor %}
+        </select>
+      </div>
+      <div><label for="due_date">Due date</label><input type="date" id="due_date" name="due_date"></div>
+      <div>
+        <label for="priority">Priority</label>
+        <select id="priority" name="priority">
+          <option>Low</option><option selected>Normal</option><option>High</option>
+        </select>
+      </div>
+    </div>
+    <label for="description">Notes</label>
+    <textarea id="description" name="description"></textarea>
+    <button type="submit" class="btn gold">Add task</button>
+  </form>
+  <p class="muted" style="font-size:11px;">A general to-do (whether or not it references an engagement) is simple - just marked Done, with no Reviewer/Partner sign-off step. For work that needs to go through the full review chain, add it from that engagement's own Tasks tab instead.</p>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Engagement tasks</h3>
+  {% if engagement_tasks %}
   <table>
     <thead><tr><th>Task</th><th>Engagement</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th>Review</th><th></th></tr></thead>
     <tbody>
-      {% for t in tasks %}
+      {% for t in engagement_tasks %}
       <tr>
         <td>{{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
         <td><a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id, tab='tasks') }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></td>
@@ -72,7 +118,46 @@
     </tbody>
   </table>
   {% else %}
-  <div class="empty-state">No tasks match these filters.</div>
+  <div class="empty-state">No engagement tasks match these filters.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">General to-dos</h3>
+  {% if personal_tasks %}
+  <table>
+    <thead><tr><th>Task</th><th>Added by</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for t in personal_tasks %}
+      <tr>
+        <td>{{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}{% if t.engagement %}<div class="muted" style="font-size:11px;">Re: <a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id) }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></div>{% endif %}</td>
+        <td>{{ t.created_by.name if t.created_by else '—' }}</td>
+        <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>
+        <td>{{ t.due_date.strftime('%d %b %Y') if t.due_date else '—' }} {% if t.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
+        <td>{{ t.priority }}</td>
+        <td>
+          <form method="post" action="{{ url_for('hr.update_personal_task', task_id=t.id) }}" class="inline">
+            <input type="hidden" name="title" value="{{ t.title }}">
+            <input type="hidden" name="assigned_to_id" value="{{ t.assigned_to_id or '' }}">
+            <input type="hidden" name="due_date" value="{{ t.due_date.isoformat() if t.due_date else '' }}">
+            <input type="hidden" name="priority" value="{{ t.priority }}">
+            <select name="status" onchange="this.form.submit()">
+              {% for s in statuses %}<option value="{{ s }}" {% if t.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+            </select>
+          </form>
+          {% if t.completed_by %}<div class="muted" style="font-size:11px;">Done by {{ t.completed_by.name }}</div>{% endif %}
+        </td>
+        <td>
+          {% if t.created_by_id == current_user.id or current_user.role == 'admin' %}
+          <form method="post" action="{{ url_for('hr.delete_personal_task', task_id=t.id) }}" class="inline" onsubmit="return confirm('Delete this task?')"><button type="submit" class="btn small danger">Delete</button></form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No general to-dos match these filters.</div>
   {% endif %}
 </div>
 {% endblock %}

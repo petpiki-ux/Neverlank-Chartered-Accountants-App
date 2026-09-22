@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Legislative Updates - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Legislative Update Control</h1>
+    <div class="subtitle">Firm-wide log of tax legislation/practice changes and their assessed impact - reachable from the Tax tab of any engagement with the Tax module on.</div>
+  </div>
+</div>
+
+<div class="card">
+  {% if updates %}
+  {% for u in updates %}
+  <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+    <p style="margin:0;"><strong>{{ u.title }}</strong> {% if u.tax_head %}<span class="badge">{{ u.tax_head }}</span>{% endif %} {% if u.is_reviewed %}<span class="badge status-Completed">Reviewed</span>{% endif %}</p>
+    <p class="muted" style="font-size:12.5px;margin:4px 0;">Effective {{ u.effective_date.strftime('%d %b %Y') if u.effective_date else '—' }} {% if u.source_reference %}&middot; {{ u.source_reference }}{% endif %} &middot; logged by {{ u.created_by.name if u.created_by else '—' }} on {{ u.created_at.strftime('%d %b %Y') }}</p>
+    {% if u.summary %}<p style="font-size:13px;">{{ u.summary }}</p>{% endif %}
+    <form method="post" action="{{ url_for('tax.review_legislative_update', update_id=u.id) }}" class="form-row">
+      <div style="flex:3;"><input type="text" name="impact_assessment" placeholder="Impact assessment" value="{{ u.impact_assessment or '' }}"></div>
+      <div><button type="submit" class="btn small gold">Save &amp; mark reviewed</button></div>
+    </form>
+    {% if u.is_reviewed %}<p class="muted" style="font-size:11px;">Reviewed by {{ u.reviewed_by.name if u.reviewed_by else '—' }} on {{ u.reviewed_at.strftime('%d %b %Y') if u.reviewed_at else '—' }}.</p>{% endif %}
+    <form method="post" action="{{ url_for('tax.delete_legislative_update', update_id=u.id) }}" onsubmit="return confirm('Delete this update?')"><button type="submit" class="btn small danger">Delete</button></form>
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="empty-state">No legislative updates logged yet.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Log an update</h3>
+  <form method="post" action="{{ url_for('tax.add_legislative_update') }}">
+    <div class="form-row">
+      <div>
+        <label for="tax_head">Tax head</label>
+        <select id="tax_head" name="tax_head">
+          <option value="">General</option>
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="title">Title *</label><input type="text" id="title" name="title" required></div>
+      <div><label for="effective_date">Effective date</label><input type="date" id="effective_date" name="effective_date"></div>
+    </div>
+    <label for="summary">Summary</label>
+    <textarea id="summary" name="summary" rows="2"></textarea>
+    <div class="form-row">
+      <div><label for="source_reference">Source / reference</label><input type="text" id="source_reference" name="source_reference"></div>
+    </div>
+    <label for="impact_assessment">Impact assessment</label>
+    <textarea id="impact_assessment" name="impact_assessment" rows="2"></textarea>
+    <button type="submit" class="btn gold">Log update</button>
+  </form>
+</div>
+{% endblock %}

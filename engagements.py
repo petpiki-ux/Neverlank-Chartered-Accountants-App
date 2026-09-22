@@ -51,6 +51,17 @@ from models import (
     OPINION_MODIFICATIONS, OPINION_MODIFICATION_LABELS,
     IncomeTaxComputation, IncomeTaxAdjustmentLine, INCOME_TAX_ITEM_TYPES, INCOME_TAX_ITEM_TYPE_LABELS,
     DeferredTaxComputation, DeferredTaxItem,
+    notify_task_assignment,
+    TAX_SERVICES, TAX_SERVICE_LABELS, TAX_HEADS,
+    TAX_OPINION_PARTS, TAX_HEALTH_CHECK_PARTS,
+    TaxEntityProfile, TaxRegistration, TaxDeadline, TaxAnalyticalReview, TaxPosition,
+    TAX_POSITION_CLASSIFICATIONS, TAX_POSITION_APPROVAL_STATUSES,
+    PenaltyInterestRate, PenaltyInterestCalculation, PENALTY_INTEREST_RATE_TYPES,
+    TaxInformationRequest, TAX_INFO_REQUEST_STATUSES,
+    TaxReturnRecord, TAX_RETURN_STATUSES,
+    TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
+    LegislativeUpdate, TaxChecklistItem, DEFAULT_TAX_CHECKLIST_ITEMS,
+    TAX_REGISTRATION_RECORD_TYPES, TAX_ENTITY_CLASSIFICATIONS,
 )
 import financials as fin
 import workpapers as wp
@@ -159,16 +170,24 @@ def new_engagement():
             flash("Please select a client.", "danger")
             return render_template("engagements/form.html", engagement=None, clients=clients, users=users,
                                     templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
-                                    subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES)
+                                    subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES,
+                                    tax_service_options=TAX_SERVICES)
 
         engagement_type = request.form.get("type", "Audit")
         selected_activities = request.form.getlist("secretarial_activities")
+        selected_tax_services = request.form.getlist("tax_services")
         engagement = Engagement(
             client_id=int(client_id),
             title=request.form.get("title", "").strip(),
             type=engagement_type,
             subdivision=(request.form.get("subdivision", "").strip() or None) if engagement_type == "Secretarial" else None,
             secretarial_activities=(",".join(selected_activities) or None) if engagement_type == "Secretarial" else None,
+            # Combinable on ANY engagement type (see TAX_SERVICES above) -
+            # not gated by engagement_type the way secretarial_activities
+            # is. A dedicated Tax engagement type with nothing explicitly
+            # ticked still gets the Tax tab (see Engagement.has_tax_module),
+            # so this is purely "which services", never "whether at all".
+            tax_services=",".join(selected_tax_services) or None,
             status=request.form.get("status", "Planning"),
             description=request.form.get("description", "").strip(),
             partner_id=request.form.get("partner_id") or None,
@@ -207,7 +226,8 @@ def new_engagement():
 
     return render_template("engagements/form.html", engagement=None, clients=clients, users=users,
                             templates=templates, types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
-                            subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES)
+                            subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES,
+                            tax_service_options=TAX_SERVICES)
 
 
 @engagements_bp.route("/<int:engagement_id>/edit", methods=["GET", "POST"])
@@ -224,6 +244,7 @@ def edit_engagement(engagement_id):
         engagement.type = request.form.get("type", "Audit")
         engagement.subdivision = (request.form.get("subdivision", "").strip() or None) if engagement.type == "Secretarial" else None
         engagement.secretarial_activities = (",".join(request.form.getlist("secretarial_activities")) or None) if engagement.type == "Secretarial" else None
+        engagement.tax_services = ",".join(request.form.getlist("tax_services")) or None
         engagement.status = request.form.get("status", "Planning")
         engagement.description = request.form.get("description", "").strip()
         engagement.partner_id = request.form.get("partner_id") or None
@@ -246,7 +267,8 @@ def edit_engagement(engagement_id):
 
     return render_template("engagements/form.html", engagement=engagement, clients=clients, users=users,
                             templates=[], types=ENGAGEMENT_TYPES, statuses=ENGAGEMENT_STATUSES,
-                            subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES)
+                            subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES,
+                            tax_service_options=TAX_SERVICES)
 
 
 @engagements_bp.route("/<int:engagement_id>/delete", methods=["POST"])
@@ -493,6 +515,17 @@ def view_engagement(engagement_id):
         substantive_area_names = AUDIT_AREAS
         substantive_area_refs = AUDIT_AREA_REFERENCES
 
+    # The Tax module's Execution Plan (Module 7) reuses this exact
+    # Substantive Procedures machinery - one area per TAX_HEADS entry -
+    # exactly like Secretarial's own Execution Plan does above, so tax-head
+    # sections just show up as extra sections on this same tab (with their
+    # own Preparer/Reviewer/Partner sign-off) whenever the Tax module is on,
+    # on top of whatever this engagement type's own areas already are -
+    # never replacing them, since Tax is commonly bundled onto another
+    # engagement type rather than being its own.
+    if engagement.has_tax_module:
+        substantive_area_names = list(substantive_area_names) + [h for h in TAX_HEADS if h not in substantive_area_names]
+
     substantive_areas_by_name = {
         a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).all()
     }
@@ -515,7 +548,16 @@ def view_engagement(engagement_id):
     workpaper_narratives = {
         wn.kind: wn for wn in WorkpaperNarrative.query.filter_by(engagement_id=engagement_id).all()
     }
-    for kind, _label, _section in WORKPAPER_NARRATIVE_KINDS:
+    # The Tax Opinion's 14 parts and the Tax Health Check Report's 15 parts
+    # (see models.TAX_OPINION_PARTS/TAX_HEALTH_CHECK_PARTS) are only ever
+    # seeded/shown on an engagement with the Tax module on - every other
+    # WorkpaperNarrative kind (rep_letter etc.) is seeded for every
+    # engagement, unchanged from before the Tax module existed.
+    seedable_kinds = [
+        (kind, label, section) for kind, label, section in WORKPAPER_NARRATIVE_KINDS
+        if engagement.has_tax_module or section not in ("tax_opinion", "tax_health_check")
+    ]
+    for kind, _label, _section in seedable_kinds:
         if kind not in workpaper_narratives:
             workpaper_narratives[kind] = _get_or_seed_workpaper_narrative(engagement_id, kind)
 
@@ -536,6 +578,54 @@ def view_engagement(engagement_id):
         else:
             queries_by_section.setdefault(q.section, []).append(q)
     open_query_count = sum(1 for q in all_queries if q.status == "Open")
+
+    # ---------- Tax tab (Tax Advisory & Tax Compliance module) ----------
+    # Only actually queried when the Tax tab could be shown - a plain
+    # Audit/Assurance/etc. engagement with no Tax service on pays for none
+    # of this. See Engagement.has_tax_module / models.py's "Tax Advisory &
+    # Tax Compliance module" section for the full picture of what's reused
+    # (RiskItem, SubstantiveProcedureArea/Item, IncomeTaxComputation/
+    # DeferredTaxComputation, WorkpaperNarrative) vs. genuinely new here.
+    tax_entity_profile = None
+    tax_registrations = []
+    tax_deadlines = []
+    tax_analytical_review = None
+    tax_risk_items = []
+    tax_positions = []
+    tax_return_records = []
+    tax_information_requests = []
+    tax_research_log = []
+    tax_structuring_options = []
+    tax_disputes = []
+    tax_checklist_items = []
+    tax_checklist_by_head = {}
+    tax_execution_areas_by_name = {}
+    if engagement.has_tax_module:
+        tax_entity_profile = TaxEntityProfile.query.filter_by(engagement_id=engagement_id).first()
+        tax_registrations = TaxRegistration.query.filter_by(engagement_id=engagement_id).order_by(TaxRegistration.record_type, TaxRegistration.id).all()
+        tax_deadlines = TaxDeadline.query.filter_by(engagement_id=engagement_id).order_by(TaxDeadline.due_date.asc()).all()
+        tax_analytical_review = TaxAnalyticalReview.query.filter_by(engagement_id=engagement_id).first()
+        tax_risk_items = RiskItem.query.filter_by(engagement_id=engagement_id, module="tax").order_by(RiskItem.id).all()
+        tax_positions = TaxPosition.query.filter_by(engagement_id=engagement_id).order_by(TaxPosition.id).all()
+        tax_return_records = TaxReturnRecord.query.filter_by(engagement_id=engagement_id).order_by(TaxReturnRecord.due_date.asc().nullslast()).all()
+        tax_information_requests = TaxInformationRequest.query.filter_by(engagement_id=engagement_id).order_by(TaxInformationRequest.id).all()
+        if engagement.has_tax_advisory:
+            tax_research_log = TaxResearchLogEntry.query.filter_by(engagement_id=engagement_id).order_by(TaxResearchLogEntry.prepared_at.desc()).all()
+            tax_structuring_options = TaxStructuringOption.query.filter_by(engagement_id=engagement_id).order_by(TaxStructuringOption.id).all()
+            tax_disputes = TaxDispute.query.filter_by(engagement_id=engagement_id).order_by(TaxDispute.id).all()
+        tax_checklist_items = TaxChecklistItem.query.filter_by(engagement_id=engagement_id).order_by(TaxChecklistItem.order, TaxChecklistItem.id).all()
+        for item in tax_checklist_items:
+            tax_checklist_by_head.setdefault(item.tax_head or "General", []).append(item)
+        # The Execution Plan (Module 7) - one SubstantiveProcedureArea per
+        # tax head, exactly like Secretarial's own Execution Plan reuses
+        # this same model (see SECRETARIAL_SUBSTANTIVE_AREAS above).
+        tax_execution_areas_by_name = {
+            a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).filter(SubstantiveProcedureArea.area.in_(TAX_HEADS)).all()
+        }
+    current_penalty_interest_rates = PenaltyInterestRate.query.order_by(PenaltyInterestRate.tax_head, PenaltyInterestRate.rate_type, PenaltyInterestRate.effective_from.desc()).all()
+    tax_penalty_calculations = PenaltyInterestCalculation.query.filter_by(engagement_id=engagement_id).order_by(PenaltyInterestCalculation.calculated_at.desc()).all() if engagement.has_tax_module else []
+    tax_opinion_narratives = {k: workpaper_narratives.get(k) for k, _ in TAX_OPINION_PARTS} if engagement.has_tax_module else {}
+    tax_health_check_narratives = {k: workpaper_narratives.get(k) for k, _ in TAX_HEALTH_CHECK_PARTS} if engagement.has_tax_module else {}
 
     return render_template(
         "engagements/detail.html",
@@ -641,6 +731,36 @@ def view_engagement(engagement_id):
         deferred_tax_result=deferred_tax_result,
         deferred_tax_tb_net=deferred_tax_tb_net,
         deferred_tax_reconciliation=deferred_tax_reconciliation,
+        tax_services=TAX_SERVICES,
+        tax_service_labels=TAX_SERVICE_LABELS,
+        tax_heads=TAX_HEADS,
+        tax_entity_profile=tax_entity_profile,
+        tax_entity_classifications=TAX_ENTITY_CLASSIFICATIONS,
+        tax_registrations=tax_registrations,
+        tax_registration_record_types=TAX_REGISTRATION_RECORD_TYPES,
+        tax_deadlines=tax_deadlines,
+        tax_analytical_review=tax_analytical_review,
+        tax_risk_items=tax_risk_items,
+        tax_positions=tax_positions,
+        tax_position_classifications=TAX_POSITION_CLASSIFICATIONS,
+        tax_position_approval_statuses=TAX_POSITION_APPROVAL_STATUSES,
+        tax_return_records=tax_return_records,
+        tax_return_statuses=TAX_RETURN_STATUSES,
+        tax_information_requests=tax_information_requests,
+        tax_info_request_statuses=TAX_INFO_REQUEST_STATUSES,
+        tax_research_log=tax_research_log,
+        tax_structuring_options=tax_structuring_options,
+        tax_disputes=tax_disputes,
+        tax_dispute_stages=TAX_DISPUTE_STAGES,
+        tax_checklist_by_head=tax_checklist_by_head,
+        tax_execution_areas_by_name=tax_execution_areas_by_name,
+        current_penalty_interest_rates=current_penalty_interest_rates,
+        penalty_interest_rate_types=PENALTY_INTEREST_RATE_TYPES,
+        tax_penalty_calculations=tax_penalty_calculations,
+        tax_opinion_parts=TAX_OPINION_PARTS,
+        tax_opinion_narratives=tax_opinion_narratives,
+        tax_health_check_parts=TAX_HEALTH_CHECK_PARTS,
+        tax_health_check_narratives=tax_health_check_narratives,
     )
 
 
@@ -1760,12 +1880,22 @@ def add_task(engagement_id):
         engagement_id=engagement_id,
         title=request.form.get("title", "").strip(),
         description=request.form.get("description", "").strip(),
-        assigned_to_id=request.form.get("assigned_to_id") or None,
+        assigned_to_id=int(request.form.get("assigned_to_id")) if request.form.get("assigned_to_id") else None,
         due_date=datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None,
         priority=request.form.get("priority", "Normal"),
         status=request.form.get("status", "To Do"),
     )
     db.session.add(task)
+    db.session.flush()
+    if task.assigned_to_id and task.assigned_to_id != current_user.id:
+        notify_task_assignment(
+            current_user, task.assigned_to_id,
+            f"Task assigned: {task.title}",
+            f"{current_user.name} assigned you a task on {engagement.client.name} - {engagement.title}:\n\n"
+            f"{task.title}\n"
+            + (f"Due {task.due_date.strftime('%d %b %Y')}\n" if task.due_date else "")
+            + (f"\n{task.description}" if task.description else ""),
+        )
     db.session.commit()
     flash("Task assigned.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tasks"))
@@ -1786,13 +1916,35 @@ def _task_redirect(task, tab="tasks"):
 def update_task(task_id):
     task = EngagementTask.query.get_or_404(task_id)
     _ensure_engagement_access(task.engagement)
+    old_assigned_to_id = task.assigned_to_id
+    old_status = task.status
+    old_due_date = task.due_date
     task.title = request.form.get("title", task.title)
     task.description = request.form.get("description", task.description)
-    task.assigned_to_id = request.form.get("assigned_to_id") or None
+    task.assigned_to_id = int(request.form.get("assigned_to_id")) if request.form.get("assigned_to_id") else None
     due_date = request.form.get("due_date")
     task.due_date = datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None
     task.priority = request.form.get("priority", task.priority)
     task.status = request.form.get("status", task.status)
+    if task.assigned_to_id and task.assigned_to_id != old_assigned_to_id:
+        notify_task_assignment(
+            current_user, task.assigned_to_id,
+            f"Task assigned: {task.title}",
+            f"{current_user.name} assigned you a task on {task.engagement.client.name} - {task.engagement.title}:\n\n{task.title}"
+            + (f"\nDue {task.due_date.strftime('%d %b %Y')}" if task.due_date else ""),
+        )
+    elif task.assigned_to_id and task.assigned_to_id == old_assigned_to_id and (task.status != old_status or task.due_date != old_due_date):
+        changes = []
+        if task.status != old_status:
+            changes.append(f"status is now {task.status}")
+        if task.due_date != old_due_date:
+            changes.append(f"due date is now {task.due_date.strftime('%d %b %Y') if task.due_date else 'unset'}")
+        notify_task_assignment(
+            current_user, task.assigned_to_id,
+            f"Task updated: {task.title}",
+            f"{current_user.name} updated a task assigned to you on {task.engagement.client.name} - {task.engagement.title}:\n\n"
+            f"{task.title} - {', '.join(changes)}.",
+        )
     if task.status == "Done":
         task.completed_by_id = current_user.id
         task.completed_at = datetime.utcnow()
@@ -3377,6 +3529,18 @@ def _get_or_seed_workpaper_narrative(engagement_id, kind):
     return narrative
 
 
+def _narrative_tab(kind):
+    """Which engagement-detail tab a WorkpaperNarrative's own Save/Review/
+    Partner-sign actions should redirect back to - "tax" for a Tax Opinion/
+    Tax Health Check part (see models.TAX_OPINION_PARTS/TAX_HEALTH_CHECK_
+    PARTS), "finalisation" for every other kind (rep_letter, report_to_
+    management, forensic_executive_summary), unchanged from before the Tax
+    module existed."""
+    if kind.startswith("tax_opinion") or kind.startswith("tax_health_check"):
+        return "tax"
+    return "finalisation"
+
+
 @engagements_bp.route("/<int:engagement_id>/workpaper-narrative/<string:kind>/save", methods=["POST"])
 @login_required
 def save_workpaper_narrative(engagement_id, kind):
@@ -3399,7 +3563,7 @@ def save_workpaper_narrative(engagement_id, kind):
     narrative.partner_signed_at = None
     db.session.commit()
     flash(f"{narrative.label} saved.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=_narrative_tab(kind)))
 
 
 @engagements_bp.route("/workpaper-narrative/<int:narrative_id>/review", methods=["POST"])
@@ -3411,12 +3575,12 @@ def review_workpaper_narrative(narrative_id):
         abort(403)
     if narrative.completed_by_id == current_user.id:
         flash("You can't review a write-up you prepared yourself - ask another supervisor/partner to review it.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab=_narrative_tab(narrative.kind)))
     narrative.reviewed_by_id = current_user.id
     narrative.reviewed_at = datetime.utcnow()
     db.session.commit()
     flash(f"{narrative.label} marked as reviewed.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab=_narrative_tab(narrative.kind)))
 
 
 @engagements_bp.route("/workpaper-narrative/<int:narrative_id>/unreview", methods=["POST"])
@@ -3430,7 +3594,7 @@ def unreview_workpaper_narrative(narrative_id):
     narrative.reviewed_at = None
     db.session.commit()
     flash("Review sign-off removed.", "info")
-    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab=_narrative_tab(narrative.kind)))
 
 
 @engagements_bp.route("/workpaper-narrative/<int:narrative_id>/partner-sign", methods=["POST"])
@@ -3442,12 +3606,12 @@ def partner_sign_workpaper_narrative(narrative_id):
         abort(403)
     if narrative.completed_by_id == current_user.id:
         flash("You can't give the partner sign-off on a write-up you prepared yourself - ask another partner to sign off.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab=_narrative_tab(narrative.kind)))
     narrative.partner_signed_by_id = current_user.id
     narrative.partner_signed_at = datetime.utcnow()
     db.session.commit()
     flash("Partner sign-off recorded.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab=_narrative_tab(narrative.kind)))
 
 
 @engagements_bp.route("/workpaper-narrative/<int:narrative_id>/partner-unsign", methods=["POST"])
@@ -3461,7 +3625,7 @@ def partner_unsign_workpaper_narrative(narrative_id):
     narrative.partner_signed_at = None
     db.session.commit()
     flash("Partner sign-off removed.", "info")
-    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=narrative.engagement_id, tab=_narrative_tab(narrative.kind)))
 
 
 # ---------- Substantive Procedures (system-based: by audit area, driven by risk + industry) ----------
@@ -4825,6 +4989,42 @@ def generate_forensic_report_docx(engagement_id):
     doc = _file_generated_workpaper(engagement, "forensic_report", "Forensic Investigation Report", None, "Forensic_Investigation_Report", "docx", buf, reference_override=filing_reference("forensic_report"))
     flash(f"Forensic investigation report filed (v{doc.version}).", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/tax-opinion/generate", methods=["POST"])
+@login_required
+def generate_tax_opinion_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    if not engagement.has_tax_module:
+        flash("The Tax Opinion is only available on an engagement with a Tax service turned on.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax"))
+    narratives_by_kind = {
+        wn.kind: wn for wn in WorkpaperNarrative.query.filter_by(engagement_id=engagement_id).all()
+        if wn.kind.startswith("tax_opinion")
+    }
+    buf = wp.build_tax_opinion_docx(engagement, narratives_by_kind)
+    doc = _file_generated_workpaper(engagement, "tax_opinion", "Tax Opinion", None, "Tax_Opinion", "docx", buf, reference_override=filing_reference("tax_opinion"))
+    flash(f"Tax Opinion filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax"))
+
+
+@engagements_bp.route("/<int:engagement_id>/workpapers/tax-health-check/generate", methods=["POST"])
+@login_required
+def generate_tax_health_check_docx(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    if not engagement.has_tax_module:
+        flash("The Tax Health Check Report is only available on an engagement with a Tax service turned on.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax"))
+    narratives_by_kind = {
+        wn.kind: wn for wn in WorkpaperNarrative.query.filter_by(engagement_id=engagement_id).all()
+        if wn.kind.startswith("tax_health_check")
+    }
+    buf = wp.build_tax_health_check_docx(engagement, narratives_by_kind)
+    doc = _file_generated_workpaper(engagement, "tax_health_check", "Tax Health Check Report", None, "Tax_Health_Check_Report", "docx", buf, reference_override=filing_reference("tax_health_check"))
+    flash(f"Tax Health Check Report filed (v{doc.version}).", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax"))
 
 
 @engagements_bp.route("/<int:engagement_id>/workpapers/file-summary/generate", methods=["POST"])

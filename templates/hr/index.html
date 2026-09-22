@@ -13,12 +13,20 @@
     <p class="muted" style="font-size:13px;">Log your weekly hours in the app (overtime calculated automatically), or download the Excel template and upload it back once filled in.</p>
   </a>
   <a href="{{ url_for('hr.project_board') }}" class="card" style="text-decoration:none;color:inherit;">
-    <h3 class="mt-0">Project Management</h3>
-    <p class="muted" style="font-size:13px;">A firm-wide board of every open task across all engagements - who's working on what, due dates, and review status, all in one place.</p>
+    <h3 class="mt-0">Tasks / To-Do List</h3>
+    <p class="muted" style="font-size:13px;">Every task in one place - work assigned to you on engagements, plus general to-dos you or a colleague have added - who's working on what, due dates, and review status. Also reachable from the top navigation bar.</p>
   </a>
   <a href="{{ url_for('hr.planner') }}" class="card" style="text-decoration:none;color:inherit;">
     <h3 class="mt-0">Planner</h3>
     <p class="muted" style="font-size:13px;">A firm-wide audit timetable (spot clashing deadlines at a glance) and a staffing grid showing who's booked on what each week.</p>
+  </a>
+  <a href="{{ url_for('tax.list_legislative_updates') }}" class="card" style="text-decoration:none;color:inherit;">
+    <h3 class="mt-0">Tax Legislative Updates</h3>
+    <p class="muted" style="font-size:13px;">Firm-wide log of tax legislation/practice changes and their assessed impact - feeds every engagement's Tax tab.</p>
+  </a>
+  <a href="{{ url_for('tax.list_penalty_interest_rates') }}" class="card" style="text-decoration:none;color:inherit;">
+    <h3 class="mt-0">Tax Penalty &amp; Interest Rates</h3>
+    <p class="muted" style="font-size:13px;">Firm-wide, effective-dated rates used by the Tax module's Penalty &amp; Interest Engine - nothing there is hardcoded.</p>
   </a>
 </div>
 

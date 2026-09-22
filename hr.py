@@ -20,8 +20,8 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, User, Engagement,
-    EngagementTask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
-    user_has_permission, user_can_access_engagement,
+    EngagementTask, PersonalTask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
+    user_has_permission, user_can_access_engagement, notify_task_assignment,
 )
 from config import Config
 
@@ -426,33 +426,162 @@ def delete_timesheet_upload(upload_id):
     return redirect(url_for("hr.list_timesheets"))
 
 
-# ---------- Project Management (firm-wide task board) ----------
+# ---------- Tasks / To-Do List (firm-wide task board) ----------
+#
+# One place that combines two kinds of task:
+#   - EngagementTask: work tied to a specific engagement (its own Tasks tab
+#     there too - this board just collates them across every engagement).
+#   - PersonalTask: general/admin work an employee is doing that isn't tied
+#     to any engagement ("upload work and tasks they are working on").
+# A task assigned to (or reassigned/updated for) someone other than the
+# person making the change sends them a notification via the existing
+# internal Messages system (see models.notify_task_assignment) - answering
+# "give notifications on tasks uploaded by other team members affecting the
+# employee" without building a second, parallel notification channel.
 
 @hr_bp.route("/projects")
 @login_required
 def project_board():
     status_filter = request.args.get("status", "")
     assignee_filter = request.args.get("assigned_to", "")
+    view = request.args.get("view", "")  # "mine" narrows to tasks assigned to me
 
-    query = EngagementTask.query.join(Engagement)
+    eng_query = EngagementTask.query.join(Engagement)
+    personal_query = PersonalTask.query
     if status_filter:
-        query = query.filter(EngagementTask.status == status_filter)
+        eng_query = eng_query.filter(EngagementTask.status == status_filter)
+        personal_query = personal_query.filter(PersonalTask.status == status_filter)
     if assignee_filter:
-        query = query.filter(EngagementTask.assigned_to_id == assignee_filter)
+        eng_query = eng_query.filter(EngagementTask.assigned_to_id == assignee_filter)
+        personal_query = personal_query.filter(PersonalTask.assigned_to_id == assignee_filter)
+    if view == "mine":
+        eng_query = eng_query.filter(EngagementTask.assigned_to_id == current_user.id)
+        personal_query = personal_query.filter(
+            (PersonalTask.assigned_to_id == current_user.id) | (PersonalTask.created_by_id == current_user.id)
+        )
 
-    tasks = query.order_by(EngagementTask.due_date.asc().nullslast()).all()
+    engagement_tasks = eng_query.order_by(EngagementTask.due_date.asc().nullslast()).all()
     if current_user.role != "admin":
-        tasks = [t for t in tasks if user_can_access_engagement(current_user, t.engagement)]
+        engagement_tasks = [t for t in engagement_tasks if user_can_access_engagement(current_user, t.engagement)]
+
+    personal_tasks = personal_query.order_by(PersonalTask.due_date.asc().nullslast()).all()
+    if current_user.role != "admin":
+        # A personal task is visible firm-wide (it's a to-do, not a
+        # confidential audit workpaper) unless it references an engagement
+        # the viewer can't access, in which case it's hidden like any other
+        # engagement-linked content.
+        personal_tasks = [t for t in personal_tasks if not t.engagement or user_can_access_engagement(current_user, t.engagement)]
+
     people = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
+    engagements = Engagement.query.order_by(Engagement.title).all()
+    if current_user.role != "admin":
+        engagements = [e for e in engagements if user_can_access_engagement(current_user, e)]
 
     return render_template(
         "projects/board.html",
-        tasks=tasks,
+        engagement_tasks=engagement_tasks,
+        personal_tasks=personal_tasks,
         people=people,
+        engagements=engagements,
         statuses=TASK_STATUSES,
         status_filter=status_filter,
         assignee_filter=assignee_filter,
+        view=view,
     )
+
+
+@hr_bp.route("/projects/personal/add", methods=["POST"])
+@login_required
+def add_personal_task():
+    due_date = request.form.get("due_date")
+    engagement_id = request.form.get("engagement_id") or None
+    if engagement_id:
+        engagement = Engagement.query.get_or_404(int(engagement_id))
+        if current_user.role != "admin" and not user_can_access_engagement(current_user, engagement):
+            abort(403)
+    task = PersonalTask(
+        created_by_id=current_user.id,
+        assigned_to_id=int(request.form.get("assigned_to_id")) if request.form.get("assigned_to_id") else current_user.id,
+        engagement_id=int(engagement_id) if engagement_id else None,
+        title=request.form.get("title", "").strip(),
+        description=request.form.get("description", "").strip(),
+        due_date=datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None,
+        priority=request.form.get("priority", "Normal"),
+        status=request.form.get("status", "To Do"),
+    )
+    if not task.title:
+        flash("Please enter a task title.", "danger")
+        return redirect(url_for("hr.project_board"))
+    db.session.add(task)
+    db.session.flush()
+    if task.assigned_to_id and task.assigned_to_id != current_user.id:
+        notify_task_assignment(
+            current_user, task.assigned_to_id,
+            f"Task assigned: {task.title}",
+            f"{current_user.name} assigned you a task:\n\n{task.title}"
+            + (f"\nDue {task.due_date.strftime('%d %b %Y')}" if task.due_date else "")
+            + (f"\n\n{task.description}" if task.description else ""),
+        )
+    db.session.commit()
+    flash("Task added.", "success")
+    return redirect(url_for("hr.project_board"))
+
+
+@hr_bp.route("/projects/personal/<int:task_id>/update", methods=["POST"])
+@login_required
+def update_personal_task(task_id):
+    task = PersonalTask.query.get_or_404(task_id)
+    if task.engagement and current_user.role != "admin" and not user_can_access_engagement(current_user, task.engagement):
+        abort(403)
+    old_assigned_to_id = task.assigned_to_id
+    old_status = task.status
+    old_due_date = task.due_date
+    task.title = request.form.get("title", task.title)
+    task.description = request.form.get("description", task.description)
+    task.assigned_to_id = int(request.form.get("assigned_to_id")) if request.form.get("assigned_to_id") else task.assigned_to_id
+    due_date = request.form.get("due_date")
+    task.due_date = datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None
+    task.priority = request.form.get("priority", task.priority)
+    task.status = request.form.get("status", task.status)
+    if task.assigned_to_id and task.assigned_to_id != old_assigned_to_id:
+        notify_task_assignment(
+            current_user, task.assigned_to_id,
+            f"Task assigned: {task.title}",
+            f"{current_user.name} assigned you a task:\n\n{task.title}"
+            + (f"\nDue {task.due_date.strftime('%d %b %Y')}" if task.due_date else ""),
+        )
+    elif task.assigned_to_id and task.assigned_to_id == old_assigned_to_id and (task.status != old_status or task.due_date != old_due_date):
+        changes = []
+        if task.status != old_status:
+            changes.append(f"status is now {task.status}")
+        if task.due_date != old_due_date:
+            changes.append(f"due date is now {task.due_date.strftime('%d %b %Y') if task.due_date else 'unset'}")
+        notify_task_assignment(
+            current_user, task.assigned_to_id,
+            f"Task updated: {task.title}",
+            f"{current_user.name} updated a task assigned to you:\n\n{task.title} - {', '.join(changes)}.",
+        )
+    if task.status == "Done":
+        task.completed_by_id = current_user.id
+        task.completed_at = datetime.utcnow()
+    else:
+        task.completed_by_id = None
+        task.completed_at = None
+    db.session.commit()
+    flash("Task updated.", "success")
+    return redirect(url_for("hr.project_board"))
+
+
+@hr_bp.route("/projects/personal/<int:task_id>/delete", methods=["POST"])
+@login_required
+def delete_personal_task(task_id):
+    task = PersonalTask.query.get_or_404(task_id)
+    if task.created_by_id != current_user.id and current_user.role != "admin":
+        abort(403)
+    db.session.delete(task)
+    db.session.commit()
+    flash("Task deleted.", "info")
+    return redirect(url_for("hr.project_board"))
 
 
 # ---------- Planner: audit timetable + staffing grid ----------

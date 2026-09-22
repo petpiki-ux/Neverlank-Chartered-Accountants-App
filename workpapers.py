@@ -864,6 +864,60 @@ def build_report_to_management_docx(engagement, narrative=None):
     return _finish(doc)
 
 
+# ================================================================= Tax Opinion / Tax Health Check Report (Word)
+# Both are just an ordered set of WorkpaperNarrative parts (see
+# models.TAX_OPINION_PARTS / TAX_HEALTH_CHECK_PARTS) rendered as numbered
+# sections - one shared builder covers both, parameterised by title/parts.
+
+def _build_tax_sections_docx(engagement, title, filing_kind, parts, narratives_by_kind):
+    doc = _new_document(title, engagement, subtitle=f"Ref. {filing_reference(filing_kind)}")
+
+    client_name = engagement.client.name if engagement.client else "[Client]"
+    doc.add_paragraph(f"Client: {client_name}")
+    doc.add_paragraph(f"Engagement: {engagement.title}")
+    doc.add_paragraph(f"Date: {_fmt_date(date.today())}")
+    doc.add_paragraph()
+
+    for i, (kind, label) in enumerate(parts, start=1):
+        narrative = narratives_by_kind.get(kind)
+        _add_heading(doc, f"{i}. {label}", level=2)
+        body = (narrative.body if narrative and narrative.body else None) or DEFAULT_WORKPAPER_NARRATIVE_BODIES.get(kind, "")
+        for line in body.split("\n"):
+            line = line.strip()
+            if line:
+                doc.add_paragraph(line)
+        if narrative and narrative.completed_by:
+            signoff_bits = [f"Prepared by {narrative.completed_by.name} on {_fmt_date(narrative.completed_at)}."]
+            if narrative.is_reviewed:
+                signoff_bits.append(f"Reviewed by {narrative.reviewed_by.name} on {_fmt_date(narrative.reviewed_at)}.")
+            if narrative.is_partner_signed:
+                signoff_bits.append(f"Partner sign-off by {narrative.partner_signed_by.name} on {_fmt_date(narrative.partner_signed_at)}.")
+            p = doc.add_paragraph(" ".join(signoff_bits))
+            for run in p.runs:
+                run.italic = True
+                run.font.size = Pt(9)
+        doc.add_paragraph()
+
+    return _finish(doc)
+
+
+def build_tax_opinion_docx(engagement, narratives_by_kind):
+    """The Tax Opinion (Tax module, Module 10) - its 14 parts are each a
+    persistent WorkpaperNarrative (see models.TAX_OPINION_PARTS); this just
+    renders them, in order, as one combined Word document."""
+    from models import TAX_OPINION_PARTS
+    return _build_tax_sections_docx(engagement, "Tax Opinion", "tax_opinion", TAX_OPINION_PARTS, narratives_by_kind)
+
+
+def build_tax_health_check_docx(engagement, narratives_by_kind):
+    """The Tax Health Check Report (Tax module, Module 10) - its 15 parts
+    are each a persistent WorkpaperNarrative (see models.
+    TAX_HEALTH_CHECK_PARTS); this just renders them, in order, as one
+    combined Word document."""
+    from models import TAX_HEALTH_CHECK_PARTS
+    return _build_tax_sections_docx(engagement, "Tax Health Check Report", "tax_health_check", TAX_HEALTH_CHECK_PARTS, narratives_by_kind)
+
+
 # ================================================================= Forensic investigation report (Word)
 
 def build_forensic_report_docx(engagement, narrative=None):

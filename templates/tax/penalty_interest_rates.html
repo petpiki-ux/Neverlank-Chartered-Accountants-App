@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Penalty & Interest Rates - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Penalty &amp; Interest Rates</h1>
+    <div class="subtitle">Firm-wide, effective-dated tax penalty/interest rates used by the Tax module's Penalty &amp; Interest Engine on every engagement - nothing here is hardcoded, so add each rate as it's confirmed.</div>
+  </div>
+</div>
+
+<div class="card">
+  {% if rates %}
+  <table>
+    <thead><tr><th>Tax head</th><th>Type</th><th>Rate</th><th>Effective from</th><th>Effective to</th><th>Current?</th><th>Notes</th><th>Entered by</th>{% if can_manage %}<th></th>{% endif %}</tr></thead>
+    <tbody>
+      {% for r in rates %}
+      <tr>
+        <td>{{ r.tax_head }}</td>
+        <td>{{ r.rate_type }}</td>
+        <td>{{ r.rate_percent }}%</td>
+        <td>{{ r.effective_from.strftime('%d %b %Y') }}</td>
+        <td>{{ r.effective_to.strftime('%d %b %Y') if r.effective_to else '—' }}</td>
+        <td>{% if r.is_current %}<span class="badge status-Completed">Current</span>{% else %}—{% endif %}</td>
+        <td>{{ r.notes or '—' }}</td>
+        <td>{{ r.entered_by.name if r.entered_by else '—' }}</td>
+        {% if can_manage %}
+        <td><form method="post" action="{{ url_for('tax.delete_penalty_interest_rate', rate_id=r.id) }}" class="inline" onsubmit="return confirm('Delete this rate?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No rates entered yet.</div>
+  {% endif %}
+</div>
+
+{% if can_manage %}
+<div class="card">
+  <h3 class="mt-0">Add a rate</h3>
+  <form method="post" action="{{ url_for('tax.add_penalty_interest_rate') }}" class="form-row" style="flex-wrap:wrap;">
+    <div>
+      <label for="tax_head">Tax head *</label>
+      <select id="tax_head" name="tax_head" required>
+        {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="rate_type">Type</label>
+      <select id="rate_type" name="rate_type">
+        {% for t in rate_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label for="rate_percent">Rate (%) *</label><input type="number" step="0.01" id="rate_percent" name="rate_percent" required></div>
+    <div><label for="effective_from">Effective from *</label><input type="date" id="effective_from" name="effective_from" required></div>
+    <div><label for="effective_to">Effective to (blank = still current)</label><input type="date" id="effective_to" name="effective_to"></div>
+    <div style="flex:2;"><label for="notes">Notes / source</label><input type="text" id="notes" name="notes"></div>
+    <div><button type="submit" class="btn gold">Add rate</button></div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

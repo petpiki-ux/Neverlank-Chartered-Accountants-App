@@ -102,6 +102,9 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}" class="{% if tab=='income_tax' %}active{% endif %}">Income Tax Computation</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}" class="{% if tab=='deferred_tax' %}active{% endif %}">Deferred Tax Computation</a>
+  {% if engagement.has_tax_module %}
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax') }}" class="{% if tab=='tax' %}active{% endif %}">Tax</a>
+  {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}" class="{% if tab=='finalisation' %}active{% endif %}">Finalisation</a>
 </div>
 
@@ -2248,6 +2251,628 @@
     {% endif %}
   </div>
   {% endif %}
+{% endif %}
+
+{% elif tab == 'tax' %}
+{% if not engagement.has_tax_module %}
+  <div class="card"><div class="empty-state">No Tax service is turned on for this engagement - turn one on from <a href="{{ url_for('engagements.edit_engagement', engagement_id=engagement.id) }}">Edit Engagement</a> first.</div></div>
+{% else %}
+
+  <div class="card">
+    <h3 class="mt-0">Tax Advisory &amp; Tax Compliance</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Services on this engagement:
+      {% for key, label in tax_services %}{% if key in engagement.tax_service_list %}<span class="badge status-Completed" style="margin-right:4px;">{{ label }}</span>{% endif %}{% endfor %}
+      {% if not engagement.tax_service_list %}<span class="muted">none explicitly ticked - shown because this is a dedicated {{ engagement.type }} engagement.</span>{% endif %}
+    </p>
+    <p class="muted" style="font-size:11.5px;">
+      The Tax Risk Register below reuses the same likelihood x impact register as everywhere else in this app; the Execution Plan (one section per tax head) lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas; CIT/Deferred Tax computations are their own tabs (<a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a>); and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Documents</a> tab, tagged with a Filing Index reference like any other working paper.
+    </p>
+  </div>
+
+  <!-- ---------- Tax Entity Profile ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Tax Entity Profile &amp; Regulatory Matrix</h3>
+    <form method="post" action="{{ url_for('tax.save_entity_profile', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        <div>
+          <label for="tax_classification">Tax classification</label>
+          <select id="tax_classification" name="tax_classification">
+            <option value="">Select...</option>
+            {% for c in tax_entity_classifications %}<option value="{{ c }}" {% if tax_entity_profile and tax_entity_profile.tax_classification==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><label for="tax_year_end">Tax year end</label><input type="date" id="tax_year_end" name="tax_year_end" value="{{ tax_entity_profile.tax_year_end.isoformat() if tax_entity_profile and tax_entity_profile.tax_year_end else '' }}"></div>
+      </div>
+      <label for="regulatory_matrix_notes">Which regulators/obligations apply (regulatory matrix)</label>
+      <textarea id="regulatory_matrix_notes" name="regulatory_matrix_notes" rows="3">{{ tax_entity_profile.regulatory_matrix_notes if tax_entity_profile else '' }}</textarea>
+      <label for="profile_notes">Notes</label>
+      <textarea id="profile_notes" name="notes" rows="2">{{ tax_entity_profile.notes if tax_entity_profile else '' }}</textarea>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+    {% if tax_entity_profile and tax_entity_profile.id %}
+    <p class="muted" style="font-size:12.5px;margin-top:10px;">
+      Prepared by {{ tax_entity_profile.completed_by.name if tax_entity_profile.completed_by else '—' }} on {{ tax_entity_profile.completed_at.strftime('%d %b %Y') if tax_entity_profile.completed_at else '—' }}.
+      {% if tax_entity_profile.is_reviewed %}Reviewed by {{ tax_entity_profile.reviewed_by.name }} on {{ tax_entity_profile.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+      {% if tax_entity_profile.is_partner_signed %}Partner sign-off by {{ tax_entity_profile.partner_signed_by.name }} on {{ tax_entity_profile.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if tax_entity_profile.is_reviewed %}
+      <form method="post" action="{{ url_for('tax.review_entity_profile', profile_id=tax_entity_profile.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif tax_entity_profile.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('tax.review_entity_profile', profile_id=tax_entity_profile.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if tax_entity_profile.is_partner_signed %}
+      <form method="post" action="{{ url_for('tax.partner_sign_entity_profile', profile_id=tax_entity_profile.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif tax_entity_profile.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('tax.partner_sign_entity_profile', profile_id=tax_entity_profile.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% endif %}
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <!-- ---------- Registrations / Clearances / Portal Access ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Registrations, Tax Clearance &amp; Portal Access</h3>
+    <p class="flash warning" style="font-size:12px;">Security: record only a portal username/reference here if needed - <strong>never a password or other secret</strong>. Tax authority portal passwords are not stored in this app.</p>
+    {% if tax_registrations %}
+    <table>
+      <thead><tr><th>Type</th><th>Tax head</th><th>Identifier</th><th>Status</th><th>Issue date</th><th>Expiry</th><th>Portal username</th><th></th></tr></thead>
+      <tbody>
+        {% for r in tax_registrations %}
+        <tr>
+          <td>{{ dict(tax_registration_record_types).get(r.record_type, r.record_type) }}</td>
+          <td>{{ r.tax_head or '—' }}</td>
+          <td>{{ r.identifier or '—' }}</td>
+          <td>{{ r.status or '—' }}{% if r.is_expired %} <span class="badge overdue">Expired</span>{% endif %}</td>
+          <td>{{ r.issue_date.strftime('%d %b %Y') if r.issue_date else '—' }}</td>
+          <td>{{ r.expiry_date.strftime('%d %b %Y') if r.expiry_date else '—' }}</td>
+          <td>{{ r.portal_username or '—' }}</td>
+          <td><form method="post" action="{{ url_for('tax.delete_registration', record_id=r.id) }}" class="inline" onsubmit="return confirm('Delete this record?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">Nothing recorded yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.add_registration', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div>
+        <label for="record_type">Type</label>
+        <select id="record_type" name="record_type">
+          {% for key, label in tax_registration_record_types %}<option value="{{ key }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="reg_tax_head">Tax head</label>
+        <select id="reg_tax_head" name="tax_head">
+          <option value="">General / whole entity</option>
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="identifier">Identifier / reference</label><input type="text" id="identifier" name="identifier"></div>
+      <div><label for="reg_status">Status</label><input type="text" id="reg_status" name="status" placeholder="e.g. Registered, Valid, Active"></div>
+      <div><label for="issue_date">Issue date</label><input type="date" id="issue_date" name="issue_date"></div>
+      <div><label for="expiry_date">Expiry date</label><input type="date" id="expiry_date" name="expiry_date"></div>
+      <div><label for="portal_username">Portal username (never a password)</label><input type="text" id="portal_username" name="portal_username"></div>
+      <div style="flex:2;"><label for="reg_notes">Notes</label><input type="text" id="reg_notes" name="notes"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Statutory Tax Calendar ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Statutory Tax Calendar</h3>
+    {% if tax_deadlines %}
+    <table>
+      <thead><tr><th>Tax head</th><th>Description</th><th>Due date</th><th>Reminder</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for d in tax_deadlines %}
+        <tr>
+          <td>{{ d.tax_head or '—' }}</td>
+          <td>{{ d.description }}</td>
+          <td>{{ d.due_date.strftime('%d %b %Y') }}</td>
+          <td>{% if d.reminder_level == 'Overdue' %}<span class="badge overdue">Overdue</span>{% elif d.reminder_level %}<span class="badge">{{ d.reminder_level }} reminder</span>{% else %}—{% endif %}</td>
+          <td>
+            <form method="post" action="{{ url_for('tax.update_deadline', deadline_id=d.id) }}" class="inline">
+              <select name="status" onchange="this.form.submit()">
+                <option value="Upcoming" {% if d.status=='Upcoming' %}selected{% endif %}>Upcoming</option>
+                <option value="Filed" {% if d.status=='Filed' %}selected{% endif %}>Filed</option>
+                <option value="Not Applicable" {% if d.status=='Not Applicable' %}selected{% endif %}>Not Applicable</option>
+              </select>
+            </form>
+          </td>
+          <td><form method="post" action="{{ url_for('tax.delete_deadline', deadline_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this deadline?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No deadlines added yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.add_deadline', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div>
+        <label for="deadline_tax_head">Tax head</label>
+        <select id="deadline_tax_head" name="tax_head">
+          <option value="">General</option>
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="deadline_description">Description *</label><input type="text" id="deadline_description" name="description" required></div>
+      <div><label for="deadline_due_date">Due date *</label><input type="date" id="deadline_due_date" name="due_date" required></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Tax Analytical Review ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Tax Analytical Review &amp; Historical Exposure</h3>
+    <form method="post" action="{{ url_for('tax.save_analytical_review', engagement_id=engagement.id) }}">
+      <label><input type="checkbox" name="is_necessary" style="width:auto;" {% if not tax_analytical_review or tax_analytical_review.is_necessary %}checked{% endif %}> A tax analytical review is necessary for this engagement</label>
+      <label for="not_necessary_reason">If not necessary, why</label>
+      <input type="text" id="not_necessary_reason" name="not_necessary_reason" value="{{ tax_analytical_review.not_necessary_reason if tax_analytical_review else '' }}">
+      <div class="form-row">
+        <div><label for="effective_tax_rate_percent">Effective tax rate (%)</label><input type="number" step="0.01" id="effective_tax_rate_percent" name="effective_tax_rate_percent" value="{{ tax_analytical_review.effective_tax_rate_percent if tax_analytical_review and tax_analytical_review.effective_tax_rate_percent is not none else '' }}"></div>
+        <div><label for="expected_tax_rate_percent">Expected/statutory tax rate (%)</label><input type="number" step="0.01" id="expected_tax_rate_percent" name="expected_tax_rate_percent" value="{{ tax_analytical_review.expected_tax_rate_percent if tax_analytical_review and tax_analytical_review.expected_tax_rate_percent is not none else '' }}"></div>
+        {% if tax_analytical_review and tax_analytical_review.etr_variance is not none %}
+        <div><label>Variance</label><div style="padding-top:8px;">{{ '%.2f'|format(tax_analytical_review.etr_variance) }}%</div></div>
+        {% endif %}
+      </div>
+      <label for="etr_variance_notes">ETR variance notes</label>
+      <textarea id="etr_variance_notes" name="etr_variance_notes" rows="2">{{ tax_analytical_review.etr_variance_notes if tax_analytical_review else '' }}</textarea>
+      <label for="multi_year_trend_notes">Multi-year trend</label>
+      <textarea id="multi_year_trend_notes" name="multi_year_trend_notes" rows="2">{{ tax_analytical_review.multi_year_trend_notes if tax_analytical_review else '' }}</textarea>
+      <label for="vat_analytics_notes">VAT analytics (input/output ratios etc.)</label>
+      <textarea id="vat_analytics_notes" name="vat_analytics_notes" rows="2">{{ tax_analytical_review.vat_analytics_notes if tax_analytical_review else '' }}</textarea>
+      <label for="paye_reconciliation_notes">PAYE reconciliation</label>
+      <textarea id="paye_reconciliation_notes" name="paye_reconciliation_notes" rows="2">{{ tax_analytical_review.paye_reconciliation_notes if tax_analytical_review else '' }}</textarea>
+      <label for="red_flags_notes">Red flags (review flags for further investigation - not conclusions)</label>
+      <textarea id="red_flags_notes" name="red_flags_notes" rows="2">{{ tax_analytical_review.red_flags_notes if tax_analytical_review else '' }}</textarea>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+    {% if tax_analytical_review and tax_analytical_review.id %}
+    <p class="muted" style="font-size:12.5px;margin-top:10px;">
+      Prepared by {{ tax_analytical_review.completed_by.name if tax_analytical_review.completed_by else '—' }} on {{ tax_analytical_review.completed_at.strftime('%d %b %Y') if tax_analytical_review.completed_at else '—' }}.
+      {% if tax_analytical_review.is_reviewed %}Reviewed by {{ tax_analytical_review.reviewed_by.name }} on {{ tax_analytical_review.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
+      {% if tax_analytical_review.is_partner_signed %}Partner sign-off by {{ tax_analytical_review.partner_signed_by.name }} on {{ tax_analytical_review.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if tax_analytical_review.is_reviewed %}
+      <form method="post" action="{{ url_for('tax.review_analytical_review', review_id=tax_analytical_review.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif tax_analytical_review.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('tax.review_analytical_review', review_id=tax_analytical_review.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if tax_analytical_review.is_partner_signed %}
+      <form method="post" action="{{ url_for('tax.partner_sign_analytical_review', review_id=tax_analytical_review.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif tax_analytical_review.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('tax.partner_sign_analytical_review', review_id=tax_analytical_review.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% endif %}
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <!-- ---------- Tax Risk Register ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Tax Risk Register</h3>
+    {% if tax_risk_items %}
+    <table>
+      <thead><tr><th>Category</th><th>Risk</th><th>Likelihood</th><th>Impact</th><th>Rating</th><th>Owner</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for r in tax_risk_items %}
+        <tr>
+          <td>{{ r.category or '—' }}</td>
+          <td>{{ r.risk_description }}{% if r.mitigation %}<div class="muted" style="font-size:11px;">Mitigation: {{ r.mitigation }}</div>{% endif %}</td>
+          <td>{{ r.likelihood }}</td>
+          <td>{{ r.impact }}</td>
+          <td><span class="badge risk-{{ r.rating }}">{{ r.rating }} ({{ r.score }})</span></td>
+          <td>{{ r.owner.name if r.owner else '—' }}</td>
+          <td>{{ r.status }}</td>
+          <td><form method="post" action="{{ url_for('tax.delete_tax_risk', risk_id=r.id) }}" class="inline" onsubmit="return confirm('Delete this risk?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No tax risks logged yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.add_tax_risk', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div><label for="risk_category">Category</label><input type="text" id="risk_category" name="category" placeholder="e.g. VAT, Compliance history"></div>
+      <div style="flex:2;"><label for="risk_description">Risk *</label><input type="text" id="risk_description" name="risk_description" required></div>
+      <div><label for="risk_likelihood">Likelihood (1-5)</label><input type="number" min="1" max="5" id="risk_likelihood" name="likelihood" value="3"></div>
+      <div><label for="risk_impact">Impact (1-5)</label><input type="number" min="1" max="5" id="risk_impact" name="impact" value="3"></div>
+      <div>
+        <label for="risk_owner">Owner</label>
+        <select id="risk_owner" name="owner_id">
+          <option value="">—</option>
+          {% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="risk_mitigation">Mitigation</label><input type="text" id="risk_mitigation" name="mitigation"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Tax Position Register ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Tax Position Register</h3>
+    {% if tax_positions %}
+    <table>
+      <thead><tr><th>Tax head</th><th>Position</th><th>Classification</th><th>Est. exposure</th><th>Approval</th><th></th></tr></thead>
+      <tbody>
+        {% for p in tax_positions %}
+        <tr>
+          <td>{{ p.tax_head or '—' }}</td>
+          <td>{{ p.position_description }}{% if p.notes %}<div class="muted" style="font-size:11px;">{{ p.notes }}</div>{% endif %}</td>
+          <td>{{ p.classification }}</td>
+          <td>{{ '%.2f'|format(p.estimated_exposure) if p.estimated_exposure is not none else '—' }}</td>
+          <td>
+            {{ p.approval_status }}
+            {% if p.approved_by %}<div class="muted" style="font-size:11px;">by {{ p.approved_by.name }}</div>{% endif %}
+            {% if current_user.role in ('partner', 'admin') and p.approval_status != 'Approved' %}
+            <form method="post" action="{{ url_for('tax.approve_tax_position', position_id=p.id) }}" class="inline"><input type="hidden" name="action" value="Approved"><button type="submit" class="btn small gold">Approve</button></form>
+            {% endif %}
+          </td>
+          <td><form method="post" action="{{ url_for('tax.delete_tax_position', position_id=p.id) }}" class="inline" onsubmit="return confirm('Delete this position?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No tax positions logged yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.add_tax_position', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div>
+        <label for="position_tax_head">Tax head</label>
+        <select id="position_tax_head" name="tax_head">
+          <option value="">—</option>
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="position_description">Position *</label><input type="text" id="position_description" name="position_description" required></div>
+      <div>
+        <label for="position_classification">Classification</label>
+        <select id="position_classification" name="classification">
+          {% for c in tax_position_classifications %}<option value="{{ c }}" {% if c=='Possible' %}selected{% endif %}>{{ c }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="position_exposure">Est. exposure</label><input type="number" step="0.01" id="position_exposure" name="estimated_exposure"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Penalty & Interest Engine ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Penalty &amp; Interest Engine</h3>
+    <p class="muted" style="font-size:11.5px;">Nothing here is a fabricated/hardcoded rate - every calculation uses a rate you (or a colleague) entered on the <a href="{{ url_for('tax.list_penalty_interest_rates') }}">firm-wide Penalty &amp; Interest Rates</a> page, or one typed in directly below.</p>
+    {% if tax_penalty_calculations %}
+    <table>
+      <thead><tr><th>Tax head</th><th>Principal</th><th>Days late</th><th>Rate used</th><th>Computed</th><th>By</th><th></th></tr></thead>
+      <tbody>
+        {% for c in tax_penalty_calculations %}
+        <tr>
+          <td>{{ c.tax_head or '—' }}</td>
+          <td>{{ '%.2f'|format(c.principal_amount) }}</td>
+          <td>{{ c.days_late }}</td>
+          <td>{{ '%.2f'|format(c.rate_percent_used) + '%' if c.rate_percent_used is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(c.computed_amount) if c.computed_amount is not none else '—' }}</td>
+          <td>{{ c.calculated_by.name if c.calculated_by else '—' }}</td>
+          <td><form method="post" action="{{ url_for('tax.delete_penalty_interest_calculation', calc_id=c.id) }}" class="inline" onsubmit="return confirm('Delete this calculation?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No calculations saved yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.calculate_penalty_interest', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div>
+        <label for="calc_tax_head">Tax head</label>
+        <select id="calc_tax_head" name="tax_head">
+          <option value="">—</option>
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="principal_amount">Principal amount *</label><input type="number" step="0.01" id="principal_amount" name="principal_amount" required></div>
+      <div><label for="days_late">Days late</label><input type="number" min="0" id="days_late" name="days_late" value="0"></div>
+      <div>
+        <label for="rate_id">Rate (firm-wide table)</label>
+        <select id="rate_id" name="rate_id">
+          <option value="">— use override below instead —</option>
+          {% for r in current_penalty_interest_rates %}{% if r.is_current %}<option value="{{ r.id }}">{{ r.tax_head }} - {{ r.rate_type }} {{ r.rate_percent }}% (from {{ r.effective_from.strftime('%d %b %Y') }})</option>{% endif %}{% endfor %}
+        </select>
+      </div>
+      <div><label for="rate_percent_override">or rate % directly</label><input type="number" step="0.01" id="rate_percent_override" name="rate_percent_override"></div>
+      <div><button type="submit" class="btn small gold">Calculate &amp; save</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Dynamic Information Request List ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Information Request List</h3>
+    {% if tax_information_requests %}
+    <table>
+      <thead><tr><th>Tax head</th><th>Item</th><th>Requested from</th><th>Requested</th><th>Received</th><th>Status</th><th></th></tr></thead>
+      <tbody>
+        {% for i in tax_information_requests %}
+        <tr>
+          <td>{{ i.tax_head or '—' }}</td>
+          <td>{{ i.item_description }}{% if i.notes %}<div class="muted" style="font-size:11px;">{{ i.notes }}</div>{% endif %}</td>
+          <td>{{ i.requested_from or '—' }}</td>
+          <td>{{ i.date_requested.strftime('%d %b %Y') if i.date_requested else '—' }}</td>
+          <td>{{ i.date_received.strftime('%d %b %Y') if i.date_received else '—' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('tax.update_information_request', item_id=i.id) }}" class="inline">
+              <select name="status" onchange="this.form.submit()">
+                {% for s in tax_info_request_statuses %}<option value="{{ s }}" {% if i.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+              </select>
+            </form>
+          </td>
+          <td><form method="post" action="{{ url_for('tax.delete_information_request', item_id=i.id) }}" class="inline" onsubmit="return confirm('Delete this item?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">Nothing requested yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.add_information_request', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div>
+        <label for="ir_tax_head">Tax head</label>
+        <select id="ir_tax_head" name="tax_head">
+          <option value="">—</option>
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="item_description">Item *</label><input type="text" id="item_description" name="item_description" required></div>
+      <div><label for="requested_from">Requested from</label><input type="text" id="requested_from" name="requested_from"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Tax Return Records (Execution + e-filing/assessment recon) ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Tax Return Records &amp; Assessment Reconciliation</h3>
+    <p class="muted" style="font-size:11.5px;">Filing status by tax head/period - the tax-head-by-tax-head Execution Plan (procedures/working steps) is on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab.</p>
+    {% if tax_return_records %}
+    <table>
+      <thead><tr><th>Tax head</th><th>Period</th><th>Due</th><th>Filed</th><th>Status</th><th>Due/Paid</th><th>Assessed</th><th>Variance</th><th></th></tr></thead>
+      <tbody>
+        {% for r in tax_return_records %}
+        <tr>
+          <td>{{ r.tax_head }}</td>
+          <td>{{ r.period_label or '—' }}</td>
+          <td>{{ r.due_date.strftime('%d %b %Y') if r.due_date else '—' }}{% if r.is_overdue %} <span class="badge overdue">Overdue</span>{% endif %}</td>
+          <td>{{ r.filed_date.strftime('%d %b %Y') if r.filed_date else '—' }}</td>
+          <td>
+            <form method="post" action="{{ url_for('tax.update_return_record', record_id=r.id) }}" class="inline">
+              <select name="status" onchange="this.form.submit()">
+                {% for s in tax_return_statuses %}<option value="{{ s }}" {% if r.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+              </select>
+            </form>
+          </td>
+          <td>{{ '%.2f'|format(r.amount_due) if r.amount_due is not none else '—' }} / {{ '%.2f'|format(r.amount_paid) if r.amount_paid is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(r.assessed_amount) if r.assessed_amount is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(r.assessment_variance) if r.assessment_variance is not none else '—' }}</td>
+          <td><form method="post" action="{{ url_for('tax.delete_return_record', record_id=r.id) }}" class="inline" onsubmit="return confirm('Delete this record?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No returns tracked yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.add_return_record', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div>
+        <label for="return_tax_head">Tax head</label>
+        <select id="return_tax_head" name="tax_head">
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="period_label">Period</label><input type="text" id="period_label" name="period_label" placeholder="e.g. 2026 Q1"></div>
+      <div><label for="return_due_date">Due date</label><input type="date" id="return_due_date" name="due_date"></div>
+      <div><label for="amount_due">Amount due</label><input type="number" step="0.01" id="amount_due" name="amount_due"></div>
+      <div><label for="return_reference">Reference</label><input type="text" id="return_reference" name="reference"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  {% if engagement.has_tax_advisory %}
+  <!-- ---------- Tax Advisory Workflow (Module 7B) ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Technical Research Log</h3>
+    {% if tax_research_log %}
+    {% for e in tax_research_log %}
+    <details style="margin-bottom:6px;">
+      <summary>{{ e.topic }} - {{ e.prepared_by.name if e.prepared_by else '—' }} ({{ e.prepared_at.strftime('%d %b %Y') }})</summary>
+      <p style="font-size:12.5px;"><strong>Question:</strong> {{ e.question or '—' }}</p>
+      <p style="font-size:12.5px;"><strong>Research notes:</strong> {{ e.research_notes or '—' }}</p>
+      <p style="font-size:12.5px;"><strong>Conclusion:</strong> {{ e.conclusion or '—' }}</p>
+      <p style="font-size:12.5px;"><strong>References:</strong> {{ e.references or '—' }}</p>
+      <form method="post" action="{{ url_for('tax.delete_research_log_entry', entry_id=e.id) }}" onsubmit="return confirm('Delete this entry?')"><button type="submit" class="btn small danger">Delete</button></form>
+    </details>
+    {% endfor %}
+    {% else %}
+    <div class="empty-state">No research logged yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.add_research_log_entry', engagement_id=engagement.id) }}" style="margin-top:10px;">
+      <div class="form-row">
+        <div style="flex:2;"><label for="topic">Topic *</label><input type="text" id="topic" name="topic" required></div>
+      </div>
+      <label for="question">Question</label><textarea id="question" name="question" rows="2"></textarea>
+      <label for="research_notes">Research notes</label><textarea id="research_notes" name="research_notes" rows="2"></textarea>
+      <label for="conclusion">Conclusion</label><textarea id="conclusion" name="conclusion" rows="2"></textarea>
+      <label for="references">References (legislation/case law/rulings)</label><textarea id="references" name="references" rows="2"></textarea>
+      <button type="submit" class="btn small gold">Add entry</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Structuring Options Analysis</h3>
+    {% if tax_structuring_options %}
+    <table>
+      <thead><tr><th>Option</th><th>Est. tax impact</th><th>Risk</th><th>Recommended</th><th></th></tr></thead>
+      <tbody>
+        {% for o in tax_structuring_options %}
+        <tr>
+          <td>{{ o.option_name }}{% if o.description %}<div class="muted" style="font-size:11px;">{{ o.description }}</div>{% endif %}</td>
+          <td>{{ '%.2f'|format(o.estimated_tax_impact) if o.estimated_tax_impact is not none else '—' }}</td>
+          <td>{{ o.risk_rating or '—' }}</td>
+          <td>
+            {% if o.recommended %}<span class="badge status-Completed">Recommended</span>{% else %}
+            <form method="post" action="{{ url_for('tax.recommend_structuring_option', option_id=o.id) }}" class="inline"><button type="submit" class="btn small secondary">Mark recommended</button></form>
+            {% endif %}
+          </td>
+          <td><form method="post" action="{{ url_for('tax.delete_structuring_option', option_id=o.id) }}" class="inline" onsubmit="return confirm('Delete this option?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No options logged yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.add_structuring_option', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div><label for="option_name">Option name *</label><input type="text" id="option_name" name="option_name" required></div>
+      <div style="flex:2;"><label for="option_description">Description</label><input type="text" id="option_description" name="description"></div>
+      <div><label for="estimated_tax_impact">Est. tax impact</label><input type="number" step="0.01" id="estimated_tax_impact" name="estimated_tax_impact"></div>
+      <div>
+        <label for="risk_rating">Risk</label>
+        <select id="risk_rating" name="risk_rating"><option>Low</option><option selected>Medium</option><option>High</option></select>
+      </div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Tax Dispute Management</h3>
+    {% if tax_disputes %}
+    <table>
+      <thead><tr><th>Tax head</th><th>Issue</th><th>Stage</th><th>Amount in dispute</th><th>Next action</th><th></th></tr></thead>
+      <tbody>
+        {% for d in tax_disputes %}
+        <tr>
+          <td>{{ d.tax_head or '—' }}</td>
+          <td>{{ d.issue_description }}</td>
+          <td>
+            <form method="post" action="{{ url_for('tax.update_dispute', dispute_id=d.id) }}" class="inline">
+              <select name="stage" onchange="this.form.submit()">
+                {% for s in tax_dispute_stages %}<option value="{{ s }}" {% if d.stage==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+              </select>
+            </form>
+          </td>
+          <td>{{ '%.2f'|format(d.amount_in_dispute) if d.amount_in_dispute is not none else '—' }}</td>
+          <td>{{ d.next_action or '—' }} {% if d.next_action_date %}({{ d.next_action_date.strftime('%d %b %Y') }}){% endif %}</td>
+          <td><form method="post" action="{{ url_for('tax.delete_dispute', dispute_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this dispute?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No disputes logged yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('tax.add_dispute', engagement_id=engagement.id) }}" class="form-row" style="margin-top:10px;flex-wrap:wrap;">
+      <div>
+        <label for="dispute_tax_head">Tax head</label>
+        <select id="dispute_tax_head" name="tax_head">
+          <option value="">—</option>
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="issue_description">Issue *</label><input type="text" id="issue_description" name="issue_description" required></div>
+      <div><label for="amount_in_dispute">Amount in dispute</label><input type="number" step="0.01" id="amount_in_dispute" name="amount_in_dispute"></div>
+      <div><label for="next_action">Next action</label><input type="text" id="next_action" name="next_action"></div>
+      <div><label for="next_action_date">Next action date</label><input type="date" id="next_action_date" name="next_action_date"></div>
+      <div><button type="submit" class="btn small gold">Add</button></div>
+    </form>
+  </div>
+  {% endif %}
+
+  <!-- ---------- Tax Head Checklists / Quality Gates ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Tax Head Checklists &amp; Quality Gates</h3>
+    {% if not tax_checklist_by_head %}
+    <form method="post" action="{{ url_for('tax.seed_tax_checklist', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small gold">Add the firm's default tax checklist</button></form>
+    {% endif %}
+    {% for head, items in tax_checklist_by_head.items() %}
+    <h4 style="margin-bottom:4px;margin-top:14px;">{{ head }}</h4>
+    {% for item in items %}
+    <form method="post" action="{{ url_for('tax.update_tax_checklist_item', item_id=item.id) }}" class="checklist-row">
+      <span class="item-text">{{ item.item_text }}</span>
+      <select name="response">
+        <option value="" {% if not item.response %}selected{% endif %}>—</option>
+        <option value="Yes" {% if item.response=='Yes' %}selected{% endif %}>Yes</option>
+        <option value="No" {% if item.response=='No' %}selected{% endif %}>No</option>
+        <option value="N/A" {% if item.response=='N/A' %}selected{% endif %}>N/A</option>
+      </select>
+      <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Save</button>
+      <button type="submit" formaction="{{ url_for('tax.delete_tax_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+    </form>
+    {% endfor %}
+    {% endfor %}
+    <form method="post" action="{{ url_for('tax.add_tax_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+      <div>
+        <label for="checklist_tax_head">Tax head</label>
+        <select id="checklist_tax_head" name="tax_head">
+          <option value="">General</option>
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="checklist_item_text">Add a checklist item</label><input type="text" id="checklist_item_text" name="item_text" required></div>
+      <div><button type="submit" class="btn small secondary">Add item</button></div>
+    </form>
+  </div>
+
+  <!-- ---------- Tax Opinion & Tax Health Check Report ---------- -->
+  {% macro tax_narrative_editor(kind, index, label, narrative) %}
+    <details style="margin-bottom:6px;">
+      <summary>{{ index }}. {{ label }}{% if narrative and narrative.is_partner_signed %} &#10003;{% endif %}</summary>
+      <form method="post" action="{{ url_for('engagements.save_workpaper_narrative', engagement_id=engagement.id, kind=kind) }}">
+        <textarea name="body" rows="5">{{ narrative.body if narrative else '' }}</textarea>
+        <button type="submit" class="btn small gold">Save</button>
+      </form>
+      {% if narrative and narrative.id %}
+      <p class="muted" style="font-size:11.5px;margin-top:6px;">
+        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ narrative.completed_at.strftime('%d %b %Y') if narrative.completed_at else '—' }}.
+        {% if narrative.is_reviewed %}Reviewed by {{ narrative.reviewed_by.name }}.{% endif %}
+        {% if narrative.is_partner_signed %}Partner sign-off by {{ narrative.partner_signed_by.name }}.{% endif %}
+      </p>
+      {% if current_user.role in ('supervisor', 'partner', 'admin') and not narrative.is_reviewed and narrative.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small secondary">Mark reviewed</button></form>
+      {% endif %}
+      {% if current_user.role in ('partner', 'admin') and not narrative.is_partner_signed and narrative.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% endif %}
+      {% endif %}
+    </details>
+  {% endmacro %}
+
+  <div class="card">
+    <h3 class="mt-0">Tax Opinion (14 parts, Ref. {{ filing_reference('tax_opinion') }})</h3>
+    <form method="post" action="{{ url_for('engagements.generate_tax_opinion_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file as Word</button></form>
+    {{ filed_workpapers('tax_opinion') }}
+    <div style="margin-top:10px;">
+      {% for key, label in tax_opinion_parts %}{{ tax_narrative_editor(key, loop.index, label, tax_opinion_narratives.get(key)) }}{% endfor %}
+    </div>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Tax Health Check Report (15 parts, Ref. {{ filing_reference('tax_health_check') }})</h3>
+    <form method="post" action="{{ url_for('engagements.generate_tax_health_check_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file as Word</button></form>
+    {{ filed_workpapers('tax_health_check') }}
+    <div style="margin-top:10px;">
+      {% for key, label in tax_health_check_parts %}{{ tax_narrative_editor(key, loop.index, label, tax_health_check_narratives.get(key)) }}{% endfor %}
+    </div>
+  </div>
+
+  <!-- ---------- Review Queries on this tab ---------- -->
+  {{ qmacros.render_queries(engagement, 'tax', queries_by_section.get('tax', [])) }}
+
 {% endif %}
 
 {% elif tab == 'finalisation' %}
