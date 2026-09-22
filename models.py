@@ -6,7 +6,7 @@ from flask_login import UserMixin
 from extensions import db
 
 
-ENGAGEMENT_TYPES = ["Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement"]
+ENGAGEMENT_TYPES = ["Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement", "Business Intelligence and IT Engagements"]
 
 # The financial reporting framework the client's Financial Statements are
 # prepared under (Finalisation tab). Only "full_ifrs" and "ifrs_for_smes"
@@ -474,6 +474,94 @@ FORENSIC_RISK_IMPACT_QUESTIONS = [
     ]),
 ]
 
+# Business Intelligence and IT Engagements-specific Risk Assessment
+# questionnaire, used in place of RISK_LIKELIHOOD_QUESTIONS/
+# RISK_IMPACT_QUESTIONS above (the same way FORENSIC_RISK_*_QUESTIONS are,
+# just for the new type) - see RiskAssessment.likelihood_questions/
+# impact_questions below. A cyber/IT/AML-CFT control assurance engagement
+# asks "how likely is a control failure or breach, and how bad would it be
+# if one happened" rather than "how likely is a financial misstatement",
+# so this questionnaire is built around threat exposure, control maturity,
+# environment complexity, third-party/cloud dependency, and AML/CFT
+# customer & channel risk - deliberately general, same as every other risk
+# questionnaire in this app; apply your own methodology and professional
+# judgement on top of it.
+BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS = [
+    ("q_threat_exposure", "How exposed is the entity to external cyber threats (internet-facing systems, remote access, prior incidents, industry targeting)?", [
+        "Minimal external footprint, no history of incidents or targeting",
+        "Limited exposure, no known incidents",
+        "Moderate exposure - some internet-facing systems, industry occasionally targeted",
+        "Significant exposure - substantial internet-facing footprint or a known prior incident",
+        "Severe exposure - heavily targeted sector/entity, and/or repeated prior incidents",
+    ]),
+    ("q_control_maturity", "How mature are the entity's IT general controls (patching, access reviews, segregation of IT duties, logging/monitoring)?", [
+        "Mature, well-documented and independently tested controls",
+        "Generally sound controls with only minor gaps",
+        "Noticeable control weaknesses in some areas",
+        "Significant control weaknesses across multiple areas",
+        "Weak or largely absent IT general controls",
+    ]),
+    ("q_environment_complexity", "How much change or complexity is there in the IT environment (new systems, cloud migration, M&A/integration, outsourced IT)?", [
+        "Stable, unchanged environment",
+        "Minor changes underway",
+        "Some notable changes (a system replacement or cloud move in progress)",
+        "Significant changes (major migration, integration, or outsourcing under way)",
+        "Extensive, concurrent change across multiple systems/providers",
+    ]),
+    ("q_third_party_cloud", "How dependent is the entity on third-party service providers and cloud platforms for critical systems or data?", [
+        "Minimal reliance - systems mostly in-house",
+        "Limited reliance, well-managed vendor relationships",
+        "Moderate reliance across several providers",
+        "Significant reliance, including on providers with limited oversight",
+        "Extensive reliance, including on critical, unaudited third parties",
+    ]),
+    ("q_aml_customer_channel", "What is the entity's AML/CFT customer and channel risk profile (cash-intensive activity, cross-border transactions, high-risk customer types, correspondent relationships)?", [
+        "Low-risk customer base and channels, minimal cash/cross-border activity",
+        "Mostly low-risk, limited higher-risk activity",
+        "Some higher-risk customers, channels, or cross-border activity",
+        "Considerable higher-risk activity (cash-intensive, cross-border, or PEP exposure)",
+        "Extensive higher-risk activity across customers, channels and jurisdictions",
+    ]),
+]
+
+BUSINESS_IT_RISK_IMPACT_QUESTIONS = [
+    ("q_data_sensitivity", "How sensitive is the data at risk (personal information under the Cyber and Data Protection Act [Chapter 12:07], financial data, trade secrets)?", [
+        "No sensitive data held",
+        "Limited sensitive data, low volume",
+        "Moderate volume of sensitive/personal data",
+        "Significant volume of sensitive/personal or regulated data",
+        "Extensive, highly sensitive data (large-scale personal data, payment data, or similar)",
+    ]),
+    ("q_continuity_dependency", "How critical are the affected systems to the entity's ongoing operations (business continuity dependency)?", [
+        "Non-critical - operations continue largely unaffected",
+        "Limited dependency - brief disruption tolerable",
+        "Moderate dependency - a short outage would be disruptive",
+        "High dependency - an outage of more than a few hours would be serious",
+        "Mission-critical - even a brief outage stops operations",
+    ]),
+    ("q_regulatory_legal", "What is the potential regulatory/legal exposure (Cyber and Data Protection Act, sector regulator such as POTRAZ/RBZ, Money Laundering and Proceeds of Crime Act [Chapter 9:24], FIU guidance)?", [
+        "Minimal - no plausible regulatory exposure",
+        "Limited - unlikely to attract regulatory attention",
+        "Moderate - plausible regulatory scrutiny or a minor penalty",
+        "Significant - likely regulatory action or a material penalty",
+        "Severe - potential for major penalties, licence risk, or criminal referral",
+    ]),
+    ("q_reputational", "What would the reputational impact be if a control failure or breach became public?", [
+        "Minimal - unlikely to attract attention",
+        "Limited - some client/stakeholder concern",
+        "Moderate - noticeable reputational impact",
+        "Serious - significant client/public/media attention",
+        "Severe - potential for lasting reputational or business damage",
+    ]),
+    ("q_overall_significance", "Overall, if a control failure or breach in this area were to occur, how significant would the combined financial, operational and reputational impact be?", [
+        "Minor",
+        "Limited",
+        "Moderate",
+        "Serious",
+        "Severe",
+    ]),
+]
+
 # A starting-point suggested audit approach per overall risk rating, shown on
 # the Planning tab. Deliberately general - always apply professional
 # judgement and your firm's own methodology on top of this.
@@ -551,6 +639,40 @@ FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
     ("Risk Assessment & Safety", "Is there any physical safety risk to the investigative team (e.g. organised crime, high-level corruption, a hostile work environment)?"),
     ("Risk Assessment & Safety", "Is there a risk of collusion - could the subjects destroy evidence if they realise an investigation is underway?"),
     ("Risk Assessment & Safety", "Does the forensic team have any conflict of interest with the client, its competitors, or the suspected individuals?"),
+]
+
+# Seeded instead of the five free-text ENTITY_UNDERSTANDING_FIELDS above when
+# the engagement's type is "Business Intelligence and IT Engagements" (see
+# engagements.seed_entity_checklist) - same Yes/No/N-A + comment presentation
+# as FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS above, but scoped to
+# understanding the entity's IT environment, data holdings, prior incident
+# history and AML/CFT exposure ahead of a cyber/IT/AML-CFT control
+# assurance engagement, rather than ISA 315's entity/industry/accounting-
+# policy prompts.
+BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
+    ("IT Environment & Infrastructure Overview", "What is the overall IT environment (on-premise, cloud, or hybrid) and how is it organised (in-house IT function, outsourced/managed service provider, or a mix)?"),
+    ("IT Environment & Infrastructure Overview", "Which core business systems (ERP, banking platforms, core application systems) does the entity rely on, and who are the key vendors/service providers?"),
+    ("IT Environment & Infrastructure Overview", "Has the IT environment changed materially in the period under review (new system implementations, cloud migration, mergers/acquisitions, outsourcing changes)?"),
+    ("IT Environment & Infrastructure Overview", "Is there a documented IT governance structure (IT steering committee, CIO/IT Manager, board-level IT oversight)?"),
+    ("Data Holdings & Classification", "What categories of data does the entity hold or process (customer personal information, financial data, employee data, trade secrets/intellectual property)?"),
+    ("Data Holdings & Classification", "Is data classified by sensitivity, and is there a documented data retention and disposal policy?"),
+    ("Data Holdings & Classification", "Where is data physically/logically stored (on-premise servers, local cloud provider, offshore cloud provider), and does this raise any cross-border data transfer considerations under the Cyber and Data Protection Act [Chapter 12:07]?"),
+    ("Cyber Security Posture & Incident History", "Has the entity experienced any cyber security incidents, breaches, or significant near-misses in recent years, and how were they handled?"),
+    ("Cyber Security Posture & Incident History", "Does the entity have documented policies for threat and vulnerability management, perimeter/endpoint protection, and security monitoring and logging?"),
+    ("Cyber Security Posture & Incident History", "Is there a documented and tested incident response and recovery plan?"),
+    ("Cyber Security Posture & Incident History", "Has the entity engaged any third party (internal audit, external specialist) to perform a penetration test, vulnerability assessment, or security review in recent years?"),
+    ("Information Security & Access Management", "How are user access and privileges granted, reviewed, and revoked (including for third parties and departing staff)?"),
+    ("Information Security & Access Management", "What third-party and cloud service providers have access to the entity's systems or data, and how is that access governed (contracts, SLAs, security clauses)?"),
+    ("Information Security & Access Management", "Is there a documented information/data classification and handling policy, and how is compliance monitored?"),
+    ("ICT Governance & Operations", "Is there a documented ICT strategy aligned to the entity's business objectives, and how is it approved and monitored?"),
+    ("ICT Governance & Operations", "What change and release management process is followed for system changes, and how are new systems developed or acquired?"),
+    ("ICT Governance & Operations", "What backup and disaster recovery arrangements are in place, and have they been tested?"),
+    ("ICT Governance & Operations", "Is there a documented and tested business continuity plan covering IT-dependent operations?"),
+    ("AML/CFT Framework & Regulatory Context", "Does the entity fall within a sector subject to AML/CFT obligations under the Money Laundering and Proceeds of Crime Act [Chapter 9:24], and if so, is there a designated Money Laundering Reporting Officer?"),
+    ("AML/CFT Framework & Regulatory Context", "What customer due diligence (CDD)/know-your-customer procedures are in place, including for higher-risk customers or channels?"),
+    ("AML/CFT Framework & Regulatory Context", "What transaction monitoring and screening arrangements are in place (sanctions screening, unusual-activity monitoring)?"),
+    ("AML/CFT Framework & Regulatory Context", "Has the entity filed any suspicious transaction reports with the Financial Intelligence Unit, or received any regulatory findings/guidance relevant to AML/CFT compliance?"),
+    ("AML/CFT Framework & Regulatory Context", "What record-keeping arrangements are in place for CDD information and transaction records, and for how long are they retained?"),
 ]
 
 
@@ -854,6 +976,62 @@ FORENSIC_AREA_REFERENCES = {
     "Asset Tracing & Financial Reconstruction": "AT",
     "Document Examination & Verification": "DE",
     "Physical & Observational Procedures": "PO",
+}
+
+# Equivalent of AUDIT_AREAS/BASELINE_SUBSTANTIVE_PROCEDURES above, used for
+# the Substantive Procedures tab on a "Business Intelligence and IT
+# Engagements" engagement instead of the financial-statement-line-item
+# areas - this engagement type gives assurance over an entity's cyber
+# security, information security, IT/ICT, and AML/CFT control environment,
+# not its financial statements. Grouped into the same four assurance
+# domains the engagement type itself was scoped around. Same as the
+# forensic areas above, HIGH_RISK_EXTRA_PROCEDURES/INDUSTRY_EXTRA_
+# PROCEDURES are not applied on top of these (they're keyed to AUDIT_AREAS
+# captions), so this engagement type's suggested procedures are always just
+# this baseline list.
+BUSINESS_IT_SUBSTANTIVE_AREAS = [
+    "Cyber Security",
+    "Information Security",
+    "Information Technology (ICT)",
+    "AML/CFT Compliance",
+]
+
+BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES = {
+    "Cyber Security": [
+        "Evaluate the entity's threat and vulnerability management process, including the frequency and remediation of vulnerability scans/penetration tests over a sample period.",
+        "Test perimeter and endpoint protection controls (firewalls, intrusion detection/prevention, endpoint protection/EDR) for a sample of critical systems.",
+        "Assess security monitoring and logging arrangements - what is logged, for how long, who reviews it, and how alerts are escalated - and test operation for a sample period.",
+        "Evaluate the incident response and recovery plan for completeness and currency, and test it against a sample of actual incidents (if any) or a walkthrough of the response process.",
+        "Confirm whether an independent penetration test or vulnerability assessment has been performed in the period, and review the findings and remediation status.",
+    ],
+    "Information Security": [
+        "Test the information/data classification and handling policy against a sample of actual data holdings to assess whether classification is applied in practice.",
+        "Test user access and privilege management - new user provisioning, periodic access reviews, and timely revocation for a sample of leavers - for a sample of critical systems.",
+        "Assess data protection and privacy compliance arrangements against the requirements of the Cyber and Data Protection Act [Chapter 12:07], including any data subject/consent processes and breach notification arrangements.",
+        "Review third-party and cloud security arrangements - contracts, security clauses/SLAs, and any independent assurance reports (e.g. SOC 2) obtained over key providers - for a sample of critical third parties.",
+    ],
+    "Information Technology (ICT)": [
+        "Review the ICT governance and strategy documentation and assess whether it is approved, current, and aligned to the entity's objectives.",
+        "Test the change and release management process for a sample of system changes, including authorisation, testing, and segregation between development and production environments.",
+        "For a sample of systems developed or acquired in the period, assess whether appropriate project governance, testing, and user acceptance procedures were followed.",
+        "Test IT operations controls (job scheduling, incident/problem management, capacity management) for a sample period.",
+        "Test backup and disaster recovery arrangements, including evidence of successful backup completion and a recent restore/recovery test.",
+        "Review the business continuity plan for IT-dependent operations and assess whether it has been tested within a reasonable period.",
+    ],
+    "AML/CFT Compliance": [
+        "Evaluate the entity's AML/CFT policies and procedures against the Money Laundering and Proceeds of Crime Act [Chapter 9:24] and applicable Financial Intelligence Unit guidance.",
+        "Test customer due diligence (CDD) procedures for a sample of new customer onboardings, including identification, verification, and risk-rating.",
+        "Test transaction monitoring and sanctions screening arrangements for a sample period, including follow-up of any alerts generated.",
+        "Review suspicious transaction reporting arrangements and, for any reports filed in the period, assess timeliness and record-keeping.",
+        "Test record-keeping of CDD information and transaction records for a sample of customers/transactions against the entity's retention policy and statutory requirements.",
+    ],
+}
+
+BUSINESS_IT_AREA_REFERENCES = {
+    "Cyber Security": "CS",
+    "Information Security": "IS",
+    "Information Technology (ICT)": "IT",
+    "AML/CFT Compliance": "AC",
 }
 
 
@@ -1651,6 +1829,23 @@ class RiskAssessment(db.Model):
     q_scheme_payroll_expenses = db.Column(db.Integer)
     q_scheme_significance = db.Column(db.Integer)
 
+    # Business Intelligence and IT Engagements-specific answers (1-5 each),
+    # used instead of the ten standard fields above on that engagement type -
+    # see BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS / BUSINESS_IT_RISK_IMPACT_
+    # QUESTIONS above. Kept as separate columns, same reasoning as the
+    # forensic-specific fields above.
+    q_threat_exposure = db.Column(db.Integer)
+    q_control_maturity = db.Column(db.Integer)
+    q_environment_complexity = db.Column(db.Integer)
+    q_third_party_cloud = db.Column(db.Integer)
+    q_aml_customer_channel = db.Column(db.Integer)
+
+    q_data_sensitivity = db.Column(db.Integer)
+    q_continuity_dependency = db.Column(db.Integer)
+    q_regulatory_legal = db.Column(db.Integer)
+    q_reputational = db.Column(db.Integer)
+    q_overall_significance = db.Column(db.Integer)
+
     notes = db.Column(db.Text)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -1670,17 +1865,31 @@ class RiskAssessment(db.Model):
         return bool(self.engagement and self.engagement.type == "Investigative Engagement")
 
     @property
+    def _is_business_it(self):
+        return bool(self.engagement and self.engagement.type == "Business Intelligence and IT Engagements")
+
+    @property
     def likelihood_questions(self):
         """The question set actually in play for this record - the Fraud
-        Triangle questionnaire on an Investigative Engagement, the ordinary
-        audit questionnaire otherwise. Everything below (likelihood_answers,
-        is_complete, likelihood/impact/score/rating) is driven from this and
-        impact_questions, so the two engagement flavours never mix."""
-        return FORENSIC_RISK_LIKELIHOOD_QUESTIONS if self._is_forensic else RISK_LIKELIHOOD_QUESTIONS
+        Triangle questionnaire on an Investigative Engagement, the cyber/IT/
+        AML-CFT control questionnaire on a Business Intelligence and IT
+        Engagement, the ordinary audit questionnaire otherwise. Everything
+        below (likelihood_answers, is_complete, likelihood/impact/score/
+        rating) is driven from this and impact_questions, so the three
+        engagement flavours never mix."""
+        if self._is_forensic:
+            return FORENSIC_RISK_LIKELIHOOD_QUESTIONS
+        if self._is_business_it:
+            return BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS
+        return RISK_LIKELIHOOD_QUESTIONS
 
     @property
     def impact_questions(self):
-        return FORENSIC_RISK_IMPACT_QUESTIONS if self._is_forensic else RISK_IMPACT_QUESTIONS
+        if self._is_forensic:
+            return FORENSIC_RISK_IMPACT_QUESTIONS
+        if self._is_business_it:
+            return BUSINESS_IT_RISK_IMPACT_QUESTIONS
+        return RISK_IMPACT_QUESTIONS
 
     @property
     def likelihood_answers(self):
@@ -1845,11 +2054,12 @@ class EntityUnderstanding(db.Model):
     @property
     def is_complete(self):
         """On an Investigative Engagement (see FORENSIC_ENTITY_UNDERSTANDING_
-        CHECKLIST_ITEMS above), the five free-text fields aren't shown at all -
-        completion instead means every detailed checklist question has been
-        answered. Every other engagement type keeps the original all-fields-
-        filled-in check."""
-        if self.engagement and self.engagement.type == "Investigative Engagement":
+        CHECKLIST_ITEMS above) or a Business Intelligence and IT Engagement
+        (see BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS above), the
+        five free-text fields aren't shown at all - completion instead means
+        every detailed checklist question has been answered. Every other
+        engagement type keeps the original all-fields-filled-in check."""
+        if self.engagement and self.engagement.type in ("Investigative Engagement", "Business Intelligence and IT Engagements"):
             items = list(self.checklist_items)
             return bool(items) and all(i.response for i in items)
         return all((v or "").strip() for v in self.field_values)
@@ -3359,6 +3569,39 @@ FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS = [
     ("Competence & Scope Realism", "Will the investigation require statements or affidavits from Shona- or Ndebele-speaking witnesses, and have we budgeted for qualified translation/interpretation so the evidence stays accurate and admissible?"),
 ]
 
+# Seeded instead of DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS when the engagement's
+# type is "Business Intelligence and IT Engagements" (see
+# acceptance.seed_acceptance_checklist) - a cyber/IT/AML-CFT control
+# assurance engagement raises acceptance considerations the standard
+# financial-statement checklist doesn't cover (competence to assess
+# technical controls, logistics of accessing client systems, handling of
+# highly confidential data, and the Cyber and Data Protection Act/AML
+# regulatory backdrop). Unlike FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS, this
+# type keeps the standard six narrative sections (Background check/
+# Independence/Predecessor/Competence/Regulatory/Engagement letter) rather
+# than replacing them - only the detailed tick + comment questions under
+# each section change, so the section names below match those six exactly.
+BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS = [
+    ("Background check", "Has the entity had any publicly reported cyber security incidents, data breaches, or regulatory findings relating to IT, information security or AML/CFT compliance?"),
+    ("Background check", "Is there evidence of a mature (or, conversely, an absent/ad hoc) IT governance and control environment based on preliminary enquiry?"),
+    ("Background check", "Are there indicators of significant IT change (system migrations, outsourcing, M&A/integration) that could heighten engagement risk?"),
+    ("Independence", "Does the firm or any engagement team member have a financial interest in, or a close relationship with, the entity's IT service providers, cloud vendors, or cyber security vendors?"),
+    ("Independence", "Has the firm previously provided IT implementation, cyber security remediation, or AML/CFT advisory services to this entity that would create a self-review threat over the same subject matter now being assessed?"),
+    ("Independence", "Are the proposed engagement team members free of any relationship that could compromise objectivity when assessing the entity's own IT/security/AML controls?"),
+    ("Predecessor", "If a predecessor firm previously performed IT, cyber security or AML/CFT assurance work for this entity, has permission been obtained to make appropriate enquiries of them?"),
+    ("Predecessor", "Were there any disagreements or concerns raised by a predecessor regarding the entity's IT general controls, cyber security posture, or AML/CFT compliance?"),
+    ("Competence", "Does the engagement team include (or have access to) specialists with genuine cyber security, information security, ICT audit, and AML/CFT expertise appropriate to this entity's environment?"),
+    ("Competence", "Is the team familiar with the relevant Zimbabwean legal/regulatory framework - the Cyber and Data Protection Act [Chapter 12:07], the Money Laundering and Proceeds of Crime Act [Chapter 9:24], and applicable FIU guidance?"),
+    ("Competence", "Has the logistics of accessing the entity's systems been agreed (read-only access levels, supervised access, remote vs on-site testing, timing to avoid disrupting live operations)?"),
+    ("Competence", "Can the firm resource this engagement without overextending the specialists required, given other concurrent commitments?"),
+    ("Regulatory", "Have appropriate confidentiality and data-handling arrangements been agreed for any highly sensitive data (personal information, security configurations, vulnerability findings) that will be accessed or generated during the engagement?"),
+    ("Regulatory", "Does the scope of testing (e.g. any vulnerability scanning or penetration testing) require a formal rules-of-engagement/authorisation letter to avoid any suggestion of unauthorised system access?"),
+    ("Regulatory", "Are there sector-specific regulatory considerations (e.g. POTRAZ, RBZ) that apply to this entity's IT/cyber/AML obligations and should shape the scope?"),
+    ("Regulatory", "Will any findings need to be reported to, or may trigger obligations with, a regulator or the Financial Intelligence Unit, and has this been discussed with the client in advance?"),
+    ("Fee & quality", "The expected fee is commensurate with the specialist skill and time required, without compromising the quality of the engagement."),
+    ("Engagement letter", "The client has agreed to the scope (which domains - cyber security, information security, ICT, AML/CFT - are covered), timeline, responsibilities, access arrangements, and fee basis set out in the engagement letter."),
+]
+
 
 class ClientAcceptanceChecklistItem(db.Model):
     """A single tick + comment line within a Client Acceptance record,
@@ -3801,6 +4044,26 @@ FORENSIC_FINALISATION_CHECKLIST_ITEMS = [
     ("Evidence & Chain of Custody", "Has original evidence been secured or returned appropriately, with working copies retained per the firm's retention policy?"),
     ("File Completion", "Have interview notes/statements been finalised, signed where applicable, and filed?"),
     ("File Completion", "Is the engagement file assembled, reviewed, and ready for archiving, with confidentiality/access restrictions reconfirmed?"),
+]
+
+# Finalisation checklist for "Business Intelligence and IT Engagements" -
+# closing out a cyber/IT/AML-CFT control assurance engagement is closer in
+# shape to closing out an investigation than a financial-statement audit
+# (findings and recommendations rather than a materiality-based opinion on
+# numbers), so this replaces DEFAULT_FINALISATION_CHECKLIST_ITEMS entirely
+# for this engagement type, same pattern as FORENSIC_FINALISATION_
+# CHECKLIST_ITEMS above.
+BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS = [
+    ("Findings & Recommendations", "Have control gaps/exceptions identified across Cyber Security, Information Security, IT (ICT), and AML/CFT Compliance been evaluated for significance and consolidated?"),
+    ("Findings & Recommendations", "Have practical remediation recommendations been drafted for each significant finding, with input from the relevant specialists?"),
+    ("Findings & Recommendations", "Has management been given the opportunity to respond to the findings before the report is finalised?"),
+    ("Reporting & Communication", "Has the final report/opinion been drafted, reviewed and approved by the engagement partner?"),
+    ("Reporting & Communication", "Has communication with those charged with governance been completed, covering significant findings and control deficiencies identified?"),
+    ("Reporting & Communication", "Where a finding could give rise to a regulatory notification obligation (e.g. under the Cyber and Data Protection Act or AML/CFT legislation), has this been discussed with the client and, where appropriate, legal counsel?"),
+    ("Evidence & Documentation", "Is all evidence gathered (system configurations, logs, screenshots, test results, interview notes) indexed and retained in line with the firm's retention policy?"),
+    ("Evidence & Documentation", "Have any highly sensitive artefacts (e.g. vulnerability details, access credentials used during testing) been securely disposed of or returned once no longer required?"),
+    ("File Completion", "Have all working papers been reviewed and cleared, with every review point resolved?"),
+    ("File Completion", "Is the engagement file assembled and ready for the archiving deadline, with confidentiality/access restrictions reconfirmed?"),
 ]
 
 

@@ -979,11 +979,14 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
     area_order: the ordered list of area names for this engagement type
     area_refs: {area_name: reference code string}"""
     is_forensic = engagement.type == "Investigative Engagement"
-    doc = _new_document(
-        "Investigative Procedures Programme" if is_forensic else "Substantive Procedures Programme",
-        engagement,
-        subtitle="Ref. " + ("SP" if not is_forensic else "IP") + "-1",
-    )
+    is_business_it = engagement.type == "Business Intelligence and IT Engagements"
+    if is_forensic:
+        title, ref_prefix = "Investigative Procedures Programme", "IP"
+    elif is_business_it:
+        title, ref_prefix = "IT & Cyber Assurance Procedures Programme", "ITP"
+    else:
+        title, ref_prefix = "Substantive Procedures Programme", "SP"
+    doc = _new_document(title, engagement, subtitle=f"Ref. {ref_prefix}-1")
 
     for area_name in area_order:
         area = areas_by_name.get(area_name)
@@ -1020,10 +1023,14 @@ def build_substantive_procedures_docx(engagement, areas_by_name, area_order, are
 
 def build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, area_refs):
     is_forensic = engagement.type == "Investigative Engagement"
-    wb, ws = _new_workbook_sheet(
-        ("Investigative Procedures Programme — Ref. IP-1" if is_forensic else "Substantive Procedures Programme — Ref. SP-1"),
-        engagement, "Programme",
-    )
+    is_business_it = engagement.type == "Business Intelligence and IT Engagements"
+    if is_forensic:
+        sheet_title = "Investigative Procedures Programme — Ref. IP-1"
+    elif is_business_it:
+        sheet_title = "IT & Cyber Assurance Procedures Programme — Ref. ITP-1"
+    else:
+        sheet_title = "Substantive Procedures Programme — Ref. SP-1"
+    wb, ws = _new_workbook_sheet(sheet_title, engagement, "Programme")
 
     row = 7
     row = _header_row(ws, row, ["Ref.", "Area", "Procedure", "Source", "Status", "Notes", "Tickmark"])

@@ -99,6 +99,7 @@ a:hover { text-decoration: underline; }
 .stat-card .num { font-size: 26px; font-weight: 700; color: var(--navy); }
 .stat-card .label { color: var(--text-muted); font-size: 12px; text-transform: uppercase; letter-spacing: 0.03em; }
 .stat-card.danger { border-left-color: var(--danger); }
+.stat-card.warning { border-left-color: var(--warning); }
 
 table { width: 100%; border-collapse: collapse; }
 th, td { text-align: left; padding: 9px 10px; border-bottom: 1px solid var(--border); font-size: 13.5px; }
@@ -166,6 +167,7 @@ select[multiple] { min-height: 110px; }
 .badge.type-Consulting { background: #567; color: white; }
 .badge.type-Secretarial { background: #6b3fa0; color: white; }
 .badge.type-InvestigativeEngagement { background: #7a2e2e; color: white; }
+.badge.type-BusinessIntelligenceandITEngagements { background: #1f5f6b; color: white; }
 .badge.risk-High { background: #fdecea; color: var(--danger); }
 .badge.risk-Medium { background: #fdf1dc; color: var(--warning); }
 .badge.risk-Low { background: #e5f6ea; color: var(--success); }

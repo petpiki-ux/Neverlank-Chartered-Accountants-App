@@ -2,7 +2,7 @@ import os
 import csv
 import io
 import uuid
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from flask import Blueprint, render_template, redirect, url_for, request, flash, current_app, send_from_directory, abort
 from flask_login import login_required, current_user
@@ -12,7 +12,7 @@ import openpyxl
 from extensions import db
 from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
-    RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation,
+    RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation, TimeSheet, TimeEntry,
     RiskAssessment, MaterialityCalculation, EntityUnderstanding, AuditStrategy, AUDIT_STRATEGY_PHASE_STATUSES,
     AnalyticalReview, AnalyticalReviewLine,
     ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
@@ -25,15 +25,19 @@ from models import (
     CASH_FLOW_METHODS, CASH_FLOW_METHOD_LABELS, PIE_CRITERIA, SME_ACT_SECTORS, SME_ACT_SIZE_BANDS,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
     FinalisationChecklist, FinalisationChecklistItem, DEFAULT_FINALISATION_CHECKLIST_ITEMS, FORENSIC_FINALISATION_CHECKLIST_ITEMS,
-    AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES,
+    BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS,
+    AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES, BUSINESS_IT_AREA_REFERENCES,
     EngagementQuery, QueryReply,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS,
     FORENSIC_RISK_LIKELIHOOD_QUESTIONS, FORENSIC_RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
+    BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS, BUSINESS_IT_RISK_IMPACT_QUESTIONS,
     ENTITY_UNDERSTANDING_FIELDS, EntityUnderstandingChecklistItem, FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
+    BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS,
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
     FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES,
+    BUSINESS_IT_SUBSTANTIVE_AREAS, BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
     Tickmark, WORKPAPER_SECTIONS, workpaper_reference, filing_reference, effectively_reviewed,
@@ -297,12 +301,22 @@ def view_engagement(engagement_id):
     )
     risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
     # An Investigative Engagement gets the Fraud Triangle-based forensic
-    # questionnaire instead of the ordinary audit risk-of-material-
-    # misstatement one - see RiskAssessment.likelihood_questions/
-    # impact_questions, which the save route below mirrors.
+    # questionnaire, and a Business Intelligence and IT Engagement gets the
+    # cyber/IT/AML-CFT control questionnaire, instead of the ordinary audit
+    # risk-of-material-misstatement one - see RiskAssessment.
+    # likelihood_questions/impact_questions, which the save route below
+    # mirrors.
     is_forensic_risk = engagement.type == "Investigative Engagement"
-    likelihood_questions = FORENSIC_RISK_LIKELIHOOD_QUESTIONS if is_forensic_risk else RISK_LIKELIHOOD_QUESTIONS
-    impact_questions = FORENSIC_RISK_IMPACT_QUESTIONS if is_forensic_risk else RISK_IMPACT_QUESTIONS
+    is_business_it_risk = engagement.type == "Business Intelligence and IT Engagements"
+    if is_forensic_risk:
+        likelihood_questions = FORENSIC_RISK_LIKELIHOOD_QUESTIONS
+        impact_questions = FORENSIC_RISK_IMPACT_QUESTIONS
+    elif is_business_it_risk:
+        likelihood_questions = BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS
+        impact_questions = BUSINESS_IT_RISK_IMPACT_QUESTIONS
+    else:
+        likelihood_questions = RISK_LIKELIHOOD_QUESTIONS
+        impact_questions = RISK_IMPACT_QUESTIONS
     materiality = MaterialityCalculation.query.filter_by(engagement_id=engagement_id).first()
     audit_strategy = AuditStrategy.query.filter_by(engagement_id=engagement_id).first() if is_forensic_risk else None
     entity_understanding = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
@@ -412,16 +426,23 @@ def view_engagement(engagement_id):
     )
 
     # On an Investigative Engagement, Substantive Procedures uses the four
-    # forensic evidence-type categories instead of the financial-statement
-    # audit areas - see FORENSIC_SUBSTANTIVE_AREAS above.
-    substantive_area_names = FORENSIC_SUBSTANTIVE_AREAS if is_forensic_risk else AUDIT_AREAS
+    # forensic evidence-type categories, and on a Business Intelligence and
+    # IT Engagement the four cyber/IT/AML-CFT assurance domains, instead of
+    # the financial-statement audit areas - see FORENSIC_SUBSTANTIVE_AREAS/
+    # BUSINESS_IT_SUBSTANTIVE_AREAS above.
+    if is_forensic_risk:
+        substantive_area_names = FORENSIC_SUBSTANTIVE_AREAS
+        substantive_area_refs = FORENSIC_AREA_REFERENCES
+    elif is_business_it_risk:
+        substantive_area_names = BUSINESS_IT_SUBSTANTIVE_AREAS
+        substantive_area_refs = BUSINESS_IT_AREA_REFERENCES
+    else:
+        substantive_area_names = AUDIT_AREAS
+        substantive_area_refs = AUDIT_AREA_REFERENCES
 
     substantive_areas_by_name = {
         a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement_id).all()
     }
-    # Working-paper reference codes (see models.py) shown next to each area
-    # heading and embedded in the generated Substantive Procedures workpapers.
-    substantive_area_refs = FORENSIC_AREA_REFERENCES if is_forensic_risk else AUDIT_AREA_REFERENCES
 
     finalisation_checklist = FinalisationChecklist.query.filter_by(engagement_id=engagement_id).first()
 
@@ -798,16 +819,22 @@ def _get_or_create_entity_understanding(engagement_id):
 @login_required
 def seed_entity_checklist(engagement_id):
     """Populate the Understanding Business/Assignment checklist with the
-    firm's Forensic Audit questions (Investigative Engagements only) -
-    mirrors acceptance.seed_acceptance_checklist: only does anything the
-    first time, so it's safe to expose as a single button."""
+    firm's Forensic Audit questions (Investigative Engagements) or its
+    cyber/IT/AML-CFT entity-understanding questions (Business Intelligence
+    and IT Engagements) - mirrors acceptance.seed_acceptance_checklist: only
+    does anything the first time, so it's safe to expose as a single
+    button."""
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     record = _get_or_create_entity_understanding(engagement_id)
     if record.checklist_items:
         flash("The checklist already has items on it.", "info")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
-    for order, (section, item_text) in enumerate(FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS, start=1):
+    checklist_items = (
+        BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS if engagement.type == "Business Intelligence and IT Engagements"
+        else FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+    )
+    for order, (section, item_text) in enumerate(checklist_items, start=1):
         db.session.add(EntityUnderstandingChecklistItem(
             entity_understanding_id=record.id,
             section=section,
@@ -1155,12 +1182,17 @@ def save_risk_assessment(engagement_id):
         db.session.add(assessment)
 
     # An Investigative Engagement is answered against the Fraud Triangle
-    # questionnaire (FORENSIC_RISK_LIKELIHOOD_QUESTIONS/_IMPACT_QUESTIONS) -
-    # every other type keeps the ordinary audit questionnaire. Must match
-    # view_engagement's likelihood_questions/impact_questions above exactly,
-    # or a submitted form's fields wouldn't line up with what gets saved.
+    # questionnaire (FORENSIC_RISK_LIKELIHOOD_QUESTIONS/_IMPACT_QUESTIONS),
+    # and a Business Intelligence and IT Engagement against the cyber/IT/
+    # AML-CFT control questionnaire (BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS/
+    # _IMPACT_QUESTIONS) - every other type keeps the ordinary audit
+    # questionnaire. Must match view_engagement's likelihood_questions/
+    # impact_questions above exactly, or a submitted form's fields wouldn't
+    # line up with what gets saved.
     if engagement.type == "Investigative Engagement":
         questions = FORENSIC_RISK_LIKELIHOOD_QUESTIONS + FORENSIC_RISK_IMPACT_QUESTIONS
+    elif engagement.type == "Business Intelligence and IT Engagements":
+        questions = BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS + BUSINESS_IT_RISK_IMPACT_QUESTIONS
     else:
         questions = RISK_LIKELIHOOD_QUESTIONS + RISK_IMPACT_QUESTIONS
 
@@ -1361,7 +1393,7 @@ def upload_substantive_area_document(engagement_id, area_name):
     the general Documents list too."""
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
-    valid_areas = FORENSIC_SUBSTANTIVE_AREAS if engagement.type == "Investigative Engagement" else AUDIT_AREAS
+    valid_areas = _substantive_areas_for(engagement)
     if area_name not in valid_areas:
         abort(404)
 
@@ -2103,7 +2135,9 @@ def _get_or_create_finalisation_checklist(engagement_id):
 def seed_finalisation_checklist(engagement_id):
     """Populate the Finalisation checklist with the firm's default items -
     the forensic set (see FORENSIC_FINALISATION_CHECKLIST_ITEMS) on an
-    Investigative Engagement, the ordinary close-out set (see DEFAULT_
+    Investigative Engagement, the cyber/IT/AML-CFT set (see BUSINESS_IT_
+    FINALISATION_CHECKLIST_ITEMS) on a Business Intelligence and IT
+    Engagement, the ordinary close-out set (see DEFAULT_
     FINALISATION_CHECKLIST_ITEMS) otherwise. Mirrors seed_entity_checklist:
     only does anything the first time, so it's safe to expose as a single
     button."""
@@ -2113,10 +2147,12 @@ def seed_finalisation_checklist(engagement_id):
     if record.checklist_items:
         flash("The checklist already has items on it.", "info")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
-    source_items = (
-        FORENSIC_FINALISATION_CHECKLIST_ITEMS if engagement.type == "Investigative Engagement"
-        else DEFAULT_FINALISATION_CHECKLIST_ITEMS
-    )
+    if engagement.type == "Investigative Engagement":
+        source_items = FORENSIC_FINALISATION_CHECKLIST_ITEMS
+    elif engagement.type == "Business Intelligence and IT Engagements":
+        source_items = BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS
+    else:
+        source_items = DEFAULT_FINALISATION_CHECKLIST_ITEMS
     for order, (section, item_text) in enumerate(source_items, start=1):
         db.session.add(FinalisationChecklistItem(
             finalisation_checklist_id=record.id,
@@ -3193,31 +3229,54 @@ def partner_unsign_workpaper_narrative(narrative_id):
 
 # ---------- Substantive Procedures (system-based: by audit area, driven by risk + industry) ----------
 
+def _substantive_areas_for(engagement):
+    """The area names valid for this engagement's Substantive Procedures tab
+    - the four forensic evidence-type categories on an Investigative
+    Engagement, the four cyber/IT/AML-CFT assurance domains on a Business
+    Intelligence and IT Engagement, or the ordinary financial-statement
+    audit areas otherwise. Used wherever an area name submitted from a form
+    needs validating against whichever set is actually in play."""
+    if engagement.type == "Investigative Engagement":
+        return FORENSIC_SUBSTANTIVE_AREAS
+    if engagement.type == "Business Intelligence and IT Engagements":
+        return BUSINESS_IT_SUBSTANTIVE_AREAS
+    return AUDIT_AREAS
+
+
 def sync_substantive_procedures(engagement):
     """Additive top-up of suggested procedures across every area, driven by
     the engagement's CURRENT Risk Assessment rating and the client's
     CURRENT industry (see AUDIT_AREAS / BASELINE_SUBSTANTIVE_PROCEDURES /
     HIGH_RISK_EXTRA_PROCEDURES / INDUSTRY_EXTRA_PROCEDURES above) - or, on
-    an Investigative Engagement, the four forensic evidence-type categories
-    instead (see FORENSIC_SUBSTANTIVE_AREAS / FORENSIC_BASELINE_
-    SUBSTANTIVE_PROCEDURES above; the risk/industry extras are audit-area
-    captions and don't apply there, so a forensic engagement only ever gets
-    its baseline list). This is the shared engine behind both the manual
-    "Generate suggested procedures" button and the automatic re-sync fired
-    whenever the risk rating or the client's industry changes (see
-    sync_substantive_procedures_if_started, save_risk_assessment, and
-    clients.edit_client) - so the suggested-procedures checklist keeps
-    itself current instead of only ever reflecting whatever the risk
-    rating/industry happened to be the first time someone clicked the
-    button. Exactly like the manual button, it only ever ADDS whatever's
-    newly applicable and not already present - it never edits, reorders or
-    removes an existing item (ticked-off work, sign-offs and manually added
-    procedures are never touched), so it's safe to call as often as
-    needed. Returns how many procedures were added."""
+    an Investigative Engagement, the four forensic evidence-type categories,
+    or on a Business Intelligence and IT Engagement, the four cyber/IT/
+    AML-CFT assurance domains, instead (see FORENSIC_SUBSTANTIVE_AREAS /
+    FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES / BUSINESS_IT_SUBSTANTIVE_AREAS
+    / BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES above; the risk/industry
+    extras are audit-area captions and don't apply there, so those two
+    engagement types only ever get their baseline list). This is the shared
+    engine behind both the manual "Generate suggested procedures" button
+    and the automatic re-sync fired whenever the risk rating or the
+    client's industry changes (see sync_substantive_procedures_if_started,
+    save_risk_assessment, and clients.edit_client) - so the
+    suggested-procedures checklist keeps itself current instead of only
+    ever reflecting whatever the risk rating/industry happened to be the
+    first time someone clicked the button. Exactly like the manual button,
+    it only ever ADDS whatever's newly applicable and not already present -
+    it never edits, reorders or removes an existing item (ticked-off work,
+    sign-offs and manually added procedures are never touched), so it's
+    safe to call as often as needed. Returns how many procedures were
+    added."""
     is_forensic = engagement.type == "Investigative Engagement"
+    is_business_it = engagement.type == "Business Intelligence and IT Engagements"
     if is_forensic:
         areas = FORENSIC_SUBSTANTIVE_AREAS
         baseline = FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES
+        high_risk = False
+        industry_map = {}
+    elif is_business_it:
+        areas = BUSINESS_IT_SUBSTANTIVE_AREAS
+        baseline = BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES
         high_risk = False
         industry_map = {}
     else:
@@ -3289,6 +3348,11 @@ def generate_substantive_procedures(engagement_id):
             flash(f"Generated {added_count} suggested forensic procedure(s) across the four investigative categories.", "success")
         else:
             flash("No new suggested procedures to add - the full forensic procedure list is already there below.", "info")
+    elif engagement.type == "Business Intelligence and IT Engagements":
+        if added_count:
+            flash(f"Generated {added_count} suggested procedure(s) across the four cyber/IT/AML-CFT assurance domains.", "success")
+        else:
+            flash("No new suggested procedures to add - the full baseline procedure list is already there below.", "info")
     else:
         risk_assessment = RiskAssessment.query.filter_by(engagement_id=engagement_id).first()
         high_risk = bool(risk_assessment and risk_assessment.rating == "High")
@@ -4161,7 +4225,7 @@ def raise_query(engagement_id):
     if section != "substantive":
         area_name = None
     elif area_name:
-        valid_areas = FORENSIC_SUBSTANTIVE_AREAS if engagement.type == "Investigative Engagement" else AUDIT_AREAS
+        valid_areas = _substantive_areas_for(engagement)
         if area_name not in valid_areas:
             abort(400)
 
@@ -4239,6 +4303,171 @@ def queries_board():
         all_queries = [q for q in all_queries if user_can_access_engagement(current_user, q.engagement)]
     return render_template(
         "engagements/queries_board.html", queries=all_queries, status_filter=status_filter,
+    )
+
+
+# ---------- Practice Dashboard (firm-wide analytics, built from data already captured - no new schema) ----------
+
+def _engagement_quality_components(engagement):
+    """Every sign-off-bearing record that currently exists for this
+    engagement - whichever one-to-one workpapers have been started, plus
+    each Substantive Procedures area - used to compute a lightweight
+    Engagement Quality Index (see engagement_quality_index below). Nothing
+    here is specific to one engagement type: it just walks whatever
+    already exists, so it works unchanged for Audit, Assurance,
+    Investigative, Business Intelligence and IT, Secretarial or Consulting
+    engagements alike, and for any future engagement type added the same
+    way (a new type simply means new records showing up in this same
+    walk, not a new branch here)."""
+    single_attrs = [
+        "client_acceptance", "risk_assessment", "materiality", "entity_understanding",
+        "analytical_review", "audit_strategy", "trial_balance", "financial_statements",
+        "directors_statement", "audit_opinion", "income_tax_computation",
+        "deferred_tax_computation", "finalisation_checklist",
+    ]
+    records = [getattr(engagement, attr) for attr in single_attrs if getattr(engagement, attr, None) is not None]
+    records.extend(engagement.substantive_procedure_areas)
+    return records
+
+
+def engagement_quality_index(engagement):
+    """A percentage: of every sign-off-bearing record that currently exists
+    for this engagement, how many are at least effectively reviewed (see
+    models.effectively_reviewed - a Partner's own preparation counts as
+    reviewed), and separately how many are partner-signed. Returns None
+    until at least one such record exists, so an engagement nobody has
+    started yet shows as "not started" rather than a misleading 0%. A
+    practical, always-current progress signal only - it is not a
+    substitute for the firm's own quality-control judgement on an
+    engagement, and it deliberately does not try to weight or score
+    different sections differently (see the delivery notes for why)."""
+    records = _engagement_quality_components(engagement)
+    if not records:
+        return None
+    reviewed = sum(1 for r in records if effectively_reviewed(r))
+    partner_signed = sum(1 for r in records if getattr(r, "is_partner_signed", False))
+    return {
+        "total": len(records),
+        "reviewed": reviewed,
+        "partner_signed": partner_signed,
+        "reviewed_pct": round(100 * reviewed / len(records)),
+        "partner_signed_pct": round(100 * partner_signed / len(records)),
+    }
+
+
+@engagements_bp.route("/analytics")
+@login_required
+def practice_dashboard():
+    """Firm-wide Practice Dashboard - engagement portfolio health, review
+    query aging, staff booking for the current week, recent logged hours,
+    and an Engagement Quality Index per active engagement - built entirely
+    from data the app already captures, with no new database tables. There
+    is deliberately no $-based WIP, realization, or recovery figure here:
+    no billing rate is captured anywhere in this app (TimeEntry records
+    hours only), so a $ figure here would have to be invented rather than
+    computed - see the architecture roadmap document for what a full
+    Practice/Audit Intelligence platform with real billing data would add.
+    Every list below is filtered through the same confidentiality rule as
+    the rest of the app: a non-admin sees only what they're Partner/
+    Manager/Team on; Admin sees everything."""
+    today = date.today()
+    all_engagements = _visible_to_current_user(
+        Engagement.query.order_by(Engagement.deadline.asc().nullslast()).all()
+    )
+    active = [e for e in all_engagements if e.status != "Completed"]
+    overdue = [e for e in active if e.is_overdue]
+
+    counts_by_status = {s: 0 for s in ENGAGEMENT_STATUSES}
+    counts_by_type = {t: 0 for t in ENGAGEMENT_TYPES}
+    for e in all_engagements:
+        counts_by_status[e.status] = counts_by_status.get(e.status, 0) + 1
+        counts_by_type[e.type] = counts_by_type.get(e.type, 0) + 1
+    counts_by_type = {t: c for t, c in counts_by_type.items() if c}
+
+    # ---- Engagement Quality Index, across every active engagement visible to this user
+    eqi_rows = []
+    for e in active:
+        idx = engagement_quality_index(e)
+        if idx:
+            eqi_rows.append({"engagement": e, "index": idx})
+    eqi_rows.sort(key=lambda r: r["index"]["reviewed_pct"])
+    firm_avg_reviewed_pct = round(sum(r["index"]["reviewed_pct"] for r in eqi_rows) / len(eqi_rows)) if eqi_rows else None
+
+    # ---- Review query aging (EngagementQuery - "no new data capture needed", it's all already there)
+    open_queries = EngagementQuery.query.filter_by(status="Open").order_by(EngagementQuery.raised_at.asc()).all()
+    if current_user.role != "admin":
+        open_queries = [q for q in open_queries if user_can_access_engagement(current_user, q.engagement)]
+    age_bucket_defs = [("0-7 days", 0, 7), ("8-14 days", 8, 14), ("15-30 days", 15, 30), ("30+ days", 31, None)]
+    query_aging = []
+    for label, lo, hi in age_bucket_defs:
+        matching = [
+            q for q in open_queries
+            if lo <= (today - q.raised_at.date()).days and (hi is None or (today - q.raised_at.date()).days <= hi)
+        ]
+        query_aging.append({"label": label, "count": len(matching)})
+    oldest_queries = sorted(open_queries, key=lambda q: q.raised_at)[:10]
+
+    # ---- Staffing: this week's booked capacity per active user (StaffAllocation - already captured for the HR Planner)
+    week_start = today - timedelta(days=today.weekday())
+    week_end = week_start + timedelta(days=6)
+    people = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
+    allocations_this_week = StaffAllocation.query.filter(
+        StaffAllocation.end_date >= week_start, StaffAllocation.start_date <= week_end
+    ).all()
+    if current_user.role != "admin":
+        allocations_this_week = [a for a in allocations_this_week if user_can_access_engagement(current_user, a.engagement)]
+    staffing = []
+    for person in people:
+        total_pct = sum(
+            a.allocation_pct for a in allocations_this_week
+            if a.user_id == person.id and a.overlaps(week_start, week_end)
+        )
+        if total_pct:
+            staffing.append({"user": person, "pct": total_pct})
+    staffing.sort(key=lambda r: r["pct"], reverse=True)
+    over_booked = [r for r in staffing if r["pct"] > 100]
+    under_booked = [r for r in staffing if r["pct"] < 50]
+
+    # ---- Hours logged in the last 30 days - a workload/activity signal only, never a $ figure (no billing rate exists anywhere in this app)
+    hours_window_days = 30
+    since = today - timedelta(days=hours_window_days)
+    recent_entries = (
+        db.session.query(TimeEntry, TimeSheet)
+        .join(TimeSheet, TimeEntry.timesheet_id == TimeSheet.id)
+        .filter(TimeEntry.work_date >= since)
+        .all()
+    )
+    if current_user.role != "admin":
+        recent_entries = [
+            (te, ts) for te, ts in recent_entries
+            if te.engagement is None or user_can_access_engagement(current_user, te.engagement)
+        ]
+    hours_by_user, hours_by_type = {}, {}
+    for te, ts in recent_entries:
+        hours_by_user[ts.user_id] = hours_by_user.get(ts.user_id, 0) + (te.hours or 0)
+        type_label = te.engagement.type if te.engagement else "Non-engagement / admin"
+        hours_by_type[type_label] = hours_by_type.get(type_label, 0) + (te.hours or 0)
+    user_by_id = {p.id: p for p in people}
+    hours_leaderboard = sorted(
+        [{"user": user_by_id[uid], "hours": round(h, 1)} for uid, h in hours_by_user.items() if uid in user_by_id],
+        key=lambda r: r["hours"], reverse=True,
+    )[:10]
+    hours_by_type_rows = sorted(
+        [{"type": t, "hours": round(h, 1)} for t, h in hours_by_type.items()],
+        key=lambda r: r["hours"], reverse=True,
+    )
+
+    return render_template(
+        "engagements/analytics.html",
+        active=active, overdue=overdue, all_engagements=all_engagements,
+        counts_by_status=counts_by_status, counts_by_type=counts_by_type,
+        total_clients=Client.query.count(),
+        eqi_rows=eqi_rows, firm_avg_reviewed_pct=firm_avg_reviewed_pct,
+        query_aging=query_aging, open_query_count=len(open_queries), oldest_queries=oldest_queries,
+        staffing=staffing, over_booked=over_booked, under_booked=under_booked,
+        week_start=week_start, week_end=week_end,
+        hours_leaderboard=hours_leaderboard, hours_by_type_rows=hours_by_type_rows,
+        hours_window_days=hours_window_days,
     )
 
 
@@ -4395,12 +4624,28 @@ def _substantive_programme_context(engagement):
     below - the same area list/order/reference codes the tab itself shows
     (see view_engagement), so the generated file always matches the screen."""
     is_forensic = engagement.type == "Investigative Engagement"
-    area_order = FORENSIC_SUBSTANTIVE_AREAS if is_forensic else AUDIT_AREAS
-    area_refs = FORENSIC_AREA_REFERENCES if is_forensic else AUDIT_AREA_REFERENCES
+    is_business_it = engagement.type == "Business Intelligence and IT Engagements"
+    if is_forensic:
+        area_order, area_refs = FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_AREA_REFERENCES
+    elif is_business_it:
+        area_order, area_refs = BUSINESS_IT_SUBSTANTIVE_AREAS, BUSINESS_IT_AREA_REFERENCES
+    else:
+        area_order, area_refs = AUDIT_AREAS, AUDIT_AREA_REFERENCES
     areas_by_name = {
         a.area: a for a in SubstantiveProcedureArea.query.filter_by(engagement_id=engagement.id).all()
     }
     return areas_by_name, area_order, area_refs
+
+
+def _procedures_programme_label(engagement):
+    """The filename label for the generated procedures programme - matches
+    the document title chosen in workpapers.build_substantive_procedures_
+    docx/xlsx for each engagement type."""
+    if engagement.type == "Investigative Engagement":
+        return "Investigative_Procedures_Programme"
+    if engagement.type == "Business Intelligence and IT Engagements":
+        return "IT_Cyber_Assurance_Procedures_Programme"
+    return "Substantive_Procedures_Programme"
 
 
 @engagements_bp.route("/<int:engagement_id>/workpapers/substantive-procedures-docx/generate", methods=["POST"])
@@ -4413,7 +4658,7 @@ def generate_substantive_procedures_docx(engagement_id):
         flash("Generate suggested procedures (or add some manually) before filing this working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
     buf = wp.build_substantive_procedures_docx(engagement, areas_by_name, area_order, area_refs)
-    label = "Investigative_Procedures_Programme" if engagement.type == "Investigative Engagement" else "Substantive_Procedures_Programme"
+    label = _procedures_programme_label(engagement)
     doc = _file_generated_workpaper(engagement, "substantive_procedures_docx", "Substantive Procedures Programme", None, label, "docx", buf, reference_override=filing_reference("substantive"))
     flash(f"Procedures programme (Word) filed (v{doc.version}).", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
@@ -4429,7 +4674,7 @@ def generate_substantive_procedures_xlsx(engagement_id):
         flash("Generate suggested procedures (or add some manually) before filing this working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
     buf = wp.build_substantive_procedures_xlsx(engagement, areas_by_name, area_order, area_refs)
-    label = "Investigative_Procedures_Programme" if engagement.type == "Investigative Engagement" else "Substantive_Procedures_Programme"
+    label = _procedures_programme_label(engagement)
     doc = _file_generated_workpaper(engagement, "substantive_procedures_xlsx", "Substantive Procedures Programme", None, label, "xlsx", buf, reference_override=filing_reference("substantive"))
     flash(f"Procedures programme (Excel) filed (v{doc.version}).", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))

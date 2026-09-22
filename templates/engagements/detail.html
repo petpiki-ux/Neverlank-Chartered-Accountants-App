@@ -680,7 +680,7 @@
     </p>
   </div>
 
-  {% if engagement.type == 'Investigative Engagement' %}
+  {% if engagement.type in ('Investigative Engagement', 'Business Intelligence and IT Engagements') %}
   {% macro entity_checklist_row(item, responses) %}
     <form method="post" action="{{ url_for('engagements.update_entity_checklist_item', item_id=item.id) }}" class="checklist-row">
       <span class="item-text">{{ item.item_text }}</span>
@@ -715,9 +715,15 @@
   <div class="card">
     <h3 class="mt-0">Understanding the Business/Assignment</h3>
     <p class="muted" style="font-size:12.5px;">
+      {% if engagement.type == 'Business Intelligence and IT Engagements' %}
+      Questions covering the IT environment and infrastructure, data holdings and classification, cyber security posture
+      and incident history, information security and access management, ICT governance and operations, and the AML/CFT
+      framework and regulatory context - work through each section below before planning fieldwork.
+      {% else %}
       Forensic Audit questions covering the objectives and scope of the engagement, the legal/regulatory context,
       data and systems access, stakeholders and logistics, and risk and safety - work through each section below
       before planning fieldwork.
+      {% endif %}
     </p>
     {% if entity_understanding and entity_understanding.checklist_assessment %}
     <div class="flash {{ entity_understanding.checklist_assessment.level }}" style="margin-bottom:4px;">
@@ -732,7 +738,8 @@
   </div>
 
   {% set entity_forensic_sections = ['Objectives & Scope of the Engagement', 'Legal, Regulatory & Governance Context', 'Data, Systems & Access Checklist', 'Stakeholders, Logistics & Timeline', 'Risk Assessment & Safety'] %}
-  {% for section in entity_forensic_sections %}
+  {% set entity_business_it_sections = ['IT Environment & Infrastructure Overview', 'Data Holdings & Classification', 'Cyber Security Posture & Incident History', 'Information Security & Access Management', 'ICT Governance & Operations', 'AML/CFT Framework & Regulatory Context'] %}
+  {% for section in (entity_business_it_sections if engagement.type == 'Business Intelligence and IT Engagements' else entity_forensic_sections) %}
     {% if entity_understanding %}{{ entity_checklist_section(entity_understanding.checklist_items, section, engagement, acceptance_checklist_responses) }}{% endif %}
   {% endfor %}
   {% else %}
@@ -2045,7 +2052,7 @@
   <div class="card">
     <h3 class="mt-0">Finalisation checklist</h3>
     <p class="muted" style="font-size:12.5px;">
-      {% if engagement.type == 'Investigative Engagement' %}What's left to close out this investigation - findings and conclusions, reporting and referral decisions, evidence and chain-of-custody wrap-up, and file completion.{% else %}What's left to close this engagement - subsequent events and going concern, overall conclusions, management communication, and file completion/archiving.{% endif %}
+      {% if engagement.type == 'Investigative Engagement' %}What's left to close out this investigation - findings and conclusions, reporting and referral decisions, evidence and chain-of-custody wrap-up, and file completion.{% elif engagement.type == 'Business Intelligence and IT Engagements' %}What's left to close this engagement - consolidating findings and recommendations, reporting and communication, evidence and documentation, and file completion.{% else %}What's left to close this engagement - subsequent events and going concern, overall conclusions, management communication, and file completion/archiving.{% endif %}
     </p>
     {% if finalisation_checklist and finalisation_checklist.checklist_assessment %}
     <div class="flash {{ finalisation_checklist.checklist_assessment.level }}" style="margin-bottom:4px;">
@@ -2057,7 +2064,13 @@
     {% endif %}
   </div>
 
-  {% set finalisation_sections = ['Findings & Conclusions', 'Reporting & Referral', 'Evidence & Chain of Custody', 'File Completion'] if engagement.type == 'Investigative Engagement' else ['Subsequent Events & Going Concern', 'Overall Conclusions', 'Management Communication', 'File Completion & Archiving'] %}
+  {% if engagement.type == 'Investigative Engagement' %}
+  {% set finalisation_sections = ['Findings & Conclusions', 'Reporting & Referral', 'Evidence & Chain of Custody', 'File Completion'] %}
+  {% elif engagement.type == 'Business Intelligence and IT Engagements' %}
+  {% set finalisation_sections = ['Findings & Recommendations', 'Reporting & Communication', 'Evidence & Documentation', 'File Completion'] %}
+  {% else %}
+  {% set finalisation_sections = ['Subsequent Events & Going Concern', 'Overall Conclusions', 'Management Communication', 'File Completion & Archiving'] %}
+  {% endif %}
   {% for section in finalisation_sections %}
     {% if finalisation_checklist %}{{ finalisation_checklist_section(finalisation_checklist.checklist_items, section, engagement, finalisation_checklist_responses) }}{% endif %}
   {% endfor %}
@@ -2742,11 +2755,11 @@
     <p class="muted" style="font-size:12.5px;">
       Generate the whole programme above as a working paper, with each area's reference code carried through - it's filed under Documents (Ref. {{ filing_reference('substantive') }}) rather than downloaded immediately; download the filed copy whenever you need the file.
     </p>
-    <h4 class="mt-0" style="margin-bottom:4px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% else %}Substantive procedures programme{% endif %} (Word)</h4>
+    <h4 class="mt-0" style="margin-bottom:4px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% elif engagement.type == 'Business Intelligence and IT Engagements' %}IT &amp; cyber assurance procedures programme{% else %}Substantive procedures programme{% endif %} (Word)</h4>
     <form method="post" action="{{ url_for('engagements.generate_substantive_procedures_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
     {{ filed_workpapers('substantive_procedures_docx') }}
 
-    <h4 style="margin-bottom:4px;margin-top:16px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% else %}Substantive procedures programme{% endif %} (Excel)</h4>
+    <h4 style="margin-bottom:4px;margin-top:16px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% elif engagement.type == 'Business Intelligence and IT Engagements' %}IT &amp; cyber assurance procedures programme{% else %}Substantive procedures programme{% endif %} (Excel)</h4>
     <form method="post" action="{{ url_for('engagements.generate_substantive_procedures_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
     {{ filed_workpapers('substantive_procedures_xlsx') }}
   </div>

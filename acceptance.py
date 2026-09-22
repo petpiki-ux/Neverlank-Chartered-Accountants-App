@@ -28,6 +28,7 @@ from models import (
     Engagement, Document, ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS,
     ClientAcceptanceChecklistItem, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS,
+    BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS,
     RISK_CATEGORIES,
     SanctionsScreening, SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, RegulatoryNotice,
@@ -450,10 +451,12 @@ def seed_acceptance_checklist(engagement_id):
     if record.checklist_items:
         flash("The checklist already has items on it.", "info")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
-    default_items = (
-        FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS if engagement.type == "Investigative Engagement"
-        else DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS
-    )
+    if engagement.type == "Investigative Engagement":
+        default_items = FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS
+    elif engagement.type == "Business Intelligence and IT Engagements":
+        default_items = BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS
+    else:
+        default_items = DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS
     for order, (section, item_text) in enumerate(default_items, start=1):
         db.session.add(ClientAcceptanceChecklistItem(
             client_acceptance_id=record.id,
