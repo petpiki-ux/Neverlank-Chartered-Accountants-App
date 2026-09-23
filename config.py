@@ -65,6 +65,12 @@ COMPANY_DOCUMENTS_DATA_DIR = os.path.join(DATA_DIR, "company_documents_data")
 # COMPANY_DOCUMENTS_DATA_DIR above: starts empty, one image per client,
 # replaced (not accumulated) whenever a new logo is uploaded.
 CLIENT_LOGOS_DATA_DIR = os.path.join(DATA_DIR, "client_logos_data")
+# Writable folder for the Legislative Update Control library (filed Acts,
+# Government Notices and Statutory Instruments - see models.LegislativeUpdate
+# and legislative_updates.py) - same idea as REGULATORY_NOTICES_DATA_DIR
+# above: starts empty, any team member with the "Manage Legislative Update
+# Control" permission adds files from the app.
+LEGISLATIVE_UPDATES_DATA_DIR = os.path.join(DATA_DIR, "legislative_updates_data")
 
 
 class Config:
@@ -87,3 +93,4 @@ class Config:
     REGULATORY_NOTICES_DATA_DIR = REGULATORY_NOTICES_DATA_DIR
     COMPANY_DOCUMENTS_DATA_DIR = COMPANY_DOCUMENTS_DATA_DIR
     CLIENT_LOGOS_DATA_DIR = CLIENT_LOGOS_DATA_DIR
+    LEGISLATIVE_UPDATES_DATA_DIR = LEGISLATIVE_UPDATES_DATA_DIR

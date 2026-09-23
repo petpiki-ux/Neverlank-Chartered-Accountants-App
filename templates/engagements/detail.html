@@ -2805,6 +2805,20 @@
     {% else %}
     <div class="empty-state">No research logged yet.</div>
     {% endif %}
+    {% if legislative_updates_for_import %}
+    <form method="post" action="{{ url_for('tax.import_research_log_entry_from_legislative_update', engagement_id=engagement.id) }}" class="form-row" style="flex-wrap:wrap;align-items:flex-end;margin-top:10px;">
+      <div style="flex:2;">
+        <label for="import_update_id">Import from Legislative Updates</label>
+        <select id="import_update_id" name="update_id">
+          <option value="">Choose a legislative update...</option>
+          {% for u in legislative_updates_for_import %}
+          <option value="{{ u.id }}">{{ u.title }}{% if u.source_reference %} ({{ u.source_reference }}){% endif %}{% if engagement.client and u.id in engagement.client.legislative_update_links|map(attribute='legislative_update_id')|list %} - tagged to {{ engagement.client.name }}{% endif %}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div><button type="submit" class="btn small secondary">Import into Research Log</button></div>
+    </form>
+    {% endif %}
     <form method="post" action="{{ url_for('tax.add_research_log_entry', engagement_id=engagement.id) }}" style="margin-top:10px;">
       <div class="form-row">
         <div style="flex:2;"><label for="topic">Topic *</label><input type="text" id="topic" name="topic" required></div>

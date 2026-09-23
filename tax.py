@@ -17,14 +17,18 @@ information requests, return records, the advisory workflow (research
 log/structuring/disputes), the compliance checklist, and the firm-wide
 legislative update log and penalty/interest rate table.
 """
+import os
+import uuid
+
 from datetime import datetime, date
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
+from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_from_directory
 from flask_login import login_required, current_user
+from werkzeug.utils import secure_filename
 
 from extensions import db
 from models import (
-    Engagement, User, RiskItem,
+    Engagement, User, RiskItem, Client,
     TaxEntityProfile, TAX_ENTITY_CLASSIFICATIONS,
     TaxRegistration, TAX_REGISTRATION_RECORD_TYPES,
     TaxDeadline,
@@ -34,13 +38,46 @@ from models import (
     TaxInformationRequest, TAX_INFO_REQUEST_STATUSES,
     TaxReturnRecord, TAX_RETURN_STATUSES,
     TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
-    LegislativeUpdate, TaxChecklistItem, DEFAULT_TAX_CHECKLIST_ITEMS,
+    LegislativeUpdate, LegislativeUpdateClientLink,
+    LEGISLATIVE_UPDATE_TYPES, LEGISLATIVE_UPDATE_TYPE_LABELS, LEGISLATIVE_UPDATE_AREAS,
+    TaxChecklistItem, DEFAULT_TAX_CHECKLIST_ITEMS,
     TAX_HEADS, PARTNER_SIGNOFF_ROLES, REVIEWER_ROLES,
     user_has_permission,
 )
 from engagements import _ensure_engagement_access
+from config import Config
+import sanctions_data
+import legislation_summary
 
 tax_bp = Blueprint("tax", __name__, url_prefix="/tax")
+
+LEGISLATIVE_UPDATE_FILE_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
+LEGISLATIVE_UPDATE_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg"}
+
+
+def _legislative_updates_dir():
+    directory = Config.LEGISLATIVE_UPDATES_DATA_DIR
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def legislative_update_editor_required(f):
+    """Filing/reprocessing/deleting a Legislative Update Control entry (with
+    or without an attached instrument) is gated by the configurable "Manage
+    Legislative Update Control" permission (Team > Permissions) - defaults
+    to partner/admin only, the same governed-library treatment as
+    Regulatory Notices, since this now files actual source documents rather
+    than just a free-text log anyone could add to. Viewing, confirming
+    practice areas, tagging a client as affected, and importing into a Tax
+    Advisory Research Log stay open to anyone logged in."""
+    from functools import wraps
+
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if not user_has_permission(current_user, "manage_legislative_updates"):
+            abort(403)
+        return f(*args, **kwargs)
+    return wrapped
 
 
 def _tax_redirect(engagement_id):
@@ -838,21 +875,44 @@ def delete_tax_checklist_item(item_id):
 
 
 # ---------- Firm-wide Legislative Update Control (Module 8) ----------
+#
+# Started as a manually-typed log (title/summary/tax_head/effective_date/
+# source_reference/impact_assessment - still exactly how "Log an update
+# only" works below). add_legislative_update now also accepts an optional
+# filed instrument (an Act/Notice/SI, as a PDF or image): its text is
+# extracted the same way as a Regulatory Notice and then summarised by AI
+# (see legislation_summary.py) into ai_summary/ai_key_changes. From there, a
+# person confirms which practice areas it touches and tags the clients it
+# affects (see LegislativeUpdateClientLink) - each tagged client then shows
+# it on their own page, and a Tax Advisory engagement can pull the summary
+# straight into its Technical Research Log with one click (see
+# import_research_log_entry_from_legislative_update below).
 
 @tax_bp.route("/legislative-updates")
 @login_required
 def list_legislative_updates():
     updates = LegislativeUpdate.query.order_by(LegislativeUpdate.effective_date.desc().nullslast(), LegislativeUpdate.created_at.desc()).all()
-    return render_template("tax/legislative_updates.html", updates=updates, tax_heads=TAX_HEADS)
+    return render_template(
+        "tax/legislative_updates.html", updates=updates, tax_heads=TAX_HEADS,
+        can_edit=user_has_permission(current_user, "manage_legislative_updates"),
+        instrument_types=LEGISLATIVE_UPDATE_TYPES, type_labels=LEGISLATIVE_UPDATE_TYPE_LABELS,
+        areas=LEGISLATIVE_UPDATE_AREAS, clients=Client.query.order_by(Client.name).all(),
+    )
 
 
 @tax_bp.route("/legislative-updates/add", methods=["POST"])
 @login_required
+@legislative_update_editor_required
 def add_legislative_update(engagement_id=None):
     title = request.form.get("title", "").strip()
     if not title:
         flash("Please enter a title.", "danger")
         return redirect(url_for("tax.list_legislative_updates"))
+
+    instrument_type = request.form.get("instrument_type", "").strip() or None
+    if instrument_type and instrument_type not in LEGISLATIVE_UPDATE_TYPES:
+        instrument_type = None
+
     update = LegislativeUpdate(
         tax_head=request.form.get("tax_head", "").strip() or None,
         title=title,
@@ -860,12 +920,121 @@ def add_legislative_update(engagement_id=None):
         effective_date=_parse_date(request.form.get("effective_date")),
         source_reference=request.form.get("source_reference", "").strip(),
         impact_assessment=request.form.get("impact_assessment", "").strip(),
+        instrument_type=instrument_type,
+        gazette_date=_parse_date(request.form.get("gazette_date")),
         created_by_id=current_user.id,
     )
     db.session.add(update)
+
+    file = request.files.get("file")
+    if file and file.filename:
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+        if ext not in LEGISLATIVE_UPDATE_FILE_EXTENSIONS:
+            flash("Only PDF, JPG and PNG files are accepted for a filed instrument - the update was logged without a file.", "warning")
+        else:
+            db.session.flush()  # assign update.id without committing yet
+            original_name = secure_filename(file.filename)
+            is_image = ext in LEGISLATIVE_UPDATE_IMAGE_EXTENSIONS
+            stored_name = f"leg{update.id}_{uuid.uuid4().hex[:8]}_{original_name}"
+            filepath = os.path.join(_legislative_updates_dir(), stored_name)
+            file.save(filepath)
+            update.original_filename = original_name
+            update.stored_filename = stored_name
+
+            if is_image:
+                update.extraction_status = None  # not applicable - no PDF text layer to try
+            else:
+                text, extraction_status, page_count = sanctions_data.extract_pdf_text(filepath)
+                update.extracted_text = text
+                update.extraction_status = extraction_status
+                update.page_count = page_count
+
+            db.session.commit()  # save the upload itself before attempting the AI call, so a slow/failed AI step never loses the file
+
+            result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
+                filepath, is_image, update.extracted_text, update.extraction_status,
+            )
+            update.ai_status = ai_status
+            update.ai_error = ai_error
+            update.ai_processed_at = datetime.utcnow()
+            if ai_status == "done":
+                update.ai_summary = result["summary"]
+                update.set_ai_key_changes(result["key_changes"])
+                update.set_ai_suggested_areas(result["suggested_areas"])
+
     db.session.commit()
-    flash("Legislative update logged.", "success")
+
+    if update.ai_status == "done":
+        flash(f"'{update.title}' filed - AI summary generated below. Confirm which practice areas it touches, then tag any clients it affects.", "success")
+    elif update.ai_status == "not_configured":
+        flash(f"'{update.title}' filed, but automatic summarisation isn't set up yet ({update.ai_error}) - add a summary manually below, or reprocess once it's configured.", "warning")
+    elif update.ai_status == "error":
+        flash(f"'{update.title}' filed, but automatic summarisation failed ({update.ai_error}) - add a summary manually below, or use \"Reprocess\" to try again.", "warning")
+    else:
+        flash("Legislative update logged.", "success")
     return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/legislative-updates/<int:update_id>/reprocess", methods=["POST"])
+@login_required
+@legislative_update_editor_required
+def reprocess_legislative_update(update_id):
+    """Re-run AI summarisation against an already-filed instrument, without
+    re-uploading the file - for when the API key wasn't configured yet at
+    filing time, or the previous attempt failed transiently."""
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    if not update.has_file:
+        flash("This entry has no filed instrument to reprocess - it was only ever logged as text.", "danger")
+        return redirect(url_for("tax.list_legislative_updates"))
+    filepath = os.path.join(_legislative_updates_dir(), update.stored_filename or "")
+    if not os.path.exists(filepath):
+        flash("The original file can no longer be found on disk - re-file the instrument.", "danger")
+        return redirect(url_for("tax.list_legislative_updates"))
+
+    is_image = update.file_ext in LEGISLATIVE_UPDATE_IMAGE_EXTENSIONS
+    result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
+        filepath, is_image, update.extracted_text, update.extraction_status,
+    )
+    update.ai_status = ai_status
+    update.ai_error = ai_error
+    update.ai_processed_at = datetime.utcnow()
+    if ai_status == "done":
+        update.ai_summary = result["summary"]
+        update.set_ai_key_changes(result["key_changes"])
+        update.set_ai_suggested_areas(result["suggested_areas"])
+    db.session.commit()
+    if ai_status == "done":
+        flash("Reprocessed - the AI summary below has been refreshed.", "success")
+    else:
+        flash(f"Reprocessing failed: {ai_error}", "danger")
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/legislative-updates/<int:update_id>/areas", methods=["POST"])
+@login_required
+def save_legislative_update_areas(update_id):
+    """Confirm/edit which practice areas this update actually touches - open
+    to anyone logged in, same as tagging a client below, since this is
+    ordinary practice-relevance judgement rather than governance of the
+    library's raw content. Nothing is ever saved here except what a person
+    actually submits, even though the form starts pre-ticked from the AI's
+    suggested_areas."""
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    submitted = request.form.getlist("areas")
+    update.set_areas([a for a in submitted if a in LEGISLATIVE_UPDATE_AREAS])
+    db.session.commit()
+    flash("Practice areas updated.", "success")
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/legislative-updates/download/<int:update_id>")
+@login_required
+def download_legislative_update(update_id):
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    directory = _legislative_updates_dir()
+    if not update.stored_filename or not os.path.exists(os.path.join(directory, update.stored_filename)):
+        abort(404)
+    return send_from_directory(directory, update.stored_filename, as_attachment=True)
 
 
 @tax_bp.route("/legislative-updates/<int:update_id>/review", methods=["POST"])
@@ -884,10 +1053,100 @@ def review_legislative_update(update_id):
 
 @tax_bp.route("/legislative-updates/<int:update_id>/delete", methods=["POST"])
 @login_required
+@legislative_update_editor_required
 def delete_legislative_update(update_id):
-    if not user_has_permission(current_user, "manage_checklist_templates"):
-        abort(403)
     update = LegislativeUpdate.query.get_or_404(update_id)
+    if update.stored_filename:
+        path = os.path.join(_legislative_updates_dir(), update.stored_filename)
+        if os.path.exists(path):
+            os.remove(path)
     db.session.delete(update)
     db.session.commit()
+    flash("Legislative update deleted.", "info")
     return redirect(url_for("tax.list_legislative_updates"))
+
+
+# ---------- Legislative Update Control: taggable relevance to clients ----------
+
+@tax_bp.route("/legislative-updates/link-client", methods=["POST"])
+@login_required
+def link_client_to_update():
+    """Tag a client as affected by a logged/filed update - open to anyone
+    logged in (see legislative_update_editor_required's docstring above).
+    Both the update and the client are taken from the form so the same
+    route serves the Legislative Updates library page (choose a client per
+    update) and a client's own page (choose an update per client) - an
+    optional redirect_client_id form field sends the person back to the
+    client's page instead of the library when called from there."""
+    update_id = request.form.get("update_id", "").strip()
+    update = LegislativeUpdate.query.get(int(update_id)) if update_id.isdigit() else None
+    redirect_client_id = request.form.get("redirect_client_id", "").strip()
+    client_id = request.form.get("client_id", "").strip()
+    client = Client.query.get(int(client_id)) if client_id.isdigit() else None
+    if not update or not client:
+        flash("Choose both an update and a client to tag.", "danger")
+    else:
+        existing = LegislativeUpdateClientLink.query.filter_by(
+            legislative_update_id=update.id, client_id=client.id,
+        ).first()
+        if existing:
+            flash(f"{client.name} is already tagged against '{update.title}'.", "info")
+        else:
+            db.session.add(LegislativeUpdateClientLink(
+                legislative_update_id=update.id,
+                client_id=client.id,
+                notes=request.form.get("notes", "").strip() or None,
+                linked_by_id=current_user.id,
+            ))
+            db.session.commit()
+            flash(f"{client.name} tagged as affected by '{update.title}'.", "success")
+    if redirect_client_id.isdigit():
+        return redirect(url_for("clients.view_client", client_id=int(redirect_client_id)))
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/legislative-updates/link/<int:link_id>/delete", methods=["POST"])
+@login_required
+def unlink_client_from_update(link_id):
+    link = LegislativeUpdateClientLink.query.get_or_404(link_id)
+    redirect_client_id = request.form.get("redirect_client_id", "").strip()
+    db.session.delete(link)
+    db.session.commit()
+    if redirect_client_id.isdigit():
+        return redirect(url_for("clients.view_client", client_id=int(redirect_client_id)))
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/<int:engagement_id>/research/import-from-legislative-update", methods=["POST"])
+@login_required
+def import_research_log_entry_from_legislative_update(engagement_id):
+    """One-click pull of a filed/logged legislative update's summary into a
+    Tax Advisory engagement's Technical Research Log, instead of retyping
+    it - pre-fills a new TaxResearchLogEntry from the chosen LegislativeUpdate
+    (its AI summary/key changes when it has one, otherwise its manually-typed
+    summary), still fully editable afterwards like any other entry."""
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_advisory(engagement):
+        return _tax_redirect(engagement_id)
+    update_id = request.form.get("update_id", "").strip()
+    update = LegislativeUpdate.query.get(int(update_id)) if update_id.isdigit() else None
+    if not update:
+        flash("Choose a legislative update to import.", "danger")
+        return _tax_redirect(engagement_id)
+
+    reference_bits = [b for b in [update.type_label, update.source_reference] if b]
+    conclusion_bits = [update.ai_summary or update.summary or ""]
+    if update.ai_key_changes:
+        conclusion_bits.append("\n".join(f"- {c}" for c in update.ai_key_changes))
+    db.session.add(TaxResearchLogEntry(
+        engagement_id=engagement_id,
+        topic=update.title,
+        question=f"How does '{update.title}' affect this engagement?",
+        research_notes=update.ai_summary or update.summary or "",
+        conclusion="\n\n".join(b for b in conclusion_bits if b),
+        references=" - ".join(reference_bits) if reference_bits else update.title,
+        prepared_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash(f"'{update.title}' imported into the Technical Research Log - edit it below as needed.", "success")
+    return _tax_redirect(engagement_id)

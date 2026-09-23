@@ -348,6 +348,10 @@ PERMISSIONS = [
      "edit payslips, and change the firm's Payroll Tax Settings. Salary data is sensitive, so this defaults "
      "to Partner/Admin only.",
      ("partner", "admin")),
+    ("manage_legislative_updates", "Manage Legislative Update Control",
+     "Upload or delete Acts, Government Notices and Statutory Instruments in the Legislative Update Control "
+     "library, used to drive AI summarisation and client-relevance tagging.",
+     ("partner", "admin")),
 ]
 PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
 
@@ -4437,13 +4441,54 @@ class TaxDispute(db.Model):
         return f"<TaxDispute {self.tax_head} stage={self.stage} engagement={self.engagement_id}>"
 
 
+# The three kinds of instrument that can now be FILED (as an actual document,
+# rather than just logged as a text entry) against a LegislativeUpdate - see
+# the "filing" fields added to that model below. Existing rows logged before
+# this existed have instrument_type None, and are shown simply as "Update".
+LEGISLATIVE_UPDATE_TYPES = ["Act", "Notice", "SI"]
+LEGISLATIVE_UPDATE_TYPE_LABELS = {
+    "Act": "Act of Parliament",
+    "Notice": "Government Notice",
+    "SI": "Statutory Instrument",
+}
+
+# A fixed set of practice-area tags a logged/filed update can be marked
+# against - used both by a person tagging an update by hand and by the AI's
+# own suggested-areas guess (see legislation_summary.py). Deliberately not
+# free text, so "which of our clients might this affect" stays answerable by
+# filtering rather than by guessing at inconsistent wording.
+LEGISLATIVE_UPDATE_AREAS = [
+    "Tax", "Companies & Corporate Law", "Labour & Employment", "Banking & Finance",
+    "Insurance & Pensions", "Anti-Money Laundering", "Data Protection & Cyber Security",
+    "Customs & Excise", "Exchange Control", "Accounting & Auditing Standards",
+    "Property & Land", "Other",
+]
+
+
 class LegislativeUpdate(db.Model):
     """One entry in the firm-wide Legislative Update Control log (Module 8)
-    - a change in tax legislation/practice the firm has logged and
-    assessed the impact of. Firm-wide rather than per-engagement (a Finance
-    Act change isn't specific to one client) - see tax.py's
-    legislative_updates list page, reachable from the Tax tab of any
-    engagement with the Tax module on, and from HR & Administration."""
+    - a change in legislation/practice the firm has logged and assessed the
+    impact of. Firm-wide rather than per-engagement (a Finance Act change
+    isn't specific to one client) - see tax.py's legislative_updates list
+    page, reachable from HR & Administration, and from a top-nav link
+    alongside the other firm-wide libraries.
+
+    Originally a manually-typed log entry (title/summary/tax_head/
+    effective_date/source_reference/impact_assessment) - those fields are
+    unchanged and still work exactly as before. The fields below let an
+    entry instead FILE the actual instrument (an Act/Notice/SI, as a PDF or
+    image): text is extracted from it the same way as RegulatoryNotice/
+    CompanyDocument (see sanctions_data.extract_pdf_text), and then
+    summarised by AI (see legislation_summary.py) into ai_summary/
+    ai_key_changes - purely informational, like every other AI-assisted
+    feature in this app: it never decides anything, a person reads it and
+    judges it. "areas" is the firm's own confirmed tagging of which
+    practice areas the instrument touches (used to decide which clients it
+    might be relevant to, and shown on each tagged client's own page - see
+    LegislativeUpdateClientLink); ai_suggested_areas is only the AI's own
+    guess at the same, offered as a starting point - never applied
+    automatically. A logged entry with no file is unaffected: all of the
+    fields below are simply blank."""
     id = db.Column(db.Integer, primary_key=True)
     tax_head = db.Column(db.String(80))
     title = db.Column(db.String(200), nullable=False)
@@ -4456,12 +4501,72 @@ class LegislativeUpdate(db.Model):
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # ---- Filing an actual instrument (Act/Notice/SI) and its AI summary ----
+    instrument_type = db.Column(db.String(10))  # "Act"/"Notice"/"SI" - see LEGISLATIVE_UPDATE_TYPES; None for an old text-only log entry
+    gazette_date = db.Column(db.Date)  # distinct from effective_date - when it was gazetted vs when it takes effect
+    areas_json = db.Column(db.Text)  # JSON-encoded list, confirmed by a person - see LEGISLATIVE_UPDATE_AREAS
+
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))
+    extracted_text = db.Column(db.Text)
+    extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error"
+    page_count = db.Column(db.Integer)
+
+    ai_summary = db.Column(db.Text)
+    ai_key_changes_json = db.Column(db.Text)  # JSON-encoded list of short bullet strings
+    ai_suggested_areas_json = db.Column(db.Text)  # JSON-encoded list - a suggestion only, never auto-applied
+    ai_status = db.Column(db.String(20))  # "done", "not_configured", "error"
+    ai_error = db.Column(db.Text)
+    ai_processed_at = db.Column(db.DateTime)
+
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
     created_by = db.relationship("User", foreign_keys=[created_by_id])
 
     @property
     def is_reviewed(self):
         return self.reviewed_by_id is not None
+
+    @property
+    def type_label(self):
+        return LEGISLATIVE_UPDATE_TYPE_LABELS.get(self.instrument_type, "Update")
+
+    @property
+    def has_file(self):
+        return bool(self.stored_filename)
+
+    @property
+    def areas(self):
+        try:
+            return json.loads(self.areas_json) if self.areas_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_areas(self, value):
+        self.areas_json = json.dumps(value or [])
+
+    @property
+    def ai_key_changes(self):
+        try:
+            return json.loads(self.ai_key_changes_json) if self.ai_key_changes_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_ai_key_changes(self, value):
+        self.ai_key_changes_json = json.dumps(value or [])
+
+    @property
+    def ai_suggested_areas(self):
+        try:
+            return json.loads(self.ai_suggested_areas_json) if self.ai_suggested_areas_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_ai_suggested_areas(self, value):
+        self.ai_suggested_areas_json = json.dumps(value or [])
+
+    @property
+    def file_ext(self):
+        return self.original_filename.rsplit(".", 1)[-1].lower() if self.original_filename and "." in self.original_filename else ""
 
     def __repr__(self):
         return f"<LegislativeUpdate {self.title!r}>"
@@ -6227,6 +6332,41 @@ class RegulatoryNotice(db.Model):
 
     def __repr__(self):
         return f"<RegulatoryNotice {self.source} {self.title!r}>"
+
+
+class LegislativeUpdateClientLink(db.Model):
+    """Tags a LegislativeUpdate (see the existing LegislativeUpdate model
+    and its new filing/AI-summary fields, above in the "Firm-wide
+    Legislative Update Control (Module 8)" section) as relevant to a
+    specific Client - "taggable relevance": filing an update doesn't push
+    anything to anyone by itself, a person decides which clients it
+    actually affects (see tax.py's link_client_to_update/unlink_client
+    routes), and each tagged client then shows it on their own page (see
+    clients/detail.html's "Relevant Legislative Updates" card). From there,
+    a Tax Advisory engagement can pull the update's AI summary straight
+    into its Technical Research Log (see tax.py's
+    import_research_log_entry_from_legislative_update)."""
+    id = db.Column(db.Integer, primary_key=True)
+    legislative_update_id = db.Column(db.Integer, db.ForeignKey("legislative_update.id"), nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    notes = db.Column(db.Text)
+    linked_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    linked_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    legislative_update = db.relationship(
+        "LegislativeUpdate",
+        backref=db.backref("client_links", lazy=True, cascade="all, delete-orphan", order_by="LegislativeUpdateClientLink.linked_at.desc()"),
+    )
+    client = db.relationship(
+        "Client",
+        backref=db.backref("legislative_update_links", lazy=True, cascade="all, delete-orphan", order_by="LegislativeUpdateClientLink.linked_at.desc()"),
+    )
+    linked_by = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("legislative_update_id", "client_id", name="uq_legislative_update_client"),)
+
+    def __repr__(self):
+        return f"<LegislativeUpdateClientLink update={self.legislative_update_id} client={self.client_id}>"
 
 
 # ---------- Finalisation checklist ("what's left to close this engagement") ----------

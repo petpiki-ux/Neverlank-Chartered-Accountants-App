@@ -777,6 +777,7 @@ def view_engagement(engagement_id):
     tax_research_log = []
     tax_structuring_options = []
     tax_disputes = []
+    legislative_updates_for_import = []
     tax_checklist_items = []
     tax_checklist_by_head = {}
     tax_execution_areas_by_name = {}
@@ -793,6 +794,18 @@ def view_engagement(engagement_id):
             tax_research_log = TaxResearchLogEntry.query.filter_by(engagement_id=engagement_id).order_by(TaxResearchLogEntry.prepared_at.desc()).all()
             tax_structuring_options = TaxStructuringOption.query.filter_by(engagement_id=engagement_id).order_by(TaxStructuringOption.id).all()
             tax_disputes = TaxDispute.query.filter_by(engagement_id=engagement_id).order_by(TaxDispute.id).all()
+            # Legislative updates tagged as relevant to this engagement's own
+            # client (see LegislativeUpdateClientLink) come first, since
+            # those are the ones most likely worth pulling into this
+            # engagement's Research Log - but every filed/logged update is
+            # offered too, in case a firm-wide update matters here even
+            # though no one has tagged this particular client yet.
+            client_tagged_update_ids = {link.legislative_update_id for link in engagement.client.legislative_update_links} if engagement.client else set()
+            all_legislative_updates = LegislativeUpdate.query.order_by(LegislativeUpdate.created_at.desc()).all()
+            legislative_updates_for_import = (
+                [u for u in all_legislative_updates if u.id in client_tagged_update_ids]
+                + [u for u in all_legislative_updates if u.id not in client_tagged_update_ids]
+            )
         tax_checklist_items = TaxChecklistItem.query.filter_by(engagement_id=engagement_id).order_by(TaxChecklistItem.order, TaxChecklistItem.id).all()
         for item in tax_checklist_items:
             tax_checklist_by_head.setdefault(item.tax_head or "General", []).append(item)
@@ -976,6 +989,7 @@ def view_engagement(engagement_id):
         tax_information_requests=tax_information_requests,
         tax_info_request_statuses=TAX_INFO_REQUEST_STATUSES,
         tax_research_log=tax_research_log,
+        legislative_updates_for_import=legislative_updates_for_import,
         tax_structuring_options=tax_structuring_options,
         tax_disputes=tax_disputes,
         tax_dispute_stages=TAX_DISPUTE_STAGES,

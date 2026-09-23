@@ -174,6 +174,27 @@ def _add_missing_columns():
             ("address", "VARCHAR(300)"),
             ("needs_detail_review", "BOOLEAN DEFAULT 0"),
         ],
+        # Legislative Update Control (Module 8) could previously only log a
+        # text entry - these let it also FILE the actual instrument (an
+        # Act/Notice/SI, as a PDF or image) and get an AI summary, confirmed
+        # practice-area tags, and client-relevance tags. See models.
+        # LegislativeUpdate's docstring.
+        "legislative_update": [
+            ("instrument_type", "VARCHAR(10)"),
+            ("gazette_date", "DATE"),
+            ("areas_json", "TEXT"),
+            ("original_filename", "VARCHAR(300)"),
+            ("stored_filename", "VARCHAR(300)"),
+            ("extracted_text", "TEXT"),
+            ("extraction_status", "VARCHAR(20)"),
+            ("page_count", "INTEGER"),
+            ("ai_summary", "TEXT"),
+            ("ai_key_changes_json", "TEXT"),
+            ("ai_suggested_areas_json", "TEXT"),
+            ("ai_status", "VARCHAR(20)"),
+            ("ai_error", "TEXT"),
+            ("ai_processed_at", "DATETIME"),
+        ],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():

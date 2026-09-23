@@ -9,7 +9,7 @@ from extensions import db
 from models import (
     Client, INDUSTRY_OPTIONS, user_has_permission, user_can_access_engagement,
     COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES, FilingIndexSection,
-    TAX_HEADS, FILING_ARCHIVE_SECTIONS,
+    TAX_HEADS, FILING_ARCHIVE_SECTIONS, LegislativeUpdate,
 )
 from engagements import sync_substantive_procedures_if_started
 
@@ -138,6 +138,7 @@ def view_client(client_id):
         filing_archive_by_section=filing_archive_by_section,
         tax_heads=TAX_HEADS,
         can_delete_filing_archive=user_has_permission(current_user, "delete_documents"),
+        legislative_updates_for_tagging=LegislativeUpdate.query.order_by(LegislativeUpdate.created_at.desc()).all(),
     )
 
 

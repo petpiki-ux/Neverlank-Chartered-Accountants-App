@@ -25,6 +25,7 @@
       <a href="{{ url_for('tickmarks.list_tickmarks') }}">Tickmarks</a>
       <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>
       <a href="{{ url_for('regulatory_notices.list_notices') }}">Regulatory Notices</a>
+      <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Updates</a>
       <a href="{{ url_for('hr.project_board') }}">Tasks{% if my_open_task_count %} <span class="badge overdue">{{ my_open_task_count }}</span>{% endif %}</a>
       <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
       <a href="{{ url_for('engagements.queries_board') }}">Queries</a>

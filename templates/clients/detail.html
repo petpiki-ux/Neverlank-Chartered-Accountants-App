@@ -243,6 +243,58 @@
 {% endif %}
 
 <div class="card">
+  <h3 class="mt-0">Relevant Legislative Updates</h3>
+  <p class="muted" style="font-size:12px;">
+    Acts, Government Notices and Statutory Instruments a team member has tagged as affecting this client -
+    filed and summarised under <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Update
+    Control</a>.
+  </p>
+  {% if client.legislative_update_links %}
+  <table>
+    <thead><tr><th>Instrument</th><th>Type</th><th>Gazetted</th><th>Summary</th><th></th></tr></thead>
+    <tbody>
+      {% for link in client.legislative_update_links %}
+      {% set update = link.legislative_update %}
+      <tr>
+        <td>
+          {{ update.title }}{% if update.source_reference %} <span class="muted">({{ update.source_reference }})</span>{% endif %}
+          {% if link.notes %}<div class="muted" style="font-size:11.5px;">{{ link.notes }}</div>{% endif %}
+        </td>
+        <td class="muted">{{ update.type_label }}</td>
+        <td class="muted">{{ update.gazette_date.strftime('%d %b %Y') if update.gazette_date else '—' }}</td>
+        <td style="font-size:12px;">{{ (update.ai_summary or update.summary or '—')|truncate(140) }}</td>
+        <td class="text-right">
+          {% if update.has_file %}<a href="{{ url_for('tax.download_legislative_update', update_id=update.id) }}" class="btn small secondary">Download</a>{% endif %}
+          <form method="post" action="{{ url_for('tax.unlink_client_from_update', link_id=link.id) }}" class="inline" onsubmit="return confirm('Untag this update from this client?')">
+            <input type="hidden" name="redirect_client_id" value="{{ client.id }}">
+            <button type="submit" class="btn small danger">Untag</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No legislative updates tagged as relevant to this client yet.</div>
+  {% endif %}
+  {% if legislative_updates_for_tagging %}
+  <form method="post" action="{{ url_for('tax.link_client_to_update') }}" class="form-row" style="flex-wrap:wrap;align-items:flex-end;margin-top:6px;">
+    <input type="hidden" name="redirect_client_id" value="{{ client.id }}">
+    <input type="hidden" name="client_id" value="{{ client.id }}">
+    <div>
+      <label for="leg_update_select">Tag an update as relevant</label>
+      <select id="leg_update_select" name="update_id" required>
+        <option value="">Choose an instrument...</option>
+        {% for u in legislative_updates_for_tagging %}<option value="{{ u.id }}">{{ u.title }}{% if u.source_reference %} ({{ u.source_reference }}){% endif %}</option>{% endfor %}
+      </select>
+    </div>
+    <div><input type="text" name="notes" placeholder="Why it's relevant (optional)"></div>
+    <div><button type="submit" class="btn small gold">Tag</button></div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
   <div class="page-header" style="margin-bottom:6px;">
     <h3 class="mt-0">Directors &amp; Shareholders</h3>
     {% if can_manage_company_documents and has_legacy_details %}
