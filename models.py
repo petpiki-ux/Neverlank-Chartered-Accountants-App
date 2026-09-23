@@ -156,6 +156,18 @@ TAX_HEADS = [
     "Provisional Tax (QPDs)",
 ]
 
+# The three sections of a client's Tax & Accounting Filing Archive (see
+# TaxAccountingFilingDocument below) - kept as a plain, ordered list like
+# every other section registry in this file (TAX_SERVICES, WORKPAPER_SECTIONS,
+# etc.) rather than hardcoded into the template, so a section can be
+# relabelled here in one place.
+FILING_ARCHIVE_SECTIONS = [
+    ("tax_clearance", "Tax Clearances"),
+    ("return", "Returns"),
+    ("schedule", "Schedules"),
+]
+FILING_ARCHIVE_SECTION_LABELS = dict(FILING_ARCHIVE_SECTIONS)
+
 # The write-up/close-out work areas tracked on the Accounting module's
 # Execution Plan - reuses SubstantiveProcedureArea/Item exactly like
 # TAX_HEADS does above (one area per entry, appended onto whatever this
@@ -1549,6 +1561,19 @@ class Client(db.Model):
 
     engagements = db.relationship("Engagement", backref="client", lazy=True, cascade="all, delete-orphan")
 
+    @property
+    def has_tax_or_accounting_engagement(self):
+        """Whether this client has ever had a Tax or Accounting engagement
+        (Engagement.has_tax_module/has_accounting_module, checked across
+        every engagement rather than only open ones) - gates whether the
+        Tax & Accounting Filing Archive card (see TaxAccountingFilingDocument
+        below) is shown on this client's page at all. Checked against every
+        engagement rather than just currently-open ones because the archive
+        is meant to keep clearance certificates/returns/schedules findable
+        for a client across tax years, long after the engagement they were
+        filed under has closed."""
+        return any(e.has_tax_module or e.has_accounting_module for e in self.engagements)
+
     def __repr__(self):
         return f"<Client {self.name}>"
 
@@ -2147,6 +2172,45 @@ class PermanentFileDocument(db.Model):
 
     def __repr__(self):
         return f"<PermanentFileDocument {self.original_filename!r}>"
+
+
+class TaxAccountingFilingDocument(db.Model):
+    """One filed document in a client's Tax & Accounting Filing Archive - a
+    Tax Clearance certificate, a filed Return, or a supporting Schedule (see
+    FILING_ARCHIVE_SECTIONS above) - kept once per Client, exactly like
+    PermanentFileDocument above, rather than tied to whichever Tax
+    Compliance/Accounting & Bookkeeping engagement happened to be open when
+    it was filed: clearance certificates and filed returns need to stay
+    findable for a client across tax years and engagements, not just the one
+    they happened to be filed under (see Client.has_tax_or_accounting_
+    engagement, which gates whether this archive is even shown for a given
+    client). tax_head (one of TAX_HEADS above) is optional - a Tax Clearance
+    Certificate is usually issued covering all tax heads at once, and a
+    Schedule may be a purely accounting one with no tax head at all - but is
+    the natural way to categorise a Return, mirroring TaxReturnRecord's own
+    tax_head field."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    section = db.Column(db.String(20), nullable=False)  # a FILING_ARCHIVE_SECTIONS key
+    tax_head = db.Column(db.String(80))  # optional - one of TAX_HEADS, blank = not tax-head-specific
+    title = db.Column(db.String(200))  # free description, e.g. "Debtors Schedule" - optional
+    period_label = db.Column(db.String(80))  # e.g. "2026", "2026 Q1"
+    reference = db.Column(db.String(100))  # ZIMRA clearance/acknowledgement/certificate number
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    notes = db.Column(db.Text)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("filing_archive_documents", lazy=True, order_by="TaxAccountingFilingDocument.uploaded_at.desc()", cascade="all, delete-orphan"))
+    uploaded_by = db.relationship("User")
+
+    @property
+    def section_label(self):
+        return FILING_ARCHIVE_SECTION_LABELS.get(self.section, self.section)
+
+    def __repr__(self):
+        return f"<TaxAccountingFilingDocument {self.section} {self.original_filename!r}>"
 
 
 class DocumentTemplate(db.Model):

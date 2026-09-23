@@ -9,6 +9,7 @@ from extensions import db
 from models import (
     Client, INDUSTRY_OPTIONS, user_has_permission, user_can_access_engagement,
     COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES, FilingIndexSection,
+    TAX_HEADS, FILING_ARCHIVE_SECTIONS,
 )
 from engagements import sync_substantive_procedures_if_started
 
@@ -116,6 +117,14 @@ def view_client(client_id):
         for p in client.key_people
     )
     permanent_file_sections = FilingIndexSection.query.filter_by(is_permanent=True, is_active=True).order_by(FilingIndexSection.order, FilingIndexSection.code).all()
+    # Group this client's Tax & Accounting Filing Archive documents by
+    # section (tax_clearance/return/schedule - see models.
+    # FILING_ARCHIVE_SECTIONS) so the template can render each of the three
+    # sections as its own list without re-filtering client.
+    # filing_archive_documents three times itself.
+    filing_archive_by_section = {key: [] for key, _ in FILING_ARCHIVE_SECTIONS}
+    for doc in client.filing_archive_documents:
+        filing_archive_by_section.setdefault(doc.section, []).append(doc)
     return render_template(
         "clients/detail.html", client=client, visible_engagements=visible_engagements,
         suggested_people=suggested_people, confirmed_people=confirmed_people,
@@ -125,6 +134,10 @@ def view_client(client_id):
         public_research_runs=client.public_research_runs,
         can_manage_company_documents=user_has_permission(current_user, "manage_company_documents"),
         permanent_file_sections=permanent_file_sections,
+        filing_archive_sections=FILING_ARCHIVE_SECTIONS,
+        filing_archive_by_section=filing_archive_by_section,
+        tax_heads=TAX_HEADS,
+        can_delete_filing_archive=user_has_permission(current_user, "delete_documents"),
     )
 
 

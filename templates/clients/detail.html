@@ -184,6 +184,64 @@
   </form>
 </div>
 
+{% if client.has_tax_or_accounting_engagement %}
+<div class="card">
+  <h3 class="mt-0">Tax &amp; Accounting Filing Archive</h3>
+  <p class="muted" style="font-size:12px;">
+    Filed once per client, across tax years and engagements, rather than tied to whichever Tax Compliance or
+    Accounting &amp; Bookkeeping engagement happened to be open at the time - three sections: Tax Clearances,
+    Returns, and Schedules.
+  </p>
+
+  {% for section_key, section_label in filing_archive_sections %}
+  <h4 style="margin-bottom:4px;{% if not loop.first %}margin-top:20px;{% endif %}">{{ loop.index }}. {{ section_label }}</h4>
+  {% set docs = filing_archive_by_section.get(section_key, []) %}
+  {% if docs %}
+  <table>
+    <thead><tr><th>File</th><th>Tax head</th><th>Period</th><th>Reference</th><th>Uploaded</th><th></th></tr></thead>
+    <tbody>
+      {% for doc in docs %}
+      <tr>
+        <td>
+          {{ doc.title or doc.original_filename }}
+          {% if doc.notes %}<div class="muted" style="font-size:11.5px;">{{ doc.notes }}</div>{% endif %}
+        </td>
+        <td class="muted">{{ doc.tax_head or '—' }}</td>
+        <td class="muted">{{ doc.period_label or '—' }}</td>
+        <td class="muted">{{ doc.reference or '—' }}</td>
+        <td class="muted">{{ doc.uploaded_at.strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
+        <td class="text-right">
+          <a href="{{ url_for('filing_archive.download_filing_archive_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
+          {% if can_delete_filing_archive %}
+          <form method="post" action="{{ url_for('filing_archive.delete_filing_archive_document', doc_id=doc.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No {{ section_label|lower }} filed yet.</div>
+  {% endif %}
+  <form method="post" action="{{ url_for('filing_archive.upload_filing_archive_document', client_id=client.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;margin-top:6px;">
+    <input type="hidden" name="section" value="{{ section_key }}">
+    <div><label for="fa_file_{{ section_key }}">File *</label><input type="file" id="fa_file_{{ section_key }}" name="file" required></div>
+    <div>
+      <label for="fa_tax_head_{{ section_key }}">Tax head</label>
+      <select id="fa_tax_head_{{ section_key }}" name="tax_head">
+        <option value="">{{ "All taxes" if section_key == "tax_clearance" else "N/A" }}</option>
+        {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label for="fa_title_{{ section_key }}">Title</label><input type="text" id="fa_title_{{ section_key }}" name="title" placeholder="{{ 'e.g. Debtors Schedule' if section_key == 'schedule' else 'Optional' }}"></div>
+    <div><label for="fa_period_{{ section_key }}">Period</label><input type="text" id="fa_period_{{ section_key }}" name="period_label" placeholder="e.g. 2026 or 2026 Q1"></div>
+    <div><label for="fa_reference_{{ section_key }}">Reference</label><input type="text" id="fa_reference_{{ section_key }}" name="reference" placeholder="Certificate / ack. no."></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">File it</button></div>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+
 <div class="card">
   <div class="page-header" style="margin-bottom:6px;">
     <h3 class="mt-0">Directors &amp; Shareholders</h3>

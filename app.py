@@ -347,6 +347,7 @@ def create_app():
     from tickmarks import tickmarks_bp
     from filing_index import filing_index_bp
     from permanent_file import permanent_file_bp
+    from filing_archive import filing_archive_bp
     from tax import tax_bp
     from accounting import accounting_bp
 
@@ -366,6 +367,7 @@ def create_app():
     app.register_blueprint(tickmarks_bp)
     app.register_blueprint(filing_index_bp)
     app.register_blueprint(permanent_file_bp)
+    app.register_blueprint(filing_archive_bp)
     app.register_blueprint(tax_bp)
     app.register_blueprint(accounting_bp)
 
