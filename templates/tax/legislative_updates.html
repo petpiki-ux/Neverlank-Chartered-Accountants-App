@@ -9,9 +9,46 @@
 </div>
 
 <div class="card">
+  <h3 class="mt-0">Ask the library</h3>
+  <p class="muted" style="font-size:12px;">
+    Ask a plain-English question and get an answer drawn only from what's actually filed below, with a
+    link back to the specific update(s) it came from - e.g. "what's the current VAT threshold" or "any
+    recent notice about clearing agent registration".
+  </p>
+  <form method="post" action="{{ url_for('tax.ask_legislative_updates') }}" class="form-row">
+    <div style="flex:4;"><input type="text" name="question" placeholder="Ask a question about what's filed..." value="{{ ask_question or '' }}" required></div>
+    <div><button type="submit" class="btn gold">Ask</button></div>
+  </form>
+
+  {% if ask_status == 'no_candidates' %}
+  <p class="muted" style="font-size:12.5px;margin-top:10px;">Nothing filed in the library shares any keywords with that question - it may not be covered yet, or try rephrasing.</p>
+  {% elif ask_status == 'no_answer' %}
+  <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;">
+    <p style="font-size:13px;margin:0;">{{ ask_answer }}</p>
+    {% if ask_candidates %}
+    <p class="muted" style="font-size:12px;margin:8px 0 2px;">Closest matches considered (none clearly answered it - worth checking by hand):</p>
+    <ul style="margin-top:0;font-size:12.5px;">
+      {% for u in ask_candidates %}<li><a href="#legislative-update-{{ u.id }}">{{ u.title }}</a></li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% elif ask_status == 'done' %}
+  <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;">
+    <p style="font-size:13px;margin:0;">{{ ask_answer }}</p>
+    {% if ask_citations %}
+    <p class="muted" style="font-size:12px;margin:8px 0 2px;">Sources:</p>
+    <ul style="margin-top:0;font-size:12.5px;">
+      {% for u in ask_citations %}<li><a href="#legislative-update-{{ u.id }}">{{ u.title }}</a>{% if u.source_reference %} <span class="muted">({{ u.source_reference }})</span>{% endif %}</li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
   {% if updates %}
   {% for u in updates %}
-  <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+  <div id="legislative-update-{{ u.id }}" style="padding:10px 0;border-bottom:1px solid var(--border);">
     <p style="margin:0;">
       <strong>{{ u.title }}</strong>
       {% if u.instrument_type %}<span class="badge">{{ u.type_label }}</span>{% endif %}

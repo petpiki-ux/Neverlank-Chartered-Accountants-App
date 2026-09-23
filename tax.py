@@ -48,6 +48,7 @@ from engagements import _ensure_engagement_access
 from config import Config
 import sanctions_data
 import legislation_summary
+import legislation_search
 
 tax_bp = Blueprint("tax", __name__, url_prefix="/tax")
 
@@ -888,15 +889,56 @@ def delete_tax_checklist_item(item_id):
 # straight into its Technical Research Log with one click (see
 # import_research_log_entry_from_legislative_update below).
 
-@tax_bp.route("/legislative-updates")
-@login_required
-def list_legislative_updates():
+def _render_legislative_updates(**extra):
     updates = LegislativeUpdate.query.order_by(LegislativeUpdate.effective_date.desc().nullslast(), LegislativeUpdate.created_at.desc()).all()
-    return render_template(
-        "tax/legislative_updates.html", updates=updates, tax_heads=TAX_HEADS,
+    context = dict(
+        updates=updates, tax_heads=TAX_HEADS,
         can_edit=user_has_permission(current_user, "manage_legislative_updates"),
         instrument_types=LEGISLATIVE_UPDATE_TYPES, type_labels=LEGISLATIVE_UPDATE_TYPE_LABELS,
         areas=LEGISLATIVE_UPDATE_AREAS, clients=Client.query.order_by(Client.name).all(),
+        ask_question=None, ask_status=None, ask_answer=None, ask_citations=None, ask_candidates=None,
+    )
+    context.update(extra)
+    return render_template("tax/legislative_updates.html", **context)
+
+
+@tax_bp.route("/legislative-updates")
+@login_required
+def list_legislative_updates():
+    return _render_legislative_updates()
+
+
+@tax_bp.route("/legislative-updates/ask", methods=["POST"])
+@login_required
+def ask_legislative_updates():
+    """"Ask the library" - a plain-English question answered from the
+    firm's own filed Legislative Update Control library (see
+    legislation_search.py), never from the model's general knowledge. Open
+    to any logged-in user, same as viewing the list itself - it only reads,
+    it never files or changes anything."""
+    question = request.form.get("question", "").strip()
+    if not question:
+        flash("Please enter a question to ask.", "danger")
+        return _render_legislative_updates()
+
+    status, payload = legislation_search.ask(question)
+    if status == "not_configured":
+        flash("Automatic question-answering isn't set up yet (ANTHROPIC_API_KEY is not set) - see the README.", "danger")
+        return _render_legislative_updates(ask_question=question, ask_status=status)
+    if status == "no_candidates":
+        return _render_legislative_updates(ask_question=question, ask_status=status)
+    if status == "no_answer":
+        return _render_legislative_updates(
+            ask_question=question, ask_status=status,
+            ask_answer=payload["answer"], ask_candidates=payload["candidates"],
+        )
+    if status == "error":
+        flash(f"Couldn't answer that: {payload}", "danger")
+        return _render_legislative_updates(ask_question=question, ask_status=status)
+    # status == "done"
+    return _render_legislative_updates(
+        ask_question=question, ask_status=status,
+        ask_answer=payload["answer"], ask_citations=payload["citations"],
     )
 
 
