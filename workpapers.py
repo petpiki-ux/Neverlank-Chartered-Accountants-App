@@ -775,6 +775,7 @@ def build_rep_letter_docx(engagement, statements, narrative=None):
     period_end = _fmt_date(engagement.period_end)
 
     is_business_it = engagement.type == "Business Intelligence and IT Engagements"
+    is_accounting = engagement.type == "Accounting & Bookkeeping"
 
     doc.add_paragraph(f"To: {FIRM_NAME}")
     doc.add_paragraph(f"Date: {_fmt_date(date.today())}")
@@ -785,6 +786,15 @@ def build_rep_letter_docx(engagement, statements, narrative=None):
             f"governance, cyber security, information security and AML/CFT control environment of {client_name} "
             f"for the period ended {period_end}, for the purpose of expressing a conclusion on the matters within "
             f"the scope of that engagement."
+        )
+    elif is_accounting:
+        doc.add_paragraph(
+            f"This representation letter is provided in connection with your engagement to prepare and/or compile "
+            f"the accounting, financial, management and cost accounting records and reports of {client_name} for "
+            f"the period ended {period_end}, encompassing Financial Accounting, Management Accounting, Cost "
+            f"Accounting and Tax compliance matters as applicable. This is a compilation/bookkeeping engagement "
+            f"and not an audit or review, and accordingly no opinion or assurance conclusion is expressed on the "
+            f"information prepared."
         )
     else:
         doc.add_paragraph(

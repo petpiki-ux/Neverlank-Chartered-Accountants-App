@@ -3668,6 +3668,8 @@
     <h3 class="mt-0">Directors' Statement</h3>
     {% if engagement.type == 'Business Intelligence and IT Engagements' %}
     <p class="muted" style="font-size:12.5px;">Goes into the IT &amp; Cyber Assurance Report itself, right after the cover page - the directors' statement of responsibility for the IT governance, cyber security and AML/CFT control environment reported on - with space for two directors to sign. Tailor the wording below to the entity, then keep the director names and date current.</p>
+    {% elif engagement.type == 'Accounting & Bookkeeping' %}
+    <p class="muted" style="font-size:12.5px;">Goes into the Financial Statements / management accounts themselves - right after the Client Details / Table of Contents page - with space for two directors to sign. Since this is a compilation/bookkeeping engagement rather than an audit or review, the wording below is management's statement of responsibility for the records and figures Neverlank has prepared/compiled, not an audit-style responsibility statement. Tailor the wording below to the entity, then keep the director names and date current.</p>
     {% else %}
     <p class="muted" style="font-size:12.5px;">Goes into the Financial Statements themselves - right after the Client Details / Table of Contents page and before the Audit Opinion/Review Report (if any) - with space for two directors to sign. Tailor the wording below to the entity, then keep the director names and date current.</p>
     {% endif %}

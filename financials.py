@@ -763,13 +763,41 @@ DEFAULT_DIRECTORS_STATEMENT_TEXT_IT = (
 )
 
 
+
+# The Accounting & Bookkeeping variant of the Directors' Statement above -
+# this engagement type is NOT an audit or review (Neverlank prepares/
+# compiles the figures itself, across Financial Accounting, Management
+# Accounting, Cost Accounting and Tax compliance matters, rather than
+# forming an opinion on figures someone else prepared - see
+# models.ACCOUNTING_SERVICES/has_tax_module), so the standard wording above
+# (which assumes an audit/review is being performed on management-prepared
+# statements, and talks about "the directors ... make an assessment ...
+# going concern") doesn't fit. Worded along the lines of an ISRS 4410
+# compilation engagement's management-responsibility statement instead.
+DEFAULT_DIRECTORS_STATEMENT_TEXT_ACCOUNTING = (
+    "Management is responsible for the accuracy and completeness of the accounting records, source "
+    "documents and other information provided to Neverlank Chartered Accountants, and for the underlying "
+    "transactions reflected in the Financial Accounting, Management Accounting, Cost Accounting and Tax "
+    "records and reports covered by this engagement. This responsibility includes maintaining adequate "
+    "accounting records and an effective system of internal control, ensuring transactions are properly "
+    "authorised and recorded, and safeguarding the entity's assets. Neverlank Chartered Accountants has "
+    "prepared/compiled the attached financial, management and cost accounting information from this "
+    "information without undertaking an audit or review, and accordingly does not express an audit "
+    "opinion or review conclusion on it. This statement has been approved by management and is signed on "
+    "its behalf by:"
+)
+
+
 def default_directors_statement_text(engagement):
     """Picks the Directors' Statement default wording for this engagement's
-    type - see DEFAULT_DIRECTORS_STATEMENT_TEXT_IT above for why Business
-    Intelligence and IT Engagements needs its own wording rather than the
-    financial-statements-worded default."""
+    type - see DEFAULT_DIRECTORS_STATEMENT_TEXT_IT/_ACCOUNTING above for why
+    Business Intelligence and IT Engagements and Accounting & Bookkeeping
+    each need their own wording rather than the audit/review-worded
+    default."""
     if engagement and engagement.type == "Business Intelligence and IT Engagements":
         return DEFAULT_DIRECTORS_STATEMENT_TEXT_IT
+    if engagement and engagement.type == "Accounting & Bookkeeping":
+        return DEFAULT_DIRECTORS_STATEMENT_TEXT_ACCOUNTING
     return DEFAULT_DIRECTORS_STATEMENT_TEXT
 
 

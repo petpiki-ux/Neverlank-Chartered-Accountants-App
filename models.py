@@ -6436,6 +6436,25 @@ DEFAULT_WORKPAPER_NARRATIVE_BODIES = {
         "We have disclosed to you the identity of all known regulatory findings, notices or correspondence (POTRAZ, RBZ, FIU or equivalent) relevant to the scope of this engagement.",
         "There have been no irregularities involving management or employees who have a significant role in IT, security or AML/CFT controls that could have a material effect on the control environment reported on.",
     ]),
+    # The Accounting & Bookkeeping variant of "rep_letter" above - this
+    # engagement type is a compilation/write-up engagement, not an audit or
+    # review (see financials.DEFAULT_DIRECTORS_STATEMENT_TEXT_ACCOUNTING for
+    # the same idea applied to the Directors' Statement), so the ISA 700
+    # audit-worded default ("financial statements", "fair value",
+    # "uncorrected misstatements") doesn't fit here either. Covers the four
+    # work areas an Accounting & Bookkeeping engagement can involve -
+    # Financial Accounting, Management Accounting, Cost Accounting and Tax
+    # (see models.ACCOUNTING_SERVICES/has_tax_module).
+    "rep_letter_accounting": "\n".join([
+        "We have provided you with all accounting records, source documents, bank statements, invoices and other information relevant to the preparation of the financial, management and cost accounting records and reports covered by this engagement.",
+        "The financial information provided is complete and accurately reflects all transactions of the entity for the period, to the best of our knowledge and belief.",
+        "We acknowledge that this is a compilation/bookkeeping engagement and that Neverlank Chartered Accountants has not performed an audit or review, and accordingly no assurance is expressed on the financial or management information prepared.",
+        "We are responsible for the proper maintenance of accounting records, for Financial Accounting, Management Accounting, Cost Accounting and Tax compliance matters, and for the safeguarding of the entity's assets.",
+        "We have disclosed to you all known instances of non-compliance or suspected non-compliance with tax laws and other regulations relevant to the entity's accounting and tax obligations.",
+        "Related party transactions and balances have been identified and disclosed to you.",
+        "All known liabilities, whether billed or unbilled, and commitments have been disclosed to you for inclusion in the accounting records.",
+        "There have been no irregularities involving management or employees with a significant role in the accounting or financial reporting process.",
+    ]),
 }
 # Short "[to be completed: ...]" placeholder wording for each of the Tax
 # Opinion's 14 parts and the Tax Health Check Report's 15 parts (see
@@ -6457,13 +6476,15 @@ for _key, _label in MANAGEMENT_ACCOUNTS_REPORT_PARTS:
 def default_workpaper_narrative_body(kind, engagement=None):
     """Picks the default starting wording for a narrative workpaper - same
     as looking it up in DEFAULT_WORKPAPER_NARRATIVE_BODIES directly, except
-    for "rep_letter" on a Business Intelligence and IT Engagements, which
-    gets the IT/cyber-tailored "rep_letter_business_it" wording above
-    instead of the financial-statements-worded default (see
-    financials.default_directors_statement_text for the same idea applied
-    to the Directors' Statement)."""
+    for "rep_letter" on a Business Intelligence and IT Engagements or an
+    Accounting & Bookkeeping engagement, each of which gets its own
+    tailored wording above instead of the financial-statements/audit-worded
+    default (see financials.default_directors_statement_text for the same
+    idea applied to the Directors' Statement)."""
     if kind == "rep_letter" and engagement and engagement.type == "Business Intelligence and IT Engagements":
         return DEFAULT_WORKPAPER_NARRATIVE_BODIES.get("rep_letter_business_it", "")
+    if kind == "rep_letter" and engagement and engagement.type == "Accounting & Bookkeeping":
+        return DEFAULT_WORKPAPER_NARRATIVE_BODIES.get("rep_letter_accounting", "")
     return DEFAULT_WORKPAPER_NARRATIVE_BODIES.get(kind, "")
 
 
