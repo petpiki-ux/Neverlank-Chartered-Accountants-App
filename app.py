@@ -497,6 +497,30 @@ def register_cli(app):
             else:
                 click.echo(f"{source}: FAILED - {error}")
 
+    @app.cli.command("import-zimra-notices")
+    @click.option("--dry-run", is_flag=True, help="List what would be imported without downloading or saving anything.")
+    @click.option("--pages", type=int, default=None, help="Only fetch this many ZIMRA listing pages (20 notices/page) - use a small number to test first.")
+    @click.option("--limit", type=int, default=None, help="Import at most this many new notices.")
+    @click.option("--sleep", "sleep_seconds", type=float, default=1.5, help="Seconds to wait between requests to ZIMRA's server (politeness delay).")
+    def import_zimra_notices(dry_run, pages, limit, sleep_seconds):
+        """Bulk-import ZIMRA's Public Notices page
+        (https://www.zimra.co.zw/public-notices) into Legislative Update
+        Control as filed "Notice" entries, each with an AI summary - see
+        zimra_notices.py. This is a CLI command rather than a button in the
+        app because, at roughly 480 notices, a single web request would
+        badly exceed any reasonable timeout - run it from Render's Shell
+        instead, where it can take as long as it needs.
+
+        ALWAYS run with --dry-run --pages 1 first to sanity-check what
+        actually gets extracted from a real page before committing to a
+        full import (see zimra_notices.py's module docstring for why).
+        Safe to interrupt and re-run at any point: every notice already
+        imported (matched by ZIMRA's own id) is skipped, never duplicated."""
+        import zimra_notices
+        zimra_notices.import_notices(
+            dry_run=dry_run, max_pages=pages, limit=limit, sleep_seconds=sleep_seconds, log=click.echo,
+        )
+
 
 app = create_app()
 
