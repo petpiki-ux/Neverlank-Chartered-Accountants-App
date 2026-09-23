@@ -837,6 +837,10 @@
     {% endif %}
     {% if not entity_understanding or not entity_understanding.checklist_items %}
     <form method="post" action="{{ url_for('engagements.seed_entity_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist</button></form>
+    {% else %}
+    <form method="post" action="{{ url_for('engagements.sync_entity_checklist_items', engagement_id=engagement.id) }}" class="inline" style="display:inline;" title="Adds any default questions that were added to the firm's checklist after this one was seeded - existing items, responses and comments are left untouched.">
+      <button type="submit" class="btn small secondary">Check for new default questions</button>
+    </form>
     {% endif %}
     <form method="post" action="{{ url_for('engagements.generate_entity_checklist_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file checklist (Word, Ref. {{ filing_reference('entity') }})</button></form>
     {{ filed_workpapers('entity_checklist') }}

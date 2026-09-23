@@ -1243,53 +1243,67 @@ def _get_or_create_entity_understanding(engagement_id):
     return record
 
 
+def _default_entity_checklist_items_for(engagement):
+    """The firm's default Understanding Business/Assignment checklist
+    questions for this engagement's type - Forensic Audit questions
+    (Investigative Engagements), cyber/IT/AML-CFT questions (Business
+    Intelligence and IT Engagements), the COBE-based Secretarial Client
+    Business Understanding Questionnaire (Secretarial, filtered to the
+    engagement's selected Activities), or the general ISA 315-style
+    DEFAULT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS for every other type.
+    Shared by seed_entity_checklist (first-time seeding) and
+    sync_entity_checklist_items (topping up an already-seeded checklist
+    with any new questions added to these lists since it was seeded) so
+    the two can never drift apart on which list applies to which type."""
+    if engagement.type == "Investigative Engagement":
+        return FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+    if engagement.type == "Business Intelligence and IT Engagements":
+        return BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+    if engagement.type == "Secretarial":
+        selected_activities = set(engagement.secretarial_activity_list)
+        return [
+            (section, item_text)
+            for section, item_text, activities in SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+            if not selected_activities or selected_activities & set(activities)
+        ]
+    return DEFAULT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+
+
+def _unpack_entity_checklist_entry(entry):
+    """Most DEFAULT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS-style entries are a
+    plain (section, item_text) pair; a BUSINESS_IT_ENTITY_UNDERSTANDING_
+    CHECKLIST_ITEMS entry can instead be a (section, item_text,
+    response_options) triple - a list of custom answer choices for this one
+    item, replacing the generic Yes/No/N-A dropdown (see
+    EntityUnderstandingChecklistItem.response_options) for a question
+    that's really "pick one of these" rather than yes/no. Returns
+    (section, item_text, response_options), with response_options None for
+    a plain pair."""
+    if len(entry) == 3:
+        return entry
+    section, item_text = entry
+    return section, item_text, None
+
+
 @engagements_bp.route("/<int:engagement_id>/entity-understanding/checklist/seed", methods=["POST"])
 @login_required
 def seed_entity_checklist(engagement_id):
     """Populate the Understanding Business/Assignment checklist with the
-    firm's Forensic Audit questions (Investigative Engagements), its
-    cyber/IT/AML-CFT entity-understanding questions (Business Intelligence
-    and IT Engagements), its COBE-based Secretarial Client Business
-    Understanding Questionnaire (Secretarial engagements, filtered to the
-    engagement's selected Activities - see Engagement.secretarial_activities
-    and SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS), or - for every
-    other engagement type (Audit, Assurance, Consulting, Tax, Accounting &
-    Bookkeeping) - the general ISA 315-style DEFAULT_ENTITY_UNDERSTANDING_
-    CHECKLIST_ITEMS, seeded alongside (not instead of) the five free-text
-    fields. Mirrors acceptance.seed_acceptance_checklist: only does
-    anything the first time, so it's safe to expose as a single button."""
+    firm's default questions for this engagement's type (see
+    _default_entity_checklist_items_for), seeded alongside (not instead of)
+    the five free-text fields. Mirrors acceptance.seed_acceptance_checklist:
+    only does anything the first time, so it's safe to expose as a single
+    button - see sync_entity_checklist_items below for topping up a
+    checklist that's already been seeded."""
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     record = _get_or_create_entity_understanding(engagement_id)
     if record.checklist_items:
         flash("The checklist already has items on it.", "info")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
-    if engagement.type == "Investigative Engagement":
-        checklist_items = FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
-    elif engagement.type == "Business Intelligence and IT Engagements":
-        checklist_items = BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
-    elif engagement.type == "Secretarial":
-        selected_activities = set(engagement.secretarial_activity_list)
-        checklist_items = [
-            (section, item_text)
-            for section, item_text, activities in SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
-            if not selected_activities or selected_activities & set(activities)
-        ]
-    else:
-        checklist_items = DEFAULT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
+    checklist_items = _default_entity_checklist_items_for(engagement)
     for order, entry in enumerate(checklist_items, start=1):
-        # Most entries are a plain (section, item_text) pair; a
-        # BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS entry can instead
-        # be a (section, item_text, response_options) triple - a list of
-        # custom answer choices for this one item, replacing the generic
-        # Yes/No/N-A dropdown (see EntityUnderstandingChecklistItem.
-        # response_options) for a question that's really "pick one of
-        # these" rather than yes/no.
-        if len(entry) == 3:
-            section, item_text, response_options = entry
-        else:
-            section, item_text = entry
-            response_options = None
+        section, item_text, response_options = _unpack_entity_checklist_entry(entry)
         db.session.add(EntityUnderstandingChecklistItem(
             entity_understanding_id=record.id,
             section=section,
@@ -1302,6 +1316,53 @@ def seed_entity_checklist(engagement_id):
     record.completed_at = datetime.utcnow()
     db.session.commit()
     flash("Default checklist items added - tick and comment on each one.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
+
+
+@engagements_bp.route("/<int:engagement_id>/entity-understanding/checklist/sync", methods=["POST"])
+@login_required
+def sync_entity_checklist_items(engagement_id):
+    """Top up an ALREADY-seeded checklist with any default questions that
+    aren't on it yet (matched by exact item_text), without touching
+    anything already there - existing items, their responses and comments
+    are left completely alone. This is what lets a firm-wide update to one
+    of the *_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS lists (e.g. a compound
+    question later split into two, each with its own dropdown - see
+    BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS) reach an engagement
+    whose checklist was seeded before that update, without wiping out
+    everything the team already filled in - seed_entity_checklist above
+    only ever does anything the FIRST time, by design, so without this
+    there'd be no way to pick up a later addition short of deleting and
+    re-seeding the whole checklist from scratch."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    record = _get_or_create_entity_understanding(engagement_id)
+    if not record.checklist_items:
+        flash("This checklist hasn't been seeded yet - use “Add the firm's default checklist” first.", "info")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
+    existing_texts = {i.item_text for i in record.checklist_items}
+    max_order = max([i.order for i in record.checklist_items], default=0)
+    checklist_items = _default_entity_checklist_items_for(engagement)
+    added = 0
+    for entry in checklist_items:
+        section, item_text, response_options = _unpack_entity_checklist_entry(entry)
+        if item_text in existing_texts:
+            continue
+        max_order += 1
+        db.session.add(EntityUnderstandingChecklistItem(
+            entity_understanding_id=record.id,
+            section=section,
+            item_text=item_text,
+            response_options="|".join(response_options) if response_options else None,
+            order=max_order,
+            created_by_id=current_user.id,
+        ))
+        added += 1
+    db.session.commit()
+    if added:
+        flash(f"Added {added} new default question{'s' if added != 1 else ''} that weren't on this checklist yet.", "success")
+    else:
+        flash("This checklist already has every current default question on it - nothing to add.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="entity"))
 
 
