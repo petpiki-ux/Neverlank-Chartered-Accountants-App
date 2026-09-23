@@ -68,11 +68,24 @@ def _robots_allow(path):
     permission. Fails safe in the "allow" direction only when robots.txt
     itself can't be fetched/parsed at all (most sites with no reachable
     robots.txt do allow ordinary crawling) - any Disallow that actually
-    matches the path is always honoured."""
+    matches the path is always honoured.
+
+    Deliberately fetches robots.txt with our own _fetch() (which sends a
+    proper User-Agent) rather than RobotFileParser.read(), which makes its
+    own bare urllib request with no User-Agent at all. Some servers (ZIMRA's
+    included, confirmed against the live site) reject that bare request -
+    and per Python's documented robotparser behaviour, an HTTPError 401/403
+    during read() sets disallow_all = True, i.e. "nothing is allowed" -  a
+    false positive with nothing to do with what robots.txt actually says.
+    Feeding the already-fetched text into RobotFileParser.parse() does the
+    exact same rule parsing/matching without that second, unauthenticated
+    fetch."""
     try:
+        resp = _fetch(urljoin(ZIMRA_BASE_URL, "/robots.txt"))
+        if resp.status_code != 200:
+            return True  # can't confirm a restriction - fail open, same as robots.txt not existing
         rp = urllib.robotparser.RobotFileParser()
-        rp.set_url(urljoin(ZIMRA_BASE_URL, "/robots.txt"))
-        rp.read()
+        rp.parse(resp.text.splitlines())
         return rp.can_fetch(USER_AGENT, urljoin(ZIMRA_BASE_URL, path))
     except Exception:
         return True
