@@ -925,7 +925,17 @@ FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
 # assurance engagement, rather than ISA 315's entity/industry/accounting-
 # policy prompts.
 BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
-    ("IT Environment & Infrastructure Overview", "What is the overall IT environment (on-premise, cloud, or hybrid) and how is it organised (in-house IT function, outsourced/managed service provider, or a mix)?"),
+    # These two were originally one compound question ("What is the overall
+    # IT environment (on-premise, cloud, or hybrid) and how is it organised
+    # (in-house IT function, outsourced/managed service provider, or a
+    # mix)?") with its answer choices spelled out in brackets rather than
+    # asked/answered as a proper dropdown - split into two, each carrying
+    # its own bracketed choices as response_options (see
+    # EntityUnderstandingChecklistItem.response_options) so the item's own
+    # dropdown offers exactly those choices instead of the generic
+    # Yes/No/N-A one.
+    ("IT Environment & Infrastructure Overview", "What is the overall IT environment?", ["On-premise", "Cloud", "Hybrid"]),
+    ("IT Environment & Infrastructure Overview", "How is the entity's IT function organised?", ["In-house IT function", "Outsourced / Managed Service Provider", "A mix"]),
     ("IT Environment & Infrastructure Overview", "Which core business systems (ERP, banking platforms, core application systems) does the entity rely on, and who are the key vendors/service providers?"),
     ("IT Environment & Infrastructure Overview", "Has the IT environment changed materially in the period under review (new system implementations, cloud migration, mergers/acquisitions, outsourcing changes)?"),
     ("IT Environment & Infrastructure Overview", "Is there a documented IT governance structure (IT steering committee, CIO/IT Manager, board-level IT oversight)?"),
@@ -934,7 +944,13 @@ BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
     ("IT Environment & Infrastructure Overview", "Have the data flows between the entity's critical financial and operational applications been mapped (source systems, integration points, and where financial data ultimately resides)?"),
     ("Data Holdings & Classification", "What categories of data does the entity hold or process (customer personal information, financial data, employee data, trade secrets/intellectual property)?"),
     ("Data Holdings & Classification", "Is data classified by sensitivity, and is there a documented data retention and disposal policy?"),
-    ("Data Holdings & Classification", "Where is data physically/logically stored (on-premise servers, local cloud provider, offshore cloud provider), and does this raise any cross-border data transfer considerations under the Cyber and Data Protection Act [Chapter 12:07]?"),
+    # Same compound-question split as the IT Environment items above - the
+    # original bracketed "(on-premise servers, local cloud provider,
+    # offshore cloud provider)" becomes this item's own dropdown choices,
+    # with the Cyber and Data Protection Act follow-up kept as a separate
+    # (ordinary Yes/No/N-A) question.
+    ("Data Holdings & Classification", "Where is data physically/logically stored?", ["On-premise servers", "Local cloud provider", "Offshore cloud provider"]),
+    ("Data Holdings & Classification", "Does the data storage location raise any cross-border data transfer considerations under the Cyber and Data Protection Act [Chapter 12:07]?"),
     ("Cyber Security Posture & Incident History", "Has the entity experienced any cyber security incidents, breaches, or significant near-misses in recent years, and how were they handled?"),
     ("Cyber Security Posture & Incident History", "Does the entity have documented policies for threat and vulnerability management, perimeter/endpoint protection, and security monitoring and logging?"),
     ("Cyber Security Posture & Incident History", "Is there a documented and tested incident response and recovery plan?"),
@@ -2909,11 +2925,30 @@ class EntityUnderstandingChecklistItem(db.Model):
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    # A "|"-separated list of custom answer choices for this one item,
+    # replacing the generic Yes/No/N-A dropdown wherever it's set - used
+    # where the question itself is really "pick one of these" rather than a
+    # yes/no (e.g. "What is the overall IT environment?" -> On-premise /
+    # Cloud / Hybrid, seeded from BUSINESS_IT_ENTITY_UNDERSTANDING_
+    # CHECKLIST_ITEMS above). Blank/None (every other checklist item, on
+    # every engagement type) keeps the standard Yes/No/N-A dropdown exactly
+    # as before - see response_option_list and the entity_checklist_row
+    # template macro.
+    response_options = db.Column(db.Text)
+
     entity_understanding = db.relationship(
         "EntityUnderstanding",
         backref=db.backref("checklist_items", lazy=True, cascade="all, delete-orphan", order_by="EntityUnderstandingChecklistItem.order"),
     )
     created_by = db.relationship("User")
+
+    @property
+    def response_option_list(self):
+        """This item's own custom answer choices, or None to fall back to
+        the standard Yes/No/N-A dropdown - see response_options above."""
+        if not self.response_options:
+            return None
+        return [o for o in self.response_options.split("|") if o]
 
     def __repr__(self):
         return f"<EntityUnderstandingChecklistItem {self.item_text!r} response={self.response!r}>"

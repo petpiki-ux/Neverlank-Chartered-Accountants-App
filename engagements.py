@@ -1277,11 +1277,24 @@ def seed_entity_checklist(engagement_id):
         ]
     else:
         checklist_items = DEFAULT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS
-    for order, (section, item_text) in enumerate(checklist_items, start=1):
+    for order, entry in enumerate(checklist_items, start=1):
+        # Most entries are a plain (section, item_text) pair; a
+        # BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS entry can instead
+        # be a (section, item_text, response_options) triple - a list of
+        # custom answer choices for this one item, replacing the generic
+        # Yes/No/N-A dropdown (see EntityUnderstandingChecklistItem.
+        # response_options) for a question that's really "pick one of
+        # these" rather than yes/no.
+        if len(entry) == 3:
+            section, item_text, response_options = entry
+        else:
+            section, item_text = entry
+            response_options = None
         db.session.add(EntityUnderstandingChecklistItem(
             entity_understanding_id=record.id,
             section=section,
             item_text=item_text,
+            response_options="|".join(response_options) if response_options else None,
             order=order,
             created_by_id=current_user.id,
         ))
@@ -1321,7 +1334,12 @@ def update_entity_checklist_item(item_id):
     item = EntityUnderstandingChecklistItem.query.get_or_404(item_id)
     _ensure_engagement_access(item.entity_understanding.engagement)
     response = request.form.get("response", "").strip()
-    item.response = response if response in CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES else ""
+    # A custom-dropdown item (item.response_option_list - see
+    # EntityUnderstandingChecklistItem.response_options) accepts its own
+    # choices instead of the standard Yes/No/N-A list, since its dropdown
+    # offers those in the template instead.
+    allowed_responses = item.response_option_list or CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES
+    item.response = response if response in allowed_responses else ""
     item.comment = request.form.get("comment", "").strip()
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=item.entity_understanding.engagement_id, tab="entity"))

@@ -119,6 +119,7 @@ def _add_missing_columns():
             ("quantitative_important", "BOOLEAN DEFAULT 1"),
         ] + partner_signoff_cols,
         "entity_understanding": list(partner_signoff_cols),
+        "entity_understanding_checklist_item": [("response_options", "TEXT")],
         "analytical_review": list(partner_signoff_cols) + [
             ("not_necessary", "BOOLEAN DEFAULT 0"), ("not_necessary_reason", "TEXT"),
         ],

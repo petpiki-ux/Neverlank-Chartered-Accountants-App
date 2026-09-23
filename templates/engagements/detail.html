@@ -764,7 +764,7 @@
       <span class="item-text">{{ item.item_text }}</span>
       <select name="response">
         <option value="" {% if not item.response %}selected{% endif %}>—</option>
-        {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+        {% for r in (item.response_option_list or responses) %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
       </select>
       <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
       <button type="submit" class="btn small secondary">Save</button>
