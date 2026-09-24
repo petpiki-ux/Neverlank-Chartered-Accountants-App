@@ -206,6 +206,23 @@ def _add_missing_columns():
             ("ai_case_authority_reasoning", "TEXT"),
             ("case_authority_status", "VARCHAR(20)"),
         ],
+        # The Policies & Procedures library ("Firm Library") upgraded from a
+        # static depository to an AI-powered research hub - these let a
+        # filed policy/procedure get its text extracted (file_text_
+        # extraction.py) and AI-summarised (policy_summary.py) the same way
+        # a filed Act/Notice/SI already is. See models.PolicyDocument's
+        # docstring.
+        "policy_document": [
+            ("extracted_text", "TEXT"),
+            ("extraction_status", "VARCHAR(20)"),
+            ("page_count", "INTEGER"),
+            ("ai_summary", "TEXT"),
+            ("ai_key_points_json", "TEXT"),
+            ("ai_suggested_category", "VARCHAR(50)"),
+            ("ai_status", "VARCHAR(20)"),
+            ("ai_error", "TEXT"),
+            ("ai_processed_at", "DATETIME"),
+        ],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():

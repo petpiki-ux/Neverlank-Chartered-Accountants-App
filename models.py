@@ -352,6 +352,11 @@ PERMISSIONS = [
      "Upload or delete Acts, Government Notices and Statutory Instruments in the Legislative Update Control "
      "library, used to drive AI summarisation and client-relevance tagging.",
      ("partner", "admin")),
+    ("research_firm_library", "Research the Firm Library",
+     "Use \"Ask the Firm Library\" to query the Policies & Procedures library with AI and see the AI-generated "
+     "summary/key points on each document. Viewing and downloading policies is unaffected by this setting and "
+     "stays open to everyone - this only gates the AI research features, piloted as Partner/Admin only.",
+     ("partner", "admin")),
 ]
 PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
 
@@ -2373,9 +2378,28 @@ def notify_task_assignment(actor, recipient_id, subject, body):
 
 class PolicyDocument(db.Model):
     """A firm policy/procedure/form in the HR & Administration > Policies and
-    Procedures library - same download/edit pattern as DocumentTemplate, but
-    grouped by a free-standing category list rather than engagement type,
-    and stored in its own data folder (Config.POLICIES_DATA_DIR).
+    Procedures library ("the Firm Library") - same download/edit pattern as
+    DocumentTemplate, but grouped by a free-standing category list rather
+    than engagement type, and stored in its own data folder
+    (Config.POLICIES_DATA_DIR).
+
+    The fields below let this library also work as an AI-powered research
+    hub, not just a static depository: text is extracted from the uploaded
+    file (see file_text_extraction.py - PDF/Word/Excel/PowerPoint) and then
+    summarised by AI (see policy_summary.py) into ai_summary/ai_key_points,
+    the same "AI suggests, person confirms" pattern already used for
+    Legislative Update Control (see LegislativeUpdate) - purely
+    informational, never applied automatically. ai_suggested_category is
+    only ever a suggestion shown on the add/edit form; the category a
+    document actually lives under is always the person's own choice.
+    Chunked (see policy_chunking.py, PolicyDocumentChunk) so "Ask the Firm
+    Library" (policy_search.py) can retrieve the specific relevant part of a
+    long policy rather than only ever seeing its first few pages. A document
+    with no extractable text (an empty file, a slide deck of images only,
+    or a legacy .doc/.xls/.ppt - see file_text_extraction.EXTRACTABLE_EXTENSIONS)
+    is unaffected by any of this: it's simply not searched or summarised,
+    same graceful-degradation principle as everywhere else AI is used in
+    this app.
     """
     id = db.Column(db.Integer, primary_key=True)
     category = db.Column(db.String(50), nullable=False, default="Other")
@@ -2386,14 +2410,96 @@ class PolicyDocument(db.Model):
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # ---- Firm Library research hub: extraction + AI summary ----
+    extracted_text = db.Column(db.Text)
+    extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error", "unsupported_format" - see file_text_extraction.py
+    page_count = db.Column(db.Integer)  # rough per-type analogue (sheet/slide count) - informational only
+
+    ai_summary = db.Column(db.Text)
+    ai_key_points_json = db.Column(db.Text)  # JSON-encoded list of short bullet strings
+    ai_suggested_category = db.Column(db.String(50))  # a suggestion only, shown on the form - never auto-applied
+    ai_status = db.Column(db.String(20))  # "done", "not_configured", "error" - see policy_summary.py
+    ai_error = db.Column(db.Text)
+    ai_processed_at = db.Column(db.DateTime)
+
     updated_by = db.relationship("User")
 
     @property
     def file_ext(self):
         return self.filename.rsplit(".", 1)[-1].lower() if "." in self.filename else ""
 
+    @property
+    def ai_key_points(self):
+        try:
+            return json.loads(self.ai_key_points_json) if self.ai_key_points_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_ai_key_points(self, value):
+        self.ai_key_points_json = json.dumps(value or [])
+
     def __repr__(self):
         return f"<PolicyDocument {self.title}>"
+
+
+class PolicyDocumentChunk(db.Model):
+    """One section-sized slice of a filed policy/procedure's extracted_text
+    (see policy_chunking.py, which reuses legislation_chunking.chunk_text) -
+    the Firm Library research hub's counterpart to LegislativeUpdateChunk,
+    letting "Ask the Firm Library" (policy_search.py) retrieve the specific
+    relevant part of a long document rather than only ever seeing a
+    fixed-size excerpt from its start. Chunked once per document (at
+    filing/edit time, or lazily the first time it's needed for an
+    already-filed document) and never re-chunked automatically afterwards.
+    Purely a search index over text that's already filed - deleting the
+    parent PolicyDocument deletes its chunks with it (cascade below);
+    nothing here is ever shown to a person directly, only used internally
+    as retrieval context."""
+    __tablename__ = "policy_document_chunk"
+    id = db.Column(db.Integer, primary_key=True)
+    policy_document_id = db.Column(db.Integer, db.ForeignKey("policy_document.id"), nullable=False)
+    chunk_index = db.Column(db.Integer, nullable=False)  # 0-based order within the document
+    heading = db.Column(db.String(300))  # the nearest Part/Chapter/numbered-section heading, if any was detected
+    text = db.Column(db.Text, nullable=False)
+
+    policy_document = db.relationship(
+        "PolicyDocument",
+        backref=db.backref("chunks", lazy=True, cascade="all, delete-orphan", order_by="PolicyDocumentChunk.chunk_index"),
+    )
+
+    def __repr__(self):
+        return f"<PolicyDocumentChunk {self.policy_document_id}#{self.chunk_index}>"
+
+
+class PolicyAskCache(db.Model):
+    """A fast-recall cache of "Ask the Firm Library" question/answer pairs
+    (see policy_search.py) - the Firm Library's counterpart to
+    LegislativeAskCache, same verbatim-recall design: asking the same or a
+    very similar question again returns the earlier answer instantly and
+    consistently instead of re-searching and re-calling the AI, while a
+    genuinely new question is still answered fresh from the filed material
+    every time. A cached answer never feeds into, or changes the answer to,
+    any OTHER question, and is always visibly flagged as reused wherever
+    it's shown. Only "done" and "no_answer" results are ever cached - a
+    transient failure, an unconfigured API key, or "nothing filed matches at
+    all" is never cached, so those always retry fresh."""
+    __tablename__ = "policy_ask_cache"
+    id = db.Column(db.Integer, primary_key=True)
+    question_normalized = db.Column(db.String(500), nullable=False, index=True)
+    question_original = db.Column(db.String(500), nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # "done" or "no_answer" only
+    answer = db.Column(db.Text, nullable=False)
+    citation_ids_json = db.Column(db.Text)  # JSON list of PolicyDocument ids cited (status "done")
+    candidate_ids_json = db.Column(db.Text)  # JSON list of PolicyDocument ids considered but not sufficient (status "no_answer")
+    asked_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    hit_count = db.Column(db.Integer, default=1)
+    last_hit_at = db.Column(db.DateTime)
+
+    asked_by = db.relationship("User", foreign_keys=[asked_by_id])
+
+    def __repr__(self):
+        return f"<PolicyAskCache {self.question_original!r} ({self.status})>"
 
 
 class TimeSheet(db.Model):

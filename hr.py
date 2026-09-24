@@ -25,10 +25,76 @@ from models import (
 )
 from config import Config
 
+import file_text_extraction
+import policy_summary
+import policy_chunking
+import policy_search
+
 hr_bp = Blueprint("hr", __name__, url_prefix="/hr")
 
 ALLOWED_POLICY_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"}
 ALLOWED_TIMESHEET_UPLOAD_EXTENSIONS = {"xlsx", "xls", "pdf"}
+
+
+def research_required(f):
+    """Gates the Firm Library's AI research features ("Ask the Firm
+    Library", and seeing the AI-generated summary/key points on a document)
+    behind the configurable "Research the Firm Library" permission (Team >
+    Permissions) - piloted as Partner/Admin only. Viewing and downloading a
+    policy/procedure is unaffected: that stays open to everyone, same as
+    before this feature existed."""
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if not user_has_permission(current_user, "research_firm_library"):
+            abort(403)
+        return f(*args, **kwargs)
+    return wrapped
+
+
+def _process_policy_file(policy, filepath, original_name):
+    """Shared by new_policy/edit_policy: extracts text from the just-saved
+    file (file_text_extraction.py - PDF/Word/Excel/PowerPoint), gets an AI
+    summary (policy_summary.py) and chunks the extracted text for "Ask the
+    Firm Library" (policy_chunking.py). Mirrors tax.py's handling of a filed
+    Legislative Update: the upload itself is never blocked or lost if
+    extraction/AI fails or isn't configured - every outcome degrades
+    gracefully and is simply shown (or not) on the list page. Does not
+    commit - the caller commits."""
+    ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
+    text, extraction_status, page_count = file_text_extraction.extract_text_for_file(filepath, ext)
+    policy.extracted_text = text or None
+    policy.extraction_status = extraction_status
+    policy.page_count = page_count
+
+    result, ai_status, ai_error = policy_summary.summarize_policy_document(filepath, text, extraction_status)
+    policy.ai_status = ai_status
+    policy.ai_error = ai_error
+    policy.ai_processed_at = datetime.utcnow()
+    if ai_status == "done":
+        policy.ai_summary = result["summary"]
+        policy.set_ai_key_points(result["key_points"])
+        policy.ai_suggested_category = result["suggested_category"]
+    else:
+        policy.ai_summary = None
+        policy.set_ai_key_points([])
+        policy.ai_suggested_category = None
+
+    if policy.extracted_text:
+        # Clear any stale chunks from a previous file before re-chunking -
+        # relevant on edit_policy, where the file (and so the text) can
+        # change; ensure_chunks() itself is a no-op if chunks already exist,
+        # so old chunks from a replaced file would otherwise linger. Clearing
+        # via the collection itself (rather than deleting each chunk
+        # directly) is what actually empties policy.chunks in memory too -
+        # cascade="all, delete-orphan" then deletes the orphaned rows -
+        # deleting them directly leaves the already-loaded `chunks`
+        # collection looking non-empty, which would make ensure_chunks()
+        # below wrongly think chunks already exist and skip re-chunking.
+        policy.chunks = []
+        db.session.flush()
+        policy_chunking.ensure_chunks(policy)
+    else:
+        policy.chunks = []
 
 
 def _visible_engagements_for(user, engagement_list):
@@ -85,9 +151,7 @@ def _policies_dir():
     return Config.POLICIES_DATA_DIR
 
 
-@hr_bp.route("/policies")
-@login_required
-def list_policies():
+def _render_policies_list(**extra):
     library = {}
     for category in POLICY_CATEGORIES:
         items = PolicyDocument.query.filter_by(category=category).order_by(
@@ -95,8 +159,82 @@ def list_policies():
         ).all()
         if items:
             library[category] = items
-    can_edit = user_has_permission(current_user, "manage_policies")
-    return render_template("hr/policies_list.html", library=library, can_edit=can_edit)
+    context = dict(
+        library=library,
+        can_edit=user_has_permission(current_user, "manage_policies"),
+        can_research=user_has_permission(current_user, "research_firm_library"),
+        ask_question=None, ask_status=None, ask_answer=None, ask_citations=None, ask_candidates=None,
+        ask_from_cache=False, ask_cache_hit_count=None,
+    )
+    context.update(extra)
+    return render_template("hr/policies_list.html", **context)
+
+
+@hr_bp.route("/policies")
+@login_required
+def list_policies():
+    return _render_policies_list()
+
+
+@hr_bp.route("/policies/ask", methods=["POST"])
+@login_required
+@research_required
+def ask_policy_library():
+    """"Ask the Firm Library" - a plain-English question answered from the
+    firm's own filed Policies & Procedures library (see policy_search.py),
+    never from the model's general knowledge. Gated by the "Research the
+    Firm Library" permission - it only reads, it never files or changes
+    anything, but the AI-research surface itself is piloted as Partner/
+    Admin only (see models.PERMISSIONS)."""
+    question = request.form.get("question", "").strip()
+    if not question:
+        flash("Please enter a question to ask.", "danger")
+        return _render_policies_list()
+
+    status, payload = policy_search.ask(question, asked_by_id=current_user.id)
+    if status == "not_configured":
+        flash("Automatic question-answering isn't set up yet (ANTHROPIC_API_KEY is not set) - see the README.", "danger")
+        return _render_policies_list(ask_question=question, ask_status=status)
+    if status == "no_candidates":
+        return _render_policies_list(ask_question=question, ask_status=status)
+    if status == "no_answer":
+        return _render_policies_list(
+            ask_question=question, ask_status=status,
+            ask_answer=payload["answer"], ask_candidates=payload["candidates"],
+            ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
+        )
+    if status == "error":
+        flash(f"Couldn't answer that: {payload}", "danger")
+        return _render_policies_list(ask_question=question, ask_status=status)
+    # status == "done"
+    return _render_policies_list(
+        ask_question=question, ask_status=status,
+        ask_answer=payload["answer"], ask_citations=payload["citations"],
+        ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
+    )
+
+
+@hr_bp.route("/policies/<int:policy_id>/reprocess", methods=["POST"])
+@login_required
+@editor_required
+def reprocess_policy_document(policy_id):
+    """Re-run text extraction and AI summarisation against an already-filed
+    policy/procedure, without re-uploading the file - for when the API key
+    wasn't configured yet at filing time, or the previous attempt failed
+    transiently. Mirrors tax.reprocess_legislative_update."""
+    policy = PolicyDocument.query.get_or_404(policy_id)
+    filepath = os.path.join(_policies_dir(), policy.filename)
+    if not os.path.exists(filepath):
+        flash("The original file can no longer be found on disk - re-upload it.", "danger")
+        return redirect(url_for("hr.list_policies"))
+
+    _process_policy_file(policy, filepath, policy.filename)
+    db.session.commit()
+    if policy.ai_status == "done":
+        flash("Reprocessed - the AI summary below has been refreshed.", "success")
+    else:
+        flash(f"Reprocessing failed: {policy.ai_error}", "danger")
+    return redirect(url_for("hr.list_policies"))
 
 
 @hr_bp.route("/policies/download/<int:policy_id>")
@@ -143,11 +281,20 @@ def new_policy():
 
         original_name = secure_filename(file.filename)
         stored_name = f"pol{policy.id}_{original_name}"
-        file.save(os.path.join(_policies_dir(), stored_name))
+        filepath = os.path.join(_policies_dir(), stored_name)
+        file.save(filepath)
         policy.filename = stored_name
+        db.session.commit()  # save the upload itself before attempting extraction/AI, so a slow/failed step never loses the file
 
+        _process_policy_file(policy, filepath, original_name)
         db.session.commit()
-        flash(f"'{policy.title}' added to the Policies library.", "success")
+
+        if policy.ai_status == "done":
+            flash(f"'{policy.title}' added to the Policies library - AI summary generated below.", "success")
+        elif policy.ai_status == "not_configured":
+            flash(f"'{policy.title}' added to the Policies library, but automatic summarisation isn't set up yet ({policy.ai_error}).", "warning")
+        else:
+            flash(f"'{policy.title}' added to the Policies library.", "success")
         return redirect(url_for("hr.list_policies"))
 
     return render_template("hr/policy_form.html", policy=None, categories=POLICY_CATEGORIES)
@@ -168,6 +315,7 @@ def edit_policy(policy_id):
             return render_template("hr/policy_form.html", policy=policy, categories=POLICY_CATEGORIES)
 
         file = request.files.get("file")
+        replaced_file = False
         if file and file.filename != "":
             if not _allowed_policy_file(file.filename):
                 flash("Only PDF, Word, Excel and PowerPoint files are allowed.", "danger")
@@ -177,14 +325,25 @@ def edit_policy(policy_id):
                 os.remove(old_path)
             original_name = secure_filename(file.filename)
             stored_name = f"pol{policy.id}_{original_name}"
-            file.save(os.path.join(_policies_dir(), stored_name))
+            new_path = os.path.join(_policies_dir(), stored_name)
+            file.save(new_path)
             policy.filename = stored_name
+            replaced_file = True
 
         policy.category = category
         policy.title = title
         policy.description = request.form.get("description", "").strip()
         policy.updated_by_id = current_user.id
         db.session.commit()
+
+        if replaced_file:
+            # The new file's text/summary/chunks replace whatever the old
+            # file had - same reasoning as tax.py's reprocess: nothing about
+            # the previous file's extraction is still meaningful once it's
+            # been swapped out.
+            _process_policy_file(policy, new_path, original_name)
+            db.session.commit()
+
         flash(f"'{policy.title}' updated.", "success")
         return redirect(url_for("hr.list_policies"))
 

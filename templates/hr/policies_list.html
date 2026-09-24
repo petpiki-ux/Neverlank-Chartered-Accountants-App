@@ -4,38 +4,102 @@
 <div class="page-header">
   <div>
     <h1>Policies and Procedures</h1>
-    <div class="subtitle">The firm's HR policies, procedures, quality control manual and internal forms.</div>
+    <div class="subtitle">The firm's HR policies, procedures, quality control manual and internal forms - the Firm Library. AI reads and summarises what's filed here so it can be researched, not just downloaded.</div>
   </div>
   {% if can_edit %}
   <a href="{{ url_for('hr.new_policy') }}" class="btn gold">+ New Policy / Procedure</a>
   {% endif %}
 </div>
 
+{% if can_research %}
+<div class="card">
+  <h3 class="mt-0">Ask the Firm Library</h3>
+  <p class="muted" style="font-size:12px;">
+    Ask a plain-English question and get an answer drawn only from what's actually filed below, with a
+    link back to the specific document(s) it came from - e.g. "what's the leave approval process" or
+    "who do I contact for an IT security incident".
+  </p>
+  <form method="post" action="{{ url_for('hr.ask_policy_library') }}" class="form-row">
+    <div style="flex:4;"><input type="text" name="question" placeholder="Ask a question about what's filed..." value="{{ ask_question or '' }}" required></div>
+    <div><button type="submit" class="btn gold">Ask</button></div>
+  </form>
+
+  {% if ask_status == 'no_candidates' %}
+  <p class="muted" style="font-size:12.5px;margin-top:10px;">Nothing filed in the library shares any keywords with that question - it may not be covered yet, or try rephrasing.</p>
+  {% elif ask_status == 'no_answer' %}
+  <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;">
+    {% if ask_from_cache %}<p class="muted" style="font-size:11.5px;margin:0 0 6px;">&#8635; Reused from an earlier, very similar question{% if ask_cache_hit_count %} (asked {{ ask_cache_hit_count }} time{{ 's' if ask_cache_hit_count != 1 else '' }}){% endif %} - not re-searched just now.</p>{% endif %}
+    <p style="font-size:13px;margin:0;">{{ ask_answer }}</p>
+    {% if ask_candidates %}
+    <p class="muted" style="font-size:12px;margin:8px 0 2px;">Closest matches considered (none clearly answered it - worth checking by hand):</p>
+    <ul style="margin-top:0;font-size:12.5px;">
+      {% for p in ask_candidates %}<li><a href="#policy-document-{{ p.id }}">{{ p.title }}</a></li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% elif ask_status == 'done' %}
+  <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;">
+    {% if ask_from_cache %}<p class="muted" style="font-size:11.5px;margin:0 0 6px;">&#8635; Reused from an earlier, very similar question{% if ask_cache_hit_count %} (asked {{ ask_cache_hit_count }} time{{ 's' if ask_cache_hit_count != 1 else '' }}){% endif %} - not re-searched just now.</p>{% endif %}
+    <p style="font-size:13px;margin:0;">{{ ask_answer }}</p>
+    {% if ask_citations %}
+    <p class="muted" style="font-size:12px;margin:8px 0 2px;">Sources:</p>
+    <ul style="margin-top:0;font-size:12.5px;">
+      {% for p in ask_citations %}<li><a href="#policy-document-{{ p.id }}">{{ p.title }}</a></li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endif %}
+
 {% for category, items in library.items() %}
 <div class="card">
   <h3 class="mt-0"><span class="badge">{{ category }}</span></h3>
-  <table>
-    <thead><tr><th>Name</th><th>Description</th><th>Format</th><th>Last updated</th><th></th></tr></thead>
-    <tbody>
-      {% for policy in items %}
-      <tr>
-        <td>{{ policy.title }}</td>
-        <td class="muted">{{ policy.description }}</td>
-        <td>{{ policy.file_ext|upper }}</td>
-        <td class="muted">{{ policy.updated_at.strftime('%d %b %Y') if policy.updated_at else '—' }}{% if policy.updated_by %} by {{ policy.updated_by.name }}{% endif %}</td>
-        <td class="text-right">
-          <a href="{{ url_for('hr.download_policy', policy_id=policy.id) }}" class="btn small secondary">Download</a>
-          {% if can_edit %}
-          <a href="{{ url_for('hr.edit_policy', policy_id=policy.id) }}" class="btn small secondary">Edit</a>
-          <form method="post" action="{{ url_for('hr.delete_policy', policy_id=policy.id) }}" style="display:inline;" onsubmit="return confirm('Delete this policy/procedure? This cannot be undone.');">
-            <button type="submit" class="btn small danger">Delete</button>
-          </form>
-          {% endif %}
-        </td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  {% for policy in items %}
+  <div id="policy-document-{{ policy.id }}" style="padding:10px 0;border-bottom:1px solid var(--border);">
+    <p style="margin:0;">
+      <strong>{{ policy.title }}</strong>
+      <span class="badge">{{ policy.file_ext|upper }}</span>
+    </p>
+    <p class="muted" style="font-size:12.5px;margin:4px 0;">
+      {{ policy.description }}
+      {% if policy.description %}&middot; {% endif %}updated {{ policy.updated_at.strftime('%d %b %Y') if policy.updated_at else '—' }}{% if policy.updated_by %} by {{ policy.updated_by.name }}{% endif %}
+    </p>
+
+    {% if can_research %}
+    <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin:8px 0;">
+      {% if policy.ai_status == 'done' %}
+      <p style="font-size:12.5px;"><strong>AI summary:</strong> {{ policy.ai_summary }}</p>
+      {% if policy.ai_key_points %}
+      <p style="font-size:12.5px;margin-bottom:2px;"><strong>Key points:</strong></p>
+      <ul style="margin-top:0;font-size:12.5px;">
+        {% for point in policy.ai_key_points %}<li>{{ point }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if policy.ai_suggested_category and policy.ai_suggested_category != policy.category %}
+      <p class="muted" style="font-size:11.5px;">AI suggested category: {{ policy.ai_suggested_category }} (filed under {{ policy.category }})</p>
+      {% endif %}
+      {% elif policy.ai_status == 'not_configured' %}
+      <p class="muted" style="font-size:12px;">Automatic summarisation isn't set up yet ({{ policy.ai_error }}).{% if can_edit %} <form method="post" action="{{ url_for('hr.reprocess_policy_document', policy_id=policy.id) }}" class="inline"><button type="submit" class="btn small secondary">Reprocess</button></form>{% endif %}</p>
+      {% elif policy.ai_status == 'error' %}
+      <p class="muted" style="font-size:12px;">{{ policy.ai_error }}{% if can_edit %} <form method="post" action="{{ url_for('hr.reprocess_policy_document', policy_id=policy.id) }}" class="inline"><button type="submit" class="btn small secondary">Reprocess</button></form>{% endif %}</p>
+      {% else %}
+      <p class="muted" style="font-size:12px;">Not yet processed for AI research.{% if can_edit %} <form method="post" action="{{ url_for('hr.reprocess_policy_document', policy_id=policy.id) }}" class="inline"><button type="submit" class="btn small secondary">Reprocess</button></form>{% endif %}</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
+    <div class="text-right">
+      <a href="{{ url_for('hr.download_policy', policy_id=policy.id) }}" class="btn small secondary">Download</a>
+      {% if can_edit %}
+      <a href="{{ url_for('hr.edit_policy', policy_id=policy.id) }}" class="btn small secondary">Edit</a>
+      <form method="post" action="{{ url_for('hr.delete_policy', policy_id=policy.id) }}" style="display:inline;" onsubmit="return confirm('Delete this policy/procedure? This cannot be undone.');">
+        <button type="submit" class="btn small danger">Delete</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  {% endfor %}
 </div>
 {% endfor %}
 
