@@ -184,6 +184,155 @@ CASE_SYSTEM_PROMPT = (
 )
 
 
+# -------------------------------------------------------------- Publications
+#
+# A filed "Pub" (instrument_type == "Pub", see models.py) is a professional
+# publication or journal article - e.g. a SAIT Tax Chronicles Monthly piece,
+# a firm's own tax alert, an ICAZ technical note - not a piece of Zimbabwean
+# legislation and not a court judgment. Added for the same reason CASE_TOOL/
+# CASE_SYSTEM_PROMPT were: forcing something through SUMMARY_TOOL/
+# SYSTEM_PROMPT above, which is written as if everything filed were
+# Zimbabwean legislation, produces a wrong-framed result - in this case a
+# real South African tax journal issue (containing analysis of GAAR, CFCs,
+# influencer income, customs proof of export and similar South African tax
+# topics, and no Zimbabwean statutory instruments at all) came back
+# described in terms of Zimbabwean statutory instruments, when what it
+# actually is is a well-regarded professional publication with persuasive,
+# secondary-source commentary - filed not as law to comply with, but as
+# commentary that helps a practitioner's own decision-making (weighing an
+# unsettled position, seeing how a technical point is argued elsewhere,
+# sense-checking an approach). PUBLICATION_SYSTEM_PROMPT asks the model to
+# treat it as exactly that: useful analysis to weigh on its own merits, not
+# primary Zimbabwean law and not binding on anyone.
+PUBLICATION_TOOL = {
+    "name": "record_publication_summary",
+    "description": "Record a summary of this professional publication/journal article for an audit/tax firm's internal library, for a practitioner weighing its analysis as commentary that informs their own decision-making - not as a statement of Zimbabwean law.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": "A plain-language summary of what this publication covers and why it might matter to an audit/tax/accounting practitioner - a few sentences, not a paragraph-by-paragraph restatement. If it contains several distinct articles/topics, say so and name the main ones.",
+            },
+            "key_changes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "The specific points, arguments, or pieces of technical analysis a practitioner would actually want to weigh when making their own decision, each as one short standalone bullet - e.g. a position taken on an unsettled question, a practical pitfall flagged, a worked example's conclusion. Leave empty if there's nothing beyond the general summary worth pulling out separately.",
+            },
+            "suggested_areas": {
+                "type": "array",
+                "items": {"type": "string", "enum": LEGISLATIVE_UPDATE_AREAS},
+                "description": "Which of the listed practice areas this publication's content is actually relevant to. Only include an area it genuinely touches - this is only a suggestion for a person to confirm.",
+            },
+            "publication_jurisdiction": {
+                "type": "string",
+                "description": "The country/jurisdiction this publication is written for or about, e.g. 'South Africa', 'Zimbabwe', 'international'. Empty string if unclear or mixed.",
+            },
+        },
+        "required": ["summary", "key_changes", "suggested_areas", "publication_jurisdiction"],
+    },
+}
+
+PUBLICATION_SYSTEM_PROMPT = (
+    "You are summarising a professional publication or journal article (e.g. a tax institute's "
+    "journal, a firm's technical alert, a professional body's technical note) being filed into a "
+    "Zimbabwean audit, tax and accounting firm's internal library. This is NOT a piece of "
+    "Zimbabwean legislation and NOT a court judgment - it is secondary commentary/analysis, filed as "
+    "a source of informed opinion that helps a practitioner make their OWN decision, not as law they "
+    "must comply with. It may not even be about Zimbabwe at all (e.g. a South African tax journal is "
+    "routinely useful commentary for a Zimbabwean tax practitioner given the shared Roman-Dutch/"
+    "common-law tradition and closely analogous legislation, without being Zimbabwean law itself). "
+    "Read it carefully and call record_publication_summary with a plain-language summary of what it "
+    "covers, the specific points a practitioner would actually want to weigh when deciding how to "
+    "treat a similar issue, the practice areas it touches, and the jurisdiction it's written for. "
+    "Describe what the publication actually says and argues - do not describe it in terms of "
+    "Zimbabwean statutory instruments, gazette numbers, or an 'effective date' it does not have, and "
+    "do not claim it contains Zimbabwean legislation if it does not. Do not invent facts, figures, or "
+    "positions not actually stated in the text."
+)
+
+
+def summarize_publication(text=None, page_images=None):
+    """The Publication counterpart to summarize()/summarize_case_law() above
+    - same shape (text or page_images in, (result, status, error) out, never
+    raises), but using PUBLICATION_TOOL/PUBLICATION_SYSTEM_PROMPT so a
+    journal article or professional publication is described as what it
+    actually is, rather than forced through the legislation-only prompt.
+
+    On "done", result is {"summary", "key_changes", "suggested_areas",
+    "publication_jurisdiction"}."""
+    if os.environ.get("ANTHROPIC_API_KEY") is None:
+        return None, "not_configured", "ANTHROPIC_API_KEY is not set - see the README for how to add it on Render."
+    if not text and not page_images:
+        return None, "error", "No text or page images were available to summarise."
+
+    content = []
+    if page_images:
+        for img_bytes in page_images:
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": base64.b64encode(img_bytes).decode("ascii")},
+            })
+        content.append({"type": "text", "text": "Summarise the professional publication shown in the page image(s) above."})
+    else:
+        content.append({"type": "text", "text": f"Summarise this professional publication:\n\n{text[:MAX_TEXT_CHARS]}"})
+
+    try:
+        client = _client()
+        response = client.messages.create(
+            model=DEFAULT_MODEL,
+            max_tokens=2048,
+            system=PUBLICATION_SYSTEM_PROMPT,
+            tools=[PUBLICATION_TOOL],
+            tool_choice={"type": "tool", "name": "record_publication_summary"},
+            messages=[{"role": "user", "content": content}],
+        )
+    except Exception as exc:
+        return None, "error", str(exc)[:2000]
+
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "record_publication_summary":
+            data = block.input or {}
+            summary = (data.get("summary") or "").strip()
+            if not summary:
+                return None, "error", "The model didn't return a summary - try again, or add one manually."
+            key_changes = [str(k).strip()[:500] for k in (data.get("key_changes") or []) if str(k).strip()]
+            suggested_areas = [a for a in (data.get("suggested_areas") or []) if a in LEGISLATIVE_UPDATE_AREAS]
+            return (
+                {
+                    "summary": summary[:5000],
+                    "key_changes": key_changes,
+                    "suggested_areas": suggested_areas,
+                    "publication_jurisdiction": (data.get("publication_jurisdiction") or "").strip()[:100],
+                },
+                "done",
+                None,
+            )
+    return None, "error", "The model didn't return a structured result - try again, or add a summary manually."
+
+
+def summarize_publication_update(filepath, is_image, extracted_text, extraction_status):
+    """The Publication counterpart to summarize_legislative_update()/
+    summarize_case_law_update() below - same text-vs-image branching,
+    calling summarize_publication() instead."""
+    if is_image:
+        try:
+            with open(filepath, "rb") as f:
+                image_bytes = f.read()
+        except Exception as exc:
+            return None, "error", f"Could not read the uploaded image file: {exc}"[:2000]
+        return summarize_publication(page_images=[image_bytes])
+
+    if extraction_status == "extracted" and extracted_text:
+        return summarize_publication(text=extracted_text)
+    if extraction_status == "no_text_found":
+        images = render_pdf_pages_to_images(filepath)
+        if not images:
+            return None, "error", "Couldn't render the scanned PDF's pages to images."
+        return summarize_publication(page_images=images)
+    return None, "error", "Couldn't read the PDF file itself, so there's nothing to summarise from."
+
+
 def _client():
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:

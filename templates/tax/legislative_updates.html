@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>Legislative Update Control</h1>
-    <div class="subtitle">Firm-wide log of legislative/practice changes and case law - file an Act, Government Notice, Statutory Instrument or court Case for an automatic AI summary, or just log an update as text. Tag the clients each one affects, then pull it into a Tax Advisory engagement's Technical Research Log with one click.</div>
+    <div class="subtitle">Firm-wide log of legislative/practice changes, case law and professional publications - file an Act, Government Notice, Statutory Instrument, court Case or Publication for an automatic AI summary, or just log an update as text. Tag the clients each one affects, then pull it into a Tax Advisory engagement's Technical Research Log with one click.</div>
   </div>
 </div>
 
@@ -178,10 +178,14 @@
 <div class="card">
   <h3 class="mt-0">File an instrument, or log an update</h3>
   <p class="muted" style="font-size:12px;">
-    Attach the actual Act, Government Notice, Statutory Instrument or court Case (PDF, JPG or PNG) to get an
-    automatic AI summary below - or leave the file blank and just log the update as text, as before. A Case can
-    be Zimbabwean or foreign - the AI assesses a foreign judgment (e.g. South African) for persuasive authority
-    rather than dismissing it for not being Zimbabwean law; you confirm the final authority classification.
+    Attach the actual Act, Government Notice, Statutory Instrument, court Case or Publication (PDF, JPG or PNG) to
+    get an automatic AI summary below - or leave the file blank and just log the update as text, as before. A Case
+    can be Zimbabwean or foreign - the AI assesses a foreign judgment (e.g. South African) for persuasive authority
+    rather than dismissing it for not being Zimbabwean law; you confirm the final authority classification. A
+    Publication is a journal article or technical note (e.g. a SAIT Tax Chronicles Monthly issue) rather than
+    Zimbabwean legislation or a judgment - it's summarised as commentary/analysis on its own terms, not forced
+    into a legislative framing; use Source / reference for its citation (e.g. "Tax Chronicles Monthly, Issue 90,
+    January 2026, SAIT").
   </p>
   <form method="post" action="{{ url_for('tax.add_legislative_update') }}" enctype="multipart/form-data">
     <div class="form-row" style="flex-wrap:wrap;">

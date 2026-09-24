@@ -882,11 +882,15 @@ def delete_tax_checklist_item(item_id):
 # Started as a manually-typed log (title/summary/tax_head/effective_date/
 # source_reference/impact_assessment - still exactly how "Log an update
 # only" works below). add_legislative_update now also accepts an optional
-# filed instrument (an Act/Notice/SI, or a court Case, as a PDF or image):
-# its text is extracted the same way as a Regulatory Notice and then
-# analysed by AI (see legislation_summary.py) into ai_summary/ai_key_changes
-# - a Case additionally gets a citation/court/jurisdiction and an authority
-# assessment (see models.CASE_AUTHORITY_STATUSES). From there, a
+# filed instrument (an Act/Notice/SI, a court Case, or a professional
+# Publication, as a PDF or image): its text is extracted the same way as a
+# Regulatory Notice and then analysed by AI (see legislation_summary.py)
+# into ai_summary/ai_key_changes - a Case additionally gets a citation/
+# court/jurisdiction and an authority assessment (see
+# models.CASE_AUTHORITY_STATUSES), while a Publication (not Zimbabwean
+# legislation and not a court judgment - e.g. a SAIT journal issue) is
+# summarised on its own terms, see legislation_summary.PUBLICATION_SYSTEM_PROMPT.
+# From there, a
 # person confirms which practice areas it touches and tags the clients it
 # affects (see LegislativeUpdateClientLink) - each tagged client then shows
 # it on their own page, and a Tax Advisory engagement can pull the summary
@@ -1022,6 +1026,24 @@ def add_legislative_update(engagement_id=None):
                     update.case_jurisdiction = result["jurisdiction"] or None
                     update.ai_case_authority_status = result["authority_status"]
                     update.ai_case_authority_reasoning = result["authority_reasoning"] or None
+            elif instrument_type == "Pub":
+                # A professional publication/journal article gets analysed
+                # as what it is - not Zimbabwean legislation and not a court
+                # judgment - see legislation_summary.PUBLICATION_SYSTEM_PROMPT
+                # for why (a South African tax journal issue, for instance,
+                # has nowhere honest to go under the legislation-only prompt
+                # and comes back mis-framed as though it were a Zimbabwean
+                # statutory instrument).
+                result, ai_status, ai_error = legislation_summary.summarize_publication_update(
+                    filepath, is_image, update.extracted_text, update.extraction_status,
+                )
+                update.ai_status = ai_status
+                update.ai_error = ai_error
+                update.ai_processed_at = datetime.utcnow()
+                if ai_status == "done":
+                    update.ai_summary = result["summary"]
+                    update.set_ai_key_changes(result["key_changes"])
+                    update.set_ai_suggested_areas(result["suggested_areas"])
             else:
                 skip_reason = legislation_summary.skip_summary_reason(instrument_type)
                 if skip_reason:
@@ -1097,6 +1119,17 @@ def reprocess_legislative_update(update_id):
             update.case_jurisdiction = result["jurisdiction"] or None
             update.ai_case_authority_status = result["authority_status"]
             update.ai_case_authority_reasoning = result["authority_reasoning"] or None
+    elif update.instrument_type == "Pub":
+        result, ai_status, ai_error = legislation_summary.summarize_publication_update(
+            filepath, is_image, update.extracted_text, update.extraction_status,
+        )
+        update.ai_status = ai_status
+        update.ai_error = ai_error
+        update.ai_processed_at = datetime.utcnow()
+        if ai_status == "done":
+            update.ai_summary = result["summary"]
+            update.set_ai_key_changes(result["key_changes"])
+            update.set_ai_suggested_areas(result["suggested_areas"])
     else:
         result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
             filepath, is_image, update.extracted_text, update.extraction_status,

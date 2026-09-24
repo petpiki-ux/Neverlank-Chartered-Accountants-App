@@ -182,16 +182,19 @@ ANSWER_TOOL = {
 SYSTEM_PROMPT = (
     "You are answering a question for staff at a Zimbabwean audit, tax and accounting firm, using "
     "ONLY the excerpts below from their own filed Legislative Update Control library (Acts, "
-    "Government Notices, Statutory Instruments, and Case Law they have filed). Do not use any "
-    "outside knowledge of Zimbabwean law, tax rates, thresholds, or dates beyond what is explicitly "
-    "stated in these excerpts, even if you believe you know the answer - the firm relies on this "
-    "being grounded only in what they've actually filed and reviewed. If the excerpts don't clearly "
-    "answer the question, set found_answer to false and say so plainly rather than guessing or "
-    "filling in from general knowledge. When you draw on a filed Case, note its authority status "
-    "(shown in the excerpt) in your answer - a Zimbabwean case is binding, while a foreign case "
-    "(e.g. South African) marked persuasive is worth citing but should be presented as persuasive "
-    "authority, not as binding Zimbabwean law. Always cite the specific [Update #N] id(s) you "
-    "actually drew on. Keep the answer concise and practical."
+    "Government Notices, Statutory Instruments, Case Law, and professional Publications they have "
+    "filed). Do not use any outside knowledge of Zimbabwean law, tax rates, thresholds, or dates "
+    "beyond what is explicitly stated in these excerpts, even if you believe you know the answer - "
+    "the firm relies on this being grounded only in what they've actually filed and reviewed. If the "
+    "excerpts don't clearly answer the question, set found_answer to false and say so plainly rather "
+    "than guessing or filling in from general knowledge. Weigh each source by what it actually is, "
+    "shown as its Type in the excerpt: an Act, Notice or SI is primary Zimbabwean law; a Case's "
+    "authority status (shown in the excerpt) tells you whether it's binding (a Zimbabwean court) or "
+    "merely persuasive (e.g. a foreign, often South African, decision); a Publication is secondary "
+    "commentary/analysis - useful and often persuasive, but never primary law and never binding, and "
+    "not necessarily about Zimbabwe at all - so present anything drawn from one as commentary or "
+    "analysis, attributed to its source, not as a statement of Zimbabwean law in its own right. Always "
+    "cite the specific [Update #N] id(s) you actually drew on. Keep the answer concise and practical."
 )
 
 
@@ -216,6 +219,8 @@ def _candidate_block(update, chunk=None):
         authority_label = update.authority_label or update.ai_authority_label
         if authority_label:
             lines.append(f"Authority for Zimbabwean practice: {authority_label}" + (" (AI suggestion, not yet confirmed)" if not update.case_authority_status else ""))
+    elif update.instrument_type == "Pub":
+        lines.append("Note: this is a professional publication (secondary commentary/analysis), not Zimbabwean legislation and not binding.")
     if update.gazette_date:
         lines.append(f"Gazetted: {update.gazette_date.strftime('%d %b %Y')}")
     if update.effective_date:
