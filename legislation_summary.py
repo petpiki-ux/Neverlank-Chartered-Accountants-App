@@ -21,7 +21,7 @@ import base64
 import anthropic
 import pdfplumber
 
-from models import LEGISLATIVE_UPDATE_AREAS
+from models import LEGISLATIVE_UPDATE_AREAS, CASE_AUTHORITY_STATUSES
 
 DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 REQUEST_TIMEOUT = 90  # seconds - a multi-page scanned gazette can take a while to read
@@ -88,6 +88,99 @@ SYSTEM_PROMPT = (
     "the document - if something is unclear or not stated, leave it out rather than guessing. If "
     "the instrument makes no substantive change (e.g. it is a purely administrative appointment or "
     "commencement notice), say so plainly in the summary and leave key_changes empty."
+)
+
+# ---------------------------------------------------------------- Case Law
+#
+# A filed "Case" (instrument_type == "Case", see models.py) is a court
+# judgment rather than a piece of legislation, so it gets its own tool/
+# prompt rather than being forced through SUMMARY_TOOL/SYSTEM_PROMPT above,
+# which are written as if everything filed were Zimbabwean legislation. That
+# framing is exactly what caused a real bug: a South African tax case,
+# filed through the legislation-only prompt, came back described as "not
+# relevant to Zimbabwean tax law" - true only in the narrow sense that it
+# isn't Zimbabwean legislation, but wrong in the sense a practitioner
+# actually cares about, since Zimbabwean courts have long treated South
+# African case law as persuasive authority (shared Roman-Dutch/common-law
+# tradition, closely analogous legislation including much of Zimbabwe's own
+# tax law). CASE_SYSTEM_PROMPT below asks the model to judge authority the
+# way a Zimbabwean practitioner would, rather than by jurisdiction alone -
+# see models.CASE_AUTHORITY_STATUSES for the resulting classification.
+CASE_TOOL = {
+    "name": "record_case_law_summary",
+    "description": "Record an analysis of this court judgment for an audit/tax firm's internal case-law register, including a plain assessment of its authority for Zimbabwean practice.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": "A plain-language summary of the case (the issue, what was decided, and why) written for an audit/tax/accounting practitioner - a few sentences, not a paragraph-by-paragraph restatement.",
+            },
+            "key_holdings": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "The specific legal principles or holdings this case establishes or applies, each as one short standalone bullet - the kind of point a practitioner would actually cite it for.",
+            },
+            "suggested_areas": {
+                "type": "array",
+                "items": {"type": "string", "enum": LEGISLATIVE_UPDATE_AREAS},
+                "description": "Which of the listed practice areas this case is actually relevant to. Only include an area the case genuinely touches - this is only a suggestion for a person to confirm.",
+            },
+            "citation": {
+                "type": "string",
+                "description": "The case's own citation as it appears in the judgment (e.g. 'ITC 1234 (2019) 82 SATC 123' or 'HH 45/20'). Empty string if none is evident.",
+            },
+            "court": {
+                "type": "string",
+                "description": "The court that decided the case (e.g. 'High Court of Zimbabwe', 'Tax Court of South Africa, Johannesburg', 'Supreme Court of Zimbabwe'). Empty string if unclear.",
+            },
+            "jurisdiction": {
+                "type": "string",
+                "description": "The country/jurisdiction of the deciding court, e.g. 'Zimbabwe', 'South Africa', 'United Kingdom'. Empty string if unclear.",
+            },
+            "authority_status": {
+                "type": "string",
+                "enum": CASE_AUTHORITY_STATUSES,
+                "description": (
+                    "How a Zimbabwean practitioner should weigh this case. 'binding' only for a "
+                    "Zimbabwean court decision that binds within the ordinary court hierarchy. "
+                    "'persuasive' for a foreign decision - especially South African - that Zimbabwean "
+                    "courts would plausibly treat as persuasive authority, e.g. because the legal "
+                    "issue or the underlying statutory provision is the same or closely analogous to "
+                    "Zimbabwean law (do not require an exact statutory match - shared Roman-Dutch/"
+                    "common-law lineage and similarly-worded tax legislation are themselves reasons "
+                    "South African case law is routinely persuasive in Zimbabwe). 'limited' if the "
+                    "persuasive value is real but weak or uncertain (e.g. a jurisdiction with less "
+                    "shared legal history, or a point turning on a provision that differs materially "
+                    "from Zimbabwean law). 'not_relevant' ONLY if the case's actual subject matter has "
+                    "no bearing on Zimbabwean tax/legal practice at all - never merely because the "
+                    "court is foreign."
+                ),
+            },
+            "authority_reasoning": {
+                "type": "string",
+                "description": "One or two sentences explaining the authority_status classification above - e.g. which Zimbabwean provision or line of authority it bears on, and why it would (or wouldn't) be persuasive.",
+            },
+        },
+        "required": ["summary", "key_holdings", "suggested_areas", "citation", "court", "jurisdiction", "authority_status", "authority_reasoning"],
+    },
+}
+
+CASE_SYSTEM_PROMPT = (
+    "You are analysing a court judgment being filed into a Zimbabwean audit, tax and accounting "
+    "firm's Legislative Update Control library, which tracks case law alongside legislation. The "
+    "case may be Zimbabwean or from another jurisdiction. Read it carefully and call "
+    "record_case_law_summary with a plain-language summary, the specific holdings a practitioner "
+    "would actually cite it for, the practice areas it touches, its citation/court/jurisdiction as "
+    "stated in the judgment, and an honest assessment of its authority for Zimbabwean practice. "
+    "Judge authority the way a Zimbabwean practitioner would, not by jurisdiction alone: a "
+    "Zimbabwean court's decision is binding within the ordinary hierarchy; a foreign court's "
+    "decision is never binding, but Zimbabwean courts have long treated South African case law in "
+    "particular as persuasive authority, given the shared Roman-Dutch/common-law tradition and "
+    "closely analogous legislation (including much of Zimbabwe's own tax law) - being foreign is "
+    "not, on its own, a reason to call a case not relevant. Reserve 'not_relevant' for a case whose "
+    "actual subject matter has no bearing on Zimbabwean tax or legal practice. Do not invent facts, "
+    "figures, or holdings not actually stated in the judgment."
 )
 
 
@@ -176,6 +269,93 @@ def summarize(text=None, page_images=None):
                 None,
             )
     return None, "error", "The model didn't return a structured result - try again, or add a summary manually."
+
+
+def summarize_case_law(text=None, page_images=None):
+    """The Case-law counterpart to summarize() above - same shape (text or
+    page_images in, (result, status, error) out, never raises), but using
+    CASE_TOOL/CASE_SYSTEM_PROMPT so a court judgment is analysed as case
+    law (with a citation/court/jurisdiction and an authority_status
+    assessment) rather than forced through the legislation-only prompt.
+
+    On "done", result is {"summary", "key_holdings", "suggested_areas",
+    "citation", "court", "jurisdiction", "authority_status",
+    "authority_reasoning"}."""
+    if os.environ.get("ANTHROPIC_API_KEY") is None:
+        return None, "not_configured", "ANTHROPIC_API_KEY is not set - see the README for how to add it on Render."
+    if not text and not page_images:
+        return None, "error", "No text or page images were available to analyse."
+
+    content = []
+    if page_images:
+        for img_bytes in page_images:
+            content.append({
+                "type": "image",
+                "source": {"type": "base64", "media_type": "image/png", "data": base64.b64encode(img_bytes).decode("ascii")},
+            })
+        content.append({"type": "text", "text": "Analyse the court judgment shown in the page image(s) above."})
+    else:
+        content.append({"type": "text", "text": f"Analyse this court judgment:\n\n{text[:MAX_TEXT_CHARS]}"})
+
+    try:
+        client = _client()
+        response = client.messages.create(
+            model=DEFAULT_MODEL,
+            max_tokens=2048,
+            system=CASE_SYSTEM_PROMPT,
+            tools=[CASE_TOOL],
+            tool_choice={"type": "tool", "name": "record_case_law_summary"},
+            messages=[{"role": "user", "content": content}],
+        )
+    except Exception as exc:
+        return None, "error", str(exc)[:2000]
+
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "record_case_law_summary":
+            data = block.input or {}
+            summary = (data.get("summary") or "").strip()
+            if not summary:
+                return None, "error", "The model didn't return a summary - try again, or add one manually."
+            authority_status = data.get("authority_status")
+            if authority_status not in CASE_AUTHORITY_STATUSES:
+                authority_status = None
+            return (
+                {
+                    "summary": summary[:5000],
+                    "key_holdings": [str(k).strip()[:500] for k in (data.get("key_holdings") or []) if str(k).strip()],
+                    "suggested_areas": [a for a in (data.get("suggested_areas") or []) if a in LEGISLATIVE_UPDATE_AREAS],
+                    "citation": (data.get("citation") or "").strip()[:300],
+                    "court": (data.get("court") or "").strip()[:200],
+                    "jurisdiction": (data.get("jurisdiction") or "").strip()[:100],
+                    "authority_status": authority_status,
+                    "authority_reasoning": (data.get("authority_reasoning") or "").strip()[:2000],
+                },
+                "done",
+                None,
+            )
+    return None, "error", "The model didn't return a structured result - try again, or add a summary manually."
+
+
+def summarize_case_law_update(filepath, is_image, extracted_text, extraction_status):
+    """The Case-law counterpart to summarize_legislative_update() below -
+    same text-vs-image branching, calling summarize_case_law() instead of
+    summarize()."""
+    if is_image:
+        try:
+            with open(filepath, "rb") as f:
+                image_bytes = f.read()
+        except Exception as exc:
+            return None, "error", f"Could not read the uploaded image file: {exc}"[:2000]
+        return summarize_case_law(page_images=[image_bytes])
+
+    if extraction_status == "extracted" and extracted_text:
+        return summarize_case_law(text=extracted_text)
+    if extraction_status == "no_text_found":
+        images = render_pdf_pages_to_images(filepath)
+        if not images:
+            return None, "error", "Couldn't render the scanned PDF's pages to images."
+        return summarize_case_law(page_images=images)
+    return None, "error", "Couldn't read the PDF file itself, so there's nothing to analyse from."
 
 
 def summarize_legislative_update(filepath, is_image, extracted_text, extraction_status):

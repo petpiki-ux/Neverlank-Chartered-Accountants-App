@@ -82,6 +82,9 @@ def _searchable_blob(update):
         update.tax_head or "",
         update.type_label or "",
         update.source_reference or "",
+        update.case_citation or "",
+        update.case_court or "",
+        update.case_jurisdiction or "",
         update.summary or "",
         update.ai_summary or "",
         " ".join(update.ai_key_changes or []),
@@ -121,7 +124,7 @@ def search_candidate_chunks(question, limit=MAX_CANDIDATES):
         title_tokens = set(_tokenize(update.title or ""))
         if update.chunks:
             for chunk in update.chunks:
-                blob = " ".join([update.title or "", update.tax_head or "", update.type_label or "", chunk.heading or "", chunk.text]).lower()
+                blob = " ".join([update.title or "", update.tax_head or "", update.type_label or "", update.case_citation or "", chunk.heading or "", chunk.text]).lower()
                 blob_tokens = set(_WORD_RE.findall(blob))
                 score = sum(2 if t in title_tokens else 1 for t in tokens if t in blob_tokens)
                 if score > 0:
@@ -179,13 +182,16 @@ ANSWER_TOOL = {
 SYSTEM_PROMPT = (
     "You are answering a question for staff at a Zimbabwean audit, tax and accounting firm, using "
     "ONLY the excerpts below from their own filed Legislative Update Control library (Acts, "
-    "Government Notices and Statutory Instruments they have filed). Do not use any outside "
-    "knowledge of Zimbabwean law, tax rates, thresholds, or dates beyond what is explicitly stated "
-    "in these excerpts, even if you believe you know the answer - the firm relies on this being "
-    "grounded only in what they've actually filed and reviewed. If the excerpts don't clearly "
+    "Government Notices, Statutory Instruments, and Case Law they have filed). Do not use any "
+    "outside knowledge of Zimbabwean law, tax rates, thresholds, or dates beyond what is explicitly "
+    "stated in these excerpts, even if you believe you know the answer - the firm relies on this "
+    "being grounded only in what they've actually filed and reviewed. If the excerpts don't clearly "
     "answer the question, set found_answer to false and say so plainly rather than guessing or "
-    "filling in from general knowledge. Always cite the specific [Update #N] id(s) you actually "
-    "drew on. Keep the answer concise and practical."
+    "filling in from general knowledge. When you draw on a filed Case, note its authority status "
+    "(shown in the excerpt) in your answer - a Zimbabwean case is binding, while a foreign case "
+    "(e.g. South African) marked persuasive is worth citing but should be presented as persuasive "
+    "authority, not as binding Zimbabwean law. Always cite the specific [Update #N] id(s) you "
+    "actually drew on. Keep the answer concise and practical."
 )
 
 
@@ -202,6 +208,14 @@ def _candidate_block(update, chunk=None):
         f"[Update #{update.id}] {update.title}",
         f"Type: {update.type_label}" + (f" ({update.tax_head})" if update.tax_head else ""),
     ]
+    if update.instrument_type == "Case":
+        if update.case_court or update.case_jurisdiction:
+            lines.append(f"Court: {update.case_court or '—'} ({update.case_jurisdiction or 'jurisdiction unclear'})")
+        if update.case_citation:
+            lines.append(f"Citation: {update.case_citation}")
+        authority_label = update.authority_label or update.ai_authority_label
+        if authority_label:
+            lines.append(f"Authority for Zimbabwean practice: {authority_label}" + (" (AI suggestion, not yet confirmed)" if not update.case_authority_status else ""))
     if update.gazette_date:
         lines.append(f"Gazetted: {update.gazette_date.strftime('%d %b %Y')}")
     if update.effective_date:
@@ -212,7 +226,7 @@ def _candidate_block(update, chunk=None):
     if summary:
         lines.append(f"Summary: {summary}")
     if update.ai_key_changes:
-        lines.append("Key changes: " + "; ".join(update.ai_key_changes))
+        lines.append(("Key holdings: " if update.instrument_type == "Case" else "Key changes: ") + "; ".join(update.ai_key_changes))
     if chunk is not None:
         heading_note = f" ({chunk.heading})" if chunk.heading else ""
         lines.append(f"Relevant excerpt from the filed document{heading_note}: {chunk.text[:EXCERPT_CHARS]}")

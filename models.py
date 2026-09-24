@@ -4441,15 +4441,40 @@ class TaxDispute(db.Model):
         return f"<TaxDispute {self.tax_head} stage={self.stage} engagement={self.engagement_id}>"
 
 
-# The three kinds of instrument that can now be FILED (as an actual document,
+# The four kinds of instrument that can now be FILED (as an actual document,
 # rather than just logged as a text entry) against a LegislativeUpdate - see
 # the "filing" fields added to that model below. Existing rows logged before
 # this existed have instrument_type None, and are shown simply as "Update".
-LEGISLATIVE_UPDATE_TYPES = ["Act", "Notice", "SI"]
+# "Case" (added alongside chunked full-text search) is for a court
+# judgment/case - Zimbabwean or foreign - rather than a piece of legislation;
+# see the case_* fields below and legislation_summary.summarize_case_law.
+LEGISLATIVE_UPDATE_TYPES = ["Act", "Notice", "SI", "Case"]
 LEGISLATIVE_UPDATE_TYPE_LABELS = {
     "Act": "Act of Parliament",
     "Notice": "Government Notice",
     "SI": "Statutory Instrument",
+    "Case": "Case Law",
+}
+
+# How a filed Case entry's authority for Zimbabwean practice is classified -
+# by the AI as a first pass (ai_case_authority_status, never applied on its
+# own) and then confirmed/overridden by a person (case_authority_status),
+# same "suggest, then a person confirms" pattern as areas/ai_suggested_areas.
+# A Zimbabwean court's decision is "binding" (subject to the ordinary court
+# hierarchy); a foreign court's decision is never binding, but Zimbabwean
+# courts have long treated South African case law in particular as
+# persuasive authority, given the shared Roman-Dutch/common-law tradition
+# and closely analogous legislation (including much of Zimbabwe's own tax
+# law) - being foreign is not, on its own, a reason to call a case "not
+# relevant". "not_relevant" is reserved for a case whose actual subject
+# matter doesn't bear on Zimbabwean tax/legal practice at all, not merely
+# because it wasn't decided by a Zimbabwean court.
+CASE_AUTHORITY_STATUSES = ["binding", "persuasive", "limited", "not_relevant"]
+CASE_AUTHORITY_LABELS = {
+    "binding": "Binding (Zimbabwean court)",
+    "persuasive": "Persuasive authority",
+    "limited": "Limited/uncertain persuasive value",
+    "not_relevant": "Not relevant to Zimbabwean practice",
 }
 
 # A fixed set of practice-area tags a logged/filed update can be marked
@@ -4476,10 +4501,10 @@ class LegislativeUpdate(db.Model):
     Originally a manually-typed log entry (title/summary/tax_head/
     effective_date/source_reference/impact_assessment) - those fields are
     unchanged and still work exactly as before. The fields below let an
-    entry instead FILE the actual instrument (an Act/Notice/SI, as a PDF or
-    image): text is extracted from it the same way as RegulatoryNotice/
-    CompanyDocument (see sanctions_data.extract_pdf_text), and then
-    summarised by AI (see legislation_summary.py) into ai_summary/
+    entry instead FILE the actual instrument (an Act/Notice/SI, or a court
+    Case, as a PDF or image): text is extracted from it the same way as
+    RegulatoryNotice/CompanyDocument (see sanctions_data.extract_pdf_text),
+    and then summarised by AI (see legislation_summary.py) into ai_summary/
     ai_key_changes - purely informational, like every other AI-assisted
     feature in this app: it never decides anything, a person reads it and
     judges it. "areas" is the firm's own confirmed tagging of which
@@ -4488,7 +4513,14 @@ class LegislativeUpdate(db.Model):
     LegislativeUpdateClientLink); ai_suggested_areas is only the AI's own
     guess at the same, offered as a starting point - never applied
     automatically. A logged entry with no file is unaffected: all of the
-    fields below are simply blank."""
+    fields below are simply blank.
+
+    A Case entry (instrument_type == "Case") is a court judgment rather
+    than a piece of legislation - Zimbabwean or foreign - and gets the
+    case_* fields below in addition to the usual summary/key-holdings/areas
+    treatment: see CASE_AUTHORITY_STATUSES above for why a foreign judgment
+    (particularly South African) is assessed for persuasive value rather
+    than dismissed outright for not being Zimbabwean law."""
     id = db.Column(db.Integer, primary_key=True)
     tax_head = db.Column(db.String(80))
     title = db.Column(db.String(200), nullable=False)
@@ -4513,11 +4545,25 @@ class LegislativeUpdate(db.Model):
     page_count = db.Column(db.Integer)
 
     ai_summary = db.Column(db.Text)
-    ai_key_changes_json = db.Column(db.Text)  # JSON-encoded list of short bullet strings
+    ai_key_changes_json = db.Column(db.Text)  # JSON-encoded list of short bullet strings (for a Case: its key holdings)
     ai_suggested_areas_json = db.Column(db.Text)  # JSON-encoded list - a suggestion only, never auto-applied
     ai_status = db.Column(db.String(20))  # "done", "not_configured", "error", "skipped" (see legislation_summary.skip_summary_reason - full Acts deliberately aren't auto-summarised)
     ai_error = db.Column(db.Text)
     ai_processed_at = db.Column(db.DateTime)
+
+    # ---- Case Law filing only (instrument_type == "Case") ----
+    # citation/court/jurisdiction are read straight off the judgment by the
+    # AI (an extraction, not a judgement call) but stay editable by hand -
+    # see tax.save_legislative_update_areas. authority_status is the actual
+    # judgement call (see CASE_AUTHORITY_STATUSES above): ai_case_authority_*
+    # is the AI's own first pass, never applied on its own; case_authority_
+    # status is what a person has actually confirmed, same pattern as areas.
+    case_citation = db.Column(db.String(300))
+    case_court = db.Column(db.String(200))
+    case_jurisdiction = db.Column(db.String(100))
+    ai_case_authority_status = db.Column(db.String(20))
+    ai_case_authority_reasoning = db.Column(db.Text)
+    case_authority_status = db.Column(db.String(20))
 
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
     created_by = db.relationship("User", foreign_keys=[created_by_id])
@@ -4567,6 +4613,18 @@ class LegislativeUpdate(db.Model):
     @property
     def file_ext(self):
         return self.original_filename.rsplit(".", 1)[-1].lower() if self.original_filename and "." in self.original_filename else ""
+
+    @property
+    def authority_label(self):
+        """The person-confirmed authority classification's display label, or
+        None if not yet confirmed - see case_authority_status above."""
+        return CASE_AUTHORITY_LABELS.get(self.case_authority_status)
+
+    @property
+    def ai_authority_label(self):
+        """The AI's own first-pass authority suggestion's display label, or
+        None if not yet processed - see ai_case_authority_status above."""
+        return CASE_AUTHORITY_LABELS.get(self.ai_case_authority_status)
 
     def __repr__(self):
         return f"<LegislativeUpdate {self.title!r}>"

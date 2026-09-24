@@ -40,6 +40,7 @@ from models import (
     TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
     LegislativeUpdate, LegislativeUpdateClientLink,
     LEGISLATIVE_UPDATE_TYPES, LEGISLATIVE_UPDATE_TYPE_LABELS, LEGISLATIVE_UPDATE_AREAS,
+    CASE_AUTHORITY_STATUSES, CASE_AUTHORITY_LABELS,
     TaxChecklistItem, DEFAULT_TAX_CHECKLIST_ITEMS,
     TAX_HEADS, PARTNER_SIGNOFF_ROLES, REVIEWER_ROLES,
     user_has_permission,
@@ -881,9 +882,11 @@ def delete_tax_checklist_item(item_id):
 # Started as a manually-typed log (title/summary/tax_head/effective_date/
 # source_reference/impact_assessment - still exactly how "Log an update
 # only" works below). add_legislative_update now also accepts an optional
-# filed instrument (an Act/Notice/SI, as a PDF or image): its text is
-# extracted the same way as a Regulatory Notice and then summarised by AI
-# (see legislation_summary.py) into ai_summary/ai_key_changes. From there, a
+# filed instrument (an Act/Notice/SI, or a court Case, as a PDF or image):
+# its text is extracted the same way as a Regulatory Notice and then
+# analysed by AI (see legislation_summary.py) into ai_summary/ai_key_changes
+# - a Case additionally gets a citation/court/jurisdiction and an authority
+# assessment (see models.CASE_AUTHORITY_STATUSES). From there, a
 # person confirms which practice areas it touches and tags the clients it
 # affects (see LegislativeUpdateClientLink) - each tagged client then shows
 # it on their own page, and a Tax Advisory engagement can pull the summary
@@ -897,6 +900,7 @@ def _render_legislative_updates(**extra):
         can_edit=user_has_permission(current_user, "manage_legislative_updates"),
         instrument_types=LEGISLATIVE_UPDATE_TYPES, type_labels=LEGISLATIVE_UPDATE_TYPE_LABELS,
         areas=LEGISLATIVE_UPDATE_AREAS, clients=Client.query.order_by(Client.name).all(),
+        case_authority_statuses=CASE_AUTHORITY_STATUSES, case_authority_labels=CASE_AUTHORITY_LABELS,
         ask_question=None, ask_status=None, ask_answer=None, ask_citations=None, ask_candidates=None,
         ask_from_cache=False, ask_cache_hit_count=None,
     )
@@ -997,13 +1001,13 @@ def add_legislative_update(engagement_id=None):
 
             db.session.commit()  # save the upload itself before attempting the AI call, so a slow/failed AI step never loses the file
 
-            skip_reason = legislation_summary.skip_summary_reason(instrument_type)
-            if skip_reason:
-                update.ai_status = "skipped"
-                update.ai_error = skip_reason
-                update.ai_processed_at = datetime.utcnow()
-            else:
-                result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
+            if instrument_type == "Case":
+                # A court judgment gets analysed as case law, not as
+                # legislation - see legislation_summary.CASE_SYSTEM_PROMPT
+                # for why (a foreign case, especially South African, is
+                # assessed for persuasive authority rather than dismissed
+                # outright for not being Zimbabwean legislation).
+                result, ai_status, ai_error = legislation_summary.summarize_case_law_update(
                     filepath, is_image, update.extracted_text, update.extraction_status,
                 )
                 update.ai_status = ai_status
@@ -1011,15 +1015,39 @@ def add_legislative_update(engagement_id=None):
                 update.ai_processed_at = datetime.utcnow()
                 if ai_status == "done":
                     update.ai_summary = result["summary"]
-                    update.set_ai_key_changes(result["key_changes"])
+                    update.set_ai_key_changes(result["key_holdings"])
                     update.set_ai_suggested_areas(result["suggested_areas"])
+                    update.case_citation = result["citation"] or None
+                    update.case_court = result["court"] or None
+                    update.case_jurisdiction = result["jurisdiction"] or None
+                    update.ai_case_authority_status = result["authority_status"]
+                    update.ai_case_authority_reasoning = result["authority_reasoning"] or None
+            else:
+                skip_reason = legislation_summary.skip_summary_reason(instrument_type)
+                if skip_reason:
+                    update.ai_status = "skipped"
+                    update.ai_error = skip_reason
+                    update.ai_processed_at = datetime.utcnow()
+                else:
+                    result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
+                        filepath, is_image, update.extracted_text, update.extraction_status,
+                    )
+                    update.ai_status = ai_status
+                    update.ai_error = ai_error
+                    update.ai_processed_at = datetime.utcnow()
+                    if ai_status == "done":
+                        update.ai_summary = result["summary"]
+                        update.set_ai_key_changes(result["key_changes"])
+                        update.set_ai_suggested_areas(result["suggested_areas"])
 
             if update.extracted_text:
                 legislation_chunking.ensure_chunks(update)
 
     db.session.commit()
 
-    if update.ai_status == "done":
+    if update.ai_status == "done" and instrument_type == "Case":
+        flash(f"'{update.title}' filed - AI analysis generated below, including a suggested authority assessment. Confirm the authority status and practice areas, then tag any clients it affects.", "success")
+    elif update.ai_status == "done":
         flash(f"'{update.title}' filed - AI summary generated below. Confirm which practice areas it touches, then tag any clients it affects.", "success")
     elif update.ai_status == "skipped":
         flash(f"'{update.title}' filed - {update.ai_error} Confirm which practice areas it touches, then tag any clients it affects.", "info")
@@ -1053,16 +1081,33 @@ def reprocess_legislative_update(update_id):
         return redirect(url_for("tax.list_legislative_updates"))
 
     is_image = update.file_ext in LEGISLATIVE_UPDATE_IMAGE_EXTENSIONS
-    result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
-        filepath, is_image, update.extracted_text, update.extraction_status,
-    )
-    update.ai_status = ai_status
-    update.ai_error = ai_error
-    update.ai_processed_at = datetime.utcnow()
-    if ai_status == "done":
-        update.ai_summary = result["summary"]
-        update.set_ai_key_changes(result["key_changes"])
-        update.set_ai_suggested_areas(result["suggested_areas"])
+    if update.instrument_type == "Case":
+        result, ai_status, ai_error = legislation_summary.summarize_case_law_update(
+            filepath, is_image, update.extracted_text, update.extraction_status,
+        )
+        update.ai_status = ai_status
+        update.ai_error = ai_error
+        update.ai_processed_at = datetime.utcnow()
+        if ai_status == "done":
+            update.ai_summary = result["summary"]
+            update.set_ai_key_changes(result["key_holdings"])
+            update.set_ai_suggested_areas(result["suggested_areas"])
+            update.case_citation = result["citation"] or None
+            update.case_court = result["court"] or None
+            update.case_jurisdiction = result["jurisdiction"] or None
+            update.ai_case_authority_status = result["authority_status"]
+            update.ai_case_authority_reasoning = result["authority_reasoning"] or None
+    else:
+        result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
+            filepath, is_image, update.extracted_text, update.extraction_status,
+        )
+        update.ai_status = ai_status
+        update.ai_error = ai_error
+        update.ai_processed_at = datetime.utcnow()
+        if ai_status == "done":
+            update.ai_summary = result["summary"]
+            update.set_ai_key_changes(result["key_changes"])
+            update.set_ai_suggested_areas(result["suggested_areas"])
     db.session.commit()
     if ai_status == "done":
         flash("Reprocessed - the AI summary below has been refreshed.", "success")
@@ -1083,8 +1128,16 @@ def save_legislative_update_areas(update_id):
     update = LegislativeUpdate.query.get_or_404(update_id)
     submitted = request.form.getlist("areas")
     update.set_areas([a for a in submitted if a in LEGISLATIVE_UPDATE_AREAS])
+    message = "Practice areas updated."
+    if update.instrument_type == "Case":
+        authority_status = request.form.get("case_authority_status", "").strip()
+        update.case_authority_status = authority_status if authority_status in CASE_AUTHORITY_STATUSES else None
+        update.case_citation = request.form.get("case_citation", "").strip() or None
+        update.case_court = request.form.get("case_court", "").strip() or None
+        update.case_jurisdiction = request.form.get("case_jurisdiction", "").strip() or None
+        message = "Practice areas and authority assessment updated."
     db.session.commit()
-    flash("Practice areas updated.", "success")
+    flash(message, "success")
     return redirect(url_for("tax.list_legislative_updates"))
 
 

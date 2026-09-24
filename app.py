@@ -194,6 +194,17 @@ def _add_missing_columns():
             ("ai_status", "VARCHAR(20)"),
             ("ai_error", "TEXT"),
             ("ai_processed_at", "DATETIME"),
+            # Case Law filing (instrument_type == "Case") - a court judgment
+            # rather than a piece of legislation. See models.LegislativeUpdate
+            # and models.CASE_AUTHORITY_STATUSES for why a foreign judgment
+            # (especially South African) is assessed for persuasive value
+            # rather than dismissed for not being Zimbabwean law.
+            ("case_citation", "VARCHAR(300)"),
+            ("case_court", "VARCHAR(200)"),
+            ("case_jurisdiction", "VARCHAR(100)"),
+            ("ai_case_authority_status", "VARCHAR(20)"),
+            ("ai_case_authority_reasoning", "TEXT"),
+            ("case_authority_status", "VARCHAR(20)"),
         ],
     }
     with db.engine.connect() as conn:

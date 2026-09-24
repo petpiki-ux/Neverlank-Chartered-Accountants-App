@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>Legislative Update Control</h1>
-    <div class="subtitle">Firm-wide log of legislative/practice changes - file an Act, Government Notice or Statutory Instrument for an automatic AI summary, or just log an update as text. Tag the clients each one affects, then pull it into a Tax Advisory engagement's Technical Research Log with one click.</div>
+    <div class="subtitle">Firm-wide log of legislative/practice changes and case law - file an Act, Government Notice, Statutory Instrument or court Case for an automatic AI summary, or just log an update as text. Tag the clients each one affects, then pull it into a Tax Advisory engagement's Technical Research Log with one click.</div>
   </div>
 </div>
 
@@ -58,11 +58,26 @@
       {% if u.is_reviewed %}<span class="badge status-Completed">Reviewed</span>{% endif %}
     </p>
     <p class="muted" style="font-size:12.5px;margin:4px 0;">
-      {% if u.gazette_date %}gazetted {{ u.gazette_date.strftime('%d %b %Y') }} &middot; {% endif %}
+      {% if u.instrument_type == 'Case' %}
+        {% if u.case_court %}{{ u.case_court }}{% endif %}{% if u.case_jurisdiction %} ({{ u.case_jurisdiction }}){% endif %}
+        {% if u.case_citation %}&middot; {{ u.case_citation }}{% endif %}
+        {% if u.case_court or u.case_citation %}&middot; {% endif %}
+      {% else %}
+        {% if u.gazette_date %}gazetted {{ u.gazette_date.strftime('%d %b %Y') }} &middot; {% endif %}
+      {% endif %}
       Effective {{ u.effective_date.strftime('%d %b %Y') if u.effective_date else '—' }}
       {% if u.source_reference %}&middot; {{ u.source_reference }}{% endif %}
       &middot; logged by {{ u.created_by.name if u.created_by else '—' }} on {{ u.created_at.strftime('%d %b %Y') }}
     </p>
+    {% if u.instrument_type == 'Case' %}
+      {% set authority_label = u.authority_label or u.ai_authority_label %}
+      {% if authority_label %}
+      <p style="margin:2px 0;">
+        <span class="badge{% if u.case_authority_status == 'not_relevant' or (not u.case_authority_status and u.ai_case_authority_status == 'not_relevant') %} status-Overdue{% elif u.case_authority_status == 'binding' or (not u.case_authority_status and u.ai_case_authority_status == 'binding') %} status-Completed{% endif %}">{{ authority_label }}</span>
+        {% if not u.case_authority_status %}<span class="muted" style="font-size:11.5px;">(AI suggestion - not yet confirmed)</span>{% endif %}
+      </p>
+      {% endif %}
+    {% endif %}
     {% if u.summary %}<p style="font-size:13px;"><strong>Summary:</strong> {{ u.summary }}</p>{% endif %}
 
     {% if u.has_file %}
@@ -70,10 +85,13 @@
       {% if u.ai_status == 'done' %}
       <p style="font-size:12.5px;"><strong>AI summary:</strong> {{ u.ai_summary }}</p>
       {% if u.ai_key_changes %}
-      <p style="font-size:12.5px;margin-bottom:2px;"><strong>Key changes:</strong></p>
+      <p style="font-size:12.5px;margin-bottom:2px;"><strong>{{ 'Key holdings:' if u.instrument_type == 'Case' else 'Key changes:' }}</strong></p>
       <ul style="margin-top:0;font-size:12.5px;">
         {% for change in u.ai_key_changes %}<li>{{ change }}</li>{% endfor %}
       </ul>
+      {% endif %}
+      {% if u.instrument_type == 'Case' and u.ai_case_authority_reasoning %}
+      <p style="font-size:12.5px;"><strong>AI authority assessment{% if u.ai_authority_label %} ({{ u.ai_authority_label }}){% endif %}:</strong> {{ u.ai_case_authority_reasoning }}</p>
       {% endif %}
       {% elif u.ai_status == 'skipped' %}
       <p class="muted" style="font-size:12px;">{{ u.ai_error }}</p>
@@ -86,6 +104,20 @@
     </div>
 
     <form method="post" action="{{ url_for('tax.save_legislative_update_areas', update_id=u.id) }}" style="margin-bottom:10px;">
+      {% if u.instrument_type == 'Case' %}
+      <div class="form-row" style="margin-bottom:8px;">
+        <div><label style="font-size:12px;">Citation</label><input type="text" name="case_citation" value="{{ u.case_citation or '' }}" style="font-size:12.5px;"></div>
+        <div><label style="font-size:12px;">Court</label><input type="text" name="case_court" value="{{ u.case_court or '' }}" style="font-size:12.5px;"></div>
+        <div><label style="font-size:12px;">Jurisdiction</label><input type="text" name="case_jurisdiction" value="{{ u.case_jurisdiction or '' }}" style="font-size:12.5px;"></div>
+      </div>
+      <label style="font-size:12.5px;">Authority for Zimbabwean practice{% if u.ai_authority_label %} <span class="muted" style="font-weight:normal;">(AI suggested: {{ u.ai_authority_label }})</span>{% endif %}</label>
+      <select name="case_authority_status" style="margin:4px 0 8px;">
+        <option value="">— not yet confirmed —</option>
+        {% for status in case_authority_statuses %}
+        <option value="{{ status }}" {% if u.case_authority_status == status %}selected{% endif %}>{{ case_authority_labels.get(status, status) }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
       <label style="font-size:12.5px;">Practice areas{% if u.ai_suggested_areas %} <span class="muted" style="font-weight:normal;">(AI suggested: {{ u.ai_suggested_areas|join(', ') }})</span>{% endif %}</label>
       <div style="display:flex;flex-wrap:wrap;gap:8px;margin:4px 0;">
         {% for area in areas %}
@@ -94,7 +126,7 @@
         </label>
         {% endfor %}
       </div>
-      <button type="submit" class="btn small secondary">Save areas</button>
+      <button type="submit" class="btn small secondary">{{ 'Save authority & areas' if u.instrument_type == 'Case' else 'Save areas' }}</button>
     </form>
     {% endif %}
 
@@ -146,8 +178,10 @@
 <div class="card">
   <h3 class="mt-0">File an instrument, or log an update</h3>
   <p class="muted" style="font-size:12px;">
-    Attach the actual Act, Government Notice or Statutory Instrument (PDF, JPG or PNG) to get an automatic
-    AI summary below - or leave the file blank and just log the update as text, as before.
+    Attach the actual Act, Government Notice, Statutory Instrument or court Case (PDF, JPG or PNG) to get an
+    automatic AI summary below - or leave the file blank and just log the update as text, as before. A Case can
+    be Zimbabwean or foreign - the AI assesses a foreign judgment (e.g. South African) for persuasive authority
+    rather than dismissing it for not being Zimbabwean law; you confirm the final authority classification.
   </p>
   <form method="post" action="{{ url_for('tax.add_legislative_update') }}" enctype="multipart/form-data">
     <div class="form-row" style="flex-wrap:wrap;">
