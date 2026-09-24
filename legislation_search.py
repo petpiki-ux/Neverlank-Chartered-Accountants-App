@@ -2,24 +2,39 @@
 Legislative Update Control library (see models.LegislativeUpdate), rather
 than the model's general knowledge.
 
-Two-stage design, deliberately simple and dependency-free (no SQLite FTS
-extension, no vector database - this needs to run identically whether the
-app is on Render or packaged as a local .exe per config.py's _is_frozen()):
+Design, deliberately simple and dependency-free (no SQLite FTS extension, no
+vector database - this needs to run identically whether the app is on
+Render or packaged as a local .exe per config.py's _is_frozen()):
 
-  1. search_candidates() - a plain Python keyword-overlap scan across every
-     filed update's title/summary/AI summary/key changes/practice areas/
-     extracted text, entirely in this process. Cheap enough at a few hundred
-     to a few thousand filed instruments, and never depends on the AI being
-     configured at all - it's what lets the UI say "nothing filed addresses
-     that" without ever calling the model.
-  2. ask() - only called once real keyword matches exist. Hands the top
-     candidates' summaries/key changes and a text excerpt to Claude (same
-     tool-calling pattern as legislation_summary.py) and asks it to answer
-     using ONLY that material, citing exactly which filed update(s) it drew
-     on. If the candidates don't actually address the question, the model
-     says so explicitly (found_answer=False) rather than guessing - this is
-     legislation a real client's compliance may depend on, so a wrong but
-     confident-sounding answer is worse than no answer.
+  1. A fast-recall cache (models.LegislativeAskCache) is checked first, by
+     exact then fuzzy (difflib) match against the question actually asked.
+     A hit returns instantly, with no search and no AI call at all, and is
+     always visibly flagged as a reused answer - see _row_to_payload(). This
+     is a verbatim recall cache, not a shared knowledge base: a cached
+     answer only ever gets reused for a close repeat of the SAME question,
+     never blended into the answer to a different one.
+  2. search_candidate_chunks() - a plain Python keyword-overlap scan across
+     every filed update's CHUNKS (models.LegislativeUpdateChunk - see
+     legislation_chunking.py), falling back to the whole document's own
+     searchable text for anything with no chunks at all (e.g. no extracted
+     text). Chunking is what lets this find a keyword buried deep inside a
+     long Act, not just whatever appears in a fixed-size excerpt from its
+     start. Cheap enough at a few hundred to a few thousand filed
+     instruments, and never depends on the AI being configured at all - it's
+     what lets the UI say "nothing filed addresses that" without ever
+     calling the model. search_candidates() is a thin document-level view
+     over the same search, for callers that just want the matching updates.
+  3. ask() - only calls the AI once real keyword matches exist. Hands the
+     top-matching chunks (with their parent update's summary/key changes)
+     to Claude (same tool-calling pattern as legislation_summary.py) and
+     asks it to answer using ONLY that material, citing exactly which filed
+     update(s) it drew on. If the material doesn't actually address the
+     question, the model says so explicitly (found_answer=False) rather
+     than guessing - this is legislation a real client's compliance may
+     depend on, so a wrong but confident-sounding answer is worse than no
+     answer. A "done" or "no_answer" result is then saved to the cache for
+     next time; a transient failure, an unconfigured key, or "nothing filed
+     matches at all" never is, so those always retry fresh.
 
 Every result is purely informational, like every other AI-assisted feature
 in this app: it never files anything or changes any record - a person reads
@@ -27,13 +42,20 @@ the answer and its cited sources and judges them, the same as with the
 per-update AI summaries."""
 import os
 import re
+import json
+import difflib
+from datetime import datetime
 
-from models import LegislativeUpdate
+from extensions import db
+from models import LegislativeUpdate, LegislativeAskCache
+
+import legislation_chunking
 
 DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 REQUEST_TIMEOUT = 90
 MAX_CANDIDATES = 8  # how many filed updates get handed to the model as context
-EXCERPT_CHARS = 3000  # per-candidate slice of extracted_text included in the prompt
+EXCERPT_CHARS = 3000  # per-chunk slice included in the prompt
+FUZZY_MATCH_THRESHOLD = 0.88  # difflib ratio above which a cached question is treated as "the same question" for recall purposes
 
 _STOPWORDS = {
     "a", "an", "the", "is", "are", "was", "were", "be", "been", "being", "and", "or", "but",
@@ -52,6 +74,9 @@ def _tokenize(text):
 
 
 def _searchable_blob(update):
+    """Whole-document searchable text - used for a document with no chunks
+    at all (e.g. a manually-logged entry with no filed instrument), and by
+    search_candidates()' title-weighting."""
     parts = [
         update.title or "",
         update.tax_head or "",
@@ -66,32 +91,65 @@ def _searchable_blob(update):
     return " ".join(parts).lower()
 
 
-def search_candidates(question, limit=MAX_CANDIDATES):
-    """Rank every filed update by how many of the question's keywords it
-    contains (title matches count double), and return the top-scoring ones.
-    Returns an empty list if nothing filed shares any keyword with the
-    question at all - the caller should treat that as "nothing to ask the
-    model about" rather than forcing a guess."""
+def _ensure_all_chunks():
+    """One-time-per-document lazy backfill: chunk every filed update that
+    has extracted text but no chunks yet - i.e. everything filed before
+    chunk-based search existed. Pure Python string work, no network or AI
+    calls, so this is safe to call at the start of every search; it does
+    real work only the first time it sees each document."""
+    changed = False
+    for update in LegislativeUpdate.query.filter(LegislativeUpdate.extracted_text.isnot(None)).all():
+        if update.extracted_text and not update.chunks:
+            legislation_chunking.ensure_chunks(update)
+            changed = True
+    if changed:
+        db.session.commit()
+
+
+def search_candidate_chunks(question, limit=MAX_CANDIDATES):
+    """Score every filed update's individual chunks (falling back to the
+    whole-document blob for anything with no chunks) against the question's
+    keywords, and return the top-scoring (update, chunk) pairs, best first.
+    `chunk` is None when the match came from the whole-document fallback.
+    Returns [] if nothing filed shares any keyword with the question."""
     tokens = set(_tokenize(question))
     if not tokens:
         return []
-    updates = LegislativeUpdate.query.all()
+    _ensure_all_chunks()
     scored = []
-    for update in updates:
-        # Whole-word matching, not substring - a naive "is this token a
-        # substring of the blob" check matches nonsense like "vat" inside
-        # "private" or "act" inside "extracted". Tokenizing the blob the
-        # same way as the question and comparing sets avoids that.
+    for update in LegislativeUpdate.query.all():
         title_tokens = set(_tokenize(update.title or ""))
-        blob_tokens = set(_WORD_RE.findall(_searchable_blob(update)))
-        score = 0
-        for token in tokens:
-            if token in blob_tokens:
-                score += 2 if token in title_tokens else 1
-        if score > 0:
-            scored.append((score, update))
-    scored.sort(key=lambda pair: pair[0], reverse=True)
-    return [update for _, update in scored[:limit]]
+        if update.chunks:
+            for chunk in update.chunks:
+                blob = " ".join([update.title or "", update.tax_head or "", update.type_label or "", chunk.heading or "", chunk.text]).lower()
+                blob_tokens = set(_WORD_RE.findall(blob))
+                score = sum(2 if t in title_tokens else 1 for t in tokens if t in blob_tokens)
+                if score > 0:
+                    scored.append((score, update, chunk))
+        else:
+            blob_tokens = set(_WORD_RE.findall(_searchable_blob(update)))
+            score = sum(2 if t in title_tokens else 1 for t in tokens if t in blob_tokens)
+            if score > 0:
+                scored.append((score, update, None))
+    scored.sort(key=lambda triple: triple[0], reverse=True)
+    return [(update, chunk) for _, update, chunk in scored[:limit]]
+
+
+def search_candidates(question, limit=MAX_CANDIDATES):
+    """Document-level view over search_candidate_chunks(): the top-matching
+    filed updates, deduplicated (a long Act can match on several of its own
+    chunks), in best-match order. Returns [] if nothing filed shares any
+    keyword with the question at all - the caller should treat that as
+    "nothing to ask the model about" rather than forcing a guess."""
+    seen_ids = set()
+    result = []
+    for update, _chunk in search_candidate_chunks(question, limit=limit * 3):
+        if update.id not in seen_ids:
+            seen_ids.add(update.id)
+            result.append(update)
+        if len(result) >= limit:
+            break
+    return result
 
 
 ANSWER_TOOL = {
@@ -139,7 +197,7 @@ def _client():
     return anthropic.Anthropic(api_key=api_key, timeout=REQUEST_TIMEOUT)
 
 
-def _candidate_block(update):
+def _candidate_block(update, chunk=None):
     lines = [
         f"[Update #{update.id}] {update.title}",
         f"Type: {update.type_label}" + (f" ({update.tax_head})" if update.tax_head else ""),
@@ -155,35 +213,122 @@ def _candidate_block(update):
         lines.append(f"Summary: {summary}")
     if update.ai_key_changes:
         lines.append("Key changes: " + "; ".join(update.ai_key_changes))
-    if update.extracted_text:
+    if chunk is not None:
+        heading_note = f" ({chunk.heading})" if chunk.heading else ""
+        lines.append(f"Relevant excerpt from the filed document{heading_note}: {chunk.text[:EXCERPT_CHARS]}")
+    elif update.extracted_text:
         lines.append(f"Excerpt from the filed document: {update.extracted_text[:EXCERPT_CHARS]}")
     return "\n".join(lines)
 
 
-def ask(question):
+# ---------------------------------------------------------------- fast-recall cache
+
+def _normalize_question(question):
+    return " ".join((question or "").strip().lower().split())
+
+
+def _cache_lookup(question):
+    """Exact match first, then a fuzzy (difflib) match against every cached
+    question - cheap at the scale this library operates at, same philosophy
+    as the keyword search above. Returns the matched LegislativeAskCache row
+    (with its hit_count bumped and committed) or None."""
+    normalized = _normalize_question(question)
+    if not normalized:
+        return None
+    row = (
+        LegislativeAskCache.query.filter_by(question_normalized=normalized)
+        .order_by(LegislativeAskCache.created_at.desc())
+        .first()
+    )
+    if row is None:
+        best_ratio = 0.0
+        for candidate in LegislativeAskCache.query.all():
+            ratio = difflib.SequenceMatcher(None, normalized, candidate.question_normalized).ratio()
+            if ratio > best_ratio:
+                best_ratio, row = ratio, candidate
+        if best_ratio < FUZZY_MATCH_THRESHOLD:
+            row = None
+    if row is not None:
+        row.hit_count = (row.hit_count or 1) + 1
+        row.last_hit_at = datetime.utcnow()
+        db.session.commit()
+    return row
+
+
+def _row_to_payload(row):
+    citation_ids = json.loads(row.citation_ids_json) if row.citation_ids_json else []
+    candidate_ids = json.loads(row.candidate_ids_json) if row.candidate_ids_json else []
+    all_ids = citation_ids + candidate_ids
+    by_id = {u.id: u for u in LegislativeUpdate.query.filter(LegislativeUpdate.id.in_(all_ids)).all()} if all_ids else {}
+
+    payload = {"answer": row.answer, "from_cache": True, "cache_hit_count": row.hit_count}
+    if row.status == "done":
+        payload["citations"] = [by_id[i] for i in citation_ids if i in by_id]
+    else:
+        payload["candidates"] = [by_id[i] for i in candidate_ids if i in by_id]
+    return payload
+
+
+def _store_cache(question, status, answer, citation_ids=None, candidate_ids=None, asked_by_id=None):
+    normalized = _normalize_question(question)
+    if not normalized:
+        return
+    row = LegislativeAskCache(
+        question_normalized=normalized,
+        question_original=question[:500],
+        status=status,
+        answer=answer[:5000],
+        citation_ids_json=json.dumps(list(citation_ids)) if citation_ids else None,
+        candidate_ids_json=json.dumps(list(candidate_ids)) if candidate_ids else None,
+        asked_by_id=asked_by_id,
+        hit_count=1,
+    )
+    db.session.add(row)
+    db.session.commit()
+
+
+def ask(question, asked_by_id=None):
     """Answer `question` from the filed legislative library.
 
     Returns (status, payload):
-      - "not_configured": no ANTHROPIC_API_KEY set. payload is None.
-      - "no_candidates": nothing filed shares any keyword with the question.
-        payload is None - nothing was sent to the model.
+      - "not_configured": no ANTHROPIC_API_KEY set (and no cached answer
+        already exists for this question). payload is None.
+      - "no_candidates": nothing filed shares any keyword with the
+        question. payload is None - nothing was sent to the model, and
+        nothing is cached.
       - "no_answer": candidates were found but the model judged they don't
-        actually answer the question. payload is {"answer": str, "candidates": [...]}
-        (candidates are the ones considered, for a person to check by hand).
-      - "done": payload is {"answer": str, "citations": [LegislativeUpdate, ...]}
+        actually answer the question. payload is
+        {"answer": str, "candidates": [...], "from_cache": bool[, "cache_hit_count": int]}.
+      - "done": payload is
+        {"answer": str, "citations": [LegislativeUpdate, ...], "from_cache": bool[, "cache_hit_count": int]}.
       - "error": payload is a short error message string.
-    Never raises."""
+    A "done"/"no_answer" result is saved to the fast-recall cache
+    (models.LegislativeAskCache) and reused verbatim - always visibly
+    flagged via payload["from_cache"] - for a close repeat of the same
+    question; every other status is never cached. Never raises."""
     question = (question or "").strip()
     if not question:
         return "error", "Please enter a question."
+
+    cached = _cache_lookup(question)
+    if cached is not None:
+        return cached.status, _row_to_payload(cached)
+
     if os.environ.get("ANTHROPIC_API_KEY") is None:
         return "not_configured", None
 
-    candidates = search_candidates(question)
-    if not candidates:
+    candidates_with_chunks = search_candidate_chunks(question)
+    if not candidates_with_chunks:
         return "no_candidates", None
 
-    context = "\n\n---\n\n".join(_candidate_block(u) for u in candidates)
+    seen_ids = set()
+    distinct_candidates = []
+    for update, _chunk in candidates_with_chunks:
+        if update.id not in seen_ids:
+            seen_ids.add(update.id)
+            distinct_candidates.append(update)
+
+    context = "\n\n---\n\n".join(_candidate_block(u, c) for u, c in candidates_with_chunks)
     user_message = (
         f"Excerpts from the firm's filed Legislative Update Control library:\n\n{context}\n\n---\n\n"
         f"Question: {question}"
@@ -209,8 +354,10 @@ def ask(question):
             if not answer:
                 return "error", "The model didn't return an answer - try rephrasing the question."
             if not data.get("found_answer"):
-                return "no_answer", {"answer": answer, "candidates": candidates}
+                _store_cache(question, "no_answer", answer, candidate_ids=[u.id for u in distinct_candidates], asked_by_id=asked_by_id)
+                return "no_answer", {"answer": answer, "candidates": distinct_candidates, "from_cache": False}
             cited_ids = {int(i) for i in (data.get("citation_ids") or []) if str(i).isdigit()}
-            citations = [u for u in candidates if u.id in cited_ids] or candidates[:1]
-            return "done", {"answer": answer, "citations": citations}
+            citations = [u for u in distinct_candidates if u.id in cited_ids] or distinct_candidates[:1]
+            _store_cache(question, "done", answer, citation_ids=[u.id for u in citations], asked_by_id=asked_by_id)
+            return "done", {"answer": answer, "citations": citations, "from_cache": False}
     return "error", "The model didn't return a structured result - try rephrasing the question."

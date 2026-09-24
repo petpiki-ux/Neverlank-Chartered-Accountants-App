@@ -49,6 +49,7 @@ from config import Config
 import sanctions_data
 import legislation_summary
 import legislation_search
+import legislation_chunking
 
 tax_bp = Blueprint("tax", __name__, url_prefix="/tax")
 
@@ -897,6 +898,7 @@ def _render_legislative_updates(**extra):
         instrument_types=LEGISLATIVE_UPDATE_TYPES, type_labels=LEGISLATIVE_UPDATE_TYPE_LABELS,
         areas=LEGISLATIVE_UPDATE_AREAS, clients=Client.query.order_by(Client.name).all(),
         ask_question=None, ask_status=None, ask_answer=None, ask_citations=None, ask_candidates=None,
+        ask_from_cache=False, ask_cache_hit_count=None,
     )
     context.update(extra)
     return render_template("tax/legislative_updates.html", **context)
@@ -921,7 +923,7 @@ def ask_legislative_updates():
         flash("Please enter a question to ask.", "danger")
         return _render_legislative_updates()
 
-    status, payload = legislation_search.ask(question)
+    status, payload = legislation_search.ask(question, asked_by_id=current_user.id)
     if status == "not_configured":
         flash("Automatic question-answering isn't set up yet (ANTHROPIC_API_KEY is not set) - see the README.", "danger")
         return _render_legislative_updates(ask_question=question, ask_status=status)
@@ -931,6 +933,7 @@ def ask_legislative_updates():
         return _render_legislative_updates(
             ask_question=question, ask_status=status,
             ask_answer=payload["answer"], ask_candidates=payload["candidates"],
+            ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
         )
     if status == "error":
         flash(f"Couldn't answer that: {payload}", "danger")
@@ -939,6 +942,7 @@ def ask_legislative_updates():
     return _render_legislative_updates(
         ask_question=question, ask_status=status,
         ask_answer=payload["answer"], ask_citations=payload["citations"],
+        ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
     )
 
 
@@ -993,21 +997,32 @@ def add_legislative_update(engagement_id=None):
 
             db.session.commit()  # save the upload itself before attempting the AI call, so a slow/failed AI step never loses the file
 
-            result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
-                filepath, is_image, update.extracted_text, update.extraction_status,
-            )
-            update.ai_status = ai_status
-            update.ai_error = ai_error
-            update.ai_processed_at = datetime.utcnow()
-            if ai_status == "done":
-                update.ai_summary = result["summary"]
-                update.set_ai_key_changes(result["key_changes"])
-                update.set_ai_suggested_areas(result["suggested_areas"])
+            skip_reason = legislation_summary.skip_summary_reason(instrument_type)
+            if skip_reason:
+                update.ai_status = "skipped"
+                update.ai_error = skip_reason
+                update.ai_processed_at = datetime.utcnow()
+            else:
+                result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
+                    filepath, is_image, update.extracted_text, update.extraction_status,
+                )
+                update.ai_status = ai_status
+                update.ai_error = ai_error
+                update.ai_processed_at = datetime.utcnow()
+                if ai_status == "done":
+                    update.ai_summary = result["summary"]
+                    update.set_ai_key_changes(result["key_changes"])
+                    update.set_ai_suggested_areas(result["suggested_areas"])
+
+            if update.extracted_text:
+                legislation_chunking.ensure_chunks(update)
 
     db.session.commit()
 
     if update.ai_status == "done":
         flash(f"'{update.title}' filed - AI summary generated below. Confirm which practice areas it touches, then tag any clients it affects.", "success")
+    elif update.ai_status == "skipped":
+        flash(f"'{update.title}' filed - {update.ai_error} Confirm which practice areas it touches, then tag any clients it affects.", "info")
     elif update.ai_status == "not_configured":
         flash(f"'{update.title}' filed, but automatic summarisation isn't set up yet ({update.ai_error}) - add a summary manually below, or reprocess once it's configured.", "warning")
     elif update.ai_status == "error":
@@ -1025,6 +1040,10 @@ def reprocess_legislative_update(update_id):
     re-uploading the file - for when the API key wasn't configured yet at
     filing time, or the previous attempt failed transiently."""
     update = LegislativeUpdate.query.get_or_404(update_id)
+    skip_reason = legislation_summary.skip_summary_reason(update.instrument_type)
+    if skip_reason:
+        flash(f"This entry isn't auto-summarised - {skip_reason}", "info")
+        return redirect(url_for("tax.list_legislative_updates"))
     if not update.has_file:
         flash("This entry has no filed instrument to reprocess - it was only ever logged as text.", "danger")
         return redirect(url_for("tax.list_legislative_updates"))

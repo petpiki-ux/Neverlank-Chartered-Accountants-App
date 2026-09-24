@@ -28,6 +28,31 @@ REQUEST_TIMEOUT = 90  # seconds - a multi-page scanned gazette can take a while 
 MAX_PAGES = 5  # cap how many page images are sent in one call - keeps cost/size bounded for a large scanned instrument
 MAX_TEXT_CHARS = 60000  # generous for a piece of legislation; truncated defensively beyond this
 
+# A full Act of Parliament can run to hundreds of pages - far more than
+# MAX_TEXT_CHARS ever reads, so a one-paragraph AI summary of one would only
+# ever reflect its earlier Parts at best. Rather than generate a
+# necessarily-partial summary of something this long, full Acts skip
+# summarisation entirely and rely on full-text chunked search instead (see
+# legislation_chunking.py/legislation_search.py's "Ask the library") -
+# Notices and subsidiary regulations/SIs are almost always short enough that
+# a summary stays genuinely useful, so they're unaffected.
+SKIP_SUMMARY_INSTRUMENT_TYPES = {"Act"}
+
+
+def skip_summary_reason(instrument_type):
+    """Returns a short, person-readable reason if `instrument_type` should
+    skip AI summarisation entirely, or None if it should be summarised as
+    normal. Callers set ai_status="skipped" (never "done"/"error"/
+    "not_configured") and store this string as ai_error when this returns
+    non-None, without ever calling summarize()/summarize_legislative_update()."""
+    if instrument_type in SKIP_SUMMARY_INSTRUMENT_TYPES:
+        return (
+            "Full Acts aren't auto-summarised - a one-paragraph summary of a document this long "
+            "would only ever reflect part of it. The full text is filed and searchable through "
+            "\"Ask the library\" instead."
+        )
+    return None
+
 SUMMARY_TOOL = {
     "name": "record_legislative_summary",
     "description": "Record a plain-language summary of this piece of Zimbabwean legislation for an audit/tax firm's internal register.",

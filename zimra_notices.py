@@ -45,6 +45,7 @@ from models import LegislativeUpdate, User
 from config import Config
 import sanctions_data
 import legislation_summary
+import legislation_chunking
 
 ZIMRA_BASE_URL = "https://www.zimra.co.zw"
 ZIMRA_NOTICES_PATH = "/public-notices"
@@ -259,5 +260,6 @@ def _import_one_notice(notice, created_by_id, log):
         update.ai_summary = result["summary"]
         update.set_ai_key_changes(result["key_changes"])
         update.set_ai_suggested_areas(result["suggested_areas"])
+    legislation_chunking.ensure_chunks(update)
     db.session.commit()
     log(f"  saved (ai_status={ai_status})")
