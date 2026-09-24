@@ -4515,7 +4515,7 @@ class LegislativeUpdate(db.Model):
     ai_summary = db.Column(db.Text)
     ai_key_changes_json = db.Column(db.Text)  # JSON-encoded list of short bullet strings
     ai_suggested_areas_json = db.Column(db.Text)  # JSON-encoded list - a suggestion only, never auto-applied
-    ai_status = db.Column(db.String(20))  # "done", "not_configured", "error", "skipped" (see legislation_summary.skip_summary_reason - full Acts deliberately aren't auto-summarised)
+    ai_status = db.Column(db.String(20))  # "done", "not_configured", "error"
     ai_error = db.Column(db.Text)
     ai_processed_at = db.Column(db.DateTime)
 
@@ -4570,69 +4570,6 @@ class LegislativeUpdate(db.Model):
 
     def __repr__(self):
         return f"<LegislativeUpdate {self.title!r}>"
-
-
-class LegislativeUpdateChunk(db.Model):
-    """One section-sized slice of a filed instrument's extracted_text (see
-    legislation_chunking.py), so "Ask the library" (legislation_search.py)
-    can retrieve the specific relevant part of a long document - a full Act
-    can run to hundreds of pages, far more than could ever be handed to the
-    AI as a single excerpt - rather than only ever seeing a fixed-size
-    excerpt from the start of the document. Chunked once per document
-    (at filing/import time, or lazily the first time it's needed for an
-    already-filed document - see legislation_chunking.ensure_chunks) and
-    never re-chunked automatically afterwards. Purely a search index over
-    text that's already filed - deleting the parent LegislativeUpdate
-    deletes its chunks with it (cascade below); nothing here is ever shown
-    to a person directly, only used internally as retrieval context."""
-    __tablename__ = "legislative_update_chunk"
-    id = db.Column(db.Integer, primary_key=True)
-    legislative_update_id = db.Column(db.Integer, db.ForeignKey("legislative_update.id"), nullable=False)
-    chunk_index = db.Column(db.Integer, nullable=False)  # 0-based order within the document
-    heading = db.Column(db.String(300))  # the nearest Part/Chapter/numbered-section heading, if any was detected
-    text = db.Column(db.Text, nullable=False)
-
-    legislative_update = db.relationship(
-        "LegislativeUpdate",
-        backref=db.backref("chunks", lazy=True, cascade="all, delete-orphan", order_by="LegislativeUpdateChunk.chunk_index"),
-    )
-
-    def __repr__(self):
-        return f"<LegislativeUpdateChunk {self.legislative_update_id}#{self.chunk_index}>"
-
-
-class LegislativeAskCache(db.Model):
-    """A fast-recall cache of "Ask the library" question/answer pairs (see
-    legislation_search.py) - asking the same or a very similar question
-    again returns the earlier answer instantly and consistently instead of
-    re-searching and re-calling the AI, while a genuinely new question is
-    still answered fresh from the filed material every time. Deliberately
-    the simpler of the two designs discussed with the firm: this is a
-    verbatim recall cache, not a growing shared knowledge base - a cached
-    answer never feeds into, or changes the answer to, any OTHER question,
-    and nothing here is reviewed/confirmed by a person before being reused
-    (see legislation_search.ask for the matching logic). Every reused
-    answer is always visibly flagged as such wherever it's shown, never
-    presented as freshly generated. Only "done" and "no_answer" results are
-    ever cached - a transient failure, an unconfigured API key, or "nothing
-    filed matches at all" is never cached, so those always retry fresh."""
-    __tablename__ = "legislative_ask_cache"
-    id = db.Column(db.Integer, primary_key=True)
-    question_normalized = db.Column(db.String(500), nullable=False, index=True)  # lowercased/whitespace-collapsed, for exact-match lookup
-    question_original = db.Column(db.String(500), nullable=False)  # as actually typed, for display/audit only
-    status = db.Column(db.String(20), nullable=False)  # "done" or "no_answer" only - see legislation_search.ask
-    answer = db.Column(db.Text, nullable=False)
-    citation_ids_json = db.Column(db.Text)  # JSON list of LegislativeUpdate ids cited (status "done")
-    candidate_ids_json = db.Column(db.Text)  # JSON list of LegislativeUpdate ids considered but not sufficient (status "no_answer")
-    asked_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    hit_count = db.Column(db.Integer, default=1)  # how many times this cached answer has been reused (starts at 1 for the original answer)
-    last_hit_at = db.Column(db.DateTime)
-
-    asked_by = db.relationship("User", foreign_keys=[asked_by_id])
-
-    def __repr__(self):
-        return f"<LegislativeAskCache {self.question_original!r} ({self.status})>"
 
 
 class TaxChecklistItem(db.Model):

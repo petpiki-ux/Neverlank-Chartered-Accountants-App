@@ -521,6 +521,38 @@ def register_cli(app):
             dry_run=dry_run, max_pages=pages, limit=limit, sleep_seconds=sleep_seconds, log=click.echo,
         )
 
+    @app.cli.command("import-zimlii-legislation")
+    @click.option("--dry-run", is_flag=True, help="List what would be imported (and why it matched) without fetching or saving anything.")
+    @click.option("--acts-only", is_flag=True, help="Only consider Acts/Ordinances - skip subsidiary legislation (regulations/SIs).")
+    @click.option("--subsidiary-only", is_flag=True, help="Only consider subsidiary legislation (regulations/SIs) - skip Acts/Ordinances.")
+    @click.option("--pages", type=int, default=None, help="Only fetch this many listing pages per collection (20 documents/page) - use a small number to test first.")
+    @click.option("--limit", type=int, default=None, help="Import at most this many new documents.")
+    @click.option("--sleep", "sleep_seconds", type=float, default=2.0, help="Seconds to wait between requests to ZimLII's server (politeness delay).")
+    def import_zimlii_legislation(dry_run, acts_only, subsidiary_only, pages, limit, sleep_seconds):
+        """Bulk-import Zimbabwean primary legislation and current subsidiary
+        legislation from ZimLII (https://zimlii.org/legislation/) into
+        Legislative Update Control, filtered to tax, customs, companies,
+        commercial, estate duty and related Finance law - see
+        zimlii_import.py for the full design and the CATEGORY_KEYWORDS list
+        that decides what counts as "related". This is a CLI command rather
+        than a button in the app for the same reason import-zimra-notices
+        is: a few hundred documents, some of them full Acts running to
+        hundreds of pages, would badly exceed a web request's timeout - run
+        it from Render's Shell instead.
+
+        ALWAYS run with --dry-run first (see zimlii_import.py's module
+        docstring for the full two-step dry-run routine this needs).
+        Safe to interrupt and re-run at any point: every document already
+        imported (matched by its own stable ZimLII id) is skipped, never
+        duplicated."""
+        if acts_only and subsidiary_only:
+            raise click.UsageError("--acts-only and --subsidiary-only can't both be set.")
+        import zimlii_import
+        zimlii_import.import_documents(
+            include_acts=not subsidiary_only, include_subsidiary=not acts_only,
+            dry_run=dry_run, max_pages=pages, limit=limit, sleep_seconds=sleep_seconds, log=click.echo,
+        )
+
 
 app = create_app()
 
