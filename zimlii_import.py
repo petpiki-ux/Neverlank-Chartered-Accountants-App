@@ -58,6 +58,7 @@ from extensions import db
 from models import LegislativeUpdate, User, LEGISLATIVE_UPDATE_AREAS
 from config import Config
 import legislation_summary
+import legislation_chunking
 
 ZIMLII_BASE_URL = "https://zimlii.org"
 LISTING_PATHS = {
@@ -369,16 +370,26 @@ def _import_one_document(document, created_by_id, log):
     update.extraction_status = "extracted"
     db.session.commit()  # save the filed text itself before attempting the AI call, so a slow/failed AI step never loses it
 
-    result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
-        filepath, False, update.extracted_text, update.extraction_status,
-    )
-    update.ai_status = ai_status
-    update.ai_error = ai_error
     from datetime import datetime
-    update.ai_processed_at = datetime.utcnow()
-    if ai_status == "done":
-        update.ai_summary = result["summary"]
-        update.set_ai_key_changes(result["key_changes"])
-        update.set_ai_suggested_areas(result["suggested_areas"])
+    skip_reason = legislation_summary.skip_summary_reason(document["instrument_type"])
+    if skip_reason:
+        # Full Acts aren't auto-summarised - see legislation_summary.skip_summary_reason.
+        # Subsidiary legislation (SIs) still gets the normal AI summary below.
+        update.ai_status = "skipped"
+        update.ai_error = skip_reason
+        update.ai_processed_at = datetime.utcnow()
+    else:
+        result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
+            filepath, False, update.extracted_text, update.extraction_status,
+        )
+        update.ai_status = ai_status
+        update.ai_error = ai_error
+        update.ai_processed_at = datetime.utcnow()
+        if ai_status == "done":
+            update.ai_summary = result["summary"]
+            update.set_ai_key_changes(result["key_changes"])
+            update.set_ai_suggested_areas(result["suggested_areas"])
+
+    legislation_chunking.ensure_chunks(update)
     db.session.commit()
-    log(f"  saved (ai_status={ai_status})")
+    log(f"  saved (ai_status={update.ai_status})")
