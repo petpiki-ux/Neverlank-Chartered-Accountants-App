@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Legislative Update Calendar - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Legislative Update Calendar</h1>
+    <div class="subtitle">A month-at-a-glance view of every filed Act, Notice, SI and Case's own <strong>effective date</strong> and <strong>gazette date</strong> - including anything bulk-imported from ZIMRA's Public Notices. Drawn straight from what's already filed in <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Update Control</a>; an entry with neither date set doesn't appear here.</div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="page-header" style="margin-bottom:10px;">
+    <h3 class="mt-0" style="margin:0;">{{ month_label }}</h3>
+    <div>
+      <a href="{{ url_for('tax.legislative_updates_calendar', year=prev_year, month=prev_month) }}" class="btn small secondary">&larr; Previous</a>
+      <a href="{{ url_for('tax.legislative_updates_calendar') }}" class="btn small secondary">This month</a>
+      <a href="{{ url_for('tax.legislative_updates_calendar', year=next_year, month=next_month) }}" class="btn small secondary">Next &rarr;</a>
+    </div>
+  </div>
+  <p class="muted" style="font-size:12px;margin-top:0;">
+    {% if event_count %}{{ event_count }} date{{ 's' if event_count != 1 else '' }} this month.{% else %}Nothing filed with an effective or gazette date falls in {{ month_label }}.{% endif %}
+    <span class="badge" style="background:#eef3ee;">Effective</span> = takes/took effect this day &middot;
+    <span class="badge" style="background:#f2eee4;">Gazetted</span> = officially gazetted this day.
+  </p>
+
+  <table style="table-layout:fixed;width:100%;">
+    <thead>
+      <tr>
+        <th style="width:14.28%;">Mon</th><th style="width:14.28%;">Tue</th><th style="width:14.28%;">Wed</th>
+        <th style="width:14.28%;">Thu</th><th style="width:14.28%;">Fri</th><th style="width:14.28%;">Sat</th><th style="width:14.28%;">Sun</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for week in weeks %}
+      <tr>
+        {% for day in week %}
+        {% if day == 0 %}
+        <td style="vertical-align:top;height:90px;background:#fafaf8;"></td>
+        {% else %}
+        <td style="vertical-align:top;height:90px;padding:4px;{% if year == today.year and month == today.month and day == today.day %}background:#f7f2e2;{% endif %}">
+          <div style="font-size:11px;" class="{{ 'muted' if not events_by_day.get(day) else '' }}">{{ day }}</div>
+          {% for ev in events_by_day.get(day, []) %}
+          <a href="{{ url_for('tax.list_legislative_updates') }}#legislative-update-{{ ev.instrument.id }}" style="display:block;text-decoration:none;color:inherit;font-size:10.5px;line-height:1.3;margin-top:3px;padding:2px 3px;border-radius:3px;background:{{ '#eef3ee' if ev.kind == 'Effective' else '#f2eee4' }};" title="{{ ev.instrument.title }} ({{ ev.kind }}{% if ev.instrument.instrument_type %}, {{ ev.instrument.type_label }}{% endif %})">
+            {{ ev.instrument.title|truncate(28) }}
+          </a>
+          {% endfor %}
+        </td>
+        {% endif %}
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

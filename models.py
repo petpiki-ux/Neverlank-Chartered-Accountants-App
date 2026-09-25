@@ -199,20 +199,25 @@ REVIEWER_ROLES = ("supervisor", "partner", "admin")
 PARTNER_SIGNOFF_ROLES = ("partner", "admin")
 
 # The engagement workpaper sections a Partner/Reviewer can raise a review
-# Query against (see EngagementQuery below) - every substantive tab on the
-# engagement detail page from Planning onward. "Overview" (plain engagement
-# fields) and "Documents" (a file list, not itself a workpaper) are
-# deliberately excluded. For "substantive", a query is further scoped to one
-# audit area (EngagementQuery.area_name) since Substantive Procedures has one
-# sign-off per area rather than one for the whole tab.
+# Query against (see EngagementQuery below) - every tab on the engagement
+# detail page, including Overview and Client Acceptance & Continuance, so a
+# reviewer can flag something anywhere in the file, from acceptance right
+# through to finalisation. For "substantive", a query is further scoped to
+# one audit area (EngagementQuery.area_name) since Substantive Procedures
+# has one sign-off per area rather than one for the whole tab.
 QUERY_SECTIONS = [
+    ("overview", "Overview"),
+    ("acceptance", "Client Acceptance & Continuance"),
     ("entity", "Understanding the Entity"),
     ("risks", "Risk Assessment"),
     ("planning", "Planning (Materiality)"),
     ("analytical", "Analytical Review"),
     ("checklist", "Checklist"),
     ("substantive", "Substantive Procedures"),
+    ("documents", "Documents"),
     ("tasks", "Tasks"),
+    ("income_tax", "Income Tax Computation"),
+    ("deferred_tax", "Deferred Tax Computation"),
     ("finalisation", "Finalisation (Trial Balance / Financial Statements)"),
     ("tax", "Tax Advisory & Compliance"),
     ("accounting", "Financial, Cost & Management Accounting"),
@@ -355,8 +360,8 @@ PERMISSIONS = [
     ("research_firm_library", "Research the Firm Library",
      "Use \"Ask the Firm Library\" to query the Policies & Procedures library with AI and see the AI-generated "
      "summary/key points on each document. Viewing and downloading policies is unaffected by this setting and "
-     "stays open to everyone - this only gates the AI research features, piloted as Partner/Admin only.",
-     ("partner", "admin")),
+     "stays open to everyone - this only gates the AI research features, rolled out firm-wide after the pilot.",
+     tuple(USER_ROLES)),
 ]
 PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
 

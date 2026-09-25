@@ -19,6 +19,7 @@ legislative update log and penalty/interest rate table.
 """
 import os
 import uuid
+import calendar as calendar_module
 
 from datetime import datetime, date
 
@@ -916,6 +917,80 @@ def _render_legislative_updates(**extra):
 @login_required
 def list_legislative_updates():
     return _render_legislative_updates()
+
+
+@tax_bp.route("/legislative-updates/calendar")
+@login_required
+def legislative_updates_calendar():
+    """A month-at-a-glance calendar of every filed instrument's own dates -
+    effective_date (when it takes/took effect) and gazette_date (when it
+    was gazetted) - drawn straight from what's already filed in
+    Legislative Update Control (including anything bulk-imported from
+    ZIMRA's Public Notices, see zimra_notices.py; a "Notice" instrument is
+    filed exactly like any other). Deliberately just plots the two dates
+    that are already there and already reliable, rather than having AI
+    guess at a filing/compliance deadline buried in a notice's text - see
+    the "Ask the library" box on the main list page for that kind of
+    open-ended question instead. A logged entry with neither date set
+    (a plain text-only log, or a file still missing both dates) simply
+    never appears here; it's still on the main list."""
+    today = date.today()
+    try:
+        year = int(request.args.get("year", today.year))
+        month = int(request.args.get("month", today.month))
+    except (TypeError, ValueError):
+        year, month = today.year, today.month
+    # clamp a stray/hand-edited query string back onto a real month rather than 500ing
+    if month < 1 or month > 12 or year < 1900 or year > 2200:
+        year, month = today.year, today.month
+
+    first_day = date(year, month, 1)
+    days_in_month = calendar_module.monthrange(year, month)[1]
+    last_day = date(year, month, days_in_month)
+
+    if month == 1:
+        prev_year, prev_month = year - 1, 12
+    else:
+        prev_year, prev_month = year, month - 1
+    if month == 12:
+        next_year, next_month = year + 1, 1
+    else:
+        next_year, next_month = year, month + 1
+
+    events_by_day = {}
+
+    def _add(updates, date_field, kind):
+        for u in updates:
+            # NOTE: the key is "instrument", not "update" - a dict key named
+            # "update" collides with dict's own built-in .update() method,
+            # so `ev.update` in the Jinja template would silently resolve to
+            # that bound method instead of doing a key lookup.
+            events_by_day.setdefault(getattr(u, date_field).day, []).append({"instrument": u, "kind": kind})
+
+    _add(
+        LegislativeUpdate.query.filter(
+            LegislativeUpdate.effective_date >= first_day, LegislativeUpdate.effective_date <= last_day,
+        ).order_by(LegislativeUpdate.title).all(),
+        "effective_date", "Effective",
+    )
+    _add(
+        LegislativeUpdate.query.filter(
+            LegislativeUpdate.gazette_date >= first_day, LegislativeUpdate.gazette_date <= last_day,
+        ).order_by(LegislativeUpdate.title).all(),
+        "gazette_date", "Gazetted",
+    )
+    for day_events in events_by_day.values():
+        day_events.sort(key=lambda e: e["instrument"].title)
+
+    weeks = calendar_module.Calendar(firstweekday=0).monthdayscalendar(year, month)  # Monday-first, 0 = outside this month
+
+    return render_template(
+        "tax/legislative_updates_calendar.html",
+        year=year, month=month, month_label=first_day.strftime("%B %Y"),
+        weeks=weeks, events_by_day=events_by_day,
+        prev_year=prev_year, prev_month=prev_month, next_year=next_year, next_month=next_month,
+        today=today, event_count=sum(len(v) for v in events_by_day.values()),
+    )
 
 
 @tax_bp.route("/legislative-updates/ask", methods=["POST"])

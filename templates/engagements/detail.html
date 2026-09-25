@@ -200,6 +200,8 @@
   </form>
   {% endif %}
 
+  {{ qmacros.render_queries(engagement, 'overview', queries_by_section.get('overview', [])) }}
+
 {% elif tab == 'acceptance' %}
   {% macro checklist_row(item, responses) %}
     <form method="post" action="{{ url_for('acceptance.update_acceptance_checklist_item', item_id=item.id) }}" class="checklist-row">
@@ -721,6 +723,8 @@
     {% endif %}
   </div>
   {% endif %}
+
+  {{ qmacros.render_queries(engagement, 'acceptance', queries_by_section.get('acceptance', [])) }}
 
 {% elif tab == 'entity' %}
 {% if not acceptance_cleared and current_user.role != 'admin' %}
@@ -2006,6 +2010,8 @@
     {% endif %}
   </div>
 
+  {{ qmacros.render_queries(engagement, 'documents', queries_by_section.get('documents', [])) }}
+
 {% endif %}
 {% elif tab == 'tasks' %}
 {% if not acceptance_cleared and current_user.role != 'admin' %}
@@ -2112,7 +2118,8 @@
 {% elif tab == 'income_tax' %}
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
-{% elif profit_before_tax is none %}
+{% else %}
+{% if profit_before_tax is none %}
   <div class="card"><div class="empty-state">Profit before tax isn't available yet - complete the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab first, then come back here.</div></div>
 {% else %}
   <div class="card">
@@ -2239,6 +2246,10 @@
   {% endif %}
 {% endif %}
 
+  {{ qmacros.render_queries(engagement, 'income_tax', queries_by_section.get('income_tax', [])) }}
+
+{% endif %}
+
 {% elif tab == 'deferred_tax' %}
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
@@ -2356,6 +2367,9 @@
     {% endif %}
   </div>
   {% endif %}
+
+  {{ qmacros.render_queries(engagement, 'deferred_tax', queries_by_section.get('deferred_tax', [])) }}
+
 {% endif %}
 
 {% elif tab == 'tax' %}
