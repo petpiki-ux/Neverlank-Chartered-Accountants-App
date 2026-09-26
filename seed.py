@@ -7,9 +7,10 @@ exact name doesn't already exist, and never touches anything else.
 """
 import os
 import shutil
+from datetime import date
 
 from extensions import db
-from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection
+from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection, StatutoryDeadline
 from config import Config
 
 
@@ -507,6 +508,37 @@ def seed_filing_index():
             typical_contents=typical_contents, order=order,
         ))
         order += 1
+    db.session.commit()
+
+
+def seed_statutory_deadlines():
+    """Pre-load the 2026 QPD (Provisional Tax) instalment dates onto the
+    firm-wide Statutory Deadlines list shown on the Legislative Update
+    Calendar - see StatutoryDeadline in models.py for why this is a
+    firm-maintained list rather than something computed. Only called once,
+    when the table is completely empty (see app.py) - never re-run after
+    that, so a row someone has since edited or deleted here stays edited
+    or deleted, and the firm's own VAT/PAYE entries (which this app never
+    assumes a fixed date for) aren't disturbed by a later restart.
+
+    The four QPD dates below (25 March, 25 June, 25 September, 20
+    December) are the standard ZIMRA due dates for the 1st-4th quarterly
+    payment dates and are well-corroborated across multiple ZIMRA public
+    notices - unlike VAT/PAYE due dates, which genuinely are NOT a fixed
+    day-of-month in practice (ZIMRA has shifted them by notice before), so
+    this app does not guess at those and leaves them for the firm to add
+    themselves."""
+    year = date.today().year
+    qpd_dates = [
+        (date(year, 3, 25), "QPD 1 (Q1) due date"),
+        (date(year, 6, 25), "QPD 2 (Q2) due date"),
+        (date(year, 9, 25), "QPD 3 (Q3) due date"),
+        (date(year, 12, 20), "QPD 4 (Q4) due date"),
+    ]
+    for due_date, description in qpd_dates:
+        db.session.add(StatutoryDeadline(
+            tax_head="Provisional Tax (QPDs)", description=description, due_date=due_date,
+        ))
     db.session.commit()
 
 

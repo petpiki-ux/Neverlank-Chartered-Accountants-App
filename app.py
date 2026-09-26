@@ -7,7 +7,7 @@ from sqlalchemy.engine import Engine
 
 from config import Config, INSTANCE_DIR
 from extensions import db, login_manager, socketio
-from models import User, DocumentTemplate, Permission, FilingIndexSection
+from models import User, DocumentTemplate, Permission, FilingIndexSection, StatutoryDeadline
 
 
 @event.listens_for(Engine, "connect")
@@ -482,6 +482,14 @@ def create_app():
         if FilingIndexSection.query.count() == 0:
             from seed import seed_filing_index
             seed_filing_index()
+        # Statutory Deadlines (StatutoryDeadline): another new-feature table,
+        # seeded the same way as Filing Index above - pre-load the current
+        # year's 4 QPD dates once, as an editable/deletable starting point,
+        # never re-seeded afterwards (see seed_statutory_deadlines's own
+        # docstring for why).
+        if StatutoryDeadline.query.count() == 0:
+            from seed import seed_statutory_deadlines
+            seed_statutory_deadlines()
         # Document Templates whose reference codes were renumbered to the
         # Filing Index's N-codes (e.g. SA-02 -> N9006) need already-seeded
         # rows on an existing install updated to match - safe/cheap to run
@@ -578,6 +586,36 @@ def register_cli(app):
         import zimlii_import
         zimlii_import.import_documents(
             include_acts=not subsidiary_only, include_subsidiary=not acts_only,
+            dry_run=dry_run, max_pages=pages, limit=limit, sleep_seconds=sleep_seconds, log=click.echo,
+        )
+
+    @app.cli.command("import-veritas-legislation")
+    @click.option("--term", "term_id", type=int, default=98, help="Veritas taxonomy term id to import from (default: 98, 'Income Tax' - https://www.veritaszim.net/taxonomy/term/98).")
+    @click.option("--area", "default_area", default="Tax", help="Practice area (see LEGISLATIVE_UPDATE_AREAS) to tag every imported item with - default 'Tax', which fits term 98. Pass '' for none.")
+    @click.option("--dry-run", is_flag=True, help="List what would be imported (and the identifier it matched) without downloading or saving anything.")
+    @click.option("--pages", type=int, default=None, help="Only fetch this many listing pages (20 items/page) - use a small number to test first.")
+    @click.option("--limit", type=int, default=None, help="Import at most this many new items.")
+    @click.option("--sleep", "sleep_seconds", type=float, default=1.5, help="Seconds to wait between requests to Veritas's server (politeness delay).")
+    def import_veritas_legislation(term_id, default_area, dry_run, pages, limit, sleep_seconds):
+        """Bulk-import Zimbabwean tax legislation from one of Veritas
+        Zimbabwe's taxonomy listing pages (default: term 98, "Income Tax",
+        https://www.veritaszim.net/taxonomy/term/98) into Legislative
+        Update Control - see veritas_import.py for the full design.
+
+        Per Petros's own instruction: skips anything where the same Act or
+        SI is already on file, from ANY source (Veritas, ZimLII, ZIMRA, or
+        a manual entry) - see veritas_import.py's module docstring for
+        exactly how that's matched. A listing item that isn't recognisably
+        an Act/SI/Government Notice (e.g. a Veritas "Bill Watch" commentary
+        piece) is skipped outright - only legislation itself gets filed.
+
+        ALWAYS run with --dry-run --pages 1 first (see veritas_import.py's
+        module docstring for why - this environment couldn't test the page
+        parsing against the live site). Safe to interrupt and re-run at any
+        point."""
+        import veritas_import
+        veritas_import.import_legislation(
+            term_id=term_id, default_area=(default_area or None),
             dry_run=dry_run, max_pages=pages, limit=limit, sleep_seconds=sleep_seconds, log=click.echo,
         )
 

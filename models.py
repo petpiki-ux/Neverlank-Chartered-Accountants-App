@@ -4762,6 +4762,44 @@ class LegislativeUpdate(db.Model):
         return f"<LegislativeUpdate {self.title!r}>"
 
 
+class StatutoryDeadline(db.Model):
+    """One firm-wide statutory compliance date shown on the Legislative
+    Update Calendar (tax.legislative_updates_calendar) - a QPD instalment,
+    a VAT/PAYE filing or payment date, or any other recurring obligation
+    the firm wants everyone to see at a glance, distinct from TaxDeadline
+    above (which is a per-engagement, per-client deadline tracked on one
+    client's own Statutory Tax Calendar tab).
+
+    Deliberately a firm-maintained list a person types in and edits by
+    hand, not something computed from a rule - the user was asked directly
+    ("Firm-maintained list" vs. having the app compute VAT/PAYE dates
+    itself) and chose this, and it fits the app's existing "nothing
+    tax-specific is fabricated" rule (see PenaltyInterestRate above):
+    VAT/PAYE due dates in particular are NOT a fixed day-of-month in
+    practice - ZIMRA has shifted them via public notice before - so this
+    app does not assume or derive one. QPD dates (25 March, 25 June,
+    25 September, 20 December) are well-corroborated and pre-seeded once,
+    on first startup, as an editable/deletable starting point (see
+    app.py's startup seed step) - never re-seeded afterwards, so deleting
+    or editing a seeded row sticks."""
+    id = db.Column(db.Integer, primary_key=True)
+    tax_head = db.Column(db.String(80))  # one of TAX_HEADS, or blank for something that doesn't fit the list
+    description = db.Column(db.String(200), nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User")
+
+    @property
+    def is_overdue(self):
+        return self.due_date < date.today()
+
+    def __repr__(self):
+        return f"<StatutoryDeadline {self.description!r} due={self.due_date}>"
+
+
 class LegislativeUpdateChunk(db.Model):
     """One section-sized slice of a filed instrument's extracted_text (see
     legislation_chunking.py), so "Ask the library" (legislation_search.py)
@@ -5541,9 +5579,40 @@ class Message(db.Model):
         "MessageRecipient", backref="message", lazy=True,
         cascade="all, delete-orphan", order_by="MessageRecipient.id",
     )
+    attachments = db.relationship(
+        "MessageAttachment", backref="message", lazy=True,
+        cascade="all, delete-orphan", order_by="MessageAttachment.id",
+    )
 
     def __repr__(self):
         return f"<Message {self.id} {self.subject!r} from={self.sender_id}>"
+
+
+class MessageAttachment(db.Model):
+    """One file attached to a Message - requested by the user so a message
+    can carry a document instead of only text ("messages to allow for
+    attachment of documents for easier communication"). Saved the same way
+    as an engagement Document (see engagements._save_engagement_document):
+    to the shared Config.UPLOAD_FOLDER, under a unique stored_filename, with
+    the same ALLOWED_EXTENSIONS/size-limit rules - this isn't a firm-wide
+    "library" like Policies or Legislative Updates, just a file riding along
+    with one message, so it gets its own small table rather than reusing
+    Document (which is engagement-specific).
+
+    Downloading one follows the exact same access rule as viewing the
+    message itself (see messages._can_view_message): the sender, or a
+    recipient who hasn't had the message recalled out from under them.
+    Deleting the Message cascades to its attachments (row and file both -
+    see messages.py), and a Forward does NOT carry attachments forward,
+    matching the existing text-only quoting behaviour for Reply/Forward."""
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey("message.id"), nullable=False)
+    original_filename = db.Column(db.String(300), nullable=False)
+    stored_filename = db.Column(db.String(300), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<MessageAttachment {self.original_filename!r} message={self.message_id}>"
 
 
 class MessageRecipient(db.Model):

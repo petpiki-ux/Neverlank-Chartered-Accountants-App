@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>Legislative Update Calendar</h1>
-    <div class="subtitle">A month-at-a-glance view of every filed Act, Notice, SI and Case's own <strong>effective date</strong> and <strong>gazette date</strong> - including anything bulk-imported from ZIMRA's Public Notices. Drawn straight from what's already filed in <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Update Control</a>; an entry with neither date set doesn't appear here.</div>
+    <div class="subtitle">A month-at-a-glance view of every filed Act, Notice, SI and Case's own <strong>effective date</strong> and <strong>gazette date</strong> - including anything bulk-imported from ZIMRA's Public Notices - plus the firm's own <strong>Statutory Deadlines</strong> list (QPD instalments, VAT/PAYE filing and payment dates, etc). Legislative dates are drawn straight from what's already filed in <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Update Control</a>; an entry with neither date set doesn't appear here. Statutory Deadlines are typed in and maintained by the firm below - this app doesn't guess at a VAT/PAYE due date, since those genuinely shift by ZIMRA notice.</div>
   </div>
 </div>
 
@@ -18,9 +18,10 @@
     </div>
   </div>
   <p class="muted" style="font-size:12px;margin-top:0;">
-    {% if event_count %}{{ event_count }} date{{ 's' if event_count != 1 else '' }} this month.{% else %}Nothing filed with an effective or gazette date falls in {{ month_label }}.{% endif %}
+    {% if event_count %}{{ event_count }} date{{ 's' if event_count != 1 else '' }} this month.{% else %}Nothing falls in {{ month_label }}.{% endif %}
     <span class="badge" style="background:#eef3ee;">Effective</span> = takes/took effect this day &middot;
-    <span class="badge" style="background:#f2eee4;">Gazetted</span> = officially gazetted this day.
+    <span class="badge" style="background:#f2eee4;">Gazetted</span> = officially gazetted this day &middot;
+    <span class="badge" style="background:#f7e3e0;">Deadline</span> = firm statutory deadline.
   </p>
 
   <table style="table-layout:fixed;width:100%;">
@@ -40,8 +41,8 @@
         <td style="vertical-align:top;height:90px;padding:4px;{% if year == today.year and month == today.month and day == today.day %}background:#f7f2e2;{% endif %}">
           <div style="font-size:11px;" class="{{ 'muted' if not events_by_day.get(day) else '' }}">{{ day }}</div>
           {% for ev in events_by_day.get(day, []) %}
-          <a href="{{ url_for('tax.list_legislative_updates') }}#legislative-update-{{ ev.instrument.id }}" style="display:block;text-decoration:none;color:inherit;font-size:10.5px;line-height:1.3;margin-top:3px;padding:2px 3px;border-radius:3px;background:{{ '#eef3ee' if ev.kind == 'Effective' else '#f2eee4' }};" title="{{ ev.instrument.title }} ({{ ev.kind }}{% if ev.instrument.instrument_type %}, {{ ev.instrument.type_label }}{% endif %})">
-            {{ ev.instrument.title|truncate(28) }}
+          <a href="{{ ev.link }}" style="display:block;text-decoration:none;color:inherit;font-size:10.5px;line-height:1.3;margin-top:3px;padding:2px 3px;border-radius:3px;background:{{ '#eef3ee' if ev.kind == 'Effective' else ('#f2eee4' if ev.kind == 'Gazetted' else '#f7e3e0') }};" title="{{ ev.detail }}">
+            {{ ev.label|truncate(28) }}
           </a>
           {% endfor %}
         </td>
@@ -51,5 +52,56 @@
       {% endfor %}
     </tbody>
   </table>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Statutory Deadlines</h3>
+  <p class="muted" style="font-size:12px;">Firm-maintained: QPD dates, VAT/PAYE filing and payment dates, and any other recurring compliance date - typed in and kept current by the team, not computed by the app (VAT/PAYE due dates in particular are not a fixed day-of-month in practice and can shift by ZIMRA notice). The 2026 QPD dates below (25 Mar, 25 Jun, 25 Sep, 20 Dec) were pre-loaded as a starting point and can be edited or removed like any other entry.</p>
+
+  <table>
+    <thead>
+      <tr><th>Due date</th><th>Description</th><th>Tax head</th><th>Notes</th>{% if can_manage_deadlines %}<th></th>{% endif %}</tr>
+    </thead>
+    <tbody>
+      {% for d in all_deadlines %}
+      <tr id="statutory-deadline-{{ d.id }}" style="{% if d.is_overdue %}color:#a33;{% endif %}">
+        <td>{{ d.due_date.strftime('%d %b %Y') }}{% if d.is_overdue %} <span class="badge" style="background:#f7e3e0;">Overdue</span>{% endif %}</td>
+        <td>{{ d.description }}</td>
+        <td>{{ d.tax_head or '-' }}</td>
+        <td class="muted" style="font-size:12px;">{{ d.notes or '' }}</td>
+        {% if can_manage_deadlines %}
+        <td>
+          <form method="post" action="{{ url_for('tax.delete_statutory_deadline', deadline_id=d.id) }}" onsubmit="return confirm('Remove this deadline?');" class="inline">
+            <input type="hidden" name="year" value="{{ year }}">
+            <input type="hidden" name="month" value="{{ month }}">
+            <button type="submit" class="btn small danger">Remove</button>
+          </form>
+        </td>
+        {% endif %}
+      </tr>
+      {% else %}
+      <tr><td colspan="{{ 5 if can_manage_deadlines else 4 }}" class="muted">No statutory deadlines on file yet.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+
+  {% if can_manage_deadlines %}
+  <h4>Add a deadline</h4>
+  <form method="post" action="{{ url_for('tax.add_statutory_deadline') }}" class="form-row" style="flex-wrap:wrap;">
+    <div><label for="sd_due_date">Due date *</label><input type="date" id="sd_due_date" name="due_date" required></div>
+    <div style="flex:2;"><label for="sd_description">Description *</label><input type="text" id="sd_description" name="description" placeholder="e.g. VAT return &amp; payment due" required></div>
+    <div>
+      <label for="sd_tax_head">Tax head (optional)</label>
+      <select id="sd_tax_head" name="tax_head">
+        <option value="">-- none --</option>
+        {% for th in tax_heads %}
+        <option value="{{ th }}">{{ th }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div style="flex:2;"><label for="sd_notes">Notes (optional)</label><input type="text" id="sd_notes" name="notes"></div>
+    <div><button type="submit" class="btn gold">Add deadline</button></div>
+  </form>
+  {% endif %}
 </div>
 {% endblock %}

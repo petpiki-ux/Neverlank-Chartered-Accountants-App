@@ -23,6 +23,7 @@
         <td>
           <a href="{{ url_for('messages.view_message', message_id=row.message_id) }}">{{ row.message.subject }}</a>
           {% if not row.is_read %}<span class="badge overdue">New</span>{% endif %}
+          {% if row.message.attachments %}<span class="muted" style="font-size:11px;" title="{{ row.message.attachments|length }} attachment(s)">&#128206;{{ row.message.attachments|length }}</span>{% endif %}
         </td>
         <td>{{ row.message.created_at.strftime('%d %b %Y %H:%M') if row.message.created_at else '—' }}</td>
         <td><a href="{{ url_for('messages.view_message', message_id=row.message_id) }}" class="btn small secondary">Open</a></td>

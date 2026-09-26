@@ -42,6 +42,7 @@ from models import (
     LegislativeUpdate, LegislativeUpdateClientLink,
     LEGISLATIVE_UPDATE_TYPES, LEGISLATIVE_UPDATE_TYPE_LABELS, LEGISLATIVE_UPDATE_AREAS,
     CASE_AUTHORITY_STATUSES, CASE_AUTHORITY_LABELS,
+    StatutoryDeadline,
     TaxChecklistItem, DEFAULT_TAX_CHECKLIST_ITEMS,
     TAX_HEADS, PARTNER_SIGNOFF_ROLES, REVIEWER_ROLES,
     user_has_permission,
@@ -933,7 +934,12 @@ def legislative_updates_calendar():
     the "Ask the library" box on the main list page for that kind of
     open-ended question instead. A logged entry with neither date set
     (a plain text-only log, or a file still missing both dates) simply
-    never appears here; it's still on the main list."""
+    never appears here; it's still on the main list.
+
+    Also plots the firm-maintained StatutoryDeadline list (QPD/VAT/PAYE/etc
+    dates a person typed in, not computed - see StatutoryDeadline's own
+    docstring in models.py) as a third kind of event, managed from a list/
+    add/delete panel on this same page."""
     today = date.today()
     try:
         year = int(request.args.get("year", today.year))
@@ -959,30 +965,42 @@ def legislative_updates_calendar():
 
     events_by_day = {}
 
-    def _add(updates, date_field, kind):
-        for u in updates:
-            # NOTE: the key is "instrument", not "update" - a dict key named
-            # "update" collides with dict's own built-in .update() method,
-            # so `ev.update` in the Jinja template would silently resolve to
-            # that bound method instead of doing a key lookup.
-            events_by_day.setdefault(getattr(u, date_field).day, []).append({"instrument": u, "kind": kind})
+    def _add_event(day, kind, label, detail, link):
+        # A plain dict with plain string keys ("label"/"detail"/"link"),
+        # deliberately NOT keyed by an attribute name that collides with one
+        # of dict's own built-in methods (an earlier version used "update"
+        # as a key, and `ev.update` in the Jinja template silently resolved
+        # to dict's own bound .update() method instead of doing a lookup).
+        events_by_day.setdefault(day, []).append({"kind": kind, "label": label, "detail": detail, "link": link})
 
-    _add(
-        LegislativeUpdate.query.filter(
-            LegislativeUpdate.effective_date >= first_day, LegislativeUpdate.effective_date <= last_day,
-        ).order_by(LegislativeUpdate.title).all(),
-        "effective_date", "Effective",
-    )
-    _add(
-        LegislativeUpdate.query.filter(
-            LegislativeUpdate.gazette_date >= first_day, LegislativeUpdate.gazette_date <= last_day,
-        ).order_by(LegislativeUpdate.title).all(),
-        "gazette_date", "Gazetted",
-    )
+    for u in LegislativeUpdate.query.filter(
+        LegislativeUpdate.effective_date >= first_day, LegislativeUpdate.effective_date <= last_day,
+    ).order_by(LegislativeUpdate.title).all():
+        detail = f"{u.title} (Effective{', ' + u.type_label if u.instrument_type else ''})"
+        _add_event(u.effective_date.day, "Effective", u.title, detail, url_for("tax.list_legislative_updates") + f"#legislative-update-{u.id}")
+
+    for u in LegislativeUpdate.query.filter(
+        LegislativeUpdate.gazette_date >= first_day, LegislativeUpdate.gazette_date <= last_day,
+    ).order_by(LegislativeUpdate.title).all():
+        detail = f"{u.title} (Gazetted{', ' + u.type_label if u.instrument_type else ''})"
+        _add_event(u.gazette_date.day, "Gazetted", u.title, detail, url_for("tax.list_legislative_updates") + f"#legislative-update-{u.id}")
+
+    deadlines_this_month = StatutoryDeadline.query.filter(
+        StatutoryDeadline.due_date >= first_day, StatutoryDeadline.due_date <= last_day,
+    ).order_by(StatutoryDeadline.due_date, StatutoryDeadline.description).all()
+    for d in deadlines_this_month:
+        detail = f"{d.description}{' - ' + d.tax_head if d.tax_head else ''} (due {d.due_date.strftime('%d %b %Y')})"
+        _add_event(d.due_date.day, "Deadline", d.description, detail, url_for("tax.legislative_updates_calendar", year=year, month=month) + f"#statutory-deadline-{d.id}")
+
     for day_events in events_by_day.values():
-        day_events.sort(key=lambda e: e["instrument"].title)
+        day_events.sort(key=lambda e: e["label"])
 
     weeks = calendar_module.Calendar(firstweekday=0).monthdayscalendar(year, month)  # Monday-first, 0 = outside this month
+
+    # Every upcoming (and this-year's) deadline for the management panel,
+    # regardless of which month is currently being viewed - not just the
+    # ones falling in this month's grid above.
+    all_deadlines = StatutoryDeadline.query.order_by(StatutoryDeadline.due_date, StatutoryDeadline.description).all()
 
     return render_template(
         "tax/legislative_updates_calendar.html",
@@ -990,7 +1008,62 @@ def legislative_updates_calendar():
         weeks=weeks, events_by_day=events_by_day,
         prev_year=prev_year, prev_month=prev_month, next_year=next_year, next_month=next_month,
         today=today, event_count=sum(len(v) for v in events_by_day.values()),
+        all_deadlines=all_deadlines, tax_heads=TAX_HEADS,
+        can_manage_deadlines=(current_user.role in REVIEWER_ROLES),
     )
+
+
+@tax_bp.route("/legislative-updates/calendar/deadlines/add", methods=["POST"])
+@login_required
+def add_statutory_deadline():
+    """Add one entry to the firm-maintained Statutory Deadlines list (see
+    StatutoryDeadline in models.py). Gated the same way as raising an
+    engagement Query (REVIEWER_ROLES) rather than the looser
+    manage_checklist_templates permission some other firm-wide reference
+    data uses - this is a compliance date the whole firm relies on, not a
+    template."""
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    description = (request.form.get("description") or "").strip()
+    due_date_str = request.form.get("due_date") or ""
+    tax_head = (request.form.get("tax_head") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    try:
+        due_date = datetime.strptime(due_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        flash("Enter a valid due date.", "danger")
+        return redirect(url_for("tax.legislative_updates_calendar"))
+    if not description:
+        flash("Enter a description for the deadline.", "danger")
+        return redirect(url_for("tax.legislative_updates_calendar"))
+    db.session.add(StatutoryDeadline(
+        tax_head=tax_head or None, description=description, due_date=due_date,
+        notes=notes or None, created_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash("Statutory deadline added.", "success")
+    return redirect(url_for("tax.legislative_updates_calendar", year=due_date.year, month=due_date.month))
+
+
+@tax_bp.route("/legislative-updates/calendar/deadlines/<int:deadline_id>/delete", methods=["POST"])
+@login_required
+def delete_statutory_deadline(deadline_id):
+    """Remove one Statutory Deadline entry - same REVIEWER_ROLES gate as
+    adding one. Preserves whichever month was being viewed (passed through
+    as hidden year/month fields) rather than bouncing back to the current
+    month."""
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    deadline = StatutoryDeadline.query.get_or_404(deadline_id)
+    db.session.delete(deadline)
+    db.session.commit()
+    flash("Statutory deadline removed.", "success")
+    try:
+        year = int(request.form.get("year") or date.today().year)
+        month = int(request.form.get("month") or date.today().month)
+    except (TypeError, ValueError):
+        year, month = date.today().year, date.today().month
+    return redirect(url_for("tax.legislative_updates_calendar", year=year, month=month))
 
 
 @tax_bp.route("/legislative-updates/ask", methods=["POST"])

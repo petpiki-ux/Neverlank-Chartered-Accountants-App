@@ -19,7 +19,10 @@
     <tbody>
       {% for message in sent_messages %}
       <tr>
-        <td><a href="{{ url_for('messages.view_message', message_id=message.id) }}">{{ message.subject }}</a></td>
+        <td>
+          <a href="{{ url_for('messages.view_message', message_id=message.id) }}">{{ message.subject }}</a>
+          {% if message.attachments %}<span class="muted" style="font-size:11px;" title="{{ message.attachments|length }} attachment(s)">&#128206;{{ message.attachments|length }}</span>{% endif %}
+        </td>
         <td>
           {% if message.recipients|length > 3 %}
             {{ message.recipients|length }} recipients

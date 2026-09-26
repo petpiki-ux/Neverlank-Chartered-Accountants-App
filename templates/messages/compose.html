@@ -6,12 +6,15 @@
 </div>
 
 <div class="card" style="max-width:640px;">
-  <form method="post" id="compose-form">
+  <form method="post" id="compose-form" enctype="multipart/form-data">
     <label for="subject">Subject *</label>
     <input type="text" id="subject" name="subject" value="{{ prefill_subject }}" required>
 
     <label for="body">Message *</label>
     <textarea id="body" name="body" rows="6" required>{{ prefill_body }}</textarea>
+
+    <label for="attachments">Attach documents (optional)</label>
+    <input type="file" id="attachments" name="attachments" multiple>
 
     <label style="margin-top:14px;">
       <input type="checkbox" name="broadcast_all" id="broadcast_all" style="width:auto;" {% if prefill_broadcast %}checked{% endif %}

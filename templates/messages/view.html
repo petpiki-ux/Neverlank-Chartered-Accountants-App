@@ -23,6 +23,16 @@
 
 <div class="card" style="max-width:720px;">
   <div style="white-space:pre-wrap;line-height:1.5;">{{ message.body }}</div>
+  {% if message.attachments %}
+  <div style="margin-top:14px;border-top:1px solid var(--border);padding-top:10px;">
+    <strong style="font-size:12.5px;">Attachments ({{ message.attachments|length }})</strong>
+    <ul style="margin:6px 0 0 0;padding-left:18px;">
+      {% for a in message.attachments %}
+      <li><a href="{{ url_for('messages.download_attachment', attachment_id=a.id) }}">{{ a.original_filename }}</a></li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
 </div>
 
 <div class="card" style="max-width:720px;">

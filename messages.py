@@ -9,16 +9,41 @@ separate server-side thread model) and Recall: a sender can pull a message
 back, but only for recipients who hadn't opened it yet. Anyone who already
 read it before the recall keeps it.
 """
+import os
+import uuid
 from datetime import datetime
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
+from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_from_directory, current_app
 
 from flask_login import login_required, current_user
+from werkzeug.utils import secure_filename
 
 from extensions import db
-from models import User, Message, MessageRecipient
+from models import User, Message, MessageRecipient, MessageAttachment
 
 messages_bp = Blueprint("messages", __name__, url_prefix="/messages")
+
+
+def _allowed_attachment(filename):
+    """Same allowlist as an engagement Document upload (see
+    engagements._allowed_file) - one shared ALLOWED_EXTENSIONS list, since
+    a message attachment is stored in the same shared upload folder."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    return ext in current_app.config["ALLOWED_EXTENSIONS"]
+
+
+def _save_message_attachment(message_id, file):
+    """Save one uploaded file to the shared upload folder and return a new
+    (uncommitted) MessageAttachment row - mirrors
+    engagements._save_engagement_document's save pattern, minus the
+    versioning (an attachment is just a file riding along with a message,
+    never re-uploaded under the same name)."""
+    original_name = secure_filename(file.filename)
+    stored_name = f"msg{message_id}_{uuid.uuid4().hex[:10]}_{original_name}"
+    file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], stored_name))
+    attachment = MessageAttachment(message_id=message_id, original_filename=original_name, stored_filename=stored_name)
+    db.session.add(attachment)
+    return attachment
 
 
 def _strip_prefixes(subject):
@@ -89,6 +114,10 @@ def compose():
         body = request.form.get("body", "").strip()
         broadcast_all = request.form.get("broadcast_all") == "on"
         recipient_ids = request.form.getlist("recipient_ids")
+        # Empty <input type="file" multiple> fields still show up in
+        # getlist() as a single FileStorage with filename == "" - drop those
+        # rather than treating them as an attachment to save.
+        attachment_files = [f for f in request.files.getlist("attachments") if f and f.filename]
 
         if not subject or not body:
             flash("Please enter a subject and a message.", "danger")
@@ -117,13 +146,28 @@ def compose():
                 prefill_broadcast=broadcast_all,
             )
 
+        bad_attachments = [f.filename for f in attachment_files if not _allowed_attachment(f.filename)]
+        if bad_attachments:
+            flash(f"File type not allowed: {', '.join(bad_attachments)}.", "danger")
+            return render_template(
+                "messages/compose.html",
+                people=people,
+                prefill_to=recipient_ids,
+                prefill_subject=subject,
+                prefill_body=body,
+                prefill_broadcast=broadcast_all,
+            )
+
         message = Message(sender_id=current_user.id, subject=subject, body=body)
         db.session.add(message)
-        db.session.flush()  # get message.id before adding recipients
+        db.session.flush()  # get message.id before adding recipients/attachments
         for person in recipients:
             db.session.add(MessageRecipient(message_id=message.id, user_id=person.id))
+        for file in attachment_files:
+            _save_message_attachment(message.id, file)
         db.session.commit()
-        flash(f"Message sent to {len(recipients)} recipient(s).", "success")
+        attachment_note = f" with {len(attachment_files)} attachment(s)" if attachment_files else ""
+        flash(f"Message sent to {len(recipients)} recipient(s){attachment_note}.", "success")
         return redirect(url_for("messages.sent"))
 
     # GET: either a blank compose form, or one prefilled as a Reply/Forward
@@ -185,6 +229,25 @@ def view_message(message_id):
         recipient_row.read_at = datetime.utcnow()
         db.session.commit()
     return render_template("messages/view.html", message=message, recipient_row=recipient_row, is_sender=is_sender)
+
+
+@messages_bp.route("/attachments/<int:attachment_id>/download")
+@login_required
+def download_attachment(attachment_id):
+    """Download one MessageAttachment - same access rule as viewing the
+    message itself (see _can_view_message/view_message above): the sender,
+    or a recipient who hasn't had the message recalled out from under them.
+    A recipient who was recalled before opening it can't reach the
+    attachment either, same as they can't reach the body."""
+    attachment = MessageAttachment.query.get_or_404(attachment_id)
+    message = attachment.message
+    recipient_row = MessageRecipient.query.filter_by(message_id=message.id, user_id=current_user.id).first()
+    if not _can_view_message(message, recipient_row):
+        abort(403)
+    return send_from_directory(
+        current_app.config["UPLOAD_FOLDER"], attachment.stored_filename, as_attachment=True,
+        download_name=attachment.original_filename,
+    )
 
 
 @messages_bp.route("/<int:message_id>/recall", methods=["POST"])
