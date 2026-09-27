@@ -4399,6 +4399,161 @@ class PenaltyInterestCalculation(db.Model):
         return f"<PenaltyInterestCalculation {self.tax_head} {self.computed_amount} engagement={self.engagement_id}>"
 
 
+# ---------- VAT Invoice Register & Input/Output Tax Working Paper ----------
+#
+# Requested by the user: capture sales (Output) and purchase/expense (Input)
+# invoices on an engagement, compute Input Tax and Output Tax, allow a rate
+# lower than the standard rate to be captured (a reduced rate, or a
+# zero-rated/exempt supply), and import an already-prepared Output/Input Tax
+# schedule (Excel/CSV) rather than only capturing invoices one at a time.
+# Lives on the Tax tab (VAT is already one of TAX_HEADS above) so it's
+# available on any engagement with the Tax module switched on - a dedicated
+# Tax engagement, or Tax compliance bundled into an Accounting/Audit
+# engagement - exactly like every other Tax module section (Penalty &
+# Interest Engine, Dynamic Information Request List) rather than a separate
+# copy under the Accounting tab.
+#
+# VATRate is firm-wide and effective-dated, for the exact same reason
+# PenaltyInterestRate above is: Zimbabwe's VAT rate has changed over time
+# and reliable current rates couldn't be sourced with confidence at build
+# time, so nothing here is ever hardcoded or guessed - a partner enters/
+# confirms each rate (including the standard rate itself, any lower/reduced
+# rate, and zero-rated) on the VAT Rates settings screen, and every invoice
+# picks one of these confirmed rates rather than the app assuming a
+# percentage on its own.
+VAT_RATE_TYPES = ["Standard", "Reduced", "Zero-rated", "Exempt"]
+
+
+class VATRate(db.Model):
+    """One effective-dated VAT rate, firm-wide (not per-engagement - a
+    statutory rate doesn't vary by client) - see the module comment above
+    for why this is never hardcoded. "Reduced" is any confirmed rate lower
+    than the firm's current Standard rate (the user's own "VAT less than
+    the standard rate" case) - captured as its own effective-dated entry
+    rather than a single extra field, so more than one lower rate can exist
+    over time (or even concurrently, for different classes of supply) just
+    like Standard can. "Zero-rated" and "Exempt" are both 0% in practice,
+    but kept as distinct rate_type values because they're treated
+    differently on a VAT return (a zero-rated supply is still a taxable
+    supply reported at 0%; an exempt supply falls outside the VAT system
+    entirely) - effective_to left blank means "still the current rate" for
+    that rate_type."""
+    id = db.Column(db.Integer, primary_key=True)
+    rate_type = db.Column(db.String(20), nullable=False, default="Standard")
+    rate_percent = db.Column(db.Float, nullable=False, default=0.0)
+    effective_from = db.Column(db.Date, nullable=False)
+    effective_to = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    entered_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    entered_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    entered_by = db.relationship("User")
+
+    @property
+    def is_current(self):
+        today = date.today()
+        return self.effective_from <= today and (self.effective_to is None or self.effective_to >= today)
+
+    @property
+    def label(self):
+        return f"{self.rate_type} ({self.rate_percent:g}%)"
+
+    def __repr__(self):
+        return f"<VATRate {self.rate_type} {self.rate_percent}% from={self.effective_from}>"
+
+
+class VATImportBatch(db.Model):
+    """One confirmed import of an already-prepared Output/Input Tax
+    schedule (Excel/CSV) into VATInvoice rows below - the user's own
+    "importing already prepared output tax and input tax schedule"
+    requirement. The uploaded file's column headers rarely match this app's
+    field names exactly, so the import is a two-step flow (see
+    tax.stage_vat_schedule_import/confirm_vat_schedule_import): the file is
+    staged and a best-effort column mapping is suggested (never applied on
+    its own - the same "AI/heuristic suggests, person confirms" pattern
+    used throughout this app, e.g. financials.suggest_fs_category), the
+    preparer reviews/adjusts that mapping, and only on confirmation is this
+    batch (and its VATInvoice rows) actually created. Kept as its own
+    record - rather than only tagging each row's source - so a batch's
+    column_mapping_json and original file stay available for the audit
+    trail, and so an entire mistaken import can be identified and reversed
+    in one place (see tax.delete_vat_import_batch, which deletes every
+    VATInvoice row it produced via the cascade below)."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    direction = db.Column(db.String(10), nullable=False)  # "Output" or "Input" - see VAT_INVOICE_DIRECTIONS
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))  # kept in Config.VAT_IMPORTS_DATA_DIR for the audit trail
+    column_mapping_json = db.Column(db.Text)  # the confirmed {field: source_column} mapping, for reference
+    row_count = db.Column(db.Integer, default=0)
+    skipped_row_count = db.Column(db.Integer, default=0)
+    imported_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    imported_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("vat_import_batches", lazy=True, cascade="all, delete-orphan"))
+    imported_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<VATImportBatch {self.direction} rows={self.row_count} engagement={self.engagement_id}>"
+
+
+VAT_INVOICE_DIRECTIONS = ["Output", "Input"]
+VAT_INVOICE_DIRECTION_LABELS = {
+    "Output": "Output Tax (sales invoice)",
+    "Input": "Input Tax (purchase/expense invoice)",
+}
+# Where a VATInvoice row came from - a person capturing it directly on the
+# form, or one row of a confirmed VATImportBatch above. Purely informational
+# (both are treated identically everywhere else); shown on the register so
+# a preparer can tell an imported row apart from one they typed themselves.
+VAT_INVOICE_SOURCES = ["manual", "import"]
+
+
+class VATInvoice(db.Model):
+    """One sales (Output) or purchase/expense (Input) invoice line captured
+    for an engagement's VAT working paper - either typed in directly or
+    produced by a confirmed VATImportBatch above. taxable_amount is always
+    the value excluding VAT; vat_amount is the actual VAT charged/claimed on
+    the invoice, captured directly (an invoice's own stated VAT amount can
+    differ from a plain rate x amount calculation by a cent or two of
+    rounding, and this is a register of what the invoice actually says, not
+    a recalculation of it) rather than only ever derived from vat_rate.
+    vat_rate/vat_rate_percent_used are still recorded for every line (the
+    rate actually used, snapshotted the same way
+    PenaltyInterestCalculation.rate_percent_used is, in case the firm-wide
+    VATRate record is later changed or retired) so the working paper can
+    show which invoices used a rate other than Standard - the user's own
+    "VAT less than the standard rate" case."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    direction = db.Column(db.String(10), nullable=False)  # "Output" or "Input"
+    invoice_date = db.Column(db.Date)
+    invoice_number = db.Column(db.String(100))
+    counterparty_name = db.Column(db.String(200))  # the customer (Output) or supplier (Input) named on the invoice
+    description = db.Column(db.String(300))
+    taxable_amount = db.Column(db.Float, nullable=False, default=0.0)
+    vat_rate_id = db.Column(db.Integer, db.ForeignKey("vat_rate.id"))
+    vat_rate_percent_used = db.Column(db.Float)  # snapshot of the rate actually applied at capture/import time
+    vat_amount = db.Column(db.Float, nullable=False, default=0.0)
+    source = db.Column(db.String(10), nullable=False, default="manual")
+    import_batch_id = db.Column(db.Integer, db.ForeignKey("vat_import_batch.id"))
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("vat_invoices", lazy=True, cascade="all, delete-orphan"))
+    vat_rate = db.relationship("VATRate")
+    import_batch = db.relationship("VATImportBatch", backref=db.backref("invoices", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def total_amount(self):
+        return (self.taxable_amount or 0.0) + (self.vat_amount or 0.0)
+
+    def __repr__(self):
+        return f"<VATInvoice {self.direction} {self.invoice_number or ''} {self.vat_amount} engagement={self.engagement_id}>"
+
+
 TAX_INFO_REQUEST_STATUSES = ["Outstanding", "Received", "Not Applicable"]
 
 
@@ -4571,13 +4726,14 @@ class TaxDispute(db.Model):
 # learned from a mis-filed South African case). A Publication is useful,
 # persuasive secondary material - not primary law and not binding - and is
 # summarised and searched that way; see summarize_publication_update.
-LEGISLATIVE_UPDATE_TYPES = ["Act", "Notice", "SI", "Case", "Pub"]
+LEGISLATIVE_UPDATE_TYPES = ["Act", "Notice", "SI", "Case", "Pub", "News"]
 LEGISLATIVE_UPDATE_TYPE_LABELS = {
     "Act": "Act of Parliament",
     "Notice": "Government Notice",
     "SI": "Statutory Instrument",
     "Case": "Case Law",
     "Pub": "Publication",
+    "News": "News Article",
 }
 
 # How a filed Case entry's authority for Zimbabwean practice is classified -
@@ -4652,7 +4808,20 @@ class LegislativeUpdate(db.Model):
     judgment, so it gets neither the case_* fields nor legislation's own
     framing: see legislation_summary.PUBLICATION_SYSTEM_PROMPT. Use the
     existing source_reference field for its citation (e.g. "Tax Chronicles
-    Monthly, Issue 90, January 2026, SAIT")."""
+    Monthly, Issue 90, January 2026, SAIT").
+
+    A News entry (instrument_type == "News") is a general news article about
+    a development the firm wants on record - typically filed by pasting a
+    URL (article_url below) rather than uploading a file: the app fetches
+    the page itself, extracts its text, and summarises it the same way as
+    everything else, but through legislation_summary.NEWS_SYSTEM_PROMPT,
+    which frames it as what it actually is - ordinary news reporting, not a
+    professional/technical analysis (unlike Pub) and never primary law -
+    so a practitioner treats it as an early signal of a possible change to
+    watch for, not something to rely on until the actual instrument is
+    filed and reviewed. has_file is False for a News entry filed this way
+    (there's no uploaded file, only an extracted copy of the page); see
+    has_source below for the check that covers both."""
     id = db.Column(db.Integer, primary_key=True)
     tax_head = db.Column(db.String(80))
     title = db.Column(db.String(200), nullable=False)
@@ -4697,6 +4866,12 @@ class LegislativeUpdate(db.Model):
     ai_case_authority_reasoning = db.Column(db.Text)
     case_authority_status = db.Column(db.String(20))
 
+    # ---- News filing only (instrument_type == "News") ----
+    # The URL the article was fetched from - both the source citation (shown
+    # as a "Read online" link) and what "Reprocess" re-fetches from, since a
+    # News entry has no uploaded file of its own to reprocess from.
+    article_url = db.Column(db.String(500))
+
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
     created_by = db.relationship("User", foreign_keys=[created_by_id])
 
@@ -4711,6 +4886,16 @@ class LegislativeUpdate(db.Model):
     @property
     def has_file(self):
         return bool(self.stored_filename)
+
+    @property
+    def has_source(self):
+        """True if there's something to show an AI summary/areas-tagging
+        box for - an uploaded file (has_file) OR a News entry's fetched
+        article_url. Use this instead of has_file when deciding whether to
+        render that box; keep using has_file itself for anything that
+        specifically needs an actual file on disk (downloading it, checking
+        file_ext, and so on)."""
+        return self.has_file or bool(self.article_url)
 
     @property
     def areas(self):

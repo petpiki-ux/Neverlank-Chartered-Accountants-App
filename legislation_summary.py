@@ -333,6 +333,121 @@ def summarize_publication_update(filepath, is_image, extracted_text, extraction_
     return None, "error", "Couldn't read the PDF file itself, so there's nothing to summarise from."
 
 
+# -------------------------------------------------------------------- News
+#
+# A filed "News" (instrument_type == "News", see models.py) is an ordinary
+# news article about a development the firm wants on record - typically
+# reporting on something BEFORE it is officially gazetted/confirmed (a
+# proposed tax change, a minister's announcement, a budget speech
+# reported on). Unlike Pub, this is not professional/technical commentary
+# to weigh as analysis - it's ordinary news reporting, and often describes
+# something that hasn't actually happened in law yet. NEWS_SYSTEM_PROMPT
+# asks the model to frame it as exactly that: an early signal of a possible
+# change worth watching for, never something to rely on for compliance
+# until the actual instrument is filed and reviewed under its own
+# instrument type (Act/Notice/SI). News is always fetched-URL text (see
+# tax._fetch_and_extract_news_article), so unlike summarize()/
+# summarize_case_law()/summarize_publication() there's no page-image
+# branch - a news article has no scanned-gazette equivalent.
+NEWS_TOOL = {
+    "name": "record_news_summary",
+    "description": "Record a summary of this news article for an audit/tax firm's internal register, framed plainly as news reporting on a possible development - not as confirmed law or professional analysis.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {
+                "type": "string",
+                "description": "A plain-language summary of what the article reports and why it might matter to an audit/tax/accounting practitioner - a few sentences, not a paragraph-by-paragraph restatement.",
+            },
+            "key_changes": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "The specific developments reported (e.g. a proposed rate change, an announced deadline, a minister's statement), each as one short standalone bullet, written to make clear this is reported/proposed rather than confirmed in law (e.g. 'Reportedly proposes...', 'Minister said...'). Leave empty if the article is general background with nothing specific to flag.",
+            },
+            "suggested_areas": {
+                "type": "array",
+                "items": {"type": "string", "enum": LEGISLATIVE_UPDATE_AREAS},
+                "description": "Which of the listed practice areas this article's content is actually relevant to. Only include an area it genuinely touches - this is only a suggestion for a person to confirm.",
+            },
+        },
+        "required": ["summary", "key_changes", "suggested_areas"],
+    },
+}
+
+NEWS_SYSTEM_PROMPT = (
+    "You are summarising a news article being filed into a Zimbabwean audit, tax and accounting "
+    "firm's Legislative Update Control library, as a News entry. This is ordinary news reporting - "
+    "NOT a piece of Zimbabwean legislation, NOT a court judgment, and NOT professional/technical "
+    "commentary. It often describes something that hasn't happened in law yet: a proposal, an "
+    "announcement, a budget speech, a minister's statement, or a report of a change that may not yet "
+    "be gazetted or may end up different from what's reported. Read it carefully and call "
+    "record_news_summary with a plain-language summary of what the article reports, the specific "
+    "developments worth flagging (written to make clear they are reported/proposed, not confirmed - "
+    "use language like 'reportedly', 'proposes', 'said'), and the practice areas it touches. Do not "
+    "present anything in the article as settled law or as something a practitioner can rely on for "
+    "compliance - it is an early signal to watch for until the actual instrument is filed and "
+    "reviewed under its own type. Do not invent facts or figures beyond what the article actually "
+    "states."
+)
+
+
+def summarize_news(text, url=None):
+    """The News counterpart to summarize()/summarize_case_law()/
+    summarize_publication() above - same (result, status, error) shape, but
+    text-only (a News entry is always fetched-URL text, never a page image)
+    and using NEWS_TOOL/NEWS_SYSTEM_PROMPT so the result reads as news
+    reporting on a possible development, not as legislation or analysis.
+
+    On "done", result is {"summary", "key_changes", "suggested_areas"}."""
+    if os.environ.get("ANTHROPIC_API_KEY") is None:
+        return None, "not_configured", "ANTHROPIC_API_KEY is not set - see the README for how to add it on Render."
+    if not text:
+        return None, "error", "No article text was available to summarise."
+
+    prompt = f"Summarise this news article:\n\n{text[:MAX_TEXT_CHARS]}"
+    if url:
+        prompt = f"Summarise this news article (from {url}):\n\n{text[:MAX_TEXT_CHARS]}"
+
+    try:
+        client = _client()
+        response = client.messages.create(
+            model=DEFAULT_MODEL,
+            max_tokens=2048,
+            system=NEWS_SYSTEM_PROMPT,
+            tools=[NEWS_TOOL],
+            tool_choice={"type": "tool", "name": "record_news_summary"},
+            messages=[{"role": "user", "content": prompt}],
+        )
+    except Exception as exc:
+        return None, "error", str(exc)[:2000]
+
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "record_news_summary":
+            data = block.input or {}
+            summary = (data.get("summary") or "").strip()
+            if not summary:
+                return None, "error", "The model didn't return a summary - try again, or add one manually."
+            key_changes = [str(k).strip()[:500] for k in (data.get("key_changes") or []) if str(k).strip()]
+            suggested_areas = [a for a in (data.get("suggested_areas") or []) if a in LEGISLATIVE_UPDATE_AREAS]
+            return (
+                {"summary": summary[:5000], "key_changes": key_changes, "suggested_areas": suggested_areas},
+                "done",
+                None,
+            )
+    return None, "error", "The model didn't return a structured result - try again, or add a summary manually."
+
+
+def summarize_news_update(extracted_text, article_url=None):
+    """Top-level helper for tax.add_legislative_update/
+    reprocess_legislative_update's News branch - thin wrapper matching the
+    shape of summarize_legislative_update/summarize_case_law_update/
+    summarize_publication_update, but simpler since a News entry has no
+    file/image branching at all (it's always fetched-URL text)."""
+    if not extracted_text:
+        return None, "error", "Couldn't extract any readable text from that article, so there's nothing to summarise."
+    return summarize_news(text=extracted_text, url=article_url)
+
+
 def _client():
     api_key = os.environ.get("ANTHROPIC_API_KEY")
     if not api_key:

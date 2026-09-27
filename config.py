@@ -71,6 +71,14 @@ CLIENT_LOGOS_DATA_DIR = os.path.join(DATA_DIR, "client_logos_data")
 # above: starts empty, any team member with the "Manage Legislative Update
 # Control" permission adds files from the app.
 LEGISLATIVE_UPDATES_DATA_DIR = os.path.join(DATA_DIR, "legislative_updates_data")
+# Writable folder for a VAT Input/Output Tax schedule uploaded for column-
+# mapping confirmation (see tax.py's VAT Working Paper routes and
+# models.VATImportBatch) - the uploaded file is staged here between the
+# "suggest a mapping" step and the "confirm and import" step (the browser
+# round-trip in between means the file can't just stay in memory), then
+# moved into an engagement-scoped subfolder once the import is confirmed so
+# the original schedule stays available for the audit trail.
+VAT_IMPORTS_DATA_DIR = os.path.join(DATA_DIR, "vat_imports_data")
 
 
 class Config:
@@ -94,3 +102,4 @@ class Config:
     COMPANY_DOCUMENTS_DATA_DIR = COMPANY_DOCUMENTS_DATA_DIR
     CLIENT_LOGOS_DATA_DIR = CLIENT_LOGOS_DATA_DIR
     LEGISLATIVE_UPDATES_DATA_DIR = LEGISLATIVE_UPDATES_DATA_DIR
+    VAT_IMPORTS_DATA_DIR = VAT_IMPORTS_DATA_DIR

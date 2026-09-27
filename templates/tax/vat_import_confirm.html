@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Confirm VAT Schedule Import - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Confirm column mapping</h1>
+    <div class="subtitle">Importing "{{ original_filename }}" as an {{ direction_label }} schedule for {{ engagement.client.name if engagement.client else '' }} - {{ engagement.title }}. Nothing is imported until you confirm the mapping below. {{ total_row_count }} data row(s) found; a preview of the first {{ preview_rows|length }} is shown.</div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Column mapping</h3>
+  <p class="muted" style="font-size:12px;">Each field below is pre-filled with the app's best guess at which column in your file matches it - check each one, and change any that guessed wrong. Leave a field set to "— not in this file —" if your schedule doesn't have that column at all.</p>
+  <form method="post" action="{{ url_for('tax.confirm_vat_schedule_import', engagement_id=engagement.id) }}">
+    <input type="hidden" name="direction" value="{{ direction }}">
+    <input type="hidden" name="staged_filename" value="{{ staged_filename }}">
+    <input type="hidden" name="original_filename" value="{{ original_filename }}">
+    <div class="form-row" style="flex-wrap:wrap;">
+      {% for field, field_label in schedule_fields %}
+      <div>
+        <label for="map_{{ field }}">{{ field_label }}</label>
+        <select id="map_{{ field }}" name="map_{{ field }}">
+          <option value="">— not in this file —</option>
+          {% for h in headers %}<option value="{{ h }}" {% if suggested_mapping.get(field) == h %}selected{% endif %}>{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      {% endfor %}
+    </div>
+
+    <p style="font-size:12.5px;margin:14px 0 4px;"><strong>Preview (first {{ preview_rows|length }} row(s) from your file, as uploaded)</strong></p>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead><tr>{% for h in headers %}<th>{{ h }}</th>{% endfor %}</tr></thead>
+        <tbody>
+          {% for row in preview_rows %}
+          <tr>{% for h in headers %}<td style="white-space:nowrap;">{{ row.get(h, '') }}</td>{% endfor %}</tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:14px;">
+      <button type="submit" class="btn gold">Confirm mapping &amp; import {{ total_row_count }} row(s)</button>
+    </div>
+  </form>
+  <form method="post" action="{{ url_for('tax.cancel_vat_schedule_import') }}" style="margin-top:6px;">
+    <input type="hidden" name="engagement_id" value="{{ engagement.id }}">
+    <input type="hidden" name="staged_filename" value="{{ staged_filename }}">
+    <button type="submit" class="btn secondary">Cancel - don't import this file</button>
+  </form>
+</div>
+{% endblock %}

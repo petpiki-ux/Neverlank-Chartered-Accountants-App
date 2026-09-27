@@ -18,10 +18,17 @@ log/structuring/disputes), the compliance checklist, and the firm-wide
 legislative update log and penalty/interest rate table.
 """
 import os
+import csv
+import io
+import json
 import uuid
 import calendar as calendar_module
 
 from datetime import datetime, date
+
+import requests
+import openpyxl
+from bs4 import BeautifulSoup
 
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_from_directory
 from flask_login import login_required, current_user
@@ -39,6 +46,9 @@ from models import (
     TaxInformationRequest, TAX_INFO_REQUEST_STATUSES,
     TaxReturnRecord, TAX_RETURN_STATUSES,
     TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
+    VATRate, VAT_RATE_TYPES,
+    VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_INVOICE_SOURCES,
+    VATImportBatch,
     LegislativeUpdate, LegislativeUpdateClientLink,
     LEGISLATIVE_UPDATE_TYPES, LEGISLATIVE_UPDATE_TYPE_LABELS, LEGISLATIVE_UPDATE_AREAS,
     CASE_AUTHORITY_STATUSES, CASE_AUTHORITY_LABELS,
@@ -64,6 +74,57 @@ def _legislative_updates_dir():
     directory = Config.LEGISLATIVE_UPDATES_DATA_DIR
     os.makedirs(directory, exist_ok=True)
     return directory
+
+
+NEWS_FETCH_TIMEOUT = 20  # seconds - a slow/unresponsive news site should never hang the request
+NEWS_MAX_TEXT_CHARS = 60000  # matches legislation_summary.MAX_TEXT_CHARS; keeps a very long page bounded before it even reaches the AI step
+NEWS_FETCH_HEADERS = {
+    # Some news sites block the default python-requests user agent outright;
+    # a plain browser-like UA is enough to get past that without doing
+    # anything deceptive - the app identifies itself honestly to the extent
+    # any browser does.
+    "User-Agent": "Mozilla/5.0 (compatible; NeverlankAuditApp/1.0; +https://neverlank-audit-app.onrender.com)"
+}
+
+
+def _fetch_and_extract_news_article(url):
+    """Fetch a news article by URL and extract its readable text, for a News
+    Legislative Update entry (instrument_type == "News") filed by pasting a
+    link rather than uploading a file - see models.LegislativeUpdate's
+    docstring. Returns (text, error): on success, text is a non-empty
+    string and error is None; on failure, text is None and error is a
+    short, person-readable message suitable for a flash message. Never
+    raises - a bad/unreachable URL should degrade cleanly, the same way a
+    bad PDF upload degrades to an extraction_status rather than a crash.
+
+    Extraction is deliberately simple (strip script/style/nav/footer/header
+    tags, then take the page's visible text) rather than a full
+    readability/boilerplate-removal algorithm - good enough for an AI
+    summarisation step that only needs the article's substance, not a
+    publication-quality reformatting of it."""
+    if not url:
+        return None, "No URL was provided."
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return None, "That doesn't look like a valid web address - it should start with http:// or https://."
+    try:
+        response = requests.get(url, headers=NEWS_FETCH_HEADERS, timeout=NEWS_FETCH_TIMEOUT)
+        response.raise_for_status()
+    except Exception as exc:
+        return None, f"Couldn't fetch that page: {exc}"[:500]
+
+    try:
+        soup = BeautifulSoup(response.content, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n")
+        lines = [line.strip() for line in text.splitlines()]
+        text = "\n".join(line for line in lines if line)
+    except Exception as exc:
+        return None, f"Couldn't read that page's content: {exc}"[:500]
+
+    if not text or len(text) < 50:
+        return None, "Couldn't find any readable article text on that page - it may require a login, or not be a plain article page."
+    return text[:NEWS_MAX_TEXT_CHARS], None
 
 
 def legislative_update_editor_required(f):
@@ -574,6 +635,464 @@ def delete_penalty_interest_calculation(calc_id):
     engagement_id = calc.engagement_id
     db.session.delete(calc)
     db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- VAT Invoice Register & Input/Output Tax Working Paper ----------
+# Requested by the user: capture sales (Output) and purchase/expense (Input)
+# invoices, compute Input Tax and Output Tax, allow a rate lower than the
+# standard rate to be captured, and import an already-prepared Output/Input
+# Tax schedule. Rates (firm-wide) are managed from their own settings screen,
+# exactly like Penalty & Interest rates above; invoice capture and schedule
+# import are engagement-scoped. See models.py's module comment above VATRate
+# for why rates are never hardcoded.
+
+def _vat_imports_dir():
+    directory = Config.VAT_IMPORTS_DATA_DIR
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def _resolve_vat_amount_and_rate(taxable_amount, vat_rate, vat_amount_input):
+    """Given the selected firm-wide VATRate (or None) and whatever the
+    preparer typed into the VAT amount field (or None if left blank),
+    returns (vat_amount, rate_percent_used) to save on the VATInvoice.
+    Prefers the invoice's own stated VAT amount when one was entered - a
+    real invoice's VAT can differ from a plain rate x amount calculation by
+    a cent or two of rounding, and this is a register of what the invoice
+    actually says - but still records a rate_percent_used either way (the
+    selected rate, or the rate implied by the entered amounts) so the
+    working paper can always show which invoices used less than the
+    standard rate."""
+    if vat_amount_input is not None:
+        if vat_rate is not None:
+            rate_percent_used = vat_rate.rate_percent
+        elif taxable_amount:
+            rate_percent_used = round((vat_amount_input / taxable_amount) * 100, 4)
+        else:
+            rate_percent_used = None
+        return vat_amount_input, rate_percent_used
+    if vat_rate is not None:
+        return round((taxable_amount or 0.0) * (vat_rate.rate_percent / 100.0), 2), vat_rate.rate_percent
+    return 0.0, None
+
+
+@tax_bp.route("/vat-rates")
+@login_required
+def list_vat_rates():
+    rates = VATRate.query.order_by(VATRate.rate_type, VATRate.effective_from.desc()).all()
+    return render_template(
+        "tax/vat_rates.html", rates=rates, rate_types=VAT_RATE_TYPES,
+        can_manage=user_has_permission(current_user, "manage_checklist_templates"),
+    )
+
+
+@tax_bp.route("/vat-rates/add", methods=["POST"])
+@login_required
+def add_vat_rate():
+    if not user_has_permission(current_user, "manage_checklist_templates"):
+        abort(403)
+    effective_from = _parse_date(request.form.get("effective_from"))
+    rate_percent = _parse_float(request.form.get("rate_percent"))
+    if not effective_from or rate_percent is None:
+        flash("Please enter both an effective date and a rate.", "danger")
+        return redirect(url_for("tax.list_vat_rates"))
+    rate = VATRate(
+        rate_type=request.form.get("rate_type") or "Standard",
+        rate_percent=rate_percent,
+        effective_from=effective_from,
+        effective_to=_parse_date(request.form.get("effective_to")),
+        notes=request.form.get("notes", "").strip(),
+        entered_by_id=current_user.id,
+    )
+    db.session.add(rate)
+    db.session.commit()
+    flash("VAT rate added.", "success")
+    return redirect(url_for("tax.list_vat_rates"))
+
+
+@tax_bp.route("/vat-rates/<int:rate_id>/delete", methods=["POST"])
+@login_required
+def delete_vat_rate(rate_id):
+    if not user_has_permission(current_user, "manage_checklist_templates"):
+        abort(403)
+    rate = VATRate.query.get_or_404(rate_id)
+    db.session.delete(rate)
+    db.session.commit()
+    return redirect(url_for("tax.list_vat_rates"))
+
+
+@tax_bp.route("/<int:engagement_id>/vat/invoices/add", methods=["POST"])
+@login_required
+def add_vat_invoice(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    direction = request.form.get("direction", "").strip()
+    if direction not in VAT_INVOICE_DIRECTIONS:
+        flash("Please choose whether this is a sales (Output) or purchase/expense (Input) invoice.", "danger")
+        return _tax_redirect(engagement_id)
+    taxable_amount = _parse_float(request.form.get("taxable_amount"))
+    if taxable_amount is None:
+        flash("Please enter the taxable amount (excluding VAT).", "danger")
+        return _tax_redirect(engagement_id)
+    rate_id = request.form.get("vat_rate_id") or None
+    vat_rate = VATRate.query.get(int(rate_id)) if rate_id else None
+    vat_amount_input = _parse_float(request.form.get("vat_amount"))
+    vat_amount, rate_percent_used = _resolve_vat_amount_and_rate(taxable_amount, vat_rate, vat_amount_input)
+    invoice = VATInvoice(
+        engagement_id=engagement_id,
+        direction=direction,
+        invoice_date=_parse_date(request.form.get("invoice_date")),
+        invoice_number=request.form.get("invoice_number", "").strip() or None,
+        counterparty_name=request.form.get("counterparty_name", "").strip() or None,
+        description=request.form.get("description", "").strip() or None,
+        taxable_amount=taxable_amount,
+        vat_rate_id=vat_rate.id if vat_rate else None,
+        vat_rate_percent_used=rate_percent_used,
+        vat_amount=vat_amount,
+        source="manual",
+        created_by_id=current_user.id,
+    )
+    db.session.add(invoice)
+    db.session.commit()
+    flash(f"{VAT_INVOICE_DIRECTION_LABELS.get(direction, direction)} invoice captured.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/vat/invoices/<int:invoice_id>/delete", methods=["POST"])
+@login_required
+def delete_vat_invoice(invoice_id):
+    invoice = VATInvoice.query.get_or_404(invoice_id)
+    _ensure_engagement_access(invoice.engagement)
+    engagement_id = invoice.engagement_id
+    db.session.delete(invoice)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# The fields a VAT Output/Input Tax schedule import can populate, and the
+# header-name synonyms used to suggest a mapping for each one - the same
+# "heuristic suggests, person confirms" pattern as
+# financials.suggest_fs_category, never applied on its own (see
+# _suggest_vat_column_mapping and models.VATImportBatch's docstring).
+VAT_SCHEDULE_FIELDS = [
+    ("invoice_date", "Invoice date"),
+    ("invoice_number", "Invoice number"),
+    ("counterparty_name", "Customer / supplier name"),
+    ("description", "Description"),
+    ("taxable_amount", "Taxable amount (excl. VAT)"),
+    ("vat_amount", "VAT amount"),
+    ("rate_percent", "VAT rate % (only used to compute the VAT amount when that column is blank)"),
+]
+VAT_SCHEDULE_REQUIRED_FIELDS = {"taxable_amount"}
+
+VAT_SCHEDULE_FIELD_SYNONYMS = {
+    "invoice_date": ["invoice date", "date", "trans date", "transaction date", "tax point", "tax point date"],
+    "invoice_number": ["invoice no", "invoice number", "inv no", "invoice #", "reference", "ref", "ref no", "document no", "doc no"],
+    "counterparty_name": ["customer", "customer name", "client", "client name", "supplier", "supplier name", "vendor", "vendor name", "counterparty", "name", "trading name"],
+    "description": ["description", "particulars", "details", "narrative", "goods/services", "nature of supply"],
+    "taxable_amount": ["taxable amount", "amount excl vat", "amount excluding vat", "net amount", "excl vat", "net", "value excl vat", "sales excl vat", "purchases excl vat", "amount (excl. vat)"],
+    "vat_amount": ["vat amount", "vat", "tax amount", "output vat", "input vat", "vat charged", "vat claimed", "tax"],
+    "rate_percent": ["vat rate", "rate", "vat %", "tax rate", "rate %", "vat rate %"],
+}
+
+
+def _suggest_vat_column_mapping(headers):
+    """Best-effort column-name matching for an uploaded Output/Input Tax
+    schedule - never guaranteed correct, and never itself imports anything;
+    the preparer reviews/adjusts every suggestion on the confirmation
+    screen before any VATInvoice row is created. Prefers an exact (case-
+    insensitive) header match over a mere substring match, and never
+    suggests the same column for two different fields."""
+    lower_headers = {h: h.strip().lower() for h in headers if h and str(h).strip()}
+    mapping = {}
+    used = set()
+    for field, _ in VAT_SCHEDULE_FIELDS:
+        synonyms = VAT_SCHEDULE_FIELD_SYNONYMS[field]
+        best = None
+        for h, lh in lower_headers.items():
+            if h in used:
+                continue
+            if lh in synonyms:
+                best = h
+                break
+        if not best:
+            for h, lh in lower_headers.items():
+                if h in used:
+                    continue
+                if any(s in lh for s in synonyms):
+                    best = h
+                    break
+        mapping[field] = best
+        if best:
+            used.add(best)
+    return mapping
+
+
+def _read_vat_schedule_rows(filepath, filename):
+    """Returns (headers, rows): the file's own column headers in order, and
+    a list of {header: value} dicts, for an uploaded Output/Input Tax
+    schedule already saved to `filepath`. Raises ValueError with a plain-
+    English message if no usable header row is found. Mirrors
+    engagements._read_tb_upload_rows's shape."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext == "csv":
+        with open(filepath, "r", encoding="utf-8-sig", errors="replace") as f:
+            reader = csv.DictReader(f)
+            headers = [h for h in (reader.fieldnames or []) if h]
+            rows = [dict(r) for r in reader]
+        return headers, rows
+    if ext not in ("xlsx", "xls"):
+        raise ValueError("Please upload an Excel (.xlsx/.xls) or CSV file.")
+    workbook = openpyxl.load_workbook(filepath, data_only=True)
+    sheet = workbook.active
+    all_rows = list(sheet.iter_rows(values_only=True))
+    if not all_rows:
+        raise ValueError("That file appears to be empty.")
+    headers = [str(c).strip() if c is not None else "" for c in all_rows[0]]
+    if not any(headers):
+        raise ValueError("Could not find a header row in that file - the first row should contain column headings.")
+    rows = []
+    for row in all_rows[1:]:
+        if all(c is None or str(c).strip() == "" for c in row):
+            continue
+        rows.append({h: v for h, v in zip(headers, row) if h})
+    return headers, rows
+
+
+def _parse_vat_schedule_amount(value):
+    """Parses one spreadsheet cell into a float, tolerant of blanks,
+    currency-formatted text ("$1,234.50"), and bracketed negatives
+    ("(1,234.50)") - a schedule from another system is never guaranteed to
+    hand back plain numbers. Returns None (never raises) if it can't be
+    read as a number at all."""
+    if value is None:
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).strip()
+    if not text:
+        return None
+    negative = text.startswith("(") and text.endswith(")")
+    text = text.strip("()").replace(",", "").replace("$", "").replace("USD", "").strip()
+    try:
+        amount = float(text)
+    except ValueError:
+        return None
+    return -amount if negative else amount
+
+
+def _parse_vat_schedule_date(value):
+    """Parses one spreadsheet cell into a date - openpyxl already hands
+    back a real datetime/date object for a genuine Excel date cell; this
+    only has to additionally handle a CSV's plain text date in a few common
+    layouts. Returns None (never raises) if it can't be read as a date."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+@tax_bp.route("/<int:engagement_id>/vat/import/stage", methods=["POST"])
+@login_required
+def stage_vat_schedule_import(engagement_id):
+    """Step 1 of the schedule import: save the upload, read its headers,
+    suggest a column mapping, and show the preparer a confirmation screen -
+    nothing is imported yet. See models.VATImportBatch's docstring for why
+    this is a two-step flow."""
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    direction = request.form.get("direction", "").strip()
+    if direction not in VAT_INVOICE_DIRECTIONS:
+        flash("Please choose whether this is an Output Tax (sales) or Input Tax (purchases/expenses) schedule.", "danger")
+        return _tax_redirect(engagement_id)
+    file = request.files.get("file")
+    if not file or not file.filename:
+        flash("Please choose a file to import.", "danger")
+        return _tax_redirect(engagement_id)
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in ("xlsx", "xls", "csv"):
+        flash("Only Excel (.xlsx/.xls) or CSV files are accepted for a schedule import.", "danger")
+        return _tax_redirect(engagement_id)
+
+    original_name = secure_filename(file.filename)
+    staged_name = f"vatstage_{engagement_id}_{uuid.uuid4().hex[:8]}_{original_name}"
+    staged_path = os.path.join(_vat_imports_dir(), staged_name)
+    file.save(staged_path)
+
+    try:
+        headers, rows = _read_vat_schedule_rows(staged_path, original_name)
+    except ValueError as exc:
+        os.remove(staged_path)
+        flash(str(exc), "danger")
+        return _tax_redirect(engagement_id)
+
+    if not rows:
+        os.remove(staged_path)
+        flash("That file has a header row but no data rows to import.", "danger")
+        return _tax_redirect(engagement_id)
+
+    suggested_mapping = _suggest_vat_column_mapping(headers)
+    return render_template(
+        "tax/vat_import_confirm.html",
+        engagement=engagement, direction=direction,
+        direction_label=VAT_INVOICE_DIRECTION_LABELS.get(direction, direction),
+        staged_filename=staged_name, original_filename=original_name,
+        headers=headers, preview_rows=rows[:10], total_row_count=len(rows),
+        schedule_fields=VAT_SCHEDULE_FIELDS, suggested_mapping=suggested_mapping,
+    )
+
+
+@tax_bp.route("/<int:engagement_id>/vat/import/confirm", methods=["POST"])
+@login_required
+def confirm_vat_schedule_import(engagement_id):
+    """Step 2: the preparer's confirmed (or corrected) column mapping is
+    actually applied, row by row, and a VATImportBatch + one VATInvoice per
+    readable row are created. Re-reads the staged file rather than trusting
+    anything posted from the browser about its contents."""
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    direction = request.form.get("direction", "").strip()
+    staged_filename = secure_filename(request.form.get("staged_filename", "").strip())
+    original_filename = request.form.get("original_filename", "").strip()
+    staged_path = os.path.join(_vat_imports_dir(), staged_filename) if staged_filename else ""
+    if direction not in VAT_INVOICE_DIRECTIONS or not staged_filename or not os.path.exists(staged_path):
+        flash("That import session has expired or the staged file could not be found - please upload the file again.", "danger")
+        return _tax_redirect(engagement_id)
+
+    mapping = {field: (request.form.get(f"map_{field}", "").strip() or None) for field, _ in VAT_SCHEDULE_FIELDS}
+    missing_required = [label for field, label in VAT_SCHEDULE_FIELDS if field in VAT_SCHEDULE_REQUIRED_FIELDS and not mapping.get(field)]
+    if missing_required:
+        os.remove(staged_path)
+        flash(f"Please map a column to: {', '.join(missing_required)} - required to import a schedule.", "danger")
+        return _tax_redirect(engagement_id)
+
+    try:
+        _headers, rows = _read_vat_schedule_rows(staged_path, original_filename or staged_filename)
+    except ValueError as exc:
+        os.remove(staged_path)
+        flash(str(exc), "danger")
+        return _tax_redirect(engagement_id)
+
+    # Move the staged file into a permanent, engagement-scoped name for the
+    # audit trail rather than leaving it under its transient staging name -
+    # the same "keep the original filed document" approach as every other
+    # upload in this app.
+    stored_name = f"vat{engagement_id}_{uuid.uuid4().hex[:8]}_{secure_filename(original_filename or staged_filename)}"
+    stored_path = os.path.join(_vat_imports_dir(), stored_name)
+    os.replace(staged_path, stored_path)
+
+    batch = VATImportBatch(
+        engagement_id=engagement_id,
+        direction=direction,
+        original_filename=original_filename or staged_filename,
+        stored_filename=stored_name,
+        column_mapping_json=json.dumps(mapping),
+        imported_by_id=current_user.id,
+    )
+    db.session.add(batch)
+    db.session.flush()  # assign batch.id before creating its invoices
+
+    imported = 0
+    skipped = 0
+    for row in rows:
+        taxable_amount = _parse_vat_schedule_amount(row.get(mapping["taxable_amount"])) if mapping.get("taxable_amount") else None
+        if taxable_amount is None:
+            skipped += 1
+            continue
+        vat_amount = _parse_vat_schedule_amount(row.get(mapping["vat_amount"])) if mapping.get("vat_amount") else None
+        rate_percent = _parse_vat_schedule_amount(row.get(mapping["rate_percent"])) if mapping.get("rate_percent") else None
+        if vat_amount is None and rate_percent is not None:
+            vat_amount = round(taxable_amount * (rate_percent / 100.0), 2)
+
+        def _mapped_text(field):
+            col = mapping.get(field)
+            if not col:
+                return None
+            value = row.get(col)
+            return str(value).strip() or None if value not in (None, "") else None
+
+        invoice = VATInvoice(
+            engagement_id=engagement_id,
+            direction=direction,
+            invoice_date=_parse_vat_schedule_date(row.get(mapping["invoice_date"])) if mapping.get("invoice_date") else None,
+            invoice_number=_mapped_text("invoice_number"),
+            counterparty_name=_mapped_text("counterparty_name"),
+            description=_mapped_text("description"),
+            taxable_amount=taxable_amount,
+            vat_rate_percent_used=rate_percent,
+            vat_amount=vat_amount or 0.0,
+            source="import",
+            import_batch_id=batch.id,
+            created_by_id=current_user.id,
+        )
+        db.session.add(invoice)
+        imported += 1
+
+    batch.row_count = imported
+    batch.skipped_row_count = skipped
+    db.session.commit()
+
+    if skipped:
+        flash(f"Imported {imported} {direction.lower()} tax invoice(s) - {skipped} row(s) were skipped (no readable taxable amount).", "warning")
+    else:
+        flash(f"Imported {imported} {direction.lower()} tax invoice(s).", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/vat/import/cancel", methods=["POST"])
+@login_required
+def cancel_vat_schedule_import():
+    """Discards a staged file the preparer decided not to import after all
+    (e.g. they picked the wrong file), rather than leaving it orphaned in
+    Config.VAT_IMPORTS_DATA_DIR."""
+    engagement_id = request.form.get("engagement_id")
+    staged_filename = secure_filename(request.form.get("staged_filename", "").strip())
+    if staged_filename:
+        staged_path = os.path.join(_vat_imports_dir(), staged_filename)
+        if os.path.exists(staged_path):
+            try:
+                os.remove(staged_path)
+            except OSError:
+                pass
+    if engagement_id:
+        return _tax_redirect(int(engagement_id))
+    return redirect(url_for("engagements.list_engagements"))
+
+
+@tax_bp.route("/vat/import-batches/<int:batch_id>/delete", methods=["POST"])
+@login_required
+def delete_vat_import_batch(batch_id):
+    """Reverses a mistaken schedule import in one action - deletes the
+    batch record and, via the cascade on VATImportBatch.invoices (see
+    models.py), every VATInvoice row it produced."""
+    batch = VATImportBatch.query.get_or_404(batch_id)
+    _ensure_engagement_access(batch.engagement)
+    engagement_id = batch.engagement_id
+    if batch.stored_filename:
+        stored_path = os.path.join(_vat_imports_dir(), batch.stored_filename)
+        if os.path.exists(stored_path):
+            try:
+                os.remove(stored_path)
+            except OSError:
+                pass
+    db.session.delete(batch)
+    db.session.commit()
+    flash("Import batch and its invoices removed.", "success")
     return _tax_redirect(engagement_id)
 
 
@@ -1129,7 +1648,38 @@ def add_legislative_update(engagement_id=None):
     db.session.add(update)
 
     file = request.files.get("file")
-    if file and file.filename:
+    if instrument_type == "News":
+        # A News entry is filed by pasting a URL rather than uploading a
+        # file - the app fetches the page itself and extracts its text. See
+        # _fetch_and_extract_news_article and models.LegislativeUpdate's
+        # docstring.
+        article_url = request.form.get("article_url", "").strip()
+        if not article_url:
+            flash("Please paste the news article's URL - a News entry is filed by URL rather than an uploaded file. The update was logged without a source.", "warning")
+        else:
+            db.session.flush()  # assign update.id without committing yet
+            text, fetch_error = _fetch_and_extract_news_article(article_url)
+            update.article_url = article_url
+            update.extraction_status = "extracted" if text else "no_text_found"
+            if text:
+                update.extracted_text = text
+            db.session.commit()  # save the fetched article itself before attempting the AI call, so a slow/failed AI step never loses it
+
+            if text:
+                result, ai_status, ai_error = legislation_summary.summarize_news_update(text, article_url)
+                update.ai_status = ai_status
+                update.ai_error = ai_error
+                update.ai_processed_at = datetime.utcnow()
+                if ai_status == "done":
+                    update.ai_summary = result["summary"]
+                    update.set_ai_key_changes(result["key_changes"])
+                    update.set_ai_suggested_areas(result["suggested_areas"])
+                legislation_chunking.ensure_chunks(update)
+            else:
+                update.ai_status = "error"
+                update.ai_error = fetch_error
+                update.ai_processed_at = datetime.utcnow()
+    elif file and file.filename:
         ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
         if ext not in LEGISLATIVE_UPDATE_FILE_EXTENSIONS:
             flash("Only PDF, JPG and PNG files are accepted for a filed instrument - the update was logged without a file.", "warning")
@@ -1242,6 +1792,38 @@ def reprocess_legislative_update(update_id):
     if skip_reason:
         flash(f"This entry isn't auto-summarised - {skip_reason}", "info")
         return redirect(url_for("tax.list_legislative_updates"))
+
+    if update.instrument_type == "News":
+        # A News entry has no uploaded file to reprocess from - it
+        # re-fetches the article fresh from article_url instead, in case the
+        # page has changed or the previous fetch/AI attempt failed.
+        if not update.article_url:
+            flash("This entry has no article URL to fetch - it was only ever logged as text.", "danger")
+            return redirect(url_for("tax.list_legislative_updates"))
+        text, fetch_error = _fetch_and_extract_news_article(update.article_url)
+        update.extraction_status = "extracted" if text else "no_text_found"
+        if text:
+            update.extracted_text = text
+            result, ai_status, ai_error = legislation_summary.summarize_news_update(text, update.article_url)
+            update.ai_status = ai_status
+            update.ai_error = ai_error
+            update.ai_processed_at = datetime.utcnow()
+            if ai_status == "done":
+                update.ai_summary = result["summary"]
+                update.set_ai_key_changes(result["key_changes"])
+                update.set_ai_suggested_areas(result["suggested_areas"])
+            legislation_chunking.ensure_chunks(update)
+        else:
+            update.ai_status = "error"
+            update.ai_error = fetch_error
+            update.ai_processed_at = datetime.utcnow()
+        db.session.commit()
+        if update.ai_status == "done":
+            flash("Reprocessed - the article was re-fetched and the AI summary below has been refreshed.", "success")
+        else:
+            flash(f"Reprocessing failed: {update.ai_error}", "danger")
+        return redirect(url_for("tax.list_legislative_updates"))
+
     if not update.has_file:
         flash("This entry has no filed instrument to reprocess - it was only ever logged as text.", "danger")
         return redirect(url_for("tax.list_legislative_updates"))

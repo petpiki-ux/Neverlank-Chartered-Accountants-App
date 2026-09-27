@@ -60,6 +60,9 @@ from models import (
     TaxEntityProfile, TaxRegistration, TaxDeadline, TaxAnalyticalReview, TaxPosition,
     TAX_POSITION_CLASSIFICATIONS, TAX_POSITION_APPROVAL_STATUSES,
     PenaltyInterestRate, PenaltyInterestCalculation, PENALTY_INTEREST_RATE_TYPES,
+    VATRate, VAT_RATE_TYPES,
+    VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS,
+    VATImportBatch,
     TaxInformationRequest, TAX_INFO_REQUEST_STATUSES,
     TaxReturnRecord, TAX_RETURN_STATUSES,
     TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
@@ -820,6 +823,29 @@ def view_engagement(engagement_id):
     tax_opinion_narratives = {k: workpaper_narratives.get(k) for k, _ in TAX_OPINION_PARTS} if engagement.has_tax_module else {}
     tax_health_check_narratives = {k: workpaper_narratives.get(k) for k, _ in TAX_HEALTH_CHECK_PARTS} if engagement.has_tax_module else {}
 
+    # VAT Invoice Register & Input/Output Tax Working Paper - see tax.py's
+    # module comment above VATRate/its own "VAT Invoice Register" section.
+    # Rates are firm-wide (like Penalty & Interest rates above); invoices
+    # and import batches are engagement-scoped.
+    current_vat_rates = VATRate.query.order_by(VATRate.rate_type, VATRate.effective_from.desc()).all()
+    vat_invoices = []
+    vat_import_batches = []
+    vat_output_tax_total = 0.0
+    vat_input_tax_total = 0.0
+    vat_output_taxable_total = 0.0
+    vat_input_taxable_total = 0.0
+    if engagement.has_tax_module:
+        vat_invoices = VATInvoice.query.filter_by(engagement_id=engagement_id).order_by(VATInvoice.invoice_date.desc().nullslast(), VATInvoice.id.desc()).all()
+        vat_import_batches = VATImportBatch.query.filter_by(engagement_id=engagement_id).order_by(VATImportBatch.imported_at.desc()).all()
+        for inv in vat_invoices:
+            if inv.direction == "Output":
+                vat_output_tax_total += inv.vat_amount or 0.0
+                vat_output_taxable_total += inv.taxable_amount or 0.0
+            elif inv.direction == "Input":
+                vat_input_tax_total += inv.vat_amount or 0.0
+                vat_input_taxable_total += inv.taxable_amount or 0.0
+    vat_net_position = vat_output_tax_total - vat_input_tax_total
+
     # ---------- Accounting tab (Financial/Cost/Management Accounting module) ----------
     # Only actually queried when the Accounting tab could be shown - see
     # Engagement.has_accounting_module / the module comment in models.py for
@@ -998,6 +1024,16 @@ def view_engagement(engagement_id):
         current_penalty_interest_rates=current_penalty_interest_rates,
         penalty_interest_rate_types=PENALTY_INTEREST_RATE_TYPES,
         tax_penalty_calculations=tax_penalty_calculations,
+        current_vat_rates=current_vat_rates,
+        vat_invoices=vat_invoices,
+        vat_import_batches=vat_import_batches,
+        vat_invoice_directions=VAT_INVOICE_DIRECTIONS,
+        vat_invoice_direction_labels=VAT_INVOICE_DIRECTION_LABELS,
+        vat_output_tax_total=vat_output_tax_total,
+        vat_input_tax_total=vat_input_tax_total,
+        vat_output_taxable_total=vat_output_taxable_total,
+        vat_input_taxable_total=vat_input_taxable_total,
+        vat_net_position=vat_net_position,
         tax_opinion_parts=TAX_OPINION_PARTS,
         tax_opinion_narratives=tax_opinion_narratives,
         tax_health_check_parts=TAX_HEALTH_CHECK_PARTS,

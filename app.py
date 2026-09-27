@@ -205,6 +205,10 @@ def _add_missing_columns():
             ("ai_case_authority_status", "VARCHAR(20)"),
             ("ai_case_authority_reasoning", "TEXT"),
             ("case_authority_status", "VARCHAR(20)"),
+            # News filing (instrument_type == "News") - filed by pasting a
+            # URL rather than uploading a file; see models.LegislativeUpdate's
+            # docstring and the has_source property.
+            ("article_url", "VARCHAR(500)"),
         ],
         # The Policies & Procedures library ("Firm Library") upgraded from a
         # static depository to an AI-powered research hub - these let a

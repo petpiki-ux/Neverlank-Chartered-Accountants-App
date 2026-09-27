@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>Legislative Update Control</h1>
-    <div class="subtitle">Firm-wide log of legislative/practice changes, case law and professional publications - file an Act, Government Notice, Statutory Instrument, court Case or Publication for an automatic AI summary, or just log an update as text. Tag the clients each one affects, then pull it into a Tax Advisory engagement's Technical Research Log with one click.</div>
+    <div class="subtitle">Firm-wide log of legislative/practice changes, case law, professional publications and news articles - file an Act, Government Notice, Statutory Instrument, court Case, Publication or News article for an automatic AI summary, or just log an update as text. Tag the clients each one affects, then pull it into a Tax Advisory engagement's Technical Research Log with one click.</div>
   </div>
   <div><a href="{{ url_for('tax.legislative_updates_calendar') }}" class="btn secondary">Calendar view</a></div>
 </div>
@@ -81,7 +81,7 @@
     {% endif %}
     {% if u.summary %}<p style="font-size:13px;"><strong>Summary:</strong> {{ u.summary }}</p>{% endif %}
 
-    {% if u.has_file %}
+    {% if u.has_source %}
     <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin:8px 0;">
       {% if u.ai_status == 'done' %}
       <p style="font-size:12.5px;"><strong>AI summary:</strong> {{ u.ai_summary }}</p>
@@ -101,7 +101,11 @@
       {% elif u.ai_status == 'error' %}
       <p class="muted" style="font-size:12px;">Automatic summarisation failed ({{ u.ai_error }}).{% if can_edit and u.instrument_type != 'Act' %} <form method="post" action="{{ url_for('tax.reprocess_legislative_update', update_id=u.id) }}" class="inline"><button type="submit" class="btn small secondary">Reprocess</button></form>{% endif %}</p>
       {% endif %}
+      {% if u.has_file %}
       <a href="{{ url_for('tax.download_legislative_update', update_id=u.id) }}" class="btn small secondary">Download filed instrument</a>
+      {% elif u.article_url %}
+      <a href="{{ u.article_url }}" target="_blank" rel="noopener">Read original article &#8599;</a>
+      {% endif %}
     </div>
 
     <form method="post" action="{{ url_for('tax.save_legislative_update_areas', update_id=u.id) }}" style="margin-bottom:10px;">
@@ -186,7 +190,9 @@
     Publication is a journal article or technical note (e.g. a SAIT Tax Chronicles Monthly issue) rather than
     Zimbabwean legislation or a judgment - it's summarised as commentary/analysis on its own terms, not forced
     into a legislative framing; use Source / reference for its citation (e.g. "Tax Chronicles Monthly, Issue 90,
-    January 2026, SAIT").
+    January 2026, SAIT"). A News article is filed by pasting its URL instead of a file - the app fetches the page
+    itself and summarises it as ordinary news reporting on a possible development, not as confirmed law or
+    professional analysis.
   </p>
   <form method="post" action="{{ url_for('tax.add_legislative_update') }}" enctype="multipart/form-data">
     <div class="form-row" style="flex-wrap:wrap;">
@@ -211,9 +217,11 @@
       <div><label for="effective_date">Effective date</label><input type="date" id="effective_date" name="effective_date"></div>
       <div><label for="source_reference">Source / reference</label><input type="text" id="source_reference" name="source_reference"></div>
     </div>
-    <label for="file">Filed instrument (PDF, JPG or PNG - optional)</label>
+    <label for="file">Filed instrument (PDF, JPG or PNG - optional, not used for a News entry)</label>
     <input type="file" id="file" name="file" accept=".pdf,.png,.jpg,.jpeg">
-    <label for="summary">Summary (used if no file is attached, or the AI summary isn't available)</label>
+    <label for="article_url">News article URL (for a News entry, instead of a file - the app fetches and summarises the page itself)</label>
+    <input type="url" id="article_url" name="article_url" placeholder="https://...">
+    <label for="summary">Summary (used if no file/URL is attached, or the AI summary isn't available)</label>
     <textarea id="summary" name="summary" rows="2"></textarea>
     <label for="impact_assessment">Impact assessment</label>
     <textarea id="impact_assessment" name="impact_assessment" rows="2"></textarea>
