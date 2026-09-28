@@ -1542,6 +1542,15 @@ engagement_team = db.Table(
 
 
 class User(UserMixin, db.Model):
+    # How recently a user must have been seen (see last_seen_at/_update_last_
+    # seen in app.py) to count as "online now" for the Messages "who's in the
+    # app" indicator (models.User.is_online) - requested by the user to show
+    # which colleagues are currently active when composing/reading a
+    # message. Wider than the once-a-minute throttle on updating
+    # last_seen_at, so the throttle itself never makes someone look offline
+    # early.
+    ONLINE_THRESHOLD_MINUTES = 5
+
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(80), unique=True, nullable=False)
     name = db.Column(db.String(120), nullable=False)
@@ -1550,6 +1559,11 @@ class User(UserMixin, db.Model):
     role = db.Column(db.String(20), default="staff")  # staff | supervisor | partner | admin
     is_active_flag = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Stamped on every authenticated request (throttled - see app.py's
+    # _update_last_seen), purely for the is_online presence indicator below.
+    # Never a precise "last activity" audit log - just recent enough to
+    # drive an online/offline dot.
+    last_seen_at = db.Column(db.DateTime)
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
@@ -1560,6 +1574,15 @@ class User(UserMixin, db.Model):
     @property
     def is_active(self):
         return self.is_active_flag
+
+    @property
+    def is_online(self):
+        """True if this user has been seen within ONLINE_THRESHOLD_MINUTES -
+        the Messages "who's in the app" indicator. A user who has never
+        logged in (last_seen_at is None) is never online."""
+        if not self.last_seen_at:
+            return False
+        return (datetime.utcnow() - self.last_seen_at).total_seconds() <= self.ONLINE_THRESHOLD_MINUTES * 60
 
     def __repr__(self):
         return f"<User {self.username}>"

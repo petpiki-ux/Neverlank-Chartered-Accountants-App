@@ -1,5 +1,6 @@
 import os
 import click
+from datetime import datetime
 from flask import Flask, redirect, url_for
 from flask_login import current_user
 from sqlalchemy import event, text
@@ -46,6 +47,10 @@ def _add_missing_columns():
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
         "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)")],
+        # last_seen_at - see models.User.is_online and this file's
+        # _update_last_seen - drives the Messages "who's in the app" online
+        # indicator.
+        "user": [("last_seen_at", "DATETIME")],
         "message_recipient": [("recalled_at", "DATETIME")],
         "engagement": [
             ("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0"),
@@ -430,6 +435,22 @@ def create_app():
         if current_user.is_authenticated:
             return redirect(url_for("engagements.dashboard"))
         return redirect(url_for("auth.login"))
+
+    @app.before_request
+    def _update_last_seen():
+        """Lightweight presence tracking behind the Messages "who's online"
+        indicator (see models.User.last_seen_at/is_online) - stamps the
+        current user's last_seen_at on any authenticated request. Throttled
+        to at most once a minute per user so an active session doesn't write
+        to the database on every single page load/asset request; the
+        ONLINE_THRESHOLD_MINUTES window in models.py is wider than this
+        throttle, so it never makes someone look offline sooner than that
+        window just because of the throttle."""
+        if current_user.is_authenticated:
+            now = datetime.utcnow()
+            if not current_user.last_seen_at or (now - current_user.last_seen_at).total_seconds() > 60:
+                current_user.last_seen_at = now
+                db.session.commit()
 
     @app.context_processor
     def inject_globals():

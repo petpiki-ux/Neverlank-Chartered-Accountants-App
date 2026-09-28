@@ -19,7 +19,10 @@
     <tbody>
       {% for row in recipient_rows %}
       <tr {% if not row.is_read %}style="font-weight:600;"{% endif %}>
-        <td>{{ row.message.sender.name if row.message.sender else '—' }}</td>
+        <td>
+          {% if row.message.sender %}<span title="{{ 'Online now' if row.message.sender.is_online else ('Last seen ' + row.message.sender.last_seen_at.strftime('%d %b %H:%M') if row.message.sender.last_seen_at else 'Never logged in') }}" style="display:inline-block;width:7px;height:7px;border-radius:50%;background:{{ '#2ecc71' if row.message.sender.is_online else '#bbb' }};margin-right:5px;"></span>{% endif %}
+          {{ row.message.sender.name if row.message.sender else '—' }}
+        </td>
         <td>
           <a href="{{ url_for('messages.view_message', message_id=row.message_id) }}">{{ row.message.subject }}</a>
           {% if not row.is_read %}<span class="badge overdue">New</span>{% endif %}
