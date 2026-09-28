@@ -19,7 +19,7 @@ from werkzeug.utils import secure_filename
 
 from extensions import db
 from models import (
-    PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, User, Engagement,
+    PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, CheckInRecord, User, Engagement, Client,
     EngagementTask, PersonalTask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
     user_has_permission, user_can_access_engagement, notify_task_assignment,
 )
@@ -391,13 +391,87 @@ def list_timesheets():
         if current_user.role not in REVIEWER_ROLES else
         TimeSheetUpload.query.order_by(TimeSheetUpload.uploaded_at.desc()).all()
     )
+    my_checkins = (
+        CheckInRecord.query.filter_by(user_id=current_user.id)
+        .order_by(CheckInRecord.check_in_at.desc())
+        .limit(20)
+        .all()
+    )
     return render_template(
         "hr/timesheets_list.html",
         my_sheets=my_sheets,
         team_sheets=team_sheets,
         uploads=uploads,
+        my_checkins=my_checkins,
         default_week=_monday_of(date.today()).isoformat(),
     )
+
+
+@hr_bp.route("/checkin", methods=["POST"])
+@login_required
+def check_in():
+    """Starts the clock for today, via the Check In button in the top bar
+    (available on every page). A no-op (just a flash) if already checked
+    in - see check_out below for where the elapsed time actually lands."""
+    open_existing = CheckInRecord.query.filter_by(user_id=current_user.id, check_out_at=None).first()
+    if open_existing:
+        flash(f"You're already checked in since {open_existing.check_in_at.strftime('%H:%M')}.", "info")
+    else:
+        now = datetime.utcnow()
+        record = CheckInRecord(user_id=current_user.id, work_date=now.date(), check_in_at=now)
+        db.session.add(record)
+        db.session.commit()
+        flash(f"Checked in at {now.strftime('%H:%M')}.", "success")
+    return redirect(request.referrer or url_for("engagements.dashboard"))
+
+
+@hr_bp.route("/checkout", methods=["POST"])
+@login_required
+def check_out():
+    """Stops the clock and adds the elapsed hours as a TimeEntry on that
+    day's TimeSheet (auto-starting the week's timesheet if it doesn't exist
+    yet) - unless that week is already Approved, in which case the
+    check-in/check-out is still recorded but nothing is added automatically,
+    same guard as add_time_entry."""
+    record = CheckInRecord.query.filter_by(user_id=current_user.id, check_out_at=None).first()
+    if not record:
+        flash("You're not checked in.", "danger")
+        return redirect(request.referrer or url_for("engagements.dashboard"))
+
+    record.check_out_at = datetime.utcnow()
+    hours = record.elapsed_hours
+
+    week_start = _monday_of(record.work_date)
+    sheet = TimeSheet.query.filter_by(user_id=current_user.id, week_start=week_start).first()
+    if not sheet:
+        sheet = TimeSheet(user_id=current_user.id, week_start=week_start)
+        db.session.add(sheet)
+        db.session.flush()
+
+    if sheet.status == "Approved":
+        db.session.commit()
+        flash(
+            f"Checked out at {record.check_out_at.strftime('%H:%M')} ({hours} hrs) - "
+            "that week's timesheet is already approved, so it wasn't added automatically. "
+            "Ask your reviewer to reopen it, then add the hours by hand.",
+            "danger",
+        )
+        return redirect(request.referrer or url_for("engagements.dashboard"))
+
+    if hours and hours > 0:
+        entry = TimeEntry(
+            timesheet_id=sheet.id,
+            work_date=record.work_date,
+            description=f"Checked in {record.check_in_at.strftime('%H:%M')} - checked out {record.check_out_at.strftime('%H:%M')}",
+            hours=hours,
+        )
+        db.session.add(entry)
+        db.session.flush()
+        record.time_entry_id = entry.id
+
+    db.session.commit()
+    flash(f"Checked out at {record.check_out_at.strftime('%H:%M')} - {hours} hrs added to this week's timesheet.", "success")
+    return redirect(request.referrer or url_for("engagements.dashboard"))
 
 
 @hr_bp.route("/timesheets/new", methods=["POST"])
@@ -604,8 +678,9 @@ def project_board():
     status_filter = request.args.get("status", "")
     assignee_filter = request.args.get("assigned_to", "")
     view = request.args.get("view", "")  # "mine" narrows to tasks assigned to me
+    search_query = request.args.get("q", "").strip()
 
-    eng_query = EngagementTask.query.join(Engagement)
+    eng_query = EngagementTask.query.join(Engagement).join(Client, Engagement.client_id == Client.id)
     personal_query = PersonalTask.query
     if status_filter:
         eng_query = eng_query.filter(EngagementTask.status == status_filter)
@@ -617,6 +692,26 @@ def project_board():
         eng_query = eng_query.filter(EngagementTask.assigned_to_id == current_user.id)
         personal_query = personal_query.filter(
             (PersonalTask.assigned_to_id == current_user.id) | (PersonalTask.created_by_id == current_user.id)
+        )
+    if search_query:
+        # Matches the task's own title/description, plus - for an
+        # engagement task - the client/engagement it's on, so typing a
+        # client name finds their tasks even if the task title itself
+        # doesn't mention the client.
+        like = f"%{search_query}%"
+        eng_query = eng_query.filter(
+            db.or_(
+                EngagementTask.title.ilike(like),
+                EngagementTask.description.ilike(like),
+                Engagement.title.ilike(like),
+                Client.name.ilike(like),
+            )
+        )
+        personal_query = personal_query.filter(
+            db.or_(
+                PersonalTask.title.ilike(like),
+                PersonalTask.description.ilike(like),
+            )
         )
 
     engagement_tasks = eng_query.order_by(EngagementTask.due_date.asc().nullslast()).all()
@@ -646,6 +741,7 @@ def project_board():
         status_filter=status_filter,
         assignee_filter=assignee_filter,
         view=view,
+        search_query=search_query,
     )
 
 

@@ -35,6 +35,15 @@
       {% endif %}
     </nav>
     <div class="user-menu">
+      {% if open_check_in %}
+      <form method="post" action="{{ url_for('hr.check_out') }}" class="inline" title="Checked in at {{ open_check_in.check_in_at.strftime('%H:%M') }}">
+        <button type="submit" class="btn small danger">Check Out ({{ open_check_in.check_in_at.strftime('%H:%M') }})</button>
+      </form>
+      {% else %}
+      <form method="post" action="{{ url_for('hr.check_in') }}" class="inline">
+        <button type="submit" class="btn small gold">Check In</button>
+      </form>
+      {% endif %}
       <a href="{{ url_for('messages.inbox') }}">Messages{% if unread_message_count %} <span class="badge overdue">{{ unread_message_count }}</span>{% endif %}</a>
       <span>{{ current_user.name }}</span>
       <a href="{{ url_for('auth.account') }}">Account</a>

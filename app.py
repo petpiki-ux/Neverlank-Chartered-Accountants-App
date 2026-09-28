@@ -454,23 +454,29 @@ def create_app():
 
     @app.context_processor
     def inject_globals():
-        from models import user_has_permission, MessageRecipient, EngagementTask, PersonalTask
+        from models import user_has_permission, MessageRecipient, EngagementTask, PersonalTask, CheckInRecord
         unread = (
             MessageRecipient.query.filter_by(user_id=current_user.id, read_at=None).count()
             if current_user.is_authenticated
             else 0
         )
         open_tasks = 0
+        open_check_in = None
         if current_user.is_authenticated:
             open_tasks = (
                 EngagementTask.query.filter_by(assigned_to_id=current_user.id).filter(EngagementTask.status != "Done").count()
                 + PersonalTask.query.filter_by(assigned_to_id=current_user.id).filter(PersonalTask.status != "Done").count()
             )
+            # Powers the Check In / Check Out button in the top bar (see
+            # hr.check_in/check_out) - shown on every page, not just the Time
+            # Sheets page, so staff can clock in/out from wherever they are.
+            open_check_in = CheckInRecord.query.filter_by(user_id=current_user.id, check_out_at=None).first()
         return {
             "firm_name": "Neverlank Chartered Accountants",
             "user_has_permission": user_has_permission,
             "unread_message_count": unread,
             "my_open_task_count": open_tasks,
+            "open_check_in": open_check_in,
         }
 
     with app.app_context():

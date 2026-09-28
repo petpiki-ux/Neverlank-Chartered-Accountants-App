@@ -13,8 +13,8 @@
     <div>
       <label for="view_toggle">Show</label>
       <select id="view_toggle" onchange="window.location.href=this.value">
-        <option value="{{ url_for('hr.project_board', status=status_filter, assigned_to=assignee_filter) }}" {% if not view %}selected{% endif %}>Everyone's tasks</option>
-        <option value="{{ url_for('hr.project_board', status=status_filter, assigned_to=assignee_filter, view='mine') }}" {% if view=='mine' %}selected{% endif %}>My tasks only</option>
+        <option value="{{ url_for('hr.project_board', status=status_filter, assigned_to=assignee_filter, q=search_query) }}" {% if not view %}selected{% endif %}>Everyone's tasks</option>
+        <option value="{{ url_for('hr.project_board', status=status_filter, assigned_to=assignee_filter, q=search_query, view='mine') }}" {% if view=='mine' %}selected{% endif %}>My tasks only</option>
       </select>
     </div>
     <div>
@@ -31,8 +31,19 @@
         {% for p in people %}<option value="{{ p.id }}" {% if assignee_filter==p.id|string %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
       </select>
     </div>
+    <div>
+      <label for="q">Search</label>
+      <input type="text" id="q" name="q" value="{{ search_query }}" placeholder="Title, notes, client or engagement...">
+    </div>
+    <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Search</button></div>
     <input type="hidden" name="view" value="{{ view }}">
   </form>
+  {% if search_query %}
+  <p class="muted" style="font-size:12.5px;margin-top:10px;margin-bottom:0;">
+    Showing tasks matching "{{ search_query }}" -
+    <a href="{{ url_for('hr.project_board', status=status_filter, assigned_to=assignee_filter, view=view) }}">clear search</a>
+  </p>
+  {% endif %}
 </div>
 
 <div class="card">

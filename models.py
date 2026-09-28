@@ -2606,6 +2606,50 @@ class TimeSheetUpload(db.Model):
     user = db.relationship("User")
 
 
+class CheckInRecord(db.Model):
+    """One check-in/check-out pair, logged via the "Check In"/"Check Out"
+    button in the top bar (available on every page, next to the user's
+    name). On check-out, the elapsed time is used to add (or top up) a
+    TimeEntry on that day's TimeSheet automatically - same self-service,
+    reviewer-approved flow as an entry typed in by hand on the Time Sheets
+    page, just with the hours worked out from the clock instead of typed in.
+    A user can only have one OPEN record (check_out_at is None) at a time;
+    checking in again while already checked in is a no-op, and checking out
+    with nothing open is a no-op - both just flash a message rather than
+    erroring.
+
+    time_entry_id is left blank when check-out happens for a week whose
+    timesheet is already Approved (locked) - the check-in/check-out itself
+    is still recorded, but nothing is added to the timesheet until a
+    reviewer reopens it and the hours are added by hand, exactly like a
+    manual entry attempted against an Approved timesheet."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    work_date = db.Column(db.Date, nullable=False)  # calendar day this belongs to (= check_in_at's date)
+    check_in_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    check_out_at = db.Column(db.DateTime)
+    time_entry_id = db.Column(db.Integer, db.ForeignKey("time_entry.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", foreign_keys=[user_id])
+    time_entry = db.relationship("TimeEntry", foreign_keys=[time_entry_id])
+
+    @property
+    def is_open(self):
+        return self.check_out_at is None
+
+    @property
+    def elapsed_hours(self):
+        """Hours between check-in and check-out, rounded to 2dp. None while
+        still checked in (no check-out yet)."""
+        if not self.check_out_at:
+            return None
+        return round((self.check_out_at - self.check_in_at).total_seconds() / 3600, 2)
+
+    def __repr__(self):
+        return f"<CheckInRecord user={self.user_id} {self.work_date}>"
+
+
 class StaffAllocation(db.Model):
     """A staff member booked onto an engagement for a specific date range,
     optionally at less than 100% of their time. Powers the HR & Admin >
