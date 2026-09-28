@@ -87,10 +87,11 @@
   <h3 class="mt-0">Engagement tasks</h3>
   {% if engagement_tasks %}
   <table>
-    <thead><tr><th>Task</th><th>Engagement</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th>Review</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Task</th><th>Engagement</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th>Review</th><th></th></tr></thead>
     <tbody>
       {% for t in engagement_tasks %}
       <tr>
+        <td class="muted">{{ loop.index }}</td>
         <td>{{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
         <td><a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id, tab='tasks') }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></td>
         <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>
@@ -137,10 +138,11 @@
   <h3 class="mt-0">General to-dos</h3>
   {% if personal_tasks %}
   <table>
-    <thead><tr><th>Task</th><th>Added by</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>#</th><th>Task</th><th>Added by</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th></th></tr></thead>
     <tbody>
       {% for t in personal_tasks %}
       <tr>
+        <td class="muted">{{ loop.index }}</td>
         <td>
           {{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}{% if t.engagement %}<div class="muted" style="font-size:11px;">Re: <a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id) }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></div>{% endif %}
 
