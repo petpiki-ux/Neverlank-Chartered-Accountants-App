@@ -20,7 +20,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, CheckInRecord, User, Engagement, Client,
-    EngagementTask, PersonalTask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
+    EngagementTask, PersonalTask, PersonalSubtask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
     user_has_permission, user_can_access_engagement, notify_task_assignment,
 )
 from config import Config
@@ -836,6 +836,60 @@ def delete_personal_task(task_id):
     db.session.delete(task)
     db.session.commit()
     flash("Task deleted.", "info")
+    return redirect(url_for("hr.project_board"))
+
+
+@hr_bp.route("/projects/personal/<int:task_id>/subtasks/add", methods=["POST"])
+@login_required
+def add_subtask(task_id):
+    """Adds a subtask (its own title + optional deadline) under a general
+    to-do - see models.PersonalSubtask. Same visibility rule as editing the
+    parent task itself: open to anyone who can see the task, gated only by
+    the engagement-confidentiality check when the task references one."""
+    task = PersonalTask.query.get_or_404(task_id)
+    if task.engagement and current_user.role != "admin" and not user_can_access_engagement(current_user, task.engagement):
+        abort(403)
+    title = request.form.get("title", "").strip()
+    if not title:
+        flash("Please enter a subtask title.", "danger")
+        return redirect(url_for("hr.project_board"))
+    due_date_raw = request.form.get("due_date")
+    try:
+        due_date = datetime.strptime(due_date_raw, "%Y-%m-%d").date() if due_date_raw else None
+    except ValueError:
+        due_date = None
+    subtask = PersonalSubtask(personal_task_id=task.id, title=title, due_date=due_date)
+    db.session.add(subtask)
+    db.session.commit()
+    flash("Subtask added.", "success")
+    return redirect(url_for("hr.project_board"))
+
+
+@hr_bp.route("/projects/personal/subtasks/<int:subtask_id>/toggle", methods=["POST"])
+@login_required
+def toggle_subtask(subtask_id):
+    """Checks/unchecks a subtask - purely its own done flag, never the
+    parent PersonalTask's status (see PersonalSubtask's docstring)."""
+    subtask = PersonalSubtask.query.get_or_404(subtask_id)
+    task = subtask.personal_task
+    if task.engagement and current_user.role != "admin" and not user_can_access_engagement(current_user, task.engagement):
+        abort(403)
+    subtask.is_done = not subtask.is_done
+    subtask.completed_at = datetime.utcnow() if subtask.is_done else None
+    db.session.commit()
+    return redirect(url_for("hr.project_board"))
+
+
+@hr_bp.route("/projects/personal/subtasks/<int:subtask_id>/delete", methods=["POST"])
+@login_required
+def delete_subtask(subtask_id):
+    subtask = PersonalSubtask.query.get_or_404(subtask_id)
+    task = subtask.personal_task
+    if task.created_by_id != current_user.id and current_user.role != "admin":
+        abort(403)
+    db.session.delete(subtask)
+    db.session.commit()
+    flash("Subtask deleted.", "info")
     return redirect(url_for("hr.project_board"))
 
 

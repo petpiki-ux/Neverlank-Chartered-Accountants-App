@@ -2380,6 +2380,43 @@ class PersonalTask(db.Model):
         return f"<PersonalTask {self.id} {self.title!r}>"
 
 
+class PersonalSubtask(db.Model):
+    """A smaller step under a general to-do (PersonalTask), each with its
+    own deadline - e.g. a to-do "Prepare training day" might be broken into
+    "Book venue" (due Mon), "Send invites" (due Wed), "Print handouts" (due
+    Fri), so the work can be tracked piece by piece instead of one lump due
+    date. Deliberately simple: just a title, an optional due date, and a
+    done/not-done flag - no assignee, priority or sign-off of its own,
+    since it belongs to (and is only ever seen alongside) its parent task.
+
+    Checking subtasks off does NOT change the parent PersonalTask's own
+    status - that stays something the person sets deliberately on the task
+    itself, exactly as before this existed. Subtasks are purely a breakdown
+    with their own deadlines, not a second completion mechanism."""
+    id = db.Column(db.Integer, primary_key=True)
+    personal_task_id = db.Column(db.Integer, db.ForeignKey("personal_task.id"), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    due_date = db.Column(db.Date)
+    is_done = db.Column(db.Boolean, default=False)
+    completed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    personal_task = db.relationship(
+        "PersonalTask",
+        backref=db.backref(
+            "subtasks", lazy=True, cascade="all, delete-orphan",
+            order_by="PersonalSubtask.due_date.asc().nullslast(), PersonalSubtask.id.asc()",
+        ),
+    )
+
+    @property
+    def is_overdue(self):
+        return bool(self.due_date and self.due_date < date.today() and not self.is_done)
+
+    def __repr__(self):
+        return f"<PersonalSubtask {self.id} {self.title!r}>"
+
+
 def notify_task_assignment(actor, recipient_id, subject, body):
     """Sends a one-off internal Message (see Message/MessageRecipient) from
     `actor` to `recipient_id` - used whenever a task (EngagementTask or

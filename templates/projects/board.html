@@ -141,7 +141,29 @@
     <tbody>
       {% for t in personal_tasks %}
       <tr>
-        <td>{{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}{% if t.engagement %}<div class="muted" style="font-size:11px;">Re: <a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id) }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></div>{% endif %}</td>
+        <td>
+          {{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}{% if t.engagement %}<div class="muted" style="font-size:11px;">Re: <a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id) }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></div>{% endif %}
+          {% if t.subtasks %}
+          <ul style="list-style:none;margin:6px 0 0 0;padding:0;font-size:11.5px;">
+            {% for st in t.subtasks %}
+            <li style="display:flex;align-items:center;gap:5px;margin-bottom:3px;{% if st.is_done %}color:var(--muted-text, #999);text-decoration:line-through;{% endif %}">
+              <form method="post" action="{{ url_for('hr.toggle_subtask', subtask_id=st.id) }}" class="inline">
+                <button type="submit" class="btn small secondary" style="padding:0 5px;line-height:1.6;" title="{{ 'Mark not done' if st.is_done else 'Mark done' }}">{{ '✓' if st.is_done else ' ' }}</button>
+              </form>
+              <span style="flex:1;">{{ st.title }}</span>
+              {% if st.due_date %}<span class="muted" style="font-size:10.5px;">due {{ st.due_date.strftime('%d %b') }}</span>{% endif %}
+              {% if st.is_overdue %}<span class="badge overdue" style="font-size:9px;padding:1px 4px;">Overdue</span>{% endif %}
+              <form method="post" action="{{ url_for('hr.delete_subtask', subtask_id=st.id) }}" class="inline" onsubmit="return confirm('Delete this subtask?')"><button type="submit" class="btn small danger" style="padding:0 5px;line-height:1.6;">&times;</button></form>
+            </li>
+            {% endfor %}
+          </ul>
+          {% endif %}
+          <form method="post" action="{{ url_for('hr.add_subtask', task_id=t.id) }}" style="margin-top:5px;display:flex;gap:4px;">
+            <input type="text" name="title" placeholder="Add subtask..." style="font-size:11px;padding:3px 5px;flex:1;">
+            <input type="date" name="due_date" style="font-size:11px;padding:3px 4px;width:128px;">
+            <button type="submit" class="btn small secondary" style="font-size:11px;padding:2px 8px;">Add</button>
+          </form>
+        </td>
         <td>{{ t.created_by.name if t.created_by else '—' }}</td>
         <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>
         <td>{{ t.due_date.strftime('%d %b %Y') if t.due_date else '—' }} {% if t.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
