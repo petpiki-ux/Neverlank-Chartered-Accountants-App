@@ -865,17 +865,19 @@ def add_subtask(task_id):
     return redirect(url_for("hr.project_board"))
 
 
-@hr_bp.route("/projects/personal/subtasks/<int:subtask_id>/toggle", methods=["POST"])
+@hr_bp.route("/projects/personal/subtasks/<int:subtask_id>/status", methods=["POST"])
 @login_required
-def toggle_subtask(subtask_id):
-    """Checks/unchecks a subtask - purely its own done flag, never the
-    parent PersonalTask's status (see PersonalSubtask's docstring)."""
+def update_subtask_status(subtask_id):
+    """Changes a subtask's own status (To Do/In Progress/Review/Done) -
+    purely its own, never the parent PersonalTask's status (see
+    PersonalSubtask's docstring: subtasks are "pure tasks", each completed
+    independently of the to-do they sit under)."""
     subtask = PersonalSubtask.query.get_or_404(subtask_id)
     task = subtask.personal_task
     if task.engagement and current_user.role != "admin" and not user_can_access_engagement(current_user, task.engagement):
         abort(403)
-    subtask.is_done = not subtask.is_done
-    subtask.completed_at = datetime.utcnow() if subtask.is_done else None
+    subtask.status = request.form.get("status", subtask.status)
+    subtask.completed_at = datetime.utcnow() if subtask.status == "Done" else None
     db.session.commit()
     return redirect(url_for("hr.project_board"))
 

@@ -232,6 +232,13 @@ def _add_missing_columns():
             ("ai_error", "TEXT"),
             ("ai_processed_at", "DATETIME"),
         ],
+        # status replaces the original is_done boolean (see
+        # models.PersonalSubtask) - a subtask is now a "pure task" carrying
+        # the same TASK_STATUSES as everything else, independent of its
+        # parent to-do's own status. The old is_done/completed_at columns
+        # are left in place harmlessly on any install that already created
+        # this table (SQLite auto-migration only ever adds columns).
+        "personal_subtask": [("status", "VARCHAR(20) DEFAULT 'To Do'")],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():

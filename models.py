@@ -2385,19 +2385,21 @@ class PersonalSubtask(db.Model):
     own deadline - e.g. a to-do "Prepare training day" might be broken into
     "Book venue" (due Mon), "Send invites" (due Wed), "Print handouts" (due
     Fri), so the work can be tracked piece by piece instead of one lump due
-    date. Deliberately simple: just a title, an optional due date, and a
-    done/not-done flag - no assignee, priority or sign-off of its own,
-    since it belongs to (and is only ever seen alongside) its parent task.
+    date.
 
-    Checking subtasks off does NOT change the parent PersonalTask's own
-    status - that stays something the person sets deliberately on the task
-    itself, exactly as before this existed. Subtasks are purely a breakdown
-    with their own deadlines, not a second completion mechanism."""
+    A "pure task" in its own right for completion purposes: it carries the
+    same To Do / In Progress / Review / Done status as every other task in
+    the app (TASK_STATUSES), set independently of the parent PersonalTask's
+    own status - moving a subtask to Done (or back) never touches the
+    parent task's status, and the parent's status never touches a subtask's
+    either. It's otherwise deliberately lighter than a full task - no
+    assignee, priority or sign-off of its own, since it belongs to (and is
+    only ever seen alongside) its parent."""
     id = db.Column(db.Integer, primary_key=True)
     personal_task_id = db.Column(db.Integer, db.ForeignKey("personal_task.id"), nullable=False)
     title = db.Column(db.String(200), nullable=False)
     due_date = db.Column(db.Date)
-    is_done = db.Column(db.Boolean, default=False)
+    status = db.Column(db.String(20), default="To Do")
     completed_at = db.Column(db.DateTime)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -2411,7 +2413,7 @@ class PersonalSubtask(db.Model):
 
     @property
     def is_overdue(self):
-        return bool(self.due_date and self.due_date < date.today() and not self.is_done)
+        return bool(self.due_date and self.due_date < date.today() and self.status != "Done")
 
     def __repr__(self):
         return f"<PersonalSubtask {self.id} {self.title!r}>"
