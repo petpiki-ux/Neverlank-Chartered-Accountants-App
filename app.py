@@ -161,6 +161,9 @@ def _add_missing_columns():
             ("conflict_dispute_notes", "TEXT"),
             ("operational_capacity_confirmed", "BOOLEAN"),
             ("operational_capacity_notes", "TEXT"),
+            ("partner_authorized_continue_by_id", "INTEGER"),
+            ("partner_authorized_continue_at", "DATETIME"),
+            ("partner_authorized_continue_notes", "TEXT"),
         ],
         "sanctions_screening": [
             ("un_auto_notes", "TEXT"),

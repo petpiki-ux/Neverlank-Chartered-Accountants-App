@@ -1858,15 +1858,27 @@ def engagement_acceptance_cleared(engagement):
     ClientAcceptance below) has been cleared, i.e. whether Understanding the
     Entity and every later tab may be opened. An engagement that doesn't
     require acceptance at all (every engagement created before this feature
-    shipped - see Engagement.acceptance_required) is always cleared. A
-    engagement that does require it is only cleared once its
-    ClientAcceptance record has an Engagement Partner sign-off AND the
-    recorded decision is "Accepted" (a declined acceptance, or one still
-    awaiting the partner, keeps the gate shut)."""
+    shipped - see Engagement.acceptance_required) is always cleared.
+
+    An engagement that does require it clears the gate either of two ways,
+    both needing the recorded decision to be "Accepted" (a declined
+    acceptance, or one still awaiting a decision, always keeps the gate
+    shut regardless of either flag below):
+      - the full Engagement Partner sign-off (ClientAcceptance.
+        partner_signed_at) - only possible once every item is complete; or
+      - the Partner's narrower interim "authorise continuing with work"
+        (ClientAcceptance.partner_authorized_continue_at) - for when the
+        decision to accept is genuinely final but one item (typically the
+        client's countersigned engagement letter) is still in process, so
+        the team isn't blocked waiting on paperwork the Partner has already
+        decided doesn't change the outcome.
+    """
     if not engagement.acceptance_required:
         return True
     ca = engagement.client_acceptance
-    return bool(ca and ca.partner_signed_at and ca.decision == "Accepted")
+    if not ca or ca.decision != "Accepted":
+        return False
+    return bool(ca.partner_signed_at or ca.partner_authorized_continue_at)
 
 
 class ChecklistTemplate(db.Model):
@@ -6097,11 +6109,30 @@ class ClientAcceptance(db.Model):
     partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     partner_signed_at = db.Column(db.DateTime)
 
+    # Interim "continue working" authorisation: a narrower, separate power
+    # that lets the Engagement Partner unlock the rest of the engagement
+    # (see engagement_acceptance_cleared below) BEFORE the full sign-off
+    # above is possible - e.g. the decision to accept has genuinely been
+    # made but one item is still physically in process (typically the
+    # client hasn't yet returned the countersigned engagement letter).
+    # Unlike the full partner sign-off, this does NOT require
+    # items_complete, and it never lets a "Declined"/"Pending" decision
+    # through - only "Accepted". It's superseded by (and should still be
+    # followed up with) a proper partner sign-off once every item is
+    # actually complete. Cleared automatically by _touch() in acceptance.py
+    # whenever any underlying field changes, same as the review/sign-off
+    # timestamps above, so a stale authorisation can never linger past the
+    # facts it was based on.
+    partner_authorized_continue_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_authorized_continue_at = db.Column(db.DateTime)
+    partner_authorized_continue_notes = db.Column(db.Text)
+
     engagement = db.relationship("Engagement", backref=db.backref("client_acceptance", uselist=False, cascade="all, delete-orphan"))
     engagement_letter_document = db.relationship("Document")
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
     partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    partner_authorized_continue_by = db.relationship("User", foreign_keys=[partner_authorized_continue_by_id])
 
     @property
     def is_reviewed(self):
@@ -6110,6 +6141,10 @@ class ClientAcceptance(db.Model):
     @property
     def is_partner_signed(self):
         return self.partner_signed_by_id is not None
+
+    @property
+    def is_authorized_to_continue(self):
+        return self.partner_authorized_continue_at is not None
 
     @property
     def items_complete(self):

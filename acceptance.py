@@ -62,6 +62,14 @@ def _touch(record):
     record.reviewed_at = None
     record.partner_signed_by_id = None
     record.partner_signed_at = None
+    # A change to any underlying field (or the decision itself) means an
+    # earlier interim "continue working" authorisation was based on facts
+    # that have since moved - clear it too, same as the sign-offs above, so
+    # the Partner has to look again rather than an authorisation silently
+    # outliving what it was granted on.
+    record.partner_authorized_continue_by_id = None
+    record.partner_authorized_continue_at = None
+    record.partner_authorized_continue_notes = None
 
 
 def _bool(name):
@@ -504,6 +512,51 @@ def partner_unsign_client_acceptance(record_id):
     record.partner_signed_at = None
     db.session.commit()
     flash("Partner sign-off removed - the engagement is locked again until it's re-signed.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/acceptance/<int:record_id>/authorize-continue", methods=["POST"])
+@login_required
+def authorize_continue_client_acceptance(record_id):
+    """The Partner's narrower power to unlock the rest of the engagement
+    before the full sign-off above is even possible - see
+    ClientAcceptance.partner_authorized_continue_at and
+    models.engagement_acceptance_cleared for what this actually does.
+    Deliberately does NOT check items_complete (that's the whole point:
+    it's for when one item, typically the countersigned engagement letter,
+    is still in process but the decision itself is final) - it only
+    requires a recorded "Accepted" decision, since authorising continued
+    work on a Declined or still-Pending engagement would make no sense.
+    Unlike the full sign-off, this has no self-preparer restriction: it's
+    the Partner exercising their own authority to let work continue, not
+    independently confirming someone else's preparation."""
+    record = ClientAcceptance.query.get_or_404(record_id)
+    _ensure_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if record.decision != "Accepted":
+        flash("Record the decision as Accepted before authorising the team to continue.", "danger")
+        return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
+    record.partner_authorized_continue_by_id = current_user.id
+    record.partner_authorized_continue_at = datetime.utcnow()
+    record.partner_authorized_continue_notes = request.form.get("partner_authorized_continue_notes", "").strip()
+    db.session.commit()
+    flash("Continuation authorised - the rest of the engagement is unlocked while the formal sign-off is finalised.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/acceptance/<int:record_id>/authorize-continue/revoke", methods=["POST"])
+@login_required
+def revoke_continue_authorization(record_id):
+    record = ClientAcceptance.query.get_or_404(record_id)
+    _ensure_access(record.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    record.partner_authorized_continue_by_id = None
+    record.partner_authorized_continue_at = None
+    record.partner_authorized_continue_notes = None
+    db.session.commit()
+    flash("Continuation authorisation removed - the engagement is locked again unless it's fully signed off.", "info")
     return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
 
 
