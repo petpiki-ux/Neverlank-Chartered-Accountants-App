@@ -680,6 +680,17 @@ def project_board():
     view = request.args.get("view", "")  # "mine" narrows to tasks assigned to me
     search_query = request.args.get("q", "").strip()
 
+    # An ordinary staff member only ever sees their OWN tasks here -
+    # "Everyone's tasks" and picking another staff member's tasks are
+    # reviewer-only (supervisor/partner/admin), same convention as Team
+    # Time Sheets (hr.list_timesheets: team_sheets is only ever populated
+    # for REVIEWER_ROLES). This overrides whatever the "view"/"assigned_to"
+    # query params say, so it can't be bypassed by editing the URL.
+    is_reviewer = current_user.role in REVIEWER_ROLES
+    if not is_reviewer:
+        view = "mine"
+        assignee_filter = ""
+
     eng_query = EngagementTask.query.join(Engagement).join(Client, Engagement.client_id == Client.id)
     personal_query = PersonalTask.query
     if status_filter:
@@ -742,6 +753,7 @@ def project_board():
         assignee_filter=assignee_filter,
         view=view,
         search_query=search_query,
+        is_reviewer=is_reviewer,
     )
 
 

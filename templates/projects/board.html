@@ -9,7 +9,11 @@
 </div>
 
 <div class="card">
+  {% if not is_reviewer %}
+  <p class="muted" style="font-size:12.5px;margin-top:0;">Showing your own tasks only.</p>
+  {% endif %}
   <form method="get" style="margin-bottom:0;" class="form-row">
+    {% if is_reviewer %}
     <div>
       <label for="view_toggle">Show</label>
       <select id="view_toggle" onchange="window.location.href=this.value">
@@ -17,6 +21,7 @@
         <option value="{{ url_for('hr.project_board', status=status_filter, assigned_to=assignee_filter, q=search_query, view='mine') }}" {% if view=='mine' %}selected{% endif %}>My tasks only</option>
       </select>
     </div>
+    {% endif %}
     <div>
       <label for="status">Status</label>
       <select name="status" id="status" onchange="this.form.submit()">
@@ -24,6 +29,7 @@
         {% for s in statuses %}<option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
       </select>
     </div>
+    {% if is_reviewer %}
     <div>
       <label for="assigned_to">Staff</label>
       <select name="assigned_to" id="assigned_to" onchange="this.form.submit()">
@@ -31,6 +37,7 @@
         {% for p in people %}<option value="{{ p.id }}" {% if assignee_filter==p.id|string %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
       </select>
     </div>
+    {% endif %}
     <div>
       <label for="q">Search</label>
       <input type="text" id="q" name="q" value="{{ search_query }}" placeholder="Title, notes, client or engagement...">
