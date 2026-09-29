@@ -22,7 +22,7 @@
       <p style="margin:4px 0;">{{ q.message }}</p>
       <p class="muted" style="font-size:11.5px;">
         Raised by {{ q.raised_by.name if q.raised_by else '—' }} on {{ q.raised_at.strftime('%d %b %Y %H:%M') if q.raised_at else '—' }}
-        {% if q.is_resolved %} &middot; Resolved by {{ q.resolved_by.name if q.resolved_by else '—' }} on {{ q.resolved_at.strftime('%d %b %Y') if q.resolved_at else '—' }}{% endif %}
+        {% if q.is_resolved %} &middot; Resolved by {{ q.resolved_by.name if q.resolved_by else '—' }} on {{ q.resolved_at.strftime('%d %b %Y') if q.resolved_at else '—' }}{% if q.resolved_via_partner_override %} <span class="badge">Partner override - no written reply</span>{% if q.partner_override_notes %} - {{ q.partner_override_notes }}{% endif %}{% endif %}{% endif %}
       </p>
 
       {% if q.replies %}
@@ -34,14 +34,24 @@
       {% endif %}
 
       <form method="post" action="{{ url_for('engagements.reply_to_query', query_id=q.id) }}" class="inline" style="margin-top:6px;">
-        <input type="text" name="message" placeholder="Reply..." style="width:260px;display:inline-block;margin-bottom:0;" required>
+        <input type="text" name="message" placeholder="Reply - explain how you addressed this..." style="width:300px;display:inline-block;margin-bottom:0;" required>
         <button type="submit" class="btn small secondary">Reply</button>
       </form>
       {% if current_user.role in ('supervisor', 'partner', 'admin') %}
         {% if q.is_resolved %}
         <form method="post" action="{{ url_for('engagements.reopen_query', query_id=q.id) }}" class="inline"><button type="submit" class="btn small secondary">Reopen</button></form>
-        {% else %}
+        {% elif q.has_preparer_reply %}
         <form method="post" action="{{ url_for('engagements.resolve_query', query_id=q.id) }}" class="inline"><button type="submit" class="btn small gold">Mark resolved</button></form>
+        {% else %}
+        <div style="margin-top:4px;">
+          <span class="muted" style="font-size:11px;">Waiting for a reply explaining how this was addressed before it can be resolved</span>
+          {% if current_user.role in ('partner', 'admin') %}
+          <form method="post" action="{{ url_for('engagements.partner_override_resolve_query', query_id=q.id) }}" class="inline" style="display:block;margin-top:4px;">
+            <input type="text" name="partner_override_notes" placeholder="Optional note, e.g. discussed and confirmed verbally" style="width:300px;display:inline-block;margin-bottom:0;">
+            <button type="submit" class="btn small gold">Partner authorise - resolve without a reply</button>
+          </form>
+          {% endif %}
+        </div>
         {% endif %}
       {% endif %}
     </div>

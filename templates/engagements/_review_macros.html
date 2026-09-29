@@ -1,0 +1,27 @@
+{# Generic "multiple reviews" log for a line-item workpaper (see
+   models.WorkpaperReview) - any number of Supervisor/Partner/Admin
+   reviewers can each leave their own dated note here. Purely additive: it
+   never gates or replaces that item's own reviewed_by/partner_signed_by
+   fields (where it has them) - the Partner's own sign-off there remains
+   the ultimate, file-closing authority. Used from the Substantive
+   Procedures items and the general Checklist tab (see REVIEWABLE_TYPES in
+   models.py for the full current list). #}
+{% macro render_reviews(reviewable_type, item) %}
+<div style="margin-top:2px;">
+  {% for r in item.reviews %}
+  <div class="muted" style="font-size:10.5px;margin:1px 0;">
+    <span class="badge status-Completed" style="font-size:9.5px;">Reviewed</span>
+    {{ r.reviewer.name if r.reviewer else '—' }} on {{ r.reviewed_at.strftime('%d %b %Y') if r.reviewed_at else '—' }}{% if r.notes %} - {{ r.notes }}{% endif %}
+    {% if r.reviewer_id == current_user.id or current_user.role in ('partner', 'admin') %}
+    <form method="post" action="{{ url_for('engagements.delete_workpaper_review', review_id=r.id) }}" class="inline"><button type="submit" class="btn small secondary" style="font-size:9.5px;padding:0 4px;" title="Remove this review">&times;</button></form>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+  <form method="post" action="{{ url_for('engagements.add_workpaper_review', reviewable_type=reviewable_type, reviewable_id=item.id) }}" class="inline" style="margin-top:2px;">
+    <input type="text" name="notes" placeholder="Add a review (optional note)..." style="width:150px;display:inline-block;margin-bottom:0;font-size:10.5px;padding:2px 4px;">
+    <button type="submit" class="btn small secondary" style="font-size:10.5px;padding:2px 6px;">+ Review</button>
+  </form>
+  {% endif %}
+</div>
+{% endmacro %}

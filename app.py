@@ -165,6 +165,10 @@ def _add_missing_columns():
             ("partner_authorized_continue_at", "DATETIME"),
             ("partner_authorized_continue_notes", "TEXT"),
         ],
+        "engagement_query": [
+            ("resolved_via_partner_override", "BOOLEAN DEFAULT 0"),
+            ("partner_override_notes", "TEXT"),
+        ],
         "sanctions_screening": [
             ("un_auto_notes", "TEXT"),
             ("ofac_auto_notes", "TEXT"),

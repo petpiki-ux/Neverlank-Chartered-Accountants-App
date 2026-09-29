@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "engagements/_query_macros.html" as qmacros with context %}
+{% import "engagements/_review_macros.html" as rmacros with context %}
 {% block title %}{{ engagement.title }} - {{ firm_name }}{% endblock %}
 {% block content %}
 {% macro tickmark_picker(selected_id) %}
@@ -1951,6 +1952,7 @@
           {% endif %}
         </form>
         {% endif %}
+        {{ rmacros.render_reviews('checklist_item', item) }}
       {% endfor %}
     {% else %}
       <div class="empty-state">No checklist items yet. Add one above, or start the engagement from a template next time.</div>
@@ -4537,6 +4539,7 @@
           </td>
         </tr>
         </form>
+        <tr><td colspan="9" style="padding-top:0;border-top:none;">{{ rmacros.render_reviews('substantive_item', item) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -4569,6 +4572,7 @@
           </td>
         </tr>
         </form>
+        <tr><td colspan="7" style="padding-top:0;border-top:none;">{{ rmacros.render_reviews('substantive_item', item) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>
@@ -4594,6 +4598,7 @@
           </td>
         </tr>
         </form>
+        <tr><td colspan="6" style="padding-top:0;border-top:none;">{{ rmacros.render_reviews('substantive_item', item) }}</td></tr>
       {% endfor %}
       </tbody>
     </table>

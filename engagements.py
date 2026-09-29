@@ -31,6 +31,7 @@ from models import (
     BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS, SECRETARIAL_FINALISATION_CHECKLIST_ITEMS,
     AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES, BUSINESS_IT_AREA_REFERENCES, SECRETARIAL_AREA_REFERENCES,
     EngagementQuery, QueryReply,
+    WorkpaperReview, REVIEWABLE_TYPES, REVIEWABLE_TYPE_SUBSTANTIVE_ITEM, REVIEWABLE_TYPE_CHECKLIST_ITEM,
     ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, SECRETARIAL_ACTIVITIES, SECRETARIAL_ACTIVITY_LABELS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS,
@@ -1186,6 +1187,82 @@ def delete_checklist_item(item_id):
     db.session.delete(item)
     db.session.commit()
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="checklist"))
+
+
+# ---------- Multiple reviews on a line-item workpaper (see models.WorkpaperReview) ----------
+#
+# Generic across every reviewable_type in REVIEWABLE_TYPES - the user's own
+# requested starting point is Substantive Procedures items and checklist
+# items (both wired in below); a further workpaper type later only needs a
+# new entry in REVIEWABLE_MODELS/_reviewable_engagement/_reviewable_redirect
+# and a `reviews` property on that model, not a new table or routes.
+
+REVIEWABLE_MODELS = {
+    REVIEWABLE_TYPE_SUBSTANTIVE_ITEM: SubstantiveProcedureItem,
+    REVIEWABLE_TYPE_CHECKLIST_ITEM: EngagementChecklistItem,
+}
+
+
+def _reviewable_engagement(reviewable_type, item):
+    if reviewable_type == REVIEWABLE_TYPE_SUBSTANTIVE_ITEM:
+        return item.area_record.engagement
+    if reviewable_type == REVIEWABLE_TYPE_CHECKLIST_ITEM:
+        return item.engagement
+    abort(400)
+
+
+def _reviewable_redirect(reviewable_type, item):
+    engagement = _reviewable_engagement(reviewable_type, item)
+    tab = "substantive" if reviewable_type == REVIEWABLE_TYPE_SUBSTANTIVE_ITEM else "checklist"
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=tab))
+
+
+@engagements_bp.route("/workpaper-reviews/<reviewable_type>/<int:reviewable_id>/add", methods=["POST"])
+@login_required
+def add_workpaper_review(reviewable_type, reviewable_id):
+    """Adds one dated review entry to a line-item workpaper - purely
+    additive, same "never gates anything" philosophy as Queries: it doesn't
+    touch that item's own reviewed_by/partner_signed_by fields (where it
+    has them), it just lets more than one reviewer each leave their own
+    note. See models.WorkpaperReview."""
+    if reviewable_type not in REVIEWABLE_TYPES:
+        abort(404)
+    model = REVIEWABLE_MODELS[reviewable_type]
+    item = model.query.get_or_404(reviewable_id)
+    engagement = _reviewable_engagement(reviewable_type, item)
+    _ensure_engagement_access(engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    review = WorkpaperReview(
+        reviewable_type=reviewable_type, reviewable_id=reviewable_id,
+        reviewer_id=current_user.id, notes=request.form.get("notes", "").strip() or None,
+    )
+    db.session.add(review)
+    db.session.commit()
+    flash("Review added.", "success")
+    return _reviewable_redirect(reviewable_type, item)
+
+
+@engagements_bp.route("/workpaper-reviews/<int:review_id>/delete", methods=["POST"])
+@login_required
+def delete_workpaper_review(review_id):
+    """A review entry can be removed by whoever left it, or by a Partner/
+    Admin (the ultimate reviewer) tidying up someone else's mistake - not
+    by an ordinary Supervisor removing another reviewer's entry."""
+    review = WorkpaperReview.query.get_or_404(review_id)
+    if review.reviewable_type not in REVIEWABLE_TYPES:
+        abort(404)
+    model = REVIEWABLE_MODELS[review.reviewable_type]
+    item = model.query.get_or_404(review.reviewable_id)
+    engagement = _reviewable_engagement(review.reviewable_type, item)
+    _ensure_engagement_access(engagement)
+    if review.reviewer_id != current_user.id and current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    reviewable_type = review.reviewable_type
+    db.session.delete(review)
+    db.session.commit()
+    flash("Review removed.", "info")
+    return _reviewable_redirect(reviewable_type, item)
 
 
 # ---------- Understanding the Entity (system-based, structured prompts) ----------
@@ -5210,11 +5287,38 @@ def resolve_query(query_id):
     _ensure_engagement_access(query.engagement)
     if current_user.role not in REVIEWER_ROLES:
         abort(403)
+    if not query.has_preparer_reply:
+        flash("Waiting on a reply explaining how this was addressed before it can be marked resolved.", "danger")
+        return _query_redirect(query)
     query.status = "Resolved"
     query.resolved_by_id = current_user.id
     query.resolved_at = datetime.utcnow()
+    query.resolved_via_partner_override = False
+    query.partner_override_notes = None
     db.session.commit()
     flash("Query marked as resolved.", "success")
+    return _query_redirect(query)
+
+
+@engagements_bp.route("/queries/<int:query_id>/resolve/partner-override", methods=["POST"])
+@login_required
+def partner_override_resolve_query(query_id):
+    """The Engagement Partner (or Admin) is the ultimate reviewer and can
+    resolve a query on their own judgement - e.g. discussed verbally with
+    the team - without waiting on the written reply resolve_query above
+    otherwise requires. Ordinary reviewers (Supervisor) don't get this
+    override; they still need someone else's reply on record first."""
+    query = EngagementQuery.query.get_or_404(query_id)
+    _ensure_engagement_access(query.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    query.status = "Resolved"
+    query.resolved_by_id = current_user.id
+    query.resolved_at = datetime.utcnow()
+    query.resolved_via_partner_override = True
+    query.partner_override_notes = request.form.get("partner_override_notes", "").strip()
+    db.session.commit()
+    flash("Query resolved by Partner authorisation, without waiting for a written reply.", "success")
     return _query_redirect(query)
 
 
@@ -5228,6 +5332,8 @@ def reopen_query(query_id):
     query.status = "Open"
     query.resolved_by_id = None
     query.resolved_at = None
+    query.resolved_via_partner_override = False
+    query.partner_override_notes = None
     db.session.commit()
     flash("Query reopened.", "info")
     return _query_redirect(query)

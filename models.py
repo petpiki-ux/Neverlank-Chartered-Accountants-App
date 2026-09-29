@@ -198,6 +198,18 @@ REVIEWER_ROLES = ("supervisor", "partner", "admin")
 # their own work.
 PARTNER_SIGNOFF_ROLES = ("partner", "admin")
 
+# The two line-item workpaper types WorkpaperReview (below, near
+# EngagementQuery) can be attached to, so far - the user's own requested
+# starting point ("start with the actual line-item workpapers - Substantive
+# Procedures / checklist items - and expand later"). Adding a further
+# workpaper type later is just one more entry here (plus its own `reviews`
+# property and a redirect case in engagements._reviewable_engagement/
+# _reviewable_redirect) - no new table or migration needed, since
+# WorkpaperReview is generic.
+REVIEWABLE_TYPE_SUBSTANTIVE_ITEM = "substantive_item"
+REVIEWABLE_TYPE_CHECKLIST_ITEM = "checklist_item"
+REVIEWABLE_TYPES = (REVIEWABLE_TYPE_SUBSTANTIVE_ITEM, REVIEWABLE_TYPE_CHECKLIST_ITEM)
+
 # The engagement workpaper sections a Partner/Reviewer can raise a review
 # Query against (see EngagementQuery below) - every tab on the engagement
 # detail page, including Overview and Client Acceptance & Continuance, so a
@@ -2098,6 +2110,22 @@ class EngagementChecklistItem(db.Model):
     def is_partner_signed(self):
         return self.partner_signed_by_id is not None
 
+    @property
+    def reviews(self):
+        """Every dated review entry left against this checklist item - see
+        WorkpaperReview. Purely additive alongside reviewed_by_id/at above
+        (the single quick "mark as reviewed" toggle stays exactly as it
+        was): this lets more than one reviewer - a Manager as well as a
+        Supervisor, say - each leave their own note on the same item,
+        without one overwriting the other. The Partner's own sign-off
+        (partner_signed_by_id/at above) remains the ultimate, file-closing
+        authority - this log never gates or replaces it."""
+        return (
+            WorkpaperReview.query
+            .filter_by(reviewable_type=REVIEWABLE_TYPE_CHECKLIST_ITEM, reviewable_id=self.id)
+            .order_by(WorkpaperReview.reviewed_at).all()
+        )
+
 
 class RiskItem(db.Model):
     """A single likelihood x impact risk register entry. Used by the Tax
@@ -3915,6 +3943,19 @@ class SubstantiveProcedureItem(db.Model):
     # extra detail" approach as trigger_event/responsible_role/target_output
     # above for Secretarial.
     procedure_kind = db.Column(db.String(20))
+
+    @property
+    def reviews(self):
+        """Every dated review entry left against this specific procedure -
+        see WorkpaperReview. Unlike the area-level Preparer/Reviewer/Partner
+        sign-off on SubstantiveProcedureArea (which covers the whole area
+        as one unit), any number of reviewers can each leave their own note
+        on one individual procedure here."""
+        return (
+            WorkpaperReview.query
+            .filter_by(reviewable_type=REVIEWABLE_TYPE_SUBSTANTIVE_ITEM, reviewable_id=self.id)
+            .order_by(WorkpaperReview.reviewed_at).all()
+        )
 
     def __repr__(self):
         return f"<SubstantiveProcedureItem area={self.area_id}>"
@@ -5796,6 +5837,48 @@ class UserPermissionOverride(db.Model):
         return f"<UserPermissionOverride user={self.user_id} {self.permission_key}={self.allowed}>"
 
 
+# ---------- Multiple reviews on a line-item workpaper ----------
+
+class WorkpaperReview(db.Model):
+    """One dated review entry against a single line-item workpaper (see
+    REVIEWABLE_TYPES above for which ones) - the generic "multiple reviews"
+    log requested by the user: "Every workpaper must have an option to
+    enable multiple reviews but the Partner is the ultimate reviewer." Any
+    number of these can exist on the same item, each left by a different
+    Supervisor/Partner/Admin reviewer (a Manager sits under one of those
+    roles too - there's no separate "Manager" login role in the app, see
+    Engagement.manager_id) at their own time, with an optional note.
+
+    This is deliberately generic/"polymorphic" rather than its own foreign
+    key per workpaper type: reviewable_type is a short fixed string (one of
+    REVIEWABLE_TYPES) naming which model the review is against, and
+    reviewable_id is that row's own primary key. That's so the SAME table
+    can be reused for further workpaper types later (the user's own
+    request: start with Substantive Procedures/checklist items, expand from
+    there) without a new child table or migration each time - just one more
+    entry in REVIEWABLE_TYPES, a `reviews` property on that model, and a
+    case in engagements._reviewable_engagement/_reviewable_redirect.
+
+    Purely additive, same philosophy as EngagementQuery above: adding a
+    review here never blocks, clears, or replaces that workpaper's own
+    Preparer/Reviewer/Partner sign-off fields (where it has them) - the
+    Partner's own sign-off remains the ultimate, file-closing authority.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    reviewable_type = db.Column(db.String(40), nullable=False)
+    reviewable_id = db.Column(db.Integer, nullable=False)
+    reviewer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    reviewed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    notes = db.Column(db.Text)
+
+    reviewer = db.relationship("User")
+
+    __table_args__ = (db.Index("ix_workpaper_review_target", "reviewable_type", "reviewable_id"),)
+
+    def __repr__(self):
+        return f"<WorkpaperReview {self.reviewable_type}:{self.reviewable_id} by user={self.reviewer_id}>"
+
+
 # ---------- Review Queries ----------
 
 class EngagementQuery(db.Model):
@@ -5820,6 +5903,15 @@ class EngagementQuery(db.Model):
     raised_at = db.Column(db.DateTime, default=datetime.utcnow)
     resolved_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     resolved_at = db.Column(db.DateTime)
+    # True only when this resolution came through the Partner-only override
+    # below (partner_override_resolve_query) rather than the ordinary
+    # resolve_query path - i.e. the Partner is the ultimate reviewer and
+    # closed it on their own judgement (e.g. discussed verbally with the
+    # team) without waiting on a written reply. Kept as its own flag rather
+    # than inferred from has_preparer_reply so the file still shows how it
+    # was actually resolved even if a reply gets added afterwards.
+    resolved_via_partner_override = db.Column(db.Boolean, default=False, nullable=False)
+    partner_override_notes = db.Column(db.Text)
 
     engagement = db.relationship("Engagement", backref=db.backref("queries", lazy=True, cascade="all, delete-orphan"))
     raised_by = db.relationship("User", foreign_keys=[raised_by_id])
@@ -5836,6 +5928,19 @@ class EngagementQuery(db.Model):
     @property
     def is_resolved(self):
         return self.status == "Resolved"
+
+    @property
+    def has_preparer_reply(self):
+        """Whether someone other than whoever raised the query has replied
+        yet - i.e. whether the preparer (or whoever picked the query up)
+        has explained how they addressed it. Required before resolve_query
+        will let a reviewer mark the query resolved (see
+        engagements.resolve_query) - a reviewer can't close out their own
+        review point without hearing back first. A query has no separate
+        "assigned preparer" field, so "a reply from someone other than the
+        reviewer who raised it" is the check - it's exactly what that
+        reviewer is actually waiting to hear before resolving."""
+        return any(r.author_id != self.raised_by_id for r in self.replies)
 
     @property
     def section_label(self):
