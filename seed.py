@@ -10,7 +10,7 @@ import shutil
 from datetime import date
 
 from extensions import db
-from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection, StatutoryDeadline
+from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PAYROLL_PAY_FREQUENCIES
 from config import Config
 
 
@@ -557,6 +557,68 @@ def seed_permissions():
             if Permission.query.filter_by(role=role, permission_key=key).first():
                 continue
             db.session.add(Permission(role=role, permission_key=key, allowed=role in default_roles))
+    db.session.commit()
+
+
+# ZIMRA PAYE (Foreign Currency / USD) tax tables, Jan-Dec 2024, as supplied
+# by the firm (attached ZIMRA table image). Bands are entered EDGE-TO-EDGE
+# (band N's upper == band N+1's lower) rather than ZIMRA's own "x.00 / x.01"
+# pair style - see PayrollTaxBand's docstring in models.py for why: the
+# progressive calculate_paye() formula taxes each band as [lower, upper), so
+# edge-to-edge boundaries are what reproduce ZIMRA's own published worked
+# examples exactly (verified by hand for all three frequencies below: Monthly
+# $1,800 -> $455.00; Weekly $65 -> $8.38; Fortnightly $420 -> $88.85 - using
+# the literal .01-offset pairs would silently under-tax by a cent or two).
+# upper=None marks the open-ended top band.
+PAYROLL_TAX_BANDS_2024_USD = {
+    "Monthly": [
+        (0, 100, 0),
+        (100, 300, 20),
+        (300, 1000, 25),
+        (1000, 2000, 30),
+        (2000, 3000, 35),
+        (3000, None, 40),
+    ],
+    "Fortnightly": [
+        (0, 46.15, 0),
+        (46.15, 138.46, 20),
+        (138.46, 461.54, 25),
+        (461.54, 923.08, 30),
+        (923.08, 1384.62, 35),
+        (1384.62, None, 40),
+    ],
+    "Weekly": [
+        (0, 23.08, 0),
+        (23.08, 69.23, 20),
+        (69.23, 230.77, 25),
+        (230.77, 461.54, 30),
+        (461.54, 692.31, 35),
+        (692.31, None, 40),
+    ],
+}
+
+
+def seed_payroll_tax_bands():
+    """Pre-load ZIMRA's 2024 USD PAYE band tables (PAYROLL_TAX_BANDS_2024_USD
+    above), one independent set per pay frequency - see PayrollTaxBand's
+    docstring in models.py for why a frequency can't just reuse another
+    frequency's bands divided down.
+
+    Gated PER-FREQUENCY (only seeds a frequency that currently has ZERO
+    PayrollTaxBand rows), not on the table being empty overall - so this is
+    safe to call on every startup: it will never overwrite a frequency the
+    firm has already customised (even if another frequency still needs
+    seeding), and it still closes the gap for a frequency - typically
+    Fortnightly/Weekly, since the old code only ever had one global list -
+    that has never had bands of its own.
+    """
+    for frequency, bands in PAYROLL_TAX_BANDS_2024_USD.items():
+        if PayrollTaxBand.query.filter_by(frequency=frequency).first():
+            continue
+        for order, (lower, upper, rate_pct) in enumerate(bands):
+            db.session.add(PayrollTaxBand(
+                frequency=frequency, lower=lower, upper=upper, rate_pct=rate_pct, order=order,
+            ))
     db.session.commit()
 
 

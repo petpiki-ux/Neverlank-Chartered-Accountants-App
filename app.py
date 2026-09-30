@@ -246,6 +246,14 @@ def _add_missing_columns():
         # are left in place harmlessly on any install that already created
         # this table (SQLite auto-migration only ever adds columns).
         "personal_subtask": [("status", "VARCHAR(20) DEFAULT 'To Do'")],
+        # frequency - see models.PayrollTaxBand's docstring: ZIMRA publishes a
+        # genuinely different PAYE band table per pay frequency, not just the
+        # Monthly one divided down, so bands are now kept per-frequency
+        # rather than as one global list applied to every employee. Existing
+        # installs' pre-existing band rows (all entered before this column
+        # existed) default to "Monthly" here, which is correct: that was the
+        # only frequency the old single global list could ever have meant.
+        "payroll_tax_band": [("frequency", "VARCHAR(20) DEFAULT 'Monthly'")],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
@@ -546,6 +554,15 @@ def create_app():
         migrate_document_template_ref_codes()
         _fix_forensic_template_type()
         _fix_forensic_checklist_items()
+        # Payroll PAYE bands: seed_payroll_tax_bands() only ever populates a
+        # pay frequency that currently has ZERO PayrollTaxBand rows of its
+        # own, so it's safe/cheap to call on every startup (like
+        # seed_permissions() above) - a no-op once every frequency has been
+        # seeded or firm-customised, but it closes the gap for Fortnightly/
+        # Weekly on any existing install that only ever had the old single
+        # global (effectively Monthly) band list.
+        from seed import seed_payroll_tax_bands
+        seed_payroll_tax_bands()
 
     register_cli(app)
 

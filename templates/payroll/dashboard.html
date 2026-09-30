@@ -11,10 +11,15 @@
 
 {% if bands_missing %}
 <div class="flash warning">
-  <strong>No PAYE bands entered yet.</strong> {{ caveat }}
+  <strong>No PAYE bands entered yet for: {{ frequencies_missing_bands|join(', ') }}.</strong>
+  A payslip generated for an employee on one of these pay frequencies will show PAYE = $0.00 until its own
+  band table is set up (ZIMRA publishes a different table per frequency, so Monthly bands alone don't cover a
+  Fortnightly/Weekly employee).
   <a href="{{ url_for('payroll.tax_settings') }}">Set up Payroll Tax Settings now</a>.
 </div>
 {% endif %}
+
+<div class="flash warning">{{ caveat }}</div>
 
 <div class="form-row" style="align-items:stretch;">
   <div class="card">

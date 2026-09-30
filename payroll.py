@@ -109,12 +109,20 @@ def dashboard():
         .distinct().order_by(Client.name).all()
     )
     settings = _get_tax_settings()
-    bands_missing = PayrollTaxBand.query.count() == 0
+    # Per-frequency, not just "does ANY band exist" - see PayrollTaxBand's
+    # docstring: ZIMRA publishes a genuinely different table per pay
+    # frequency, so having Monthly bands says nothing about whether
+    # Fortnightly/Weekly are configured.
+    frequencies_missing_bands = [
+        f for f in PAYROLL_PAY_FREQUENCIES if PayrollTaxBand.query.filter_by(frequency=f).count() == 0
+    ]
+    bands_missing = bool(frequencies_missing_bands)
     return render_template(
         "payroll/dashboard.html",
         internal_periods=internal_periods, client_periods=client_periods,
         internal_employee_count=internal_employee_count, client_employee_count=client_employee_count,
         clients_with_payroll=clients_with_payroll, settings=settings, bands_missing=bands_missing,
+        frequencies_missing_bands=frequencies_missing_bands,
         caveat=PAYROLL_TAX_CAVEAT,
     )
 
@@ -141,22 +149,38 @@ def tax_settings():
         flash("Payroll Tax Settings updated.", "success")
         return redirect(url_for("payroll.tax_settings"))
 
-    bands = PayrollTaxBand.query.order_by(PayrollTaxBand.lower).all()
-    return render_template("payroll/tax_settings.html", settings=settings, bands=bands, caveat=PAYROLL_TAX_CAVEAT)
+    # Bands grouped by pay frequency - see PayrollTaxBand's docstring: ZIMRA
+    # publishes a genuinely different band table per frequency, so each one
+    # gets its own table/add-form on the settings screen rather than one
+    # flat list applied to everybody.
+    bands_by_frequency = {
+        f: PayrollTaxBand.query.filter_by(frequency=f).order_by(PayrollTaxBand.lower).all()
+        for f in PAYROLL_PAY_FREQUENCIES
+    }
+    return render_template(
+        "payroll/tax_settings.html", settings=settings, bands_by_frequency=bands_by_frequency,
+        pay_frequencies=PAYROLL_PAY_FREQUENCIES, caveat=PAYROLL_TAX_CAVEAT,
+    )
 
 
 @payroll_bp.route("/tax-settings/band/add", methods=["POST"])
 @login_required
 def add_tax_band():
     _ensure_payroll_access()
+    frequency = request.form.get("frequency", "Monthly")
+    if frequency not in PAYROLL_PAY_FREQUENCIES:
+        frequency = "Monthly"
     lower = _parse_float(request.form.get("lower"), 0.0)
     upper_raw = request.form.get("upper", "").strip()
     upper = _parse_float(upper_raw) if upper_raw else None
     rate_pct = _parse_float(request.form.get("rate_pct"), 0.0)
-    band = PayrollTaxBand(lower=lower, upper=upper, rate_pct=rate_pct, order=PayrollTaxBand.query.count())
+    band = PayrollTaxBand(
+        frequency=frequency, lower=lower, upper=upper, rate_pct=rate_pct,
+        order=PayrollTaxBand.query.filter_by(frequency=frequency).count(),
+    )
     db.session.add(band)
     db.session.commit()
-    flash("PAYE band added.", "success")
+    flash(f"{frequency} PAYE band added.", "success")
     return redirect(url_for("payroll.tax_settings"))
 
 
@@ -386,7 +410,18 @@ def generate_payslips(period_id):
         return redirect(url_for("payroll.view_period", period_id=period.id))
 
     settings = _get_tax_settings()
-    bands = PayrollTaxBand.query.all()
+    # Bands are looked up PER EMPLOYEE below (by their own pay_frequency),
+    # not fetched once here - see PayrollTaxBand's docstring: a Fortnightly
+    # or Weekly employee must never be taxed against the Monthly table.
+    # Cached per-frequency within this one request so a period with many
+    # employees on the same frequency doesn't re-query per employee.
+    bands_cache = {}
+
+    def _bands_for(frequency):
+        if frequency not in bands_cache:
+            bands_cache[frequency] = PayrollTaxBand.query.filter_by(frequency=frequency).all()
+        return bands_cache[frequency]
+
     covered_employee_ids = {p.employee_id for p in period.payslips}
 
     eligible_query = PayrollEmployee.query.filter_by(scope=period.scope, is_active=True)
@@ -401,6 +436,7 @@ def generate_payslips(period_id):
 
     created = 0
     for employee in employees:
+        bands = _bands_for(employee.pay_frequency)
         result = payroll_calc.calculate_payslip(employee.basic_salary, [], [], settings, bands)
         payslip = Payslip(
             period_id=period.id, employee_id=employee.id,
@@ -464,7 +500,10 @@ def recalculate_payslip(payslip_id):
         return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
 
     settings = _get_tax_settings()
-    bands = PayrollTaxBand.query.all()
+    # This employee's OWN pay-frequency bands - see PayrollTaxBand's
+    # docstring on why a Fortnightly/Weekly employee can't use the Monthly
+    # table.
+    bands = PayrollTaxBand.query.filter_by(frequency=payslip.employee.pay_frequency).all()
     allowance_items = [i for i in payslip.items if i.category == "Allowance"]
     deduction_items = [i for i in payslip.items if i.category == "Deduction"]
     result = payroll_calc.calculate_payslip(payslip.basic_salary, allowance_items, deduction_items, settings, bands)

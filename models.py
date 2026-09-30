@@ -7621,21 +7621,28 @@ class InvoiceLineItem(db.Model):
 # inconsistent figures for the current bands/credits/NSSA ceiling. Rather
 # than hard-code a number that might be wrong, EVERY rate here lives in the
 # editable PayrollTaxSettings/PayrollTaxBand records below (per the firm's
-# own choice: "auto-calculated but editable") and starts blank/zero except
-# for the one figure that WAS consistently corroborated across sources
-# (AIDS levy = 3% of PAYE payable). The Payroll > Tax Settings screen and
-# every payslip carry a clear caveat to verify current rates against ZIMRA
-# and NSSA directly before relying on the auto-calculation.
+# own choice: "auto-calculated but editable"). The PAYE bands are now
+# pre-loaded (see seed.seed_payroll_tax_bands) from the ZIMRA "PAYE Foreign
+# Currency Tax Tables for January to December 2024" document the firm
+# supplied directly - one Monthly/Fortnightly/Weekly table each, matching
+# PAYROLL_PAY_FREQUENCIES. AIDS levy defaults to the one figure that WAS
+# consistently corroborated across sources (3% of PAYE payable); NSSA
+# starts blank/zero, still unverified. The Payroll > Tax Settings screen
+# and every payslip carry a clear caveat to reconfirm all of this against
+# ZIMRA/NSSA directly (in particular: the PAYE bands are dated to 2024 and
+# should be checked against ZIMRA's current-year table before relying on
+# the auto-calculation for a later tax year).
 PAYROLL_SCOPES = ["internal", "client"]
 PAYROLL_PAY_FREQUENCIES = ["Monthly", "Fortnightly", "Weekly"]
 PAYROLL_PERIOD_STATUSES = ["Draft", "Finalized"]
 PAYSLIP_ITEM_CATEGORIES = ["Allowance", "Deduction"]
 PAYROLL_TAX_CAVEAT = (
-    "Zimbabwean PAYE bands, the AIDS levy % and NSSA rates/ceiling change from "
-    "time to time and could not be reliably verified from public sources when "
-    "this module was built. Please confirm the figures below against the "
-    "current ZIMRA tax tables and NSSA notice before relying on any "
-    "auto-calculated payslip."
+    "The PAYE bands below are pre-loaded from ZIMRA's 2024 USD tax tables (as "
+    "supplied to the firm) - please reconfirm them against ZIMRA's CURRENT "
+    "table before relying on any auto-calculated payslip, especially in a "
+    "later tax year. The AIDS levy % and NSSA rates/ceiling could not be "
+    "reliably verified from public sources when this module was built and "
+    "should also be confirmed against ZIMRA/NSSA directly."
 )
 
 
@@ -7667,16 +7674,29 @@ class PayrollTaxBand(db.Model):
     (not including) `upper` is taxed at `rate_pct`. `upper` left blank means
     this is the open-ended top band. Progressive calculation - see
     payroll_calc.calculate_paye - so bands should be entered as the
-    marginal-rate table exactly as ZIMRA publishes it, not as cumulative
-    amounts."""
+    marginal-rate table exactly as ZIMRA publishes it (as boundaries that
+    run edge-to-edge, e.g. 0-100, 100-300, 300-1000..., NOT the "100.00 /
+    100.01" style pairs ZIMRA prints for human readability - the marginal
+    formula already treats each band as taxing only the slice from `lower`
+    up to (not including) `upper`, so an edge-to-edge boundary is what
+    reproduces ZIMRA's own published worked examples exactly; a one-cent
+    gap between bands would silently under-tax by a cent or two).
+
+    `frequency` is one of PAYROLL_PAY_FREQUENCIES ("Monthly", "Fortnightly",
+    "Weekly") - ZIMRA publishes a genuinely different band table per pay
+    frequency (not simply the Monthly one divided by 2 or 4), so each
+    frequency keeps its own independent set of bands here, and
+    payroll_calc.calculate_paye is always called with only the bands
+    matching the employee's own pay_frequency (see payroll.py)."""
     id = db.Column(db.Integer, primary_key=True)
+    frequency = db.Column(db.String(20), nullable=False, default="Monthly")
     lower = db.Column(db.Float, nullable=False, default=0.0)
     upper = db.Column(db.Float)
     rate_pct = db.Column(db.Float, nullable=False, default=0.0)
     order = db.Column(db.Integer, default=0)
 
     def __repr__(self):
-        return f"<PayrollTaxBand {self.lower}-{self.upper} @ {self.rate_pct}%>"
+        return f"<PayrollTaxBand {self.frequency} {self.lower}-{self.upper} @ {self.rate_pct}%>"
 
 
 class PayrollEmployee(db.Model):
