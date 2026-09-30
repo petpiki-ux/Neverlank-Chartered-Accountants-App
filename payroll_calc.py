@@ -12,6 +12,21 @@ Kept separate from payroll.py (the routes) the same way financials.py is
 kept separate from engagements.py elsewhere in this app - so the same
 numbers used to populate a payslip on screen are exactly what gets written
 into the downloaded Word/PDF document.
+
+NSSA employee contribution as an allowable PAYE deduction: ZIMRA's own
+published PAYE method (zimra.co.zw) is (1) gross income, (2) less exempt
+income, (3) less allowable deductions e.g. pension contributions -> taxable
+income, (4) apply the tax tables, (5) less tax credits, (6) plus 3% AIDS
+Levy on the tax after credits. The employee's own NSSA contribution is one
+of step 3's "allowable deductions" - it reduces taxable income BEFORE the
+tax tables are applied, not just a deduction taken from net pay after tax.
+This module deducts it in full (already capped via
+PayrollTaxSettings.nssa_insurable_ceiling, the same statutory ceiling that
+caps the contribution itself - no separate limit is applied on top of
+that). ZIMRA's method also has an exempt-income step (e.g. a bonus
+exemption) and a tax-credits step (e.g. elderly/blind/disabled person's and
+medical credits) that this app does not yet model - see
+PAYROLL_TAX_CAVEAT in models.py.
 """
 
 
@@ -49,17 +64,22 @@ def calculate_payslip(basic_salary, allowance_items, deduction_items, settings, 
     taxable_allowances = sum((i.amount or 0.0) for i in allowance_items if getattr(i, "taxable", True))
     non_taxable_allowances = sum((i.amount or 0.0) for i in allowance_items if not getattr(i, "taxable", True))
     allowances_total = taxable_allowances + non_taxable_allowances
-
-    taxable_income = max(0.0, basic_salary + taxable_allowances)
     gross_pay = basic_salary + allowances_total
 
-    paye_tax = calculate_paye(taxable_income, bands)
-    aids_levy = round(paye_tax * (settings.aids_levy_pct or 0.0) / 100.0, 2)
-
+    # NSSA employee contribution is computed FIRST - it's needed both for
+    # net pay (as always) AND, per ZIMRA's own PAYE method (see module
+    # docstring), as an allowable deduction that reduces taxable income
+    # BEFORE the tax tables are applied - not just a deduction taken from
+    # net pay after tax.
     ceiling = settings.nssa_insurable_ceiling
     nssa_base = min(gross_pay, ceiling) if ceiling else gross_pay
     nssa_employee = round(nssa_base * (settings.nssa_employee_pct or 0.0) / 100.0, 2)
     nssa_employer = round(nssa_base * (settings.nssa_employer_pct or 0.0) / 100.0, 2)
+
+    taxable_income = max(0.0, basic_salary + taxable_allowances - nssa_employee)
+
+    paye_tax = calculate_paye(taxable_income, bands)
+    aids_levy = round(paye_tax * (settings.aids_levy_pct or 0.0) / 100.0, 2)
 
     other_deductions_total = round(sum((i.amount or 0.0) for i in deduction_items), 2)
 

@@ -52,13 +52,24 @@
 <div class="card" style="max-width:760px;">
   <h2 style="margin-top:0;font-size:16px;">How PAYE is calculated</h2>
   <p style="font-size:12.5px;">
-    PAYE uses the standard <strong>marginal (progressive) rate</strong> method: each band below taxes only the
-    slice of taxable income that falls within it, not the whole income at that band's rate. The bands are
-    applied edge-to-edge (each band's upper bound is the next band's lower bound), and a band with no upper
-    bound taxes everything above its lower bound at its own rate.
+    Following ZIMRA's own published method:
+  </p>
+  <ol style="font-size:12.5px;padding-left:20px;">
+    <li>Gross income = basic salary + taxable allowances.</li>
+    <li>Less allowable deductions - the employee's own <strong>NSSA contribution</strong> is deducted here, before
+      tax is calculated (not just taken from net pay afterwards) - gives Taxable Income.</li>
+    <li>Taxable Income is run through the marginal (progressive) rate bands below - each band taxes only the
+      slice of taxable income that falls within it, not the whole income at that band's rate.</li>
+    <li>AIDS Levy (3% by default, editable above) is charged on the resulting PAYE.</li>
+  </ol>
+  <p class="muted" style="font-size:11.5px;">
+    ZIMRA's method also has an exempt-income step (e.g. a bonus exemption) and a tax-credits step (e.g.
+    elderly/blind/disabled person's and medical credits) that this app does not yet calculate automatically -
+    for an employee who qualifies, adjust that payslip's PAYE/net pay by hand on its own page.
   </p>
   <p style="font-size:12.5px;">
-    Worked example (Monthly, ZIMRA 2024 USD table) - a taxable income of <strong>$1,800</strong>:
+    Worked example (Monthly, ZIMRA 2024 USD table) - a taxable income of <strong>$1,800</strong> (already after
+    the NSSA deduction above):
   </p>
   <table style="font-size:12px;max-width:520px;">
     <thead><tr><th>Slice</th><th class="text-right">Amount</th><th class="text-right">Rate</th><th class="text-right">Tax</th></tr></thead>
@@ -71,8 +82,7 @@
     </tbody>
   </table>
   <p class="muted" style="font-size:11.5px;margin-bottom:0;">
-    This matches ZIMRA's own published worked example for a $1,800 Monthly taxable income exactly. AIDS Levy is
-    then charged as a % of this PAYE figure, and NSSA is calculated separately on gross pay (both below) - see
+    This matches ZIMRA's own published worked example for a $1,800 Monthly taxable income exactly - see
     payroll_calc.py for the exact arithmetic used on every payslip.
   </p>
 </div>

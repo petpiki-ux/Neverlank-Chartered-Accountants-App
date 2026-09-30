@@ -7642,7 +7642,15 @@ PAYROLL_TAX_CAVEAT = (
     "table before relying on any auto-calculated payslip, especially in a "
     "later tax year. The AIDS levy % and NSSA rates/ceiling could not be "
     "reliably verified from public sources when this module was built and "
-    "should also be confirmed against ZIMRA/NSSA directly."
+    "should also be confirmed against ZIMRA/NSSA directly. The employee's "
+    "own NSSA contribution is deducted from taxable income before PAYE is "
+    "calculated (ZIMRA's own published method treats it as an allowable "
+    "deduction, like a pension contribution). ZIMRA's method also has an "
+    "exempt-income step (e.g. a bonus exemption) and a tax-credits step "
+    "(e.g. elderly/blind/disabled person's and medical credits) that this "
+    "app does not yet calculate automatically - for an employee who "
+    "qualifies, manually adjust that payslip's PAYE and net pay figures on "
+    "its own page (this marks it as no longer auto-calculated)."
 )
 
 
