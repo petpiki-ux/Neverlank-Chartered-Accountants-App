@@ -70,15 +70,19 @@
       perk, entered as an Allowance item.</li>
   </ol>
   <p style="font-size:12.5px;">
-    <strong>Excluded:</strong> an employer's own share of a benefit such as medical aid is a non-cash fringe
-    benefit to the employer, not part of the employee's earnings, so it's never added. If instead the
-    <em>employee's own</em> share of such a benefit is deducted from their pay (a <strong>Deduction</strong> line
-    item), Insurable Earnings are still based on gross pay <em>before</em> that deduction - Deduction items never
-    reduce them.
+    <strong>Excluded:</strong> an employer's own share of a benefit such as <strong>medical aid</strong> is a
+    non-cash fringe benefit to the employer, not part of the employee's earnings, so it must never count toward
+    NSSA - on the Payslip screen, add it as an Allowance (or Exempt Income) line item with
+    "Counts toward NSSA?" set to <strong>No</strong>, so it can still appear on the payslip/count toward gross pay
+    if needed, without inflating the NSSA calculation. If instead the <em>employee's own</em> share of such a
+    benefit is deducted from their pay (a <strong>Deduction</strong> line item), Insurable Earnings are already
+    based on gross pay <em>before</em> that deduction - Deduction items never reduce them, so no flag is needed
+    there.
   </p>
   <p class="muted" style="font-size:11.5px;margin-bottom:0;">
-    In this app, Insurable Earnings = gross pay = basic salary + all Allowance items + all Exempt Income items,
-    capped at the Insurable Earnings ceiling above - see payroll_calc.py for the exact calculation.
+    In this app, Insurable Earnings = basic salary + every Allowance/Exempt Income item marked "Counts toward
+    NSSA: Yes" (the default) - capped at the Insurable Earnings ceiling above - see payroll_calc.py for the exact
+    calculation.
   </p>
 </div>
 

@@ -560,10 +560,18 @@ def add_payslip_item(payslip_id):
     category = request.form.get("category", "Allowance")
     if category not in PAYSLIP_ITEM_CATEGORIES:
         category = "Allowance"
+    # nssa_applicable only matters for Allowance/Exempt Income (the two
+    # categories that feed NSSA Insurable Earnings - see
+    # payroll_calc.calculate_payslip); defaults to True/"Yes" in the form
+    # (unchanged NSSA behaviour) unless the firm explicitly picks "No" - the
+    # one case this exists for is the EMPLOYER's own medical aid (or similar
+    # benefit) contribution, which must be excluded from NSSA even though it
+    # may still belong on the payslip.
     item = PayslipItem(
         payslip_id=payslip.id, category=category, label=label,
         amount=_parse_float(request.form.get("amount"), 0.0),
         taxable=bool(request.form.get("taxable")) if category == "Allowance" else False,
+        nssa_applicable=bool(request.form.get("nssa_applicable", "1")) if category in ("Allowance", "Exempt Income") else True,
     )
     db.session.add(item)
     db.session.commit()

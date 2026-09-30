@@ -51,10 +51,13 @@
     <strong>Exempt Income</strong> (e.g. a bonus exemption) counts toward gross/net pay but is never taxed.
     <strong>Tax Credit</strong> (e.g. an elderly/blind/disabled person's or medical expenses credit) reduces
     PAYE payable directly, after the tax tables. Neither figure is pre-filled - see the caveat on
-    <a href="{{ url_for('payroll.tax_settings') }}">Payroll Tax Settings</a>.
+    <a href="{{ url_for('payroll.tax_settings') }}">Payroll Tax Settings</a>. An Allowance or Exempt Income
+    line can also be marked "Counts toward NSSA? No" - use this for the <strong>employer's own medical aid</strong>
+    (or similar benefit) contribution, which the NSSA Act/SI 393 of 1993 excludes from Insurable Earnings even
+    though it may still belong on the payslip; leave it "Yes" for an ordinary cash allowance.
   </p>
   <table>
-    <thead><tr><th>Category</th><th>Label</th><th class="text-right">Amount</th><th>Taxable</th><th></th></tr></thead>
+    <thead><tr><th>Category</th><th>Label</th><th class="text-right">Amount</th><th>Taxable</th><th>Counts toward NSSA</th><th></th></tr></thead>
     <tbody>
       {% for item in payslip.items %}
       <tr>
@@ -62,6 +65,7 @@
         <td>{{ item.label }}</td>
         <td class="text-right">{{ '%.2f'|format(item.amount or 0) }}</td>
         <td>{% if item.category == 'Allowance' %}{{ 'Yes' if item.taxable else 'No' }}{% else %}—{% endif %}</td>
+        <td>{% if item.category in ('Allowance', 'Exempt Income') %}{{ 'Yes' if item.nssa_applicable else 'No' }}{% else %}—{% endif %}</td>
         <td class="text-right">
           {% if not locked %}
           <form method="post" action="{{ url_for('payroll.delete_payslip_item', item_id=item.id) }}" class="inline">
@@ -72,7 +76,7 @@
       </tr>
       {% endfor %}
       {% if not payslip.items %}
-      <tr><td colspan="5" class="empty-state">No allowances/deductions added - only basic salary and statutory deductions apply.</td></tr>
+      <tr><td colspan="6" class="empty-state">No allowances/deductions added - only basic salary and statutory deductions apply.</td></tr>
       {% endif %}
     </tbody>
   </table>
@@ -100,9 +104,16 @@
         <option value="">No</option>
       </select>
     </div>
+    <div>
+      <label for="nssa_applicable">Counts toward NSSA? (Allowance/Exempt Income only)</label>
+      <select id="nssa_applicable" name="nssa_applicable">
+        <option value="1">Yes</option>
+        <option value="">No - e.g. employer's medical aid contribution</option>
+      </select>
+    </div>
     <div><button type="submit" class="btn secondary">+ Add</button></div>
   </form>
-  <p class="muted" style="font-size:10.5px;margin-top:4px;">"Taxable?" only applies to an Allowance - it's ignored for Deduction, Exempt Income and Tax Credit lines.</p>
+  <p class="muted" style="font-size:10.5px;margin-top:4px;">"Taxable?" only applies to an Allowance - it's ignored for Deduction, Exempt Income and Tax Credit lines. "Counts toward NSSA?" only applies to an Allowance or Exempt Income line - it's ignored for Deduction and Tax Credit lines (which never enter NSSA Insurable Earnings regardless).</p>
   <form method="post" action="{{ url_for('payroll.recalculate_payslip', payslip_id=payslip.id) }}" style="margin-top:10px;">
     <button type="submit" class="btn gold">Recalculate from salary, items &amp; tax settings</button>
   </form>

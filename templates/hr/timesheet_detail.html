@@ -19,46 +19,82 @@
   <div class="stat-card"><div class="num">{{ sheet.total_hours }}</div><div class="label">Total hours</div></div>
   <div class="stat-card"><div class="num">{{ sheet.regular_hours }}</div><div class="label">Regular hours</div></div>
   <div class="stat-card{% if sheet.overtime_hours > 0 %} danger{% endif %}"><div class="num">{{ sheet.overtime_hours }}</div><div class="label">Overtime hours</div></div>
+  {% if sheet.total_leave_days %}
+  <div class="stat-card"><div class="num">{{ sheet.total_leave_days }}</div><div class="label">Leave days this week</div></div>
+  {% endif %}
 </div>
 
 {% if can_edit %}
 <div class="card">
   <h3 class="mt-0">Add an entry</h3>
-  <form method="post" action="{{ url_for('hr.add_time_entry', timesheet_id=sheet.id) }}" class="form-row" style="align-items:flex-end;">
+  {% if not sheet_employee %}
+  <p class="flash warning" style="font-size:12px;">
+    No Payroll employee profile is linked to your login, so you can log hours but not leave here yet -
+    ask an Admin/Partner to link one on Payroll &gt; Employees first.
+  </p>
+  {% endif %}
+  <div class="form-row" style="margin-bottom:8px;">
+    <div>
+      <label for="entry_kind">Entry type</label>
+      <select id="entry_kind" name="entry_kind" form="add-work-entry-form" onchange="document.getElementById('work-fields').style.display = this.value === 'work' ? '' : 'none'; document.getElementById('leave-fields').style.display = this.value === 'leave' ? '' : 'none';">
+        <option value="work">Hours worked</option>
+        {% if sheet_employee %}<option value="leave">Leave taken</option>{% endif %}
+      </select>
+    </div>
+  </div>
+  <form id="add-work-entry-form" method="post" action="{{ url_for('hr.add_time_entry', timesheet_id=sheet.id) }}" class="form-row" style="align-items:flex-end;">
     <div>
       <label for="work_date">Date</label>
       <select id="work_date" name="work_date">
         {% for d in week_dates %}<option value="{{ d.isoformat() }}">{{ d.strftime('%a %d %b') }}</option>{% endfor %}
       </select>
     </div>
-    <div>
-      <label for="engagement_id">Engagement (optional)</label>
-      <select id="engagement_id" name="engagement_id">
-        <option value="">General / non-billable</option>
-        {% for e in engagements %}<option value="{{ e.id }}">{{ e.client.name }} - {{ e.title }}</option>{% endfor %}
-      </select>
+    <div id="work-fields" class="form-row" style="align-items:flex-end;">
+      <div>
+        <label for="engagement_id">Engagement (optional)</label>
+        <select id="engagement_id" name="engagement_id">
+          <option value="">General / non-billable</option>
+          {% for e in engagements %}<option value="{{ e.id }}">{{ e.client.name }} - {{ e.title }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="description">Description</label><input type="text" id="description" name="description" placeholder="e.g. Fieldwork - cash testing"></div>
+      <div><label for="hours">Hours</label><input type="number" id="hours" name="hours" step="0.25" min="0.25" max="24"></div>
     </div>
-    <div><label for="description">Description</label><input type="text" id="description" name="description" placeholder="e.g. Fieldwork - cash testing"></div>
-    <div><label for="hours">Hours</label><input type="number" id="hours" name="hours" step="0.25" min="0.25" max="24" required></div>
+    {% if sheet_employee %}
+    <div id="leave-fields" class="form-row" style="align-items:flex-end;display:none;">
+      <div>
+        <label for="leave_type_id">Leave type</label>
+        <select id="leave_type_id" name="leave_type_id">
+          {% for lt, bal in leave_balances %}
+          <option value="{{ lt.id }}">{{ lt.name }} ({{ bal.current_balance }} day(s) available)</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div><label for="leave_days">Days</label><input type="number" id="leave_days" name="leave_days" step="0.5" min="0.5" max="365" value="1"></div>
+    </div>
+    {% endif %}
     <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add entry</button></div>
   </form>
-  <p class="muted" style="font-size:12px;">Any hours beyond {{ 8 }} on a single day are automatically counted as overtime.</p>
+  <p class="muted" style="font-size:12px;">Any hours beyond {{ 8 }} on a single day are automatically counted as overtime. Leave taken is checked against the employee's own Leave balance - see <a href="{{ url_for('hr.list_leave_balances') }}">Leave</a>.</p>
 </div>
 {% endif %}
 
 <div class="card">
   {% if sheet.entries %}
   <table>
-    <thead><tr><th>Date</th><th>Engagement</th><th>Description</th><th>Hours</th><th>Regular</th><th>Overtime</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
+    <thead><tr><th>Date</th><th>Engagement / Leave</th><th>Description</th><th>Hours</th><th>Regular</th><th>Overtime</th>{% if can_edit %}<th></th>{% endif %}</tr></thead>
     <tbody>
     {% for e in sheet.entries %}
       <tr>
         <td>{{ e.work_date.strftime('%a %d %b') }}</td>
-        <td class="muted">{{ e.engagement.title if e.engagement else 'General / non-billable' }}</td>
+        <td class="muted">
+          {% if e.is_leave %}<span class="badge status-OnHold">{{ e.leave_type.name }}</span>
+          {% else %}{{ e.engagement.title if e.engagement else 'General / non-billable' }}{% endif %}
+        </td>
         <td class="muted">{{ e.description or '—' }}</td>
-        <td>{{ e.hours }}</td>
-        <td>{{ e.regular_hours }}</td>
-        <td>{{ e.overtime_hours }}</td>
+        <td>{% if e.is_leave %}—{% else %}{{ e.hours }}{% endif %}</td>
+        <td>{% if e.is_leave %}{{ e.leave_days }} day(s){% else %}{{ e.regular_hours }}{% endif %}</td>
+        <td>{{ e.overtime_hours if not e.is_leave else '—' }}</td>
         {% if can_edit %}
         <td><form method="post" action="{{ url_for('hr.delete_time_entry', entry_id=e.id) }}" class="inline" onsubmit="return confirm('Delete this entry?')"><button type="submit" class="btn small danger">Delete</button></form></td>
         {% endif %}

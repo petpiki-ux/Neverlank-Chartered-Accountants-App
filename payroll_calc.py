@@ -40,13 +40,18 @@ performance bonuses - Allowance items, taxable or not for PAYE purposes,
 which is a separate question from whether NSSA applies) + the cash value of
 any taxable benefit in kind, EXCLUDING an employer's own share of a benefit
 such as medical aid (not part of the employee's own earnings). Below,
-`gross_pay` (basic salary + all Allowance items + Exempt Income items) IS
-this Insurable Earnings base: Exempt Income items count too (a tax-exempt
-bonus is still a cash earning for NSSA purposes even though it's excluded
-from taxable income for PAYE), while Deduction items never reduce it - so
-if the employee's own share of a benefit like medical aid is deducted from
-their pay as a Deduction item, Insurable Earnings still reflect gross pay
-BEFORE that deduction, exactly as the legislation requires.
+`nssa_earnings` (basic salary + every Allowance/Exempt Income item whose own
+`nssa_applicable` flag is True - the default) is this Insurable Earnings
+base: Exempt Income items count too (a tax-exempt bonus is still a cash
+earning for NSSA purposes even though it's excluded from taxable income for
+PAYE), while Deduction items never reduce it - so if the employee's own
+share of a benefit like medical aid is deducted from their pay as a
+Deduction item, Insurable Earnings still reflect gross pay BEFORE that
+deduction, exactly as the legislation requires. `nssa_earnings` is NOT
+always the same as `gross_pay`: an Allowance/Exempt Income item entered with
+`nssa_applicable=False` (e.g. the employer's own medical aid contribution,
+shown on the payslip and counted in gross pay, but never an employee
+earning) still counts toward `gross_pay`/net pay but is excluded here.
 
 Exempt Income items (step 2) count toward gross/net pay exactly like an
 Allowance, but are NEVER part of taxable income, regardless of their own
@@ -112,15 +117,28 @@ def calculate_payslip(basic_salary, items, settings, bands):
     # income BEFORE the tax tables are applied - not just a deduction taken
     # from net pay after tax.
     #
-    # nssa_base is Insurable Earnings (NSSA Act [Chapter 17:04] / SI 393 of
-    # 1993): basic salary + all Allowance items + Exempt Income items - i.e.
-    # gross_pay above, capped at the ceiling. Deduction items are never part
-    # of gross_pay, so they never reduce Insurable Earnings either - e.g. if
-    # the employee's own share of a benefit like medical aid is entered as a
-    # Deduction, NSSA is still calculated on gross pay before that
-    # deduction, exactly as required.
+    # nssa_earnings is Insurable Earnings (NSSA Act [Chapter 17:04] / SI 393
+    # of 1993): basic salary + Allowance/Exempt Income items - same as
+    # gross_pay above - EXCEPT any item whose own `nssa_applicable` flag is
+    # False is left out here (while still counting toward gross_pay/net pay
+    # above, if it's meant to). That flag exists for exactly one case: the
+    # EMPLOYER's own medical aid (or similar benefit) contribution - a
+    # non-cash fringe benefit to the employer, never part of the employee's
+    # NSSA earnings even if it's shown on the payslip - see PayslipItem's
+    # docstring in models.py. Deduction items are never part of gross_pay to
+    # begin with, so they never reduce Insurable Earnings either - e.g. if
+    # the EMPLOYEE's own share of medical aid is instead entered as a
+    # Deduction (taken straight off their pay), NSSA is still calculated on
+    # gross pay before that deduction, exactly as required.
+    nssa_eligible_allowances = sum(
+        (i.amount or 0.0) for i in allowance_items if getattr(i, "nssa_applicable", True)
+    )
+    nssa_eligible_exempt = sum(
+        (i.amount or 0.0) for i in exempt_items if getattr(i, "nssa_applicable", True)
+    )
+    nssa_earnings = basic_salary + nssa_eligible_allowances + nssa_eligible_exempt
     ceiling = settings.nssa_insurable_ceiling
-    nssa_base = min(gross_pay, ceiling) if ceiling else gross_pay
+    nssa_base = min(nssa_earnings, ceiling) if ceiling else nssa_earnings
     nssa_employee = round(nssa_base * (settings.nssa_employee_pct or 0.0) / 100.0, 2)
     nssa_employer = round(nssa_base * (settings.nssa_employer_pct or 0.0) / 100.0, 2)
 

@@ -12,6 +12,10 @@
     <h3 class="mt-0">Time Sheets</h3>
     <p class="muted" style="font-size:13px;">Log your weekly hours in the app (overtime calculated automatically), or download the Excel template and upload it back once filled in.</p>
   </a>
+  <a href="{{ url_for('hr.list_leave_balances') }}" class="card" style="text-decoration:none;color:inherit;">
+    <h3 class="mt-0">Leave</h3>
+    <p class="muted" style="font-size:13px;">Annual, Sick, Special/Compassionate and Maternity leave balances - accrued automatically per the Labour Act, with an opening balance you can set once. Captured straight from your Time Sheet.</p>
+  </a>
   <a href="{{ url_for('hr.project_board') }}" class="card" style="text-decoration:none;color:inherit;">
     <h3 class="mt-0">Tasks / To-Do List</h3>
     <p class="muted" style="font-size:13px;">Every task in one place - work assigned to you on engagements, plus general to-dos you or a colleague have added - who's working on what, due dates, and review status. Also reachable from the top navigation bar.</p>

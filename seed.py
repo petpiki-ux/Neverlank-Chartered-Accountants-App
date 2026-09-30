@@ -10,7 +10,7 @@ import shutil
 from datetime import date
 
 from extensions import db
-from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PayrollTaxSettings, PAYROLL_PAY_FREQUENCIES
+from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PayrollTaxSettings, PAYROLL_PAY_FREQUENCIES, LeaveType, LEAVE_TYPES_STATUTORY_ZW
 from config import Config
 
 
@@ -645,6 +645,40 @@ def seed_payroll_nssa_defaults():
         settings.nssa_employer_pct = 4.5
         settings.nssa_insurable_ceiling = 700.0
         db.session.commit()
+
+
+def seed_leave_types():
+    """Pre-load Zimbabwe's statutory leave types (LEAVE_TYPES_STATUTORY_ZW in
+    models.py - Annual/Vacation, Sick, Special/Compassionate, Maternity),
+    per the Labour Act [Chapter 28:01] s.14A and related provisions.
+
+    Gated PER-NAME (only adds a LeaveType that doesn't already exist by that
+    exact name), not on the table being empty overall - same pattern as
+    seed_payroll_tax_bands above - so this is safe to call on every startup:
+    it never touches a leave type the firm has already customised (renamed,
+    retired, or edited the figures on), and it still closes the gap for a
+    brand new statutory type added to LEAVE_TYPES_STATUTORY_ZW in a later
+    update.
+    """
+    for order, (
+        name, accrual_days_per_month, annual_entitlement_days, max_accumulation_days,
+        is_accumulative, full_pay_days, half_pay_pct, min_service_months_to_take, notes,
+    ) in enumerate(LEAVE_TYPES_STATUTORY_ZW):
+        if LeaveType.query.filter_by(name=name).first():
+            continue
+        db.session.add(LeaveType(
+            name=name,
+            accrual_days_per_month=accrual_days_per_month,
+            annual_entitlement_days=annual_entitlement_days,
+            max_accumulation_days=max_accumulation_days,
+            is_accumulative=is_accumulative,
+            full_pay_days=full_pay_days,
+            half_pay_pct=half_pay_pct if half_pay_pct is not None else 50.0,
+            min_service_months_to_take=min_service_months_to_take,
+            order=order,
+            notes=notes,
+        ))
+    db.session.commit()
 
 
 def run_seed():

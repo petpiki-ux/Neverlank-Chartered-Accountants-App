@@ -266,6 +266,20 @@ def _add_missing_columns():
             ("paye_before_credits", "FLOAT DEFAULT 0"),
             ("tax_credits_total", "FLOAT DEFAULT 0"),
         ],
+        # nssa_applicable - see PayslipItem's docstring in models.py: lets an
+        # Allowance/Exempt Income item (e.g. the EMPLOYER's own medical aid
+        # contribution) be excluded from NSSA Insurable Earnings specifically,
+        # separate from whether it counts toward gross pay or PAYE taxable
+        # income. Existing items default to True (1) - unchanged NSSA
+        # behaviour for every item already on a payslip - until a firm
+        # explicitly unticks it for a specific line like Medical Aid.
+        "payslip_item": [("nssa_applicable", "BOOLEAN DEFAULT 1")],
+        # leave_type_id/leave_days - see models.LeaveType/LeaveBalance: a
+        # Time Sheet entry can now record leave taken (Annual/Sick/Special/
+        # Maternity, etc.) instead of hours worked. Existing entries default
+        # to NULL for both, i.e. an ordinary hours-worked entry, exactly as
+        # before this feature existed.
+        "time_entry": [("leave_type_id", "INTEGER"), ("leave_days", "FLOAT")],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
@@ -584,6 +598,13 @@ def create_app():
         # the three fields itself.
         from seed import seed_payroll_nssa_defaults
         seed_payroll_nssa_defaults()
+        # Leave Management: seed_leave_types() only ever adds a LeaveType
+        # that doesn't already exist by name, so it's safe/cheap to call on
+        # every startup for the same reason as seed_payroll_tax_bands above -
+        # a no-op once every statutory type has been seeded (or the firm has
+        # renamed/retired one), but it closes the gap on first install.
+        from seed import seed_leave_types
+        seed_leave_types()
 
     register_cli(app)
 

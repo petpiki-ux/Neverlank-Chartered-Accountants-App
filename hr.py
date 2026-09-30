@@ -21,9 +21,11 @@ from extensions import db
 from models import (
     PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, CheckInRecord, User, Engagement, Client,
     EngagementTask, PersonalTask, PersonalSubtask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
+    PayrollEmployee, LeaveType, LeaveBalance,
     user_has_permission, user_can_access_engagement, notify_task_assignment,
 )
 from config import Config
+import leave_calc
 
 import file_text_extraction
 import policy_summary
@@ -508,6 +510,15 @@ def view_timesheet(timesheet_id):
     can_edit = (sheet.user_id == current_user.id) and sheet.status != "Approved"
     can_review = current_user.role in REVIEWER_ROLES and sheet.user_id != current_user.id
     week_dates = [sheet.week_start + timedelta(days=i) for i in range(7)]
+
+    # Leave capture on the timesheet is only possible if this SHEET'S OWNER
+    # has a linked Payroll employee profile (see _add_leave_entry) - looked
+    # up by the sheet's own user_id, not current_user, so a reviewer viewing
+    # someone else's timesheet still sees the right balances (read-only for
+    # them, since can_edit is false in that case).
+    sheet_employee = PayrollEmployee.query.filter_by(user_id=sheet.user_id, scope="internal").first()
+    leave_balances = leave_calc.sync_all_balances_for_employee(sheet_employee) if sheet_employee else []
+
     return render_template(
         "hr/timesheet_detail.html",
         sheet=sheet,
@@ -515,6 +526,8 @@ def view_timesheet(timesheet_id):
         can_edit=can_edit,
         can_review=can_review,
         week_dates=week_dates,
+        sheet_employee=sheet_employee,
+        leave_balances=leave_balances,
     )
 
 
@@ -534,6 +547,11 @@ def add_time_entry(timesheet_id):
     except (ValueError, TypeError):
         flash("Please choose a valid date.", "danger")
         return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+    entry_kind = request.form.get("entry_kind", "work")
+
+    if entry_kind == "leave":
+        return _add_leave_entry(sheet, work_date)
 
     try:
         hours = float(request.form.get("hours", 0) or 0)
@@ -557,6 +575,78 @@ def add_time_entry(timesheet_id):
     return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
 
 
+def _add_leave_entry(sheet, work_date):
+    """Records leave taken on one day of `sheet` - the leave-capture half of
+    add_time_entry above, split out for readability. Validates against the
+    employee's own LeaveBalance (synced first, so the check uses up-to-date
+    figures) before creating the entry, and moves the days into
+    LeaveBalance.taken_days on success - see delete_time_entry for the
+    reverse when such an entry is removed."""
+    timesheet_id = sheet.id
+    leave_type_id = request.form.get("leave_type_id")
+    leave_type = LeaveType.query.get(leave_type_id) if leave_type_id else None
+    if not leave_type:
+        flash("Please choose a leave type.", "danger")
+        return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+    try:
+        leave_days = float(request.form.get("leave_days", 0) or 0)
+    except ValueError:
+        leave_days = 0
+
+    if leave_days <= 0:
+        flash("Please enter a number of leave days greater than zero.", "danger")
+        return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+    employee = PayrollEmployee.query.filter_by(user_id=current_user.id, scope="internal").first()
+    if not employee:
+        flash(
+            "No Payroll employee profile is linked to your login yet, so leave can't be tracked against a "
+            "balance - ask an Admin/Partner to link one on Payroll > Employees first.",
+            "danger",
+        )
+        return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+    balance = leave_calc.get_or_create_balance(employee, leave_type)
+    leave_calc.sync_leave_balance(employee, leave_type, balance)
+
+    if leave_type.min_service_months_to_take:
+        served_months = leave_calc.months_between(employee.date_joined, work_date) if employee.date_joined else 0
+        if served_months < leave_type.min_service_months_to_take:
+            flash(
+                f"{leave_type.name} normally can't be TAKEN until {employee.full_name} has completed "
+                f"{leave_type.min_service_months_to_take} months of continuous service (it still accrues "
+                "from day one) - only override this if your own firm policy allows earlier taking.",
+                "danger",
+            )
+            return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+    available = balance.current_balance
+    if leave_days > available:
+        flash(
+            f"Only {available:.2f} day(s) of {leave_type.name} are available for {employee.full_name} "
+            f"(brought forward {balance.brought_forward or 0:.2f} + accrued {balance.accrued_days or 0:.2f} "
+            f"- taken {balance.taken_days or 0:.2f}) - reduce the days, or top up the balance on the Leave "
+            "screen first.",
+            "danger",
+        )
+        return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+    entry = TimeEntry(
+        timesheet_id=timesheet_id,
+        work_date=work_date,
+        description=f"{leave_type.name} ({leave_days:g} day{'s' if leave_days != 1 else ''})",
+        hours=0,
+        leave_type_id=leave_type.id,
+        leave_days=leave_days,
+    )
+    db.session.add(entry)
+    balance.taken_days = round((balance.taken_days or 0.0) + leave_days, 2)
+    db.session.commit()
+    flash(f"{leave_days:g} day(s) of {leave_type.name} added - {balance.current_balance:.2f} day(s) remain.", "success")
+    return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+
 @hr_bp.route("/timesheets/entries/<int:entry_id>/delete", methods=["POST"])
 @login_required
 def delete_time_entry(entry_id):
@@ -567,6 +657,16 @@ def delete_time_entry(entry_id):
     if sheet.status == "Approved":
         flash("This timesheet is already approved - ask your reviewer to reopen it before changing entries.", "danger")
         return redirect(url_for("hr.view_timesheet", timesheet_id=sheet.id))
+    if entry.leave_type_id and entry.leave_days:
+        # Reverse the leave taken by this entry before removing it, so
+        # deleting a leave entry gives the days back to the balance it was
+        # taken from - the same employee lookup add_time_entry used to take
+        # them in the first place.
+        employee = PayrollEmployee.query.filter_by(user_id=sheet.user_id, scope="internal").first()
+        if employee:
+            balance = LeaveBalance.query.filter_by(employee_id=employee.id, leave_type_id=entry.leave_type_id).first()
+            if balance:
+                balance.taken_days = round(max(0.0, (balance.taken_days or 0.0) - entry.leave_days), 2)
     db.session.delete(entry)
     db.session.commit()
     return redirect(url_for("hr.view_timesheet", timesheet_id=sheet.id))
@@ -599,6 +699,115 @@ def unapprove_timesheet(timesheet_id):
     db.session.commit()
     flash("Timesheet reopened for editing.", "info")
     return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+
+
+# --------------------------------------------------------------- Leave Management
+
+def _to_float_or_none(value, default=None):
+    if value is None or str(value).strip() == "":
+        return default
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+@hr_bp.route("/leave")
+@login_required
+def list_leave_balances():
+    """Self-service: the current user's own leave balances, synced up to
+    date on every view (see leave_calc.sync_all_balances_for_employee).
+    Supervisor/Partner/Admin also see every internal employee's balances
+    below, with a form to set/adjust each one's brought-forward balance."""
+    my_employee = PayrollEmployee.query.filter_by(user_id=current_user.id, scope="internal").first()
+    my_balances = leave_calc.sync_all_balances_for_employee(my_employee) if my_employee else []
+
+    team_balances = None
+    if current_user.role in REVIEWER_ROLES:
+        employees = (
+            PayrollEmployee.query.filter_by(scope="internal", is_active=True)
+            .order_by(PayrollEmployee.full_name)
+            .all()
+        )
+        team_balances = [(emp, leave_calc.sync_all_balances_for_employee(emp)) for emp in employees]
+
+    return render_template(
+        "hr/leave_balances.html",
+        my_employee=my_employee,
+        my_balances=my_balances,
+        team_balances=team_balances,
+        can_manage=current_user.role in REVIEWER_ROLES,
+    )
+
+
+@hr_bp.route("/leave/balances/<int:balance_id>/brought-forward", methods=["POST"])
+@login_required
+@reviewer_required
+def set_leave_brought_forward(balance_id):
+    balance = LeaveBalance.query.get_or_404(balance_id)
+    balance.brought_forward = _to_float_or_none(request.form.get("brought_forward"), 0.0) or 0.0
+    db.session.commit()
+    flash(f"Brought-forward balance updated for {balance.employee.full_name} - {balance.leave_type.name}.", "success")
+    return redirect(url_for("hr.list_leave_balances"))
+
+
+@hr_bp.route("/leave/types", methods=["GET", "POST"])
+@login_required
+@reviewer_required
+def leave_types():
+    """Firm-editable leave type definitions - pre-loaded with Zimbabwe's
+    statutory minimums (see LEAVE_TYPES_STATUTORY_ZW/seed.seed_leave_types)
+    but every figure can be adjusted if the firm's own policy or a
+    collective bargaining agreement is more generous."""
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "add":
+            name = request.form.get("name", "").strip()
+            if not name:
+                flash("Please name the leave type.", "danger")
+                return redirect(url_for("hr.leave_types"))
+            if LeaveType.query.filter_by(name=name).first():
+                flash("A leave type with that name already exists.", "danger")
+                return redirect(url_for("hr.leave_types"))
+            db.session.add(LeaveType(
+                name=name,
+                accrual_days_per_month=_to_float_or_none(request.form.get("accrual_days_per_month"), 0.0) or 0.0,
+                annual_entitlement_days=_to_float_or_none(request.form.get("annual_entitlement_days")),
+                max_accumulation_days=_to_float_or_none(request.form.get("max_accumulation_days")),
+                is_accumulative=bool(request.form.get("is_accumulative")),
+                full_pay_days=_to_float_or_none(request.form.get("full_pay_days")),
+                half_pay_pct=_to_float_or_none(request.form.get("half_pay_pct"), 50.0),
+                min_service_months_to_take=int(_to_float_or_none(request.form.get("min_service_months_to_take"), 0) or 0),
+                notes=request.form.get("notes", "").strip(),
+                order=LeaveType.query.count(),
+            ))
+            db.session.commit()
+            flash("Leave type added.", "success")
+        elif action == "delete":
+            lt = LeaveType.query.get_or_404(request.form.get("leave_type_id"))
+            if LeaveBalance.query.filter_by(leave_type_id=lt.id).first():
+                flash(f"Can't remove {lt.name} - it already has leave balances/history against it. Mark it inactive instead.", "danger")
+            else:
+                db.session.delete(lt)
+                db.session.commit()
+                flash("Leave type removed.", "success")
+        else:
+            lt = LeaveType.query.get_or_404(request.form.get("leave_type_id"))
+            lt.accrual_days_per_month = _to_float_or_none(request.form.get("accrual_days_per_month"), lt.accrual_days_per_month) or 0.0
+            lt.annual_entitlement_days = _to_float_or_none(request.form.get("annual_entitlement_days"))
+            lt.max_accumulation_days = _to_float_or_none(request.form.get("max_accumulation_days"))
+            lt.is_accumulative = bool(request.form.get("is_accumulative"))
+            lt.full_pay_days = _to_float_or_none(request.form.get("full_pay_days"))
+            lt.half_pay_pct = _to_float_or_none(request.form.get("half_pay_pct"), lt.half_pay_pct)
+            lt.min_service_months_to_take = int(_to_float_or_none(request.form.get("min_service_months_to_take"), 0) or 0)
+            lt.is_active = bool(request.form.get("is_active"))
+            lt.notes = request.form.get("notes", "").strip()
+            db.session.commit()
+            flash(f"{lt.name} updated.", "success")
+        return redirect(url_for("hr.leave_types"))
+
+    all_leave_types = LeaveType.query.order_by(LeaveType.order).all()
+    return render_template("hr/leave_types.html", leave_types=all_leave_types)
 
 
 @hr_bp.route("/timesheets/upload", methods=["POST"])

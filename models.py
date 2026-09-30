@@ -2645,6 +2645,14 @@ class TimeSheet(db.Model):
         return round(sum(max((e.hours or 0) - STANDARD_HOURS_PER_DAY, 0) for e in self.entries), 2)
 
     @property
+    def leave_entries(self):
+        return [e for e in self.entries if e.leave_type_id]
+
+    @property
+    def total_leave_days(self):
+        return round(sum(e.leave_days or 0 for e in self.entries if e.leave_type_id), 2)
+
+    @property
     def is_reviewed(self):
         return self.reviewed_by_id is not None
 
@@ -2653,14 +2661,32 @@ class TimeSheet(db.Model):
 
 
 class TimeEntry(db.Model):
+    """One day's entry on a TimeSheet - EITHER hours worked (the original
+    purpose: `hours` set, `leave_type_id`/`leave_days` left blank) OR leave
+    taken (`leave_type_id`/`leave_days` set instead, `hours` left at 0) -
+    never both on the same entry. A day with both hours worked and leave
+    taken (e.g. a half day) is two separate entries for that same
+    `work_date`, exactly like two different engagements worked in one day
+    are already two separate entries today."""
     id = db.Column(db.Integer, primary_key=True)
     timesheet_id = db.Column(db.Integer, db.ForeignKey("time_sheet.id"), nullable=False)
     work_date = db.Column(db.Date, nullable=False)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
     description = db.Column(db.String(255))
     hours = db.Column(db.Float, default=0)
+    # Leave taken on this day - see LeaveType/LeaveBalance below and
+    # hr.add_time_entry, which is what actually moves days out of the
+    # employee's LeaveBalance.taken_days when one of these entries is added
+    # (and back when it's deleted).
+    leave_type_id = db.Column(db.Integer, db.ForeignKey("leave_type.id"))
+    leave_days = db.Column(db.Float)
 
     engagement = db.relationship("Engagement")
+    leave_type = db.relationship("LeaveType")
+
+    @property
+    def is_leave(self):
+        return self.leave_type_id is not None
 
     @property
     def regular_hours(self):
@@ -2727,6 +2753,128 @@ class CheckInRecord(db.Model):
 
     def __repr__(self):
         return f"<CheckInRecord user={self.user_id} {self.work_date}>"
+
+
+# ---------------------------------------------------------------------------
+# Leave Management
+#
+# Ties into Time Sheets above (a TimeEntry can record leave taken instead of
+# hours worked - see TimeEntry.leave_type_id/leave_days) and Payroll's
+# PayrollEmployee (LeaveBalance keys off PayrollEmployee, not User directly,
+# since date_joined - needed to compute accrual from completed months of
+# service - lives there; see hr.py's leave routes for how a logged-in User
+# is matched to their own PayrollEmployee record).
+#
+# Zimbabwe's Labour Act [Chapter 28:01] s.14A sets Annual/Vacation Leave's
+# statutory minimum: 2.5 calendar days per completed month of continuous
+# service (30/year), accumulating up to a 90-day ceiling (no further accrual
+# once reached, until leave is taken), but normally only TAKEN after 1 year
+# of continuous service. Sick Leave, Special/Compassionate Leave and
+# Maternity Leave are each a fixed annual (or per-event) entitlement instead
+# - non-accumulative, so unused days simply lapse rather than rolling into
+# the next year. See LEAVE_TYPES_STATUTORY_ZW/seed.seed_leave_types for the
+# exact pre-loaded figures - every field is firm-editable, since a firm's
+# own policy or a collective bargaining agreement may be more generous than
+# the statutory minimum (never less).
+LEAVE_TYPES_STATUTORY_ZW = [
+    # (name, accrual_days_per_month, annual_entitlement_days, max_accumulation_days,
+    #  is_accumulative, full_pay_days, half_pay_pct, min_service_months_to_take, notes)
+    (
+        "Annual/Vacation Leave", 2.5, 30.0, 90.0, True, None, None, 12,
+        "Labour Act [Chapter 28:01] s.14A: 2.5 calendar days per completed month of continuous "
+        "service (30/year). Accumulates up to a 90-day cap - no further accrual once reached, "
+        "until leave is taken. Normally only TAKEN after 1 year of continuous service (it still "
+        "accrues from day one) unless the firm's own policy allows earlier taking.",
+    ),
+    (
+        "Sick Leave", 0.0, 180.0, None, False, 90.0, 50.0, 0,
+        "180 days per leave year: the first 90 days on full pay, the next 90 on half pay (a medical "
+        "certificate would normally be required, though this app doesn't enforce that). "
+        "Non-accumulative - granted afresh each leave year, unused days lapse.",
+    ),
+    (
+        "Special/Compassionate Leave", 0.0, 12.0, None, False, None, None, 0,
+        "12 days per calendar year, for bereavement, court attendance or trade union business. "
+        "Non-accumulative - granted afresh each leave year, unused days lapse.",
+    ),
+    (
+        "Maternity Leave", 0.0, 98.0, None, False, None, None, 0,
+        "98 consecutive days, full pay, regardless of tenure or number of previous pregnancies. "
+        "Modelled here as a 98-day annual entitlement rather than a rolling balance - "
+        "non-accumulative, since it's a per-event entitlement, not something that accrues monthly.",
+    ),
+]
+
+
+class LeaveType(db.Model):
+    """A firm-editable leave category - pre-loaded with Zimbabwe's statutory
+    minimums (see LEAVE_TYPES_STATUTORY_ZW/seed.seed_leave_types) but every
+    field can be edited, since a firm's own policy or a collective
+    bargaining agreement may be more generous than the statutory minimum.
+
+    `is_accumulative` distinguishes the two accrual models the Labour Act
+    actually uses: Annual/Vacation Leave accrues monthly and carries over
+    (up to `max_accumulation_days`), while Sick/Special/Maternity leave are
+    each a fixed `annual_entitlement_days` granted afresh every leave year -
+    see leave_calc.sync_leave_balance for exactly how each is kept current.
+
+    `full_pay_days`/`half_pay_pct` model Sick Leave's 90-full-pay/90-half-pay
+    split (None for a leave type that's either all full pay or doesn't
+    distinguish); `min_service_months_to_take` is Annual Leave's "only after
+    1 year of continuous service" rule (0 for a leave type with no such
+    qualifying period)."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    accrual_days_per_month = db.Column(db.Float, default=0.0)
+    annual_entitlement_days = db.Column(db.Float)  # None = uncapped
+    max_accumulation_days = db.Column(db.Float)  # None = no cap
+    is_accumulative = db.Column(db.Boolean, default=True, nullable=False)
+    full_pay_days = db.Column(db.Float)  # None = the whole annual_entitlement_days is at full pay
+    half_pay_pct = db.Column(db.Float, default=50.0)
+    min_service_months_to_take = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    notes = db.Column(db.Text)
+
+    def __repr__(self):
+        return f"<LeaveType {self.name!r}>"
+
+
+class LeaveBalance(db.Model):
+    """One PayrollEmployee's running balance for one LeaveType - created
+    on demand (see leave_calc.get_or_create_balance) the first time it's
+    needed, not seeded up front.
+
+    `brought_forward` is a one-time, manually-entered OPENING balance (e.g.
+    migrating from a previous system or spreadsheet) - set once via the
+    Leave screen and never touched again by the automatic accrual logic in
+    leave_calc.sync_leave_balance, which only ever adds to `accrued_days`
+    (Annual/Vacation Leave) or resets it for a new leave year (Sick/
+    Special/Maternity). `leave_year` is the calendar year a NON-accumulative
+    type's current `accrued_days`/`taken_days` apply to - rolled over
+    automatically the first time this balance is touched in a later year.
+    `last_accrual_date` is the last calendar date accrual was calculated
+    through, for an accumulative type, so re-running the sync never
+    double-counts an already-completed month."""
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("payroll_employee.id"), nullable=False)
+    leave_type_id = db.Column(db.Integer, db.ForeignKey("leave_type.id"), nullable=False)
+    brought_forward = db.Column(db.Float, default=0.0)
+    accrued_days = db.Column(db.Float, default=0.0)
+    taken_days = db.Column(db.Float, default=0.0)
+    leave_year = db.Column(db.Integer)  # only meaningful for a non-accumulative LeaveType
+    last_accrual_date = db.Column(db.Date)  # only meaningful for an accumulative LeaveType
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    employee = db.relationship("PayrollEmployee")
+    leave_type = db.relationship("LeaveType")
+
+    @property
+    def current_balance(self):
+        return round((self.brought_forward or 0.0) + (self.accrued_days or 0.0) - (self.taken_days or 0.0), 2)
+
+    def __repr__(self):
+        return f"<LeaveBalance employee={self.employee_id} type={self.leave_type_id} balance={self.current_balance}>"
 
 
 class StaffAllocation(db.Model):
@@ -7662,9 +7810,11 @@ PAYROLL_TAX_CAVEAT = (
     "Earnings (the amount NSSA is calculated on) = basic salary + regular "
     "cash allowances/earnings (e.g. housing, transport, performance "
     "bonuses) + the cash value of any taxable benefit in kind - excluding "
-    "an employer's own share of a benefit like medical aid; if the "
-    "employee's own share is instead deducted from their pay, Insurable "
-    "Earnings are still based on gross pay before that deduction. The "
+    "an employer's own share of a benefit like medical aid (untick "
+    "\"Counts toward NSSA?\" on that Allowance/Exempt Income line if the "
+    "firm records it on the payslip); if the employee's own share is "
+    "instead deducted from their pay, Insurable Earnings are still based "
+    "on gross pay before that deduction. The "
     "employee's own NSSA contribution is deducted from taxable income "
     "before PAYE is calculated (ZIMRA's own published method treats it as "
     "an allowable deduction, like a pension contribution). A payslip can "
@@ -7877,22 +8027,41 @@ class PayslipItem(db.Model):
       - Allowance: added to gross AND (if `taxable`) taxable income - e.g. a
         housing allowance. `taxable` only matters for this category.
       - Deduction: subtracted from net pay only (never touches taxable
-        income or PAYE) - e.g. an advance recovery, a union subscription.
+        income, PAYE or NSSA Insurable Earnings) - e.g. an advance recovery,
+        a union subscription, or the EMPLOYEE's own medical aid contribution
+        if it's taken straight off their pay (NSSA is still calculated on
+        gross pay before this deduction, per the NSSA Act/SI 393 of 1993 -
+        see payroll_calc.py).
       - Exempt Income: added to gross/net pay like an Allowance, but NEVER
         added to taxable income, whatever `taxable` says - e.g. a bonus
         exemption (ZIMRA's own PAYE method has a dedicated "deduct exempt
         income" step for this, separate from ordinary allowable
         deductions).
       - Tax Credit: subtracted directly from PAYE payable (after the tax
-        tables, before AIDS Levy) - never touches gross pay or taxable
-        income - e.g. an elderly/blind/disabled person's or medical
-        expenses credit."""
+        tables, before AIDS Levy) - never touches gross pay, taxable income
+        or NSSA - e.g. an elderly/blind/disabled person's or medical
+        expenses credit.
+
+    `nssa_applicable` (Allowance/Exempt Income only - a Deduction/Tax Credit
+    never enters NSSA Insurable Earnings regardless) controls whether THIS
+    item's amount counts toward NSSA Insurable Earnings, separately from
+    whether it counts toward gross/net pay or PAYE taxable income (`taxable`
+    above). Defaults to True (unchanged behaviour) because most Allowance/
+    Exempt Income items genuinely are "regular cash earnings" that DO count
+    toward Insurable Earnings. The one case this exists for: the EMPLOYER's
+    own medical aid (or similar benefit) contribution, entered here so it
+    shows on the payslip and/or counts toward gross pay for PAYE purposes,
+    but is a non-cash fringe benefit to the employer that must be EXCLUDED
+    from NSSA Insurable Earnings (NSSA Act [Chapter 17:04] / SI 393 of 1993)
+    - untick "Counts toward NSSA?" for that specific line. See
+    payroll_calc.calculate_payslip for exactly where this is applied."""
     id = db.Column(db.Integer, primary_key=True)
     payslip_id = db.Column(db.Integer, db.ForeignKey("payslip.id"), nullable=False)
     category = db.Column(db.String(20), nullable=False, default="Allowance")
     label = db.Column(db.String(150), nullable=False)
     amount = db.Column(db.Float, default=0.0)
     taxable = db.Column(db.Boolean, default=True)
+    nssa_applicable = db.Column(db.Boolean, default=True)
 
     def __repr__(self):
         return f"<PayslipItem {self.label!r} {self.category} {self.amount}>"
