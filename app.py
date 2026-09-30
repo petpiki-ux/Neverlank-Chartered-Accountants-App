@@ -575,6 +575,15 @@ def create_app():
         # global (effectively Monthly) band list.
         from seed import seed_payroll_tax_bands
         seed_payroll_tax_bands()
+        # NSSA employee/employer % and Insurable Earnings ceiling are now
+        # confirmed (see PAYROLL_TAX_CAVEAT in models.py) - backfill them
+        # onto an existing install whose PayrollTaxSettings row is still at
+        # the old unconfirmed 0%/0%/no-ceiling defaults. Safe/cheap to call
+        # on every startup for the same reason as seed_payroll_tax_bands
+        # above: a no-op once done, or if the firm already customised any of
+        # the three fields itself.
+        from seed import seed_payroll_nssa_defaults
+        seed_payroll_nssa_defaults()
 
     register_cli(app)
 

@@ -7615,23 +7615,37 @@ class InvoiceLineItem(db.Model):
 # client_id is the only thing that distinguishes them; the tax calculation,
 # payslip layout and download formats are identical either way.
 #
-# Zimbabwean PAYE bands, the AIDS levy % and the NSSA employee/employer
-# rate+ceiling could NOT be reliably confirmed from public sources at the
-# time this was built - independent tax-calculator sites returned mutually
-# inconsistent figures for the current bands/credits/NSSA ceiling. Rather
-# than hard-code a number that might be wrong, EVERY rate here lives in the
+# Zimbabwean PAYE bands could NOT be reliably confirmed from public sources
+# at the time this was built - independent tax-calculator sites returned
+# mutually inconsistent figures for the current bands/credits. Rather than
+# hard-code a number that might be wrong, EVERY rate here lives in the
 # editable PayrollTaxSettings/PayrollTaxBand records below (per the firm's
-# own choice: "auto-calculated but editable"). The PAYE bands are now
-# pre-loaded (see seed.seed_payroll_tax_bands) from the ZIMRA "PAYE Foreign
-# Currency Tax Tables for January to December 2024" document the firm
-# supplied directly - one Monthly/Fortnightly/Weekly table each, matching
-# PAYROLL_PAY_FREQUENCIES. AIDS levy defaults to the one figure that WAS
-# consistently corroborated across sources (3% of PAYE payable); NSSA
-# starts blank/zero, still unverified. The Payroll > Tax Settings screen
-# and every payslip carry a clear caveat to reconfirm all of this against
-# ZIMRA/NSSA directly (in particular: the PAYE bands are dated to 2024 and
-# should be checked against ZIMRA's current-year table before relying on
-# the auto-calculation for a later tax year).
+# own choice: "auto-calculated but editable"). The PAYE bands are pre-loaded
+# (see seed.seed_payroll_tax_bands) from the ZIMRA "PAYE Foreign Currency Tax
+# Tables for January to December 2024" document the firm supplied directly -
+# one Monthly/Fortnightly/Weekly table each, matching PAYROLL_PAY_FREQUENCIES.
+# AIDS levy defaults to 3% of PAYE payable (the one figure that was
+# consistently corroborated across sources when this module was built).
+#
+# NSSA employee/employer contribution rate and Insurable Earnings ceiling ARE
+# now confirmed, per the firm's own research citing the NSSA Act [Chapter
+# 17:04] and Statutory Instrument 393 of 1993: 4.5% employee + 4.5% employer
+# (9% total) of Insurable Earnings, capped at USD 700.00/month (or the local
+# currency equivalent) - see seed.seed_payroll_nssa_defaults and
+# PayrollTaxSettings below. Insurable Earnings = basic salary + regular cash
+# allowances/earnings (housing, transport, performance bonuses, etc.) + the
+# cash value of any taxable benefit in kind, EXCLUDING the employer's own
+# share of a benefit such as medical aid (a non-cash fringe benefit to the
+# employer, not part of the employee's earnings); if the employee's own
+# share of such a benefit is instead deducted from their pay, Insurable
+# Earnings are still based on gross pay BEFORE that deduction, not after -
+# see payroll_calc.calculate_payslip, where NSSA is computed from gross pay
+# and Deduction line items never reduce it. The Payroll > Tax Settings
+# screen and every payslip still carry a caveat to reconfirm all of this
+# against ZIMRA/NSSA directly (in particular: the PAYE bands are dated to
+# 2024 and should be checked against ZIMRA's current-year table before
+# relying on the auto-calculation for a later tax year, and the NSSA ceiling
+# should be reconfirmed if it is later revised or paid in local currency).
 PAYROLL_SCOPES = ["internal", "client"]
 PAYROLL_PAY_FREQUENCIES = ["Monthly", "Fortnightly", "Weekly"]
 PAYROLL_PERIOD_STATUSES = ["Draft", "Finalized"]
@@ -7640,35 +7654,54 @@ PAYROLL_TAX_CAVEAT = (
     "The PAYE bands below are pre-loaded from ZIMRA's 2024 USD tax tables (as "
     "supplied to the firm) - please reconfirm them against ZIMRA's CURRENT "
     "table before relying on any auto-calculated payslip, especially in a "
-    "later tax year. The AIDS levy % and NSSA rates/ceiling could not be "
-    "reliably verified from public sources when this module was built and "
-    "should also be confirmed against ZIMRA/NSSA directly. The employee's "
-    "own NSSA contribution is deducted from taxable income before PAYE is "
-    "calculated (ZIMRA's own published method treats it as an allowable "
-    "deduction, like a pension contribution). A payslip can also carry its "
-    "own \"Exempt Income\" line items (e.g. a bonus exemption - reduces "
-    "taxable income but still counts toward gross/net pay) and \"Tax "
-    "Credit\" line items (e.g. elderly/blind/disabled person's or medical "
-    "expense credits - reduce PAYE payable directly, after the tax tables, "
-    "before AIDS Levy) - the current statutory exempt/credit AMOUNTS "
-    "couldn't be reliably confirmed either, so nothing is pre-filled: enter "
-    "them per employee once confirmed against ZIMRA."
+    "later tax year. NSSA's employee/employer contribution rate (4.5% each, "
+    "9% total) and Insurable Earnings ceiling (USD 700.00/month) are "
+    "pre-loaded per the NSSA Act [Chapter 17:04] and Statutory Instrument "
+    "393 of 1993, as confirmed by the firm - reconfirm if paid in local "
+    "currency equivalent or if the ceiling is later revised. Insurable "
+    "Earnings (the amount NSSA is calculated on) = basic salary + regular "
+    "cash allowances/earnings (e.g. housing, transport, performance "
+    "bonuses) + the cash value of any taxable benefit in kind - excluding "
+    "an employer's own share of a benefit like medical aid; if the "
+    "employee's own share is instead deducted from their pay, Insurable "
+    "Earnings are still based on gross pay before that deduction. The "
+    "employee's own NSSA contribution is deducted from taxable income "
+    "before PAYE is calculated (ZIMRA's own published method treats it as "
+    "an allowable deduction, like a pension contribution). A payslip can "
+    "also carry its own \"Exempt Income\" line items (e.g. a bonus "
+    "exemption - reduces taxable income but still counts toward gross/net "
+    "pay AND toward Insurable Earnings) and \"Tax Credit\" line items (e.g. "
+    "elderly/blind/disabled person's or medical expense credits - reduce "
+    "PAYE payable directly, after the tax tables, before AIDS Levy) - the "
+    "current statutory exempt/credit AMOUNTS couldn't be reliably confirmed "
+    "either, so nothing is pre-filled: enter them per employee once "
+    "confirmed against ZIMRA."
 )
 
 
 class PayrollTaxSettings(db.Model):
     """A single editable settings record (id=1, created on first use) holding
     every rate the payroll tax engine needs, other than the PAYE bands
-    themselves (see PayrollTaxBand). Deliberately NOT seeded with specific
-    NSSA figures - see the caveat above."""
+    themselves (see PayrollTaxBand). NSSA's employee/employer % and
+    Insurable Earnings ceiling default to the firm-confirmed figures (4.5% /
+    4.5% / USD 700.00) per NSSA Act [Chapter 17:04] and SI 393 of 1993 - see
+    the caveat above and seed.seed_payroll_nssa_defaults (which backfills an
+    existing install that still has the old unconfirmed 0%/0%/no-ceiling
+    defaults, without touching a firm-customised value)."""
     id = db.Column(db.Integer, primary_key=True)
     currency = db.Column(db.String(10), default="USD", nullable=False)
     # Of PAYE payable - the one figure consistently corroborated across the
     # sources checked, so this is the only rate given a non-zero default.
     aids_levy_pct = db.Column(db.Float, default=3.0)
-    nssa_employee_pct = db.Column(db.Float, default=0.0)
-    nssa_employer_pct = db.Column(db.Float, default=0.0)
-    nssa_insurable_ceiling = db.Column(db.Float)  # None = no ceiling applied
+    # 4.5% employee + 4.5% employer (9% total) of Insurable Earnings, and a
+    # USD 700.00/month Insurable Earnings ceiling - confirmed per NSSA Act
+    # [Chapter 17:04] and SI 393 of 1993 (see PAYROLL_TAX_CAVEAT above).
+    # These defaults only apply to a settings row created fresh from here on;
+    # seed.seed_payroll_nssa_defaults backfills an existing row still left at
+    # the old 0%/0%/no-ceiling defaults.
+    nssa_employee_pct = db.Column(db.Float, default=4.5)
+    nssa_employer_pct = db.Column(db.Float, default=4.5)
+    nssa_insurable_ceiling = db.Column(db.Float, default=700.0)  # None = no ceiling applied
     source_notes = db.Column(db.Text)
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)

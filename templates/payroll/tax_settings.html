@@ -26,16 +26,21 @@
     </div>
     <div class="form-row">
       <div>
-        <label for="nssa_employee_pct">NSSA - Employee %</label>
+        <label for="nssa_employee_pct">NSSA - Employee % (of Insurable Earnings)</label>
         <input type="number" step="0.01" min="0" id="nssa_employee_pct" name="nssa_employee_pct" value="{{ settings.nssa_employee_pct }}">
       </div>
       <div>
-        <label for="nssa_employer_pct">NSSA - Employer % (informational)</label>
+        <label for="nssa_employer_pct">NSSA - Employer % (informational, of Insurable Earnings)</label>
         <input type="number" step="0.01" min="0" id="nssa_employer_pct" name="nssa_employer_pct" value="{{ settings.nssa_employer_pct }}">
       </div>
     </div>
-    <label for="nssa_insurable_ceiling">NSSA insurable earnings ceiling (leave blank for no ceiling)</label>
+    <label for="nssa_insurable_ceiling">NSSA Insurable Earnings ceiling per month (leave blank for no ceiling)</label>
     <input type="number" step="0.01" min="0" id="nssa_insurable_ceiling" name="nssa_insurable_ceiling" value="{{ settings.nssa_insurable_ceiling if settings.nssa_insurable_ceiling is not none else '' }}">
+    <p class="muted" style="font-size:11px;margin-top:4px;">
+      Defaults to 4.5% employee + 4.5% employer (9% total) of Insurable Earnings, capped at USD 700.00/month -
+      per the NSSA Act [Chapter 17:04] and Statutory Instrument 393 of 1993, as confirmed by the firm. Reconfirm
+      if paid in local currency equivalent, or if the ceiling is later revised.
+    </p>
 
     <label for="source_notes">Source / notes (where these rates came from, and when they were last checked)</label>
     <textarea id="source_notes" name="source_notes" rows="3">{{ settings.source_notes }}</textarea>
@@ -47,6 +52,34 @@
     Last updated {{ settings.updated_at.strftime('%d %b %Y') }}{% if settings.updated_by %} by {{ settings.updated_by.name }}{% endif %}.
   </p>
   {% endif %}
+</div>
+
+<div class="card" style="max-width:760px;">
+  <h2 style="margin-top:0;font-size:16px;">What counts as Insurable Earnings (for NSSA)</h2>
+  <p style="font-size:12.5px;">
+    Per the NSSA Act [Chapter 17:04] and Statutory Instrument 393 of 1993, NSSA's employee and employer
+    contributions are calculated on "Insurable Earnings", not just basic salary:
+  </p>
+  <ol style="font-size:12.5px;padding-left:20px;">
+    <li><strong>Basic Salary/Wages</strong> - the core contractual wage.</li>
+    <li><strong>Regular Allowances &amp; Cash Earnings</strong> - any cash allowance regularly earned as part of
+      employment (e.g. housing, transport, performance bonuses) - every <strong>Allowance</strong> line item on a
+      payslip, whether or not it's taxable for PAYE purposes (that's a separate question). A tax-exempt bonus
+      entered as an <strong>Exempt Income</strong> item still counts here too, since it's still a cash earning.</li>
+    <li><strong>Cash Value of Benefits</strong> - the taxable cash value of a benefit in kind or employer-provided
+      perk, entered as an Allowance item.</li>
+  </ol>
+  <p style="font-size:12.5px;">
+    <strong>Excluded:</strong> an employer's own share of a benefit such as medical aid is a non-cash fringe
+    benefit to the employer, not part of the employee's earnings, so it's never added. If instead the
+    <em>employee's own</em> share of such a benefit is deducted from their pay (a <strong>Deduction</strong> line
+    item), Insurable Earnings are still based on gross pay <em>before</em> that deduction - Deduction items never
+    reduce them.
+  </p>
+  <p class="muted" style="font-size:11.5px;margin-bottom:0;">
+    In this app, Insurable Earnings = gross pay = basic salary + all Allowance items + all Exempt Income items,
+    capped at the Insurable Earnings ceiling above - see payroll_calc.py for the exact calculation.
+  </p>
 </div>
 
 <div class="card" style="max-width:760px;">

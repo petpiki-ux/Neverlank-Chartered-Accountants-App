@@ -10,7 +10,7 @@ import shutil
 from datetime import date
 
 from extensions import db
-from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PAYROLL_PAY_FREQUENCIES
+from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PayrollTaxSettings, PAYROLL_PAY_FREQUENCIES
 from config import Config
 
 
@@ -620,6 +620,31 @@ def seed_payroll_tax_bands():
                 frequency=frequency, lower=lower, upper=upper, rate_pct=rate_pct, order=order,
             ))
     db.session.commit()
+
+
+def seed_payroll_nssa_defaults():
+    """Backfill the firm-confirmed NSSA employee/employer % and Insurable
+    Earnings ceiling (4.5% / 4.5% / USD 700.00, per the NSSA Act [Chapter
+    17:04] and SI 393 of 1993 - see PAYROLL_TAX_CAVEAT in models.py) onto an
+    EXISTING PayrollTaxSettings row that's still sitting at the old
+    unconfirmed 0%/0%/no-ceiling defaults.
+
+    Gated on all three fields still being untouched, not on the row simply
+    existing - so this is safe to call on every startup: a firm that has
+    already entered its own NSSA % or ceiling (even just one of the three
+    fields) is left alone, exactly like seed_payroll_tax_bands above never
+    overwrites a frequency the firm has customised. A brand-new install
+    doesn't need this at all - PayrollTaxSettings' own column defaults
+    already create a fresh row with these confirmed figures.
+    """
+    settings = PayrollTaxSettings.query.get(1)
+    if not settings:
+        return
+    if settings.nssa_employee_pct == 0.0 and settings.nssa_employer_pct == 0.0 and settings.nssa_insurable_ceiling is None:
+        settings.nssa_employee_pct = 4.5
+        settings.nssa_employer_pct = 4.5
+        settings.nssa_insurable_ceiling = 700.0
+        db.session.commit()
 
 
 def run_seed():

@@ -1,12 +1,13 @@
 """The Payroll tax calculation engine.
 
 Deliberately data-driven: every rate (PAYE bands, AIDS levy %, NSSA
-employee/employer % and insurable ceiling) is read from the firm's own
-editable PayrollTaxSettings/PayrollTaxBand records (see models.py) rather
-than hard-coded here, because current Zimbabwean rates could not be
-reliably confirmed from public sources when this module was built - see
-PAYROLL_TAX_CAVEAT in models.py. This module only implements the
-arithmetic; it never invents a rate the firm hasn't entered.
+employee/employer % and Insurable Earnings ceiling) is read from the firm's
+own editable PayrollTaxSettings/PayrollTaxBand records (see models.py)
+rather than hard-coded here. The PAYE bands still need reconfirming each tax
+year - see PAYROLL_TAX_CAVEAT in models.py - but the NSSA rate/ceiling are
+now confirmed per the NSSA Act [Chapter 17:04] and SI 393 of 1993. This
+module only implements the arithmetic; it never invents a rate the firm
+hasn't entered/confirmed.
 
 Kept separate from payroll.py (the routes) the same way financials.py is
 kept separate from engagements.py elsewhere in this app - so the same
@@ -31,6 +32,21 @@ not just a deduction taken from net pay after tax. This module deducts it
 in full (already capped via PayrollTaxSettings.nssa_insurable_ceiling, the
 same statutory ceiling that caps the contribution itself - no separate
 limit is applied on top of that).
+
+NSSA itself (both the employee and employer shares) is calculated on
+"Insurable Earnings", per the NSSA Act [Chapter 17:04] and SI 393 of 1993:
+basic salary + regular cash allowances/earnings (e.g. housing, transport,
+performance bonuses - Allowance items, taxable or not for PAYE purposes,
+which is a separate question from whether NSSA applies) + the cash value of
+any taxable benefit in kind, EXCLUDING an employer's own share of a benefit
+such as medical aid (not part of the employee's own earnings). Below,
+`gross_pay` (basic salary + all Allowance items + Exempt Income items) IS
+this Insurable Earnings base: Exempt Income items count too (a tax-exempt
+bonus is still a cash earning for NSSA purposes even though it's excluded
+from taxable income for PAYE), while Deduction items never reduce it - so
+if the employee's own share of a benefit like medical aid is deducted from
+their pay as a Deduction item, Insurable Earnings still reflect gross pay
+BEFORE that deduction, exactly as the legislation requires.
 
 Exempt Income items (step 2) count toward gross/net pay exactly like an
 Allowance, but are NEVER part of taxable income, regardless of their own
@@ -95,6 +111,14 @@ def calculate_payslip(basic_salary, items, settings, bands):
     # docstring, step 3), as an allowable deduction that reduces taxable
     # income BEFORE the tax tables are applied - not just a deduction taken
     # from net pay after tax.
+    #
+    # nssa_base is Insurable Earnings (NSSA Act [Chapter 17:04] / SI 393 of
+    # 1993): basic salary + all Allowance items + Exempt Income items - i.e.
+    # gross_pay above, capped at the ceiling. Deduction items are never part
+    # of gross_pay, so they never reduce Insurable Earnings either - e.g. if
+    # the employee's own share of a benefit like medical aid is entered as a
+    # Deduction, NSSA is still calculated on gross pay before that
+    # deduction, exactly as required.
     ceiling = settings.nssa_insurable_ceiling
     nssa_base = min(gross_pay, ceiling) if ceiling else gross_pay
     nssa_employee = round(nssa_base * (settings.nssa_employee_pct or 0.0) / 100.0, 2)
