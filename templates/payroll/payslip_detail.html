@@ -45,8 +45,14 @@
 </div>
 {% endif %}
 
-<div class="card" style="max-width:520px;">
-  <h2 style="margin-top:0;font-size:16px;">Allowances &amp; Deductions</h2>
+<div class="card" style="max-width:560px;">
+  <h2 style="margin-top:0;font-size:16px;">Allowances, Deductions, Exempt Income &amp; Tax Credits</h2>
+  <p class="muted" style="font-size:11.5px;">
+    <strong>Exempt Income</strong> (e.g. a bonus exemption) counts toward gross/net pay but is never taxed.
+    <strong>Tax Credit</strong> (e.g. an elderly/blind/disabled person's or medical expenses credit) reduces
+    PAYE payable directly, after the tax tables. Neither figure is pre-filled - see the caveat on
+    <a href="{{ url_for('payroll.tax_settings') }}">Payroll Tax Settings</a>.
+  </p>
   <table>
     <thead><tr><th>Category</th><th>Label</th><th class="text-right">Amount</th><th>Taxable</th><th></th></tr></thead>
     <tbody>
@@ -88,7 +94,7 @@
       <input type="number" step="0.01" min="0" id="amount" name="amount" required>
     </div>
     <div>
-      <label for="taxable">Taxable? (allowances only)</label>
+      <label for="taxable">Taxable? (Allowance only)</label>
       <select id="taxable" name="taxable">
         <option value="1">Yes</option>
         <option value="">No</option>
@@ -96,6 +102,7 @@
     </div>
     <div><button type="submit" class="btn secondary">+ Add</button></div>
   </form>
+  <p class="muted" style="font-size:10.5px;margin-top:4px;">"Taxable?" only applies to an Allowance - it's ignored for Deduction, Exempt Income and Tax Credit lines.</p>
   <form method="post" action="{{ url_for('payroll.recalculate_payslip', payslip_id=payslip.id) }}" style="margin-top:10px;">
     <button type="submit" class="btn gold">Recalculate from salary, items &amp; tax settings</button>
   </form>
@@ -117,34 +124,46 @@
     </div>
     <div class="form-row">
       <div>
+        <label for="exempt_income_total">Exempt income (from items above)</label>
+        <input type="number" step="0.01" id="exempt_income_total" name="exempt_income_total" value="{{ payslip.exempt_income_total }}" {% if locked %}disabled{% endif %}>
+      </div>
+      <div>
         <label for="taxable_income">Taxable income</label>
         <input type="number" step="0.01" id="taxable_income" name="taxable_income" value="{{ payslip.taxable_income }}" {% if locked %}disabled{% endif %}>
       </div>
+    </div>
+    <div class="form-row">
       <div>
-        <label for="paye_tax">PAYE (income tax)</label>
-        <input type="number" step="0.01" id="paye_tax" name="paye_tax" value="{{ payslip.paye_tax }}" {% if locked %}disabled{% endif %}>
+        <label for="paye_before_credits">PAYE before Tax Credits</label>
+        <input type="number" step="0.01" id="paye_before_credits" name="paye_before_credits" value="{{ payslip.paye_before_credits }}" {% if locked %}disabled{% endif %}>
+      </div>
+      <div>
+        <label for="tax_credits_total">Tax credits (from items above)</label>
+        <input type="number" step="0.01" id="tax_credits_total" name="tax_credits_total" value="{{ payslip.tax_credits_total }}" {% if locked %}disabled{% endif %}>
       </div>
     </div>
     <div class="form-row">
+      <div>
+        <label for="paye_tax">PAYE (income tax, after credits)</label>
+        <input type="number" step="0.01" id="paye_tax" name="paye_tax" value="{{ payslip.paye_tax }}" {% if locked %}disabled{% endif %}>
+      </div>
       <div>
         <label for="aids_levy">AIDS levy</label>
         <input type="number" step="0.01" id="aids_levy" name="aids_levy" value="{{ payslip.aids_levy }}" {% if locked %}disabled{% endif %}>
       </div>
+    </div>
+    <div class="form-row">
       <div>
         <label for="nssa_employee">NSSA - employee</label>
         <input type="number" step="0.01" id="nssa_employee" name="nssa_employee" value="{{ payslip.nssa_employee }}" {% if locked %}disabled{% endif %}>
       </div>
-    </div>
-    <div class="form-row">
       <div>
         <label for="nssa_employer">NSSA - employer (informational)</label>
         <input type="number" step="0.01" id="nssa_employer" name="nssa_employer" value="{{ payslip.nssa_employer }}" {% if locked %}disabled{% endif %}>
       </div>
-      <div>
-        <label for="other_deductions_total">Other deductions (from items above)</label>
-        <input type="number" step="0.01" id="other_deductions_total" name="other_deductions_total" value="{{ payslip.other_deductions_total }}" {% if locked %}disabled{% endif %}>
-      </div>
     </div>
+    <label for="other_deductions_total">Other deductions (from items above)</label>
+    <input type="number" step="0.01" id="other_deductions_total" name="other_deductions_total" value="{{ payslip.other_deductions_total }}" {% if locked %}disabled{% endif %}>
     <label for="net_pay">Net pay</label>
     <input type="number" step="0.01" id="net_pay" name="net_pay" value="{{ payslip.net_pay }}" {% if locked %}disabled{% endif %} style="font-weight:bold;">
 

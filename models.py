@@ -7635,7 +7635,7 @@ class InvoiceLineItem(db.Model):
 PAYROLL_SCOPES = ["internal", "client"]
 PAYROLL_PAY_FREQUENCIES = ["Monthly", "Fortnightly", "Weekly"]
 PAYROLL_PERIOD_STATUSES = ["Draft", "Finalized"]
-PAYSLIP_ITEM_CATEGORIES = ["Allowance", "Deduction"]
+PAYSLIP_ITEM_CATEGORIES = ["Allowance", "Deduction", "Exempt Income", "Tax Credit"]
 PAYROLL_TAX_CAVEAT = (
     "The PAYE bands below are pre-loaded from ZIMRA's 2024 USD tax tables (as "
     "supplied to the firm) - please reconfirm them against ZIMRA's CURRENT "
@@ -7645,12 +7645,14 @@ PAYROLL_TAX_CAVEAT = (
     "should also be confirmed against ZIMRA/NSSA directly. The employee's "
     "own NSSA contribution is deducted from taxable income before PAYE is "
     "calculated (ZIMRA's own published method treats it as an allowable "
-    "deduction, like a pension contribution). ZIMRA's method also has an "
-    "exempt-income step (e.g. a bonus exemption) and a tax-credits step "
-    "(e.g. elderly/blind/disabled person's and medical credits) that this "
-    "app does not yet calculate automatically - for an employee who "
-    "qualifies, manually adjust that payslip's PAYE and net pay figures on "
-    "its own page (this marks it as no longer auto-calculated)."
+    "deduction, like a pension contribution). A payslip can also carry its "
+    "own \"Exempt Income\" line items (e.g. a bonus exemption - reduces "
+    "taxable income but still counts toward gross/net pay) and \"Tax "
+    "Credit\" line items (e.g. elderly/blind/disabled person's or medical "
+    "expense credits - reduce PAYE payable directly, after the tax tables, "
+    "before AIDS Levy) - the current statutory exempt/credit AMOUNTS "
+    "couldn't be reliably confirmed either, so nothing is pre-filled: enter "
+    "them per employee once confirmed against ZIMRA."
 )
 
 
@@ -7792,9 +7794,22 @@ class Payslip(db.Model):
 
     basic_salary = db.Column(db.Float, default=0.0)
     allowances_total = db.Column(db.Float, default=0.0)
+    # Exempt Income line items (see PAYSLIP_ITEM_CATEGORIES/PayslipItem) -
+    # counted toward gross/net pay like an allowance, but never toward
+    # taxable_income - ZIMRA's own PAYE method has a dedicated "deduct
+    # exempt income" step (e.g. a bonus exemption) before allowable
+    # deductions/PAYE, kept separate here from allowances_total so it's
+    # shown as its own line for that reason.
+    exempt_income_total = db.Column(db.Float, default=0.0)
     taxable_income = db.Column(db.Float, default=0.0)
     gross_pay = db.Column(db.Float, default=0.0)
 
+    # PAYE computed on taxable_income, before Tax Credit line items are
+    # applied - kept alongside paye_tax (the figure AFTER credits, which is
+    # what's actually charged) purely so the payslip can show its workings;
+    # see payroll_calc.calculate_payslip.
+    paye_before_credits = db.Column(db.Float, default=0.0)
+    tax_credits_total = db.Column(db.Float, default=0.0)
     paye_tax = db.Column(db.Float, default=0.0)
     aids_levy = db.Column(db.Float, default=0.0)
     nssa_employee = db.Column(db.Float, default=0.0)
@@ -7824,11 +7839,21 @@ class Payslip(db.Model):
 
 
 class PayslipItem(db.Model):
-    """An ad-hoc allowance or deduction line on one payslip (e.g. a housing
-    allowance, an advance recovery, a union subscription) beyond basic
-    salary and the statutory PAYE/AIDS levy/NSSA lines. `taxable` only
-    matters for an Allowance - whether it is added to taxable income before
-    PAYE is computed, or paid tax-free."""
+    """An ad-hoc line on one payslip, beyond basic salary and the statutory
+    PAYE/AIDS levy/NSSA lines - see PAYSLIP_ITEM_CATEGORIES:
+      - Allowance: added to gross AND (if `taxable`) taxable income - e.g. a
+        housing allowance. `taxable` only matters for this category.
+      - Deduction: subtracted from net pay only (never touches taxable
+        income or PAYE) - e.g. an advance recovery, a union subscription.
+      - Exempt Income: added to gross/net pay like an Allowance, but NEVER
+        added to taxable income, whatever `taxable` says - e.g. a bonus
+        exemption (ZIMRA's own PAYE method has a dedicated "deduct exempt
+        income" step for this, separate from ordinary allowable
+        deductions).
+      - Tax Credit: subtracted directly from PAYE payable (after the tax
+        tables, before AIDS Levy) - never touches gross pay or taxable
+        income - e.g. an elderly/blind/disabled person's or medical
+        expenses credit."""
     id = db.Column(db.Integer, primary_key=True)
     payslip_id = db.Column(db.Integer, db.ForeignKey("payslip.id"), nullable=False)
     category = db.Column(db.String(20), nullable=False, default="Allowance")

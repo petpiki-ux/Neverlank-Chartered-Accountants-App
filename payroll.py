@@ -437,7 +437,7 @@ def generate_payslips(period_id):
     created = 0
     for employee in employees:
         bands = _bands_for(employee.pay_frequency)
-        result = payroll_calc.calculate_payslip(employee.basic_salary, [], [], settings, bands)
+        result = payroll_calc.calculate_payslip(employee.basic_salary, [], settings, bands)
         payslip = Payslip(
             period_id=period.id, employee_id=employee.id,
             generated_by_id=current_user.id, is_auto_calculated=True,
@@ -504,9 +504,7 @@ def recalculate_payslip(payslip_id):
     # docstring on why a Fortnightly/Weekly employee can't use the Monthly
     # table.
     bands = PayrollTaxBand.query.filter_by(frequency=payslip.employee.pay_frequency).all()
-    allowance_items = [i for i in payslip.items if i.category == "Allowance"]
-    deduction_items = [i for i in payslip.items if i.category == "Deduction"]
-    result = payroll_calc.calculate_payslip(payslip.basic_salary, allowance_items, deduction_items, settings, bands)
+    result = payroll_calc.calculate_payslip(payslip.basic_salary, payslip.items, settings, bands)
     for key, value in result.items():
         setattr(payslip, key, value)
     payslip.is_auto_calculated = True
@@ -527,8 +525,11 @@ def update_payslip(payslip_id):
         return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
 
     payslip.basic_salary = _parse_float(request.form.get("basic_salary"), payslip.basic_salary or 0.0)
+    payslip.exempt_income_total = _parse_float(request.form.get("exempt_income_total"), payslip.exempt_income_total or 0.0)
     payslip.taxable_income = _parse_float(request.form.get("taxable_income"), payslip.taxable_income or 0.0)
     payslip.gross_pay = _parse_float(request.form.get("gross_pay"), payslip.gross_pay or 0.0)
+    payslip.paye_before_credits = _parse_float(request.form.get("paye_before_credits"), payslip.paye_before_credits or 0.0)
+    payslip.tax_credits_total = _parse_float(request.form.get("tax_credits_total"), payslip.tax_credits_total or 0.0)
     payslip.paye_tax = _parse_float(request.form.get("paye_tax"), payslip.paye_tax or 0.0)
     payslip.aids_levy = _parse_float(request.form.get("aids_levy"), payslip.aids_levy or 0.0)
     payslip.nssa_employee = _parse_float(request.form.get("nssa_employee"), payslip.nssa_employee or 0.0)

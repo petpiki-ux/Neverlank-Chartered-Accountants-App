@@ -41,8 +41,22 @@ def _payslip_rows(payslip):
     for item in payslip.items:
         if item.category == "Allowance":
             earnings.append((item.label, item.amount or 0.0))
+    for item in payslip.items:
+        if item.category == "Exempt Income":
+            earnings.append((f"{item.label} (Exempt)", item.amount or 0.0))
 
-    deductions = [("PAYE (Income Tax)", payslip.paye_tax or 0.0), ("AIDS Levy", payslip.aids_levy or 0.0)]
+    deductions = []
+    if payslip.tax_credits_total:
+        # Show the workings (PAYE before credits, then the credit itself)
+        # purely for transparency - these two informational rows are never
+        # separately summed into Total Deductions, which uses the stored
+        # paye_tax (already net of credits) via Payslip.total_deductions.
+        deductions.append(("PAYE before Tax Credits", payslip.paye_before_credits or 0.0))
+        for item in payslip.items:
+            if item.category == "Tax Credit":
+                deductions.append((f"Less: {item.label}", -(item.amount or 0.0)))
+    deductions.append(("PAYE (Income Tax)", payslip.paye_tax or 0.0))
+    deductions.append(("AIDS Levy", payslip.aids_levy or 0.0))
     if payslip.nssa_employee:
         deductions.append(("NSSA (Employee)", payslip.nssa_employee))
     for item in payslip.items:

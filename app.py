@@ -254,6 +254,18 @@ def _add_missing_columns():
         # existed) default to "Monthly" here, which is correct: that was the
         # only frequency the old single global list could ever have meant.
         "payroll_tax_band": [("frequency", "VARCHAR(20) DEFAULT 'Monthly'")],
+        # exempt_income_total/paye_before_credits/tax_credits_total - see
+        # models.Payslip's docstring and PAYSLIP_ITEM_CATEGORIES: PAYE
+        # computation now supports "Exempt Income" and "Tax Credit" line
+        # items (ZIMRA's own published method has both steps) - existing
+        # payslips default to 0 for all three, exactly as if no such items
+        # existed on them yet, which is correct (nothing retroactively
+        # changes their already-stored PAYE/net pay figures).
+        "payslip": [
+            ("exempt_income_total", "FLOAT DEFAULT 0"),
+            ("paye_before_credits", "FLOAT DEFAULT 0"),
+            ("tax_credits_total", "FLOAT DEFAULT 0"),
+        ],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():

@@ -55,17 +55,24 @@
     Following ZIMRA's own published method:
   </p>
   <ol style="font-size:12.5px;padding-left:20px;">
-    <li>Gross income = basic salary + taxable allowances.</li>
-    <li>Less allowable deductions - the employee's own <strong>NSSA contribution</strong> is deducted here, before
-      tax is calculated (not just taken from net pay afterwards) - gives Taxable Income.</li>
+    <li>Gross income = basic salary + taxable and non-taxable allowances + any <strong>Exempt Income</strong> line
+      items (e.g. a bonus exemption) entered on the payslip.</li>
+    <li>Less exempt income - <strong>Exempt Income</strong> items are carved back out here, so they're never
+      taxed, even though they're part of gross/net pay.</li>
+    <li>Less allowable deductions - the employee's own <strong>NSSA contribution</strong> is deducted here too,
+      before tax is calculated (not just taken from net pay afterwards) - gives Taxable Income.</li>
     <li>Taxable Income is run through the marginal (progressive) rate bands below - each band taxes only the
-      slice of taxable income that falls within it, not the whole income at that band's rate.</li>
-    <li>AIDS Levy (3% by default, editable above) is charged on the resulting PAYE.</li>
+      slice of taxable income that falls within it, not the whole income at that band's rate - giving PAYE
+      before credits.</li>
+    <li>Less tax credits - any <strong>Tax Credit</strong> line items on the payslip (e.g. an elderly/blind/
+      disabled person's or medical expenses credit) are subtracted here, floored at zero.</li>
+    <li>AIDS Levy (3% by default, editable above) is charged on the resulting PAYE (after credits).</li>
   </ol>
   <p class="muted" style="font-size:11.5px;">
-    ZIMRA's method also has an exempt-income step (e.g. a bonus exemption) and a tax-credits step (e.g.
-    elderly/blind/disabled person's and medical credits) that this app does not yet calculate automatically -
-    for an employee who qualifies, adjust that payslip's PAYE/net pay by hand on its own page.
+    Exempt Income and Tax Credit are added as their own line items on each payslip (Payslip &gt; "Allowances,
+    Deductions, Exempt Income &amp; Tax Credits") - their exact CURRENT statutory amounts couldn't be reliably
+    confirmed when this module was built, so nothing is pre-filled; enter them per employee once confirmed
+    against ZIMRA.
   </p>
   <p style="font-size:12.5px;">
     Worked example (Monthly, ZIMRA 2024 USD table) - a taxable income of <strong>$1,800</strong> (already after
