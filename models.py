@@ -342,7 +342,7 @@ PERMISSIONS = [
      "Trigger a manual refresh of the cached UN, OFAC and EU sanctions lists used by automated screening.",
      ("partner", "admin")),
     ("manage_company_documents", "Manage Company Documents",
-     "Upload or delete a client's company documents (incorporation certificate, CR14, share register, etc.), confirm/edit/delete the Directors & Shareholders picked up from them, and run the public-information scan on a client's business.",
+     "Upload or delete a client's company documents (incorporation certificate, CR6, share register, etc.), confirm/edit/delete the Directors & Shareholders picked up from them, and run the public-information scan on a client's business.",
      tuple(USER_ROLES)),
     ("manage_checklist_templates", "Manage Checklist Templates",
      "Create, edit or delete the checklist templates used to start new engagements (previously unrestricted).",
@@ -1486,8 +1486,9 @@ SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES = {
     "Annual Returns & Filings Log": [
         "Lodge the Annual Return (Form CR11) with the Registrar within 42 days of the AGM (Sec 165).",
         "File Form CR6 for any change in directors or secretaries within 14 days (Sec 215).",
-        "Lodge Form CR14 for changes in registered office address within 14 days (Sec 160).",
+        "Lodge Form CR5 for changes in registered office address within 14 days (Sec 160).",
         "File returns of allotment of shares within statutory timelines following board approval (Sec 93 & 95).",
+        "Lodge the Company Summary return introduced under the new COBE Act - reconfirm the prescribed form reference and filing deadline with the Registrar, as these were not yet confirmed when this item was added.",
         "File the stamped registry certificates and official filing acknowledgments.",
     ],
     "Statutory Register Audit": [
@@ -1532,8 +1533,9 @@ SECRETARIAL_EXECUTION_TASK_DETAILS = {
     "File the signed board packs, approved minute books and action trackers.": ("Post-meeting", "Minutes Secretary", "Signed Board Packs, Approved Minute Books & Action Trackers"),
     "Lodge the Annual Return (Form CR11) with the Registrar within 42 days of the AGM (Sec 165).": ("Post-AGM", "Compliance Officer", "Stamped Form CR11 receipt"),
     "File Form CR6 for any change in directors or secretaries within 14 days (Sec 215).": ("Director/secretary resignation or appointment", "Assistant Secretary", "Certified Form CR6 copy"),
-    "Lodge Form CR14 for changes in registered office address within 14 days (Sec 160).": ("Registered office change", "Assistant Secretary", "Certified Form CR14 copy"),
+    "Lodge Form CR5 for changes in registered office address within 14 days (Sec 160).": ("Registered office change", "Assistant Secretary", "Certified Form CR5 copy"),
     "File returns of allotment of shares within statutory timelines following board approval (Sec 93 & 95).": ("Share allotment approved", "Secretariat Staff", "Stamped Return of Allotment"),
+    "Lodge the Company Summary return introduced under the new COBE Act - reconfirm the prescribed form reference and filing deadline with the Registrar, as these were not yet confirmed when this item was added.": ("Annual - reconfirm trigger/deadline (new COBE requirement)", "Compliance Officer", "Company Summary filing confirmation (reconfirm form reference)"),
     "File the stamped registry certificates and official filing acknowledgments.": ("On receipt from Registrar", "Compliance Officer", "Stamped Registry Certificates & Filing Acknowledgments"),
     "Maintain and update the Register of Beneficial Ownership (Sec 72), verifying no unapproved nominee shareholding exceeds the 20% statutory cap.": ("Annual review / update within 14 days of change", "Compliance Officer", "Reconciled Register of Beneficial Owners"),
     "Update the Register of Members (Sec 157) following executed share transfers (Sec 149).": ("Share transfer executed", "Compliance Officer", "Updated Register of Members"),
@@ -6888,8 +6890,9 @@ class ClientAcceptanceChecklistItem(db.Model):
 COMPANY_DOCUMENT_TYPES = [
     "Certificate of Incorporation",
     "Memorandum & Articles of Association",
-    "CR14 - Return of Directors",
-    "CR6 - Notice of Situation of Registered Office",
+    "CR6 - Return of Directors",
+    "CR5 - Notice of Situation of Registered Office",
+    "Company Summary",
     "Share Register / Share Certificates",
     "Beneficial Ownership Declaration",
     "Director/Shareholder ID Documents",
@@ -6902,7 +6905,7 @@ PERSON_STATUSES = ["Suggested", "Confirmed"]
 
 class CompanyDocument(db.Model):
     """One company registration document (certificate of incorporation,
-    CR14, share register, etc.) uploaded once against a Client and reused
+    CR6, share register, etc.) uploaded once against a Client and reused
     across every one of that client's engagements. Text is extracted on
     upload the same way as RegulatoryNotice (see sanctions_data.
     extract_pdf_text); an image upload (a photographed/scanned page saved
@@ -7361,6 +7364,7 @@ SECRETARIAL_FINALISATION_CHECKLIST_ITEMS = [
     ("Registry & Reconciliations", "Director/Secretary changes confirmed - all appointments, resignations, or address changes lodged on Form CR6 under Sec 217/241? [SEC-FIN-04]"),
     ("Registry & Reconciliations", "Registered office changes verified on Form CR5 (Notice of Registered Office) under Sec 240? [SEC-FIN-05]"),
     ("Registry & Reconciliations", "Share allotments verified on Form CR11 (Return of Allotments) under Sec 93 & 95?"),
+    ("Registry & Reconciliations", "Company Summary filed with the Registrar under the new COBE Act - form reference and filing deadline reconfirmed against current CIPO guidance (newly introduced requirement, not yet finalised when this item was added)?"),
     ("Board & Governance Audit Trail", "Board/AGM minutes signed and bound - all draft minutes from Board, Committee, and General Meetings reviewed, signed by the Board Chairperson, and entered into the master minute book (Sec 170 & 176)? [SEC-FIN-02]"),
     ("Board & Governance Audit Trail", "Special resolutions indexed and filed - Form CR8 returns bear CIPO stamp confirmations for all Special Resolutions passed during the year (Sec 176 & 178)? [SEC-FIN-07]"),
     ("Board & Governance Audit Trail", "Board action tracker closed out - a final summary of all action items compiled, completed tasks noted and unresolved matters rolled into the next period's planning cycle?"),

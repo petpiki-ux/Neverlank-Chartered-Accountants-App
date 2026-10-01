@@ -54,7 +54,7 @@ POLICIES_DATA_DIR = os.path.join(DATA_DIR, "policies_data")
 # Notice Screening searches during an auto-screen.
 REGULATORY_NOTICES_DATA_DIR = os.path.join(DATA_DIR, "regulatory_notices_data")
 # Writable folder for company registration documents uploaded against a
-# Client (certificate of incorporation, CR14, share register, etc - see
+# Client (certificate of incorporation, CR6, share register, etc - see
 # models.CompanyDocument and company_documents.py) - same idea as
 # POLICIES_DATA_DIR/REGULATORY_NOTICES_DATA_DIR above: starts empty, any
 # team member with the "Manage Company Documents" permission adds files

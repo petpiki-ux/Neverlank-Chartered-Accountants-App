@@ -2,7 +2,7 @@
 CompanyDocument, models.ClientKeyPerson), not on any one engagement, so
 it's filled in once per client and reused by every engagement that client
 ever has. Upload a company registration document (certificate of
-incorporation, CR14, share register, etc); its text is extracted the same
+incorporation, CR6, share register, etc); its text is extracted the same
 way as a Regulatory Notice (sanctions_data.extract_pdf_text), and then the
 Claude API is asked to pick out every Director/Shareholder/Beneficial
 Owner/Company Secretary named in it (entity_extraction.py) - reading

@@ -580,6 +580,14 @@ def create_app():
         migrate_document_template_ref_codes()
         _fix_forensic_template_type()
         _fix_forensic_checklist_items()
+        # CR-form code renumbering under the new Companies and Other
+        # Business Entities Act [Chapter 24:31] (COBE Act): old CR14 (Return
+        # of Directors) is now CR6, old CR6 (Notice of Situation of
+        # Registered Office) is now CR5 - see migrate_cr_form_codes's own
+        # docstring. Same no-op-once-done safety as the migration above.
+        from seed import migrate_cr_form_codes, migrate_secretarial_finalisation_company_summary
+        migrate_cr_form_codes()
+        migrate_secretarial_finalisation_company_summary()
         # Payroll PAYE bands: seed_payroll_tax_bands() only ever populates a
         # pay frequency that currently has ZERO PayrollTaxBand rows of its
         # own, so it's safe/cheap to call on every startup (like

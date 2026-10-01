@@ -10,7 +10,12 @@ import shutil
 from datetime import date
 
 from extensions import db
-from models import User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES, FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PayrollTaxSettings, PAYROLL_PAY_FREQUENCIES, LeaveType, LEAVE_TYPES_STATUTORY_ZW
+from models import (
+    User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES,
+    FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PayrollTaxSettings, PAYROLL_PAY_FREQUENCIES,
+    LeaveType, LEAVE_TYPES_STATUTORY_ZW, CompanyDocument, SubstantiveProcedureItem, FinalisationChecklist,
+    FinalisationChecklistItem,
+)
 from config import Config
 
 
@@ -383,6 +388,116 @@ def migrate_document_template_ref_codes():
         db.session.commit()
 
 
+# (old, new) exact-text pairs for CompanyDocument.document_type rows already
+# stored under the old Companies Act [Chapter 24:03] CR-form labels, now
+# renumbered under the Companies and Other Business Entities Act [Chapter
+# 24:31] (COBE Act): old CR14 (Return of Directors) is now CR6, and old CR6
+# (Notice of Situation of Registered Office) is now CR5. COMPANY_DOCUMENT_
+# TYPES in models.py already uses the new labels for anything uploaded from
+# now on - this corrects documents uploaded before that change.
+COMPANY_DOCUMENT_TYPE_CR_CODE_MIGRATIONS = [
+    ("CR14 - Return of Directors", "CR6 - Return of Directors"),
+    ("CR6 - Notice of Situation of Registered Office", "CR5 - Notice of Situation of Registered Office"),
+]
+
+# (old procedure_text, new procedure_text, old target_output, new
+# target_output) for SubstantiveProcedureItem rows already synced onto a
+# Secretarial engagement's Execution Plan under the old CR14 label for
+# registered office changes - see SECRETARIAL_BASELINE_SUBSTANTIVE_
+# PROCEDURES["Annual Returns & Filings Log"] in models.py. The "CR6 for
+# directors" line is left out here because it was already correct under the
+# old Companies Act and remains correct under COBE - nothing to migrate.
+SUBSTANTIVE_PROCEDURE_CR_CODE_MIGRATIONS = [
+    (
+        "Lodge Form CR14 for changes in registered office address within 14 days (Sec 160).",
+        "Lodge Form CR5 for changes in registered office address within 14 days (Sec 160).",
+        "Certified Form CR14 copy",
+        "Certified Form CR5 copy",
+    ),
+]
+
+
+def migrate_cr_form_codes():
+    """Bring already-stored CR-form references up to date with the
+    Companies and Other Business Entities Act [Chapter 24:31] (COBE Act)
+    renumbering: old CR14 (Return of Directors) is now CR6, and old CR6
+    (Notice of Situation of Registered Office) is now CR5. Covers:
+      - CompanyDocument.document_type (see COMPANY_DOCUMENT_TYPE_CR_CODE_
+        MIGRATIONS above).
+      - SubstantiveProcedureItem.procedure_text/target_output already synced
+        onto a Secretarial engagement's Execution Plan (see
+        SUBSTANTIVE_PROCEDURE_CR_CODE_MIGRATIONS above) - the "Company
+        Summary" line added to the same baseline list needs no migration
+        here, since sync_substantive_procedures (engagements.py) is purely
+        additive and will pick up the new line on its own next re-sync.
+    Matches on exact old text only, so a document type or procedure a firm
+    member has since renamed/customised by hand is left alone - same safety
+    property as migrate_document_template_ref_codes() above. Safe to call on
+    every startup: once a row is migrated (or was never on the old text to
+    begin with), there is nothing left to match and this is a no-op.
+    """
+    changed = False
+    for old_type, new_type in COMPANY_DOCUMENT_TYPE_CR_CODE_MIGRATIONS:
+        for row in CompanyDocument.query.filter_by(document_type=old_type).all():
+            row.document_type = new_type
+            changed = True
+    for old_text, new_text, old_output, new_output in SUBSTANTIVE_PROCEDURE_CR_CODE_MIGRATIONS:
+        for row in SubstantiveProcedureItem.query.filter_by(procedure_text=old_text).all():
+            row.procedure_text = new_text
+            if row.target_output == old_output:
+                row.target_output = new_output
+            changed = True
+    if changed:
+        db.session.commit()
+
+
+# The new "Company Summary" line added to SECRETARIAL_FINALISATION_
+# CHECKLIST_ITEMS["Registry & Reconciliations"] in models.py - unlike
+# SubstantiveProcedureItem above, FinalisationChecklistItem rows are only
+# ever seeded once per engagement (seed_finalisation_checklist in
+# engagements.py refuses to run again once the checklist has items), so an
+# engagement that already seeded its Finalisation checklist before this
+# line existed would never pick it up on its own. This adds it, once, to
+# every Secretarial engagement's checklist that's missing it.
+SECRETARIAL_FINALISATION_COMPANY_SUMMARY_ITEM = (
+    "Registry & Reconciliations",
+    "Company Summary filed with the Registrar under the new COBE Act - form reference and filing deadline "
+    "reconfirmed against current CIPO guidance (newly introduced requirement, not yet finalised when this item "
+    "was added)?",
+)
+
+
+def migrate_secretarial_finalisation_company_summary():
+    """Adds the new Company Summary line (see SECRETARIAL_FINALISATION_
+    COMPANY_SUMMARY_ITEM above) to every Secretarial engagement's
+    Finalisation checklist that already has items but doesn't have this one
+    yet. Leaves a checklist with no items at all untouched - that engagement
+    will get the line the normal way, the first time someone clicks "seed
+    default items". Safe to call on every startup: once every existing
+    checklist has the line (or never had any items to begin with), there is
+    nothing left to add and this is a no-op."""
+    section, item_text = SECRETARIAL_FINALISATION_COMPANY_SUMMARY_ITEM
+    changed = False
+    for record in FinalisationChecklist.query.all():
+        if not record.engagement or record.engagement.type != "Secretarial":
+            continue
+        items = record.checklist_items
+        if not items:
+            continue
+        if any(i.item_text == item_text for i in items):
+            continue
+        max_order = max((i.order for i in items), default=0)
+        db.session.add(FinalisationChecklistItem(
+            finalisation_checklist_id=record.id,
+            section=section,
+            item_text=item_text,
+            order=max_order + 1,
+        ))
+        changed = True
+    if changed:
+        db.session.commit()
+
+
 # The firm's Audit Working Paper Indexing & Filing Policy, transcribed from
 # the source document, as (code, category, section, typical_contents)
 # tuples - Current File (N-series) first, then Permanent File (P-series,
@@ -474,7 +589,7 @@ FILING_INDEX_SEED = [
 
 FILING_INDEX_PERMANENT_SEED = [
     # ---- Permanent File (P-series) ----
-    ("P1000", "Incorporation & Statutory", "Incorporation & Statutory", "Certificate of incorporation, CR6/CR14, memorandum & articles."),
+    ("P1000", "Incorporation & Statutory", "Incorporation & Statutory", "Certificate of incorporation, CR6/CR5, memorandum & articles."),
     ("P2000", "Engagement Administration", "Engagement Administration", "Standing engagement letter, independence declarations, fee history."),
     ("P3000", "Accounting Policies", "Accounting Policies", "Group/entity accounting policy manual, significant IFRS elections."),
     ("P4000", "Prior Year Financial Statements", "Prior Year Financial Statements", "Signed financial statements and auditor's reports, prior years."),

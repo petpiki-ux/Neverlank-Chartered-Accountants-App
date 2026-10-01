@@ -5,7 +5,7 @@ for the upload route that calls this).
 
 Uses the Claude API (the `anthropic` package) so scanned/photographed
 documents can be read the same way a person would, rather than relying on
-OCR text alone - a scanned Zimbabwean CR14 or share register varies a lot
+OCR text alone - a scanned Zimbabwean CR6 or share register varies a lot
 in layout and scan quality, and matching it with regex/keyword rules (the
 approach sanctions_data.py uses for RBZ/FIU notices, where all that's
 needed is "does this name appear anywhere") would be far less reliable for
@@ -82,7 +82,7 @@ PEOPLE_TOOL = {
 
 SYSTEM_PROMPT = (
     "You are extracting company officer/ownership information from a company registration "
-    "document (for example a Certificate of Incorporation, a CR14 Return of Directors, a CR6, "
+    "document (for example a Certificate of Incorporation, a CR6 Return of Directors, a CR5, "
     "Memorandum & Articles of Association, or a share register) for an audit firm's Client "
     "Acceptance / AML-KYC records. Read the document carefully and call record_company_people "
     "with every individual actually named as a Director, Shareholder, Beneficial Owner, or "
