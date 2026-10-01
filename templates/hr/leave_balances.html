@@ -77,9 +77,11 @@
   <h2 style="margin-top:0;font-size:16px;">Everyone's balances</h2>
   <p class="muted" style="font-size:12px;">
     Annual/Vacation Leave only - the one leave type the firm tracks a per-employee balance for (Sick/
-    Special/Maternity are provisions, see above). Set a one-time opening ("brought forward") balance per
-    employee - e.g. when migrating from a previous system. Automatic accrual/resets never touch this
-    figure again.
+    Special/Maternity are provisions, see above). Set a one-time opening balance per employee - "Brought
+    forward" for an opening balance (e.g. migrating from a previous system) and "Already taken" for leave
+    the employee took before the firm started using this Leave feature, so their available balance is
+    correct from day one instead of overstating what they actually have left. Automatic accrual and Time
+    Sheet leave capture only ever ADD on top of whatever is set here - they never reduce or reset it.
   </p>
   {% for emp, balances in team_balances %}
   <h3 style="font-size:13.5px;margin:16px 0 6px;">{{ emp.full_name }}{% if emp.job_title %} <span class="muted" style="font-weight:normal;">- {{ emp.job_title }}</span>{% endif %}</h3>
@@ -87,7 +89,7 @@
   <p class="muted" style="font-size:11px;">No joining date on file - Annual/Vacation Leave can't accrue automatically until one is set on Payroll &gt; Employees.</p>
   {% endif %}
   <table>
-    <thead><tr><th>Leave type</th><th class="text-right">Brought forward</th><th class="text-right">Accrued</th><th class="text-right">Taken</th><th class="text-right">Available</th><th></th></tr></thead>
+    <thead><tr><th>Leave type</th><th class="text-right">Brought forward</th><th class="text-right">Accrued</th><th class="text-right">Taken</th><th class="text-right">Available</th><th>Set opening balance</th></tr></thead>
     <tbody>
       {% for lt, bal in balances %}
       <tr>
@@ -97,8 +99,13 @@
         <td class="text-right">{{ '%.2f'|format(bal.taken_days or 0) }}</td>
         <td class="text-right" style="font-weight:600;">{{ '%.2f'|format(bal.current_balance) }}</td>
         <td class="text-right">
-          <form method="post" action="{{ url_for('hr.set_leave_brought_forward', balance_id=bal.id) }}" class="inline" style="display:inline-flex;gap:4px;align-items:center;">
-            <input type="number" step="0.01" name="brought_forward" value="{{ bal.brought_forward or 0 }}" style="width:80px;">
+          <form method="post" action="{{ url_for('hr.set_leave_brought_forward', balance_id=bal.id) }}" class="inline" style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
+            <label class="muted" style="font-size:10.5px;margin:0;">Brought fwd
+              <input type="number" step="0.01" name="brought_forward" value="{{ bal.brought_forward or 0 }}" style="width:70px;">
+            </label>
+            <label class="muted" style="font-size:10.5px;margin:0;">Already taken
+              <input type="number" step="0.01" name="taken_days" value="{{ bal.taken_days or 0 }}" style="width:70px;">
+            </label>
             <button type="submit" class="btn small secondary">Set</button>
           </form>
         </td>

@@ -776,10 +776,25 @@ def list_leave_balances():
 @login_required
 @reviewer_required
 def set_leave_brought_forward(balance_id):
+    """Sets BOTH one-time opening figures for an employee's LeaveBalance -
+    `brought_forward` (an opening balance, e.g. migrating from a previous
+    system) and `taken_days` (leave already taken that this app never
+    captured itself, e.g. leave taken before the firm started using this
+    Leave feature) - so current_balance reflects reality from day one,
+    rather than showing more days available than the employee actually has.
+    Automatic accrual (leave_calc.sync_leave_balance) never touches either
+    figure once set here - it only ever ADDS newly accrued days on top, or
+    ADDS further days via a Time Sheet leave entry (hr._add_leave_entry)."""
     balance = LeaveBalance.query.get_or_404(balance_id)
     balance.brought_forward = _to_float_or_none(request.form.get("brought_forward"), 0.0) or 0.0
+    balance.taken_days = _to_float_or_none(request.form.get("taken_days"), 0.0) or 0.0
     db.session.commit()
-    flash(f"Brought-forward balance updated for {balance.employee.full_name} - {balance.leave_type.name}.", "success")
+    flash(
+        f"Opening balance updated for {balance.employee.full_name} - {balance.leave_type.name} "
+        f"(brought forward {balance.brought_forward:.2f}, already taken {balance.taken_days:.2f} - "
+        f"{balance.current_balance:.2f} day(s) now available).",
+        "success",
+    )
     return redirect(url_for("hr.list_leave_balances"))
 
 

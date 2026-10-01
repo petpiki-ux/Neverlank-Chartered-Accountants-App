@@ -142,7 +142,17 @@ def calculate_payslip(basic_salary, items, settings, bands):
     nssa_employee = round(nssa_base * (settings.nssa_employee_pct or 0.0) / 100.0, 2)
     nssa_employer = round(nssa_base * (settings.nssa_employer_pct or 0.0) / 100.0, 2)
 
-    taxable_income = max(0.0, basic_salary + taxable_allowances - nssa_employee - exempt_income_total)
+    # NOTE: exempt_income_total is deliberately NOT subtracted again here -
+    # Exempt Income items are a separate category from Allowance items (see
+    # allowance_items/exempt_items above), so they were never part of
+    # `basic_salary + taxable_allowances` to begin with. Subtracting
+    # exempt_income_total on top of that double-counted the exclusion and
+    # understated taxable income (and therefore PAYE) by the full exempt
+    # amount every time a payslip had one - e.g. $45 of exempt income wrongly
+    # knocked a further $45 off taxable income instead of $0 extra. ZIMRA's
+    # step 2 ("Gross income - Exempt income = Income") is already satisfied
+    # here by simply never having added exempt income into this base.
+    taxable_income = max(0.0, basic_salary + taxable_allowances - nssa_employee)
 
     paye_before_credits = calculate_paye(taxable_income, bands)
     tax_credits_total = round(sum((i.amount or 0.0) for i in credit_items), 2)
