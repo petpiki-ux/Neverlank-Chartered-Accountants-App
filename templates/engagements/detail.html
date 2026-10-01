@@ -1576,7 +1576,7 @@
           <input type="date" id="agm_target" name="agm_target" value="{{ secretarial_plan.agm_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.agm_target else '' }}">
         </div>
         <div>
-          <label for="annual_return_target">Annual return (CR6) filing target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.annual_return_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
+          <label for="annual_return_target">Annual return (CR11/CR23) filing target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.annual_return_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
           <input type="date" id="annual_return_target" name="annual_return_target" value="{{ secretarial_plan.annual_return_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.annual_return_target else '' }}">
         </div>
       </div>
