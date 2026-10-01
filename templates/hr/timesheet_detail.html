@@ -65,8 +65,8 @@
       <div>
         <label for="leave_type_id">Leave type</label>
         <select id="leave_type_id" name="leave_type_id">
-          {% for lt, bal in leave_balances %}
-          <option value="{{ lt.id }}">{{ lt.name }} ({{ bal.current_balance }} day(s) available)</option>
+          {% for lt, bal in leave_choices %}
+          <option value="{{ lt.id }}">{{ lt.name }}{% if bal is not none %} ({{ bal.current_balance }} day(s) available){% else %} (provision - no balance tracked){% endif %}</option>
           {% endfor %}
         </select>
       </div>

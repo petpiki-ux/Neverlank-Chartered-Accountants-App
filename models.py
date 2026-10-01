@@ -2776,6 +2776,16 @@ class CheckInRecord(db.Model):
 # exact pre-loaded figures - every field is firm-editable, since a firm's
 # own policy or a collective bargaining agreement may be more generous than
 # the statutory minimum (never less).
+#
+# Only Annual/Vacation Leave is an obligation the firm actively tracks a
+# running balance for, per employee (confirmed with the Managing Partner:
+# accrual continues to run from each employee's own date_joined, same as
+# before). Sick/Special/Compassionate/Maternity leave are kept as statutory
+# PROVISIONS - their figures are defined once on the Leave Types screen and
+# can still be captured on a Time Sheet for record-keeping, but the firm
+# does not maintain a per-employee LeaveBalance (no accrual, no running
+# total, no cap enforcement) for them - see leave_calc.sync_all_balances_for_employee
+# and hr._add_leave_entry, both of which gate this on LeaveType.is_accumulative.
 LEAVE_TYPES_STATUTORY_ZW = [
     # (name, accrual_days_per_month, annual_entitlement_days, max_accumulation_days,
     #  is_accumulative, full_pay_days, half_pay_pct, min_service_months_to_take, notes)
@@ -2817,6 +2827,13 @@ class LeaveType(db.Model):
     (up to `max_accumulation_days`), while Sick/Special/Maternity leave are
     each a fixed `annual_entitlement_days` granted afresh every leave year -
     see leave_calc.sync_leave_balance for exactly how each is kept current.
+    It ALSO decides whether this leave type gets a tracked per-employee
+    LeaveBalance at all: True (e.g. Annual/Vacation Leave) means the firm
+    is treating it as an obligation it actively accrues and tracks a running
+    balance for; False (e.g. Sick/Special/Maternity) means it's kept as a
+    statutory PROVISION instead - still definable here and still capturable
+    on a Time Sheet, but with no per-employee balance, accrual or cap (see
+    leave_calc.sync_all_balances_for_employee and hr._add_leave_entry).
 
     `full_pay_days`/`half_pay_pct` model Sick Leave's 90-full-pay/90-half-pay
     split (None for a leave type that's either all full pay or doesn't

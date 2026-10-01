@@ -26,8 +26,8 @@
       <div>
         <label>Accrues automatically?</label>
         <select name="is_accumulative">
-          <option value="1" {% if lt.is_accumulative %}selected{% endif %}>Yes - accrues monthly, carries over (e.g. Annual Leave)</option>
-          <option value="" {% if not lt.is_accumulative %}selected{% endif %}>No - fixed entitlement each leave year (e.g. Sick Leave)</option>
+          <option value="1" {% if lt.is_accumulative %}selected{% endif %}>Yes - accrues monthly, carries over, tracked per employee (e.g. Annual Leave)</option>
+          <option value="" {% if not lt.is_accumulative %}selected{% endif %}>No - a statutory provision only, no per-employee balance kept (e.g. Sick Leave)</option>
         </select>
       </div>
       <div>
@@ -81,8 +81,8 @@
       <div>
         <label>Accrues automatically?</label>
         <select name="is_accumulative">
-          <option value="1">Yes - accrues monthly, carries over</option>
-          <option value="" selected>No - fixed entitlement each leave year</option>
+          <option value="1">Yes - accrues monthly, carries over, tracked per employee</option>
+          <option value="" selected>No - a statutory provision only, no per-employee balance kept</option>
         </select>
       </div>
       <div>

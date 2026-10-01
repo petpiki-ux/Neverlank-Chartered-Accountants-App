@@ -23,6 +23,15 @@ LEAVE_TYPES_STATUTORY_ZW in models.py:
 Neither path ever touches `brought_forward` - that's a one-time, manually
 entered opening balance (see hr.set_leave_brought_forward), left alone here
 from the moment it's set.
+
+Only `is_accumulative` leave types get a tracked per-employee LeaveBalance
+at all (confirmed with the Managing Partner: Annual/Vacation Leave is the
+one obligation the firm actively accrues and tracks a running balance for,
+continuing to run from each employee's own date_joined). A non-accumulative
+leave type (Sick/Special/Compassionate/Maternity) is a statutory PROVISION
+instead - defined on the Leave Types screen and still capturable on a Time
+Sheet, but with no LeaveBalance row, accrual or cap kept per employee - see
+sync_all_balances_for_employee below and hr._add_leave_entry.
 """
 from datetime import date
 
@@ -94,15 +103,27 @@ def sync_leave_balance(employee, leave_type, balance, as_of=None):
 
 
 def sync_all_balances_for_employee(employee, as_of=None, commit=True):
-    """Returns [(LeaveType, LeaveBalance), ...] for every active LeaveType,
-    each brought up to date first. `commit=False` lets a caller that's
-    about to make a further change (e.g. recording leave taken) fold the
-    sync into its own single commit."""
+    """Returns [(LeaveType, LeaveBalance), ...] for every active ACCUMULATIVE
+    LeaveType only (e.g. Annual/Vacation Leave), each brought up to date
+    first. A non-accumulative LeaveType (Sick/Special/Maternity) never gets
+    a row here - see provision_leave_types() for those instead; they're
+    statutory provisions, not something the firm tracks a per-employee
+    balance for. `commit=False` lets a caller that's about to make a
+    further change (e.g. recording leave taken) fold the sync into its own
+    single commit."""
     results = []
-    for leave_type in LeaveType.query.filter_by(is_active=True).order_by(LeaveType.order).all():
+    for leave_type in LeaveType.query.filter_by(is_active=True, is_accumulative=True).order_by(LeaveType.order).all():
         balance = get_or_create_balance(employee, leave_type)
         sync_leave_balance(employee, leave_type, balance, as_of=as_of)
         results.append((leave_type, balance))
     if commit:
         db.session.commit()
     return results
+
+
+def provision_leave_types():
+    """Every active NON-accumulative LeaveType (Sick/Special/Compassionate/
+    Maternity, by default) - statutory provisions the firm defines once and
+    makes available to capture on a Time Sheet, but never tracks a
+    per-employee LeaveBalance for (no accrual, no running total, no cap)."""
+    return LeaveType.query.filter_by(is_active=True, is_accumulative=False).order_by(LeaveType.order).all()

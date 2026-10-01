@@ -66,9 +66,22 @@ def _payslip_rows(payslip):
     return earnings, deductions
 
 
+def _leave_rows(leave_balances):
+    """(leave_type_name, accrued, taken, available) rows for the payslip's
+    Leave section - ACCUMULATIVE leave types only (e.g. Annual/Vacation
+    Leave), the one(s) the firm tracks a running per-employee balance for.
+    Sick/Special/Maternity are statutory provisions, not a balance, so they
+    never appear on the payslip - see leave_calc.sync_all_balances_for_employee,
+    which is what `leave_balances` already comes from."""
+    return [
+        (lt.name, bal.accrued_days or 0.0, bal.taken_days or 0.0, bal.current_balance)
+        for lt, bal in (leave_balances or [])
+    ]
+
+
 # ---------------------------------------------------------------- Word (.docx)
 
-def generate_payslip_docx(payslip):
+def generate_payslip_docx(payslip, leave_balances=None):
     employee = payslip.employee
     period = payslip.period
 
@@ -168,6 +181,26 @@ def generate_payslip_docx(payslip):
         run.bold = True
         run.font.size = Pt(9.5)
 
+    leave_rows = _leave_rows(leave_balances)
+    if leave_rows:
+        doc.add_paragraph()
+        leave_title_p = doc.add_paragraph()
+        leave_title_run = leave_title_p.add_run("Leave")
+        leave_title_run.bold = True
+        leave_title_run.font.size = Pt(10.5)
+
+        leave_table = doc.add_table(rows=len(leave_rows) + 1, cols=4)
+        leave_table.style = "Light Grid Accent 1"
+        leave_hdr = leave_table.rows[0].cells
+        for idx, text in enumerate(["Leave Type", "Accrued (days)", "Taken (days)", "Available (days)"]):
+            run = leave_hdr[idx].paragraphs[0].add_run(text)
+            run.bold = True
+            run.font.size = Pt(9.5)
+        for i, (name, accrued, taken, available) in enumerate(leave_rows):
+            row = leave_table.rows[i + 1].cells
+            for idx, text in enumerate([name, _fmt_num(accrued), _fmt_num(taken), _fmt_num(available)]):
+                row[idx].paragraphs[0].add_run(text).font.size = Pt(9.5)
+
     doc.add_paragraph()
 
     net_p = doc.add_paragraph()
@@ -196,7 +229,7 @@ def generate_payslip_docx(payslip):
 
 # ---------------------------------------------------------------------- PDF
 
-def generate_payslip_pdf(payslip):
+def generate_payslip_pdf(payslip, leave_balances=None):
     employee = payslip.employee
     period = payslip.period
 
@@ -274,6 +307,26 @@ def generate_payslip_pdf(payslip):
     ]))
     story.append(body_table)
     story.append(Spacer(1, 16))
+
+    leave_rows = _leave_rows(leave_balances)
+    if leave_rows:
+        story.append(Paragraph("<b>Leave</b>", ParagraphStyle("leave_title", parent=styles["Normal"], fontSize=10.5)))
+        story.append(Spacer(1, 4))
+        leave_body = [["Leave Type", "Accrued (days)", "Taken (days)", "Available (days)"]]
+        for name, accrued, taken, available in leave_rows:
+            leave_body.append([name, _fmt_num(accrued), _fmt_num(taken), _fmt_num(available)])
+        leave_table = Table(leave_body, colWidths=[150, 90, 90, 90])
+        leave_table.setStyle(TableStyle([
+            ("BACKGROUND", (0, 0), (-1, 0), gold),
+            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
+            ("FONTSIZE", (0, 0), (-1, -1), 9.5),
+            ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.grey),
+            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        story.append(leave_table)
+        story.append(Spacer(1, 16))
 
     story.append(Paragraph(
         f"<b>NET PAY: {period.currency or ''} {_fmt_num(payslip.net_pay)}</b>",

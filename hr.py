@@ -516,8 +516,18 @@ def view_timesheet(timesheet_id):
     # up by the sheet's own user_id, not current_user, so a reviewer viewing
     # someone else's timesheet still sees the right balances (read-only for
     # them, since can_edit is false in that case).
+    #
+    # leave_choices mixes two kinds of leave type for the entry dropdown:
+    # tracked ones (Annual/Vacation Leave - a real (LeaveType, LeaveBalance)
+    # pair, balance not None) and statutory provisions (Sick/Special/
+    # Maternity - (LeaveType, None), no balance kept per employee at all).
     sheet_employee = PayrollEmployee.query.filter_by(user_id=sheet.user_id, scope="internal").first()
-    leave_balances = leave_calc.sync_all_balances_for_employee(sheet_employee) if sheet_employee else []
+    if sheet_employee:
+        tracked = leave_calc.sync_all_balances_for_employee(sheet_employee)
+        provisions = [(lt, None) for lt in leave_calc.provision_leave_types()]
+        leave_choices = tracked + provisions
+    else:
+        leave_choices = []
 
     return render_template(
         "hr/timesheet_detail.html",
@@ -527,7 +537,7 @@ def view_timesheet(timesheet_id):
         can_review=can_review,
         week_dates=week_dates,
         sheet_employee=sheet_employee,
-        leave_balances=leave_balances,
+        leave_choices=leave_choices,
     )
 
 
@@ -577,11 +587,17 @@ def add_time_entry(timesheet_id):
 
 def _add_leave_entry(sheet, work_date):
     """Records leave taken on one day of `sheet` - the leave-capture half of
-    add_time_entry above, split out for readability. Validates against the
-    employee's own LeaveBalance (synced first, so the check uses up-to-date
-    figures) before creating the entry, and moves the days into
-    LeaveBalance.taken_days on success - see delete_time_entry for the
-    reverse when such an entry is removed."""
+    add_time_entry above, split out for readability.
+
+    Only an ACCUMULATIVE leave type (e.g. Annual/Vacation Leave) is
+    validated against, and deducted from, a real per-employee LeaveBalance
+    (synced first, so the check uses up-to-date figures) - see
+    delete_time_entry for the reverse when such an entry is removed. A
+    non-accumulative leave type (Sick/Special/Compassionate/Maternity) is a
+    statutory PROVISION instead: the firm doesn't track a running balance
+    for it, so the entry is simply recorded (still subject to the
+    min-service-to-take rule, if the firm has set one) with no balance
+    check or deduction."""
     timesheet_id = sheet.id
     leave_type_id = request.form.get("leave_type_id")
     leave_type = LeaveType.query.get(leave_type_id) if leave_type_id else None
@@ -601,14 +617,11 @@ def _add_leave_entry(sheet, work_date):
     employee = PayrollEmployee.query.filter_by(user_id=current_user.id, scope="internal").first()
     if not employee:
         flash(
-            "No Payroll employee profile is linked to your login yet, so leave can't be tracked against a "
-            "balance - ask an Admin/Partner to link one on Payroll > Employees first.",
+            "No Payroll employee profile is linked to your login yet, so leave can't be recorded - ask an "
+            "Admin/Partner to link one on Payroll > Employees first.",
             "danger",
         )
         return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
-
-    balance = leave_calc.get_or_create_balance(employee, leave_type)
-    leave_calc.sync_leave_balance(employee, leave_type, balance)
 
     if leave_type.min_service_months_to_take:
         served_months = leave_calc.months_between(employee.date_joined, work_date) if employee.date_joined else 0
@@ -621,16 +634,21 @@ def _add_leave_entry(sheet, work_date):
             )
             return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
 
-    available = balance.current_balance
-    if leave_days > available:
-        flash(
-            f"Only {available:.2f} day(s) of {leave_type.name} are available for {employee.full_name} "
-            f"(brought forward {balance.brought_forward or 0:.2f} + accrued {balance.accrued_days or 0:.2f} "
-            f"- taken {balance.taken_days or 0:.2f}) - reduce the days, or top up the balance on the Leave "
-            "screen first.",
-            "danger",
-        )
-        return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
+    balance = None
+    if leave_type.is_accumulative:
+        balance = leave_calc.get_or_create_balance(employee, leave_type)
+        leave_calc.sync_leave_balance(employee, leave_type, balance)
+
+        available = balance.current_balance
+        if leave_days > available:
+            flash(
+                f"Only {available:.2f} day(s) of {leave_type.name} are available for {employee.full_name} "
+                f"(brought forward {balance.brought_forward or 0:.2f} + accrued {balance.accrued_days or 0:.2f} "
+                f"- taken {balance.taken_days or 0:.2f}) - reduce the days, or top up the balance on the Leave "
+                "screen first.",
+                "danger",
+            )
+            return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
 
     entry = TimeEntry(
         timesheet_id=timesheet_id,
@@ -641,9 +659,13 @@ def _add_leave_entry(sheet, work_date):
         leave_days=leave_days,
     )
     db.session.add(entry)
-    balance.taken_days = round((balance.taken_days or 0.0) + leave_days, 2)
-    db.session.commit()
-    flash(f"{leave_days:g} day(s) of {leave_type.name} added - {balance.current_balance:.2f} day(s) remain.", "success")
+    if balance is not None:
+        balance.taken_days = round((balance.taken_days or 0.0) + leave_days, 2)
+        db.session.commit()
+        flash(f"{leave_days:g} day(s) of {leave_type.name} added - {balance.current_balance:.2f} day(s) remain.", "success")
+    else:
+        db.session.commit()
+        flash(f"{leave_days:g} day(s) of {leave_type.name} recorded.", "success")
     return redirect(url_for("hr.view_timesheet", timesheet_id=timesheet_id))
 
 
@@ -657,11 +679,13 @@ def delete_time_entry(entry_id):
     if sheet.status == "Approved":
         flash("This timesheet is already approved - ask your reviewer to reopen it before changing entries.", "danger")
         return redirect(url_for("hr.view_timesheet", timesheet_id=sheet.id))
-    if entry.leave_type_id and entry.leave_days:
+    if entry.leave_type_id and entry.leave_days and entry.leave_type and entry.leave_type.is_accumulative:
         # Reverse the leave taken by this entry before removing it, so
         # deleting a leave entry gives the days back to the balance it was
         # taken from - the same employee lookup add_time_entry used to take
-        # them in the first place.
+        # them in the first place. Only an accumulative leave type ever has
+        # a real LeaveBalance to reverse - a statutory provision (Sick/
+        # Special/Maternity) never had one deducted in the first place.
         employee = PayrollEmployee.query.filter_by(user_id=sheet.user_id, scope="internal").first()
         if employee:
             balance = LeaveBalance.query.filter_by(employee_id=employee.id, leave_type_id=entry.leave_type_id).first()
@@ -715,12 +739,19 @@ def _to_float_or_none(value, default=None):
 @hr_bp.route("/leave")
 @login_required
 def list_leave_balances():
-    """Self-service: the current user's own leave balances, synced up to
-    date on every view (see leave_calc.sync_all_balances_for_employee).
-    Supervisor/Partner/Admin also see every internal employee's balances
-    below, with a form to set/adjust each one's brought-forward balance."""
+    """Self-service: the current user's own leave balance(s), synced up to
+    date on every view (see leave_calc.sync_all_balances_for_employee) -
+    only for an ACCUMULATIVE leave type (Annual/Vacation Leave), the one
+    the firm actively tracks per employee. Supervisor/Partner/Admin also
+    see every internal employee's balances below, with a form to set/adjust
+    each one's brought-forward balance.
+
+    Sick/Special/Compassionate/Maternity leave are statutory PROVISIONS,
+    not a per-employee balance - leave_provisions lists their figures once
+    (not per employee) for reference; leave_calc.provision_leave_types()."""
     my_employee = PayrollEmployee.query.filter_by(user_id=current_user.id, scope="internal").first()
     my_balances = leave_calc.sync_all_balances_for_employee(my_employee) if my_employee else []
+    leave_provisions = leave_calc.provision_leave_types()
 
     team_balances = None
     if current_user.role in REVIEWER_ROLES:
@@ -735,6 +766,7 @@ def list_leave_balances():
         "hr/leave_balances.html",
         my_employee=my_employee,
         my_balances=my_balances,
+        leave_provisions=leave_provisions,
         team_balances=team_balances,
         can_manage=current_user.role in REVIEWER_ROLES,
     )

@@ -28,6 +28,34 @@
 <div class="flash info">This payslip's period is Finalized, so it's read-only. Reopen the period to make changes.</div>
 {% endif %}
 
+{% if payslip.employee and not payslip.employee.date_joined and leave_balances %}
+<div class="flash muted" style="font-size:12px;">
+  No joining date on file for {{ payslip.employee.full_name }}, so Annual/Vacation Leave can't accrue yet - set
+  one on <a href="{{ url_for('payroll.edit_employee', employee_id=payslip.employee.id) }}">Payroll &gt; Employees</a>.
+</div>
+{% elif leave_balances %}
+<div class="card" style="max-width:520px;">
+  <h2 style="margin-top:0;font-size:16px;">Leave</h2>
+  <table>
+    <thead><tr><th>Leave type</th><th class="text-right">Accrued</th><th class="text-right">Taken</th><th class="text-right">Available</th></tr></thead>
+    <tbody>
+      {% for lt, bal in leave_balances %}
+      <tr>
+        <td>{{ lt.name }}</td>
+        <td class="text-right">{{ '%.2f'|format(bal.accrued_days or 0) }}</td>
+        <td class="text-right">{{ '%.2f'|format(bal.taken_days or 0) }}</td>
+        <td class="text-right" style="font-weight:600;">{{ '%.2f'|format(bal.current_balance) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:11px;margin-top:8px;margin-bottom:0;">
+    Current balance as at today - also shown on the downloaded Word/PDF payslip. See
+    <a href="{{ url_for('hr.list_leave_balances') }}">Leave</a> for details or to set a brought-forward balance.
+  </p>
+</div>
+{% endif %}
+
 {% if timesheet_summary %}
 <div class="card" style="max-width:520px;">
   <h2 style="margin-top:0;font-size:16px;">Time Sheets this period</h2>

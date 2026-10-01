@@ -6,7 +6,8 @@
     <h1>Leave</h1>
     <div class="subtitle">
       Annual, Sick, Special/Compassionate and Maternity leave, per the Labour Act [Chapter 28:01] -
-      accrued automatically, capture leave taken from your <a href="{{ url_for('hr.list_timesheets') }}">Time Sheet</a>.
+      Annual/Vacation Leave accrues automatically and is tracked per employee; the others are statutory
+      provisions. Capture leave taken from your <a href="{{ url_for('hr.list_timesheets') }}">Time Sheet</a>.
     </div>
   </div>
   <div>
@@ -16,7 +17,7 @@
 </div>
 
 <div class="card" style="max-width:640px;">
-  <h2 style="margin-top:0;font-size:16px;">Your balances</h2>
+  <h2 style="margin-top:0;font-size:16px;">Your balance</h2>
   {% if not my_employee %}
   <div class="empty-state">
     No Payroll employee profile is linked to your login yet, so leave can't be tracked for you - ask an
@@ -38,19 +39,48 @@
     </tbody>
   </table>
   <p class="muted" style="font-size:11px;margin-top:8px;margin-bottom:0;">
-    Annual/Vacation Leave accrues 2.5 days per completed month of service (capped at 90 days accumulated);
-    Sick, Special/Compassionate and Maternity leave are each a fixed entitlement granted afresh every leave
-    year (unused days don't roll over). Figures are firm-editable - see Leave Types.
+    Annual/Vacation Leave accrues 2.5 days per completed month of service (capped at 90 days accumulated)
+    - this is the one leave obligation the firm tracks a running balance for. Figures are firm-editable -
+    see Leave Types.
   </p>
   {% else %}
-  <div class="empty-state">No leave types configured yet.</div>
+  <div class="empty-state">No accumulative leave type (e.g. Annual/Vacation Leave) is configured yet.</div>
   {% endif %}
 </div>
+
+{% if leave_provisions %}
+<div class="card" style="max-width:640px;">
+  <h2 style="margin-top:0;font-size:16px;">Other leave entitlements</h2>
+  <p class="muted" style="font-size:12px;">
+    Sick, Special/Compassionate and Maternity leave are statutory provisions, not a tracked balance - each
+    is a fixed entitlement granted afresh every leave year (unused days don't roll over), available to
+    capture directly on a <a href="{{ url_for('hr.list_timesheets') }}">Time Sheet</a> without a running
+    per-employee total.
+  </p>
+  <table>
+    <thead><tr><th>Leave type</th><th class="text-right">Entitlement/year</th><th>Notes</th></tr></thead>
+    <tbody>
+      {% for lt in leave_provisions %}
+      <tr>
+        <td>{{ lt.name }}</td>
+        <td class="text-right">{{ '%g'|format(lt.annual_entitlement_days) if lt.annual_entitlement_days is not none else '—' }} day(s)</td>
+        <td class="muted" style="font-size:12px;">{{ lt.notes or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 
 {% if can_manage and team_balances %}
 <div class="card">
   <h2 style="margin-top:0;font-size:16px;">Everyone's balances</h2>
-  <p class="muted" style="font-size:12px;">Set a one-time opening ("brought forward") balance per employee/leave type - e.g. when migrating from a previous system. Automatic accrual/resets never touch this figure again.</p>
+  <p class="muted" style="font-size:12px;">
+    Annual/Vacation Leave only - the one leave type the firm tracks a per-employee balance for (Sick/
+    Special/Maternity are provisions, see above). Set a one-time opening ("brought forward") balance per
+    employee - e.g. when migrating from a previous system. Automatic accrual/resets never touch this
+    figure again.
+  </p>
   {% for emp, balances in team_balances %}
   <h3 style="font-size:13.5px;margin:16px 0 6px;">{{ emp.full_name }}{% if emp.job_title %} <span class="muted" style="font-weight:normal;">- {{ emp.job_title }}</span>{% endif %}</h3>
   {% if not emp.date_joined %}

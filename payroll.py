@@ -23,6 +23,7 @@ from models import (
 )
 import payroll_calc
 import payroll_documents
+import leave_calc
 
 payroll_bp = Blueprint("payroll", __name__, url_prefix="/payroll")
 
@@ -484,9 +485,15 @@ def view_payslip(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
     timesheet_summary = _timesheet_summary_for(payslip.employee, payslip.period)
+    # Annual/Vacation Leave is the one leave type the firm tracks a running
+    # balance for (see leave_calc.sync_all_balances_for_employee) - shown on
+    # the payslip so the employee can see the days they're accruing, same
+    # current figures as the HR > Leave screen. Sick/Special/Maternity are
+    # statutory provisions, not a balance, so they never appear here.
+    leave_balances = leave_calc.sync_all_balances_for_employee(payslip.employee) if payslip.employee else []
     return render_template(
         "payroll/payslip_detail.html", payslip=payslip, item_categories=PAYSLIP_ITEM_CATEGORIES,
-        timesheet_summary=timesheet_summary,
+        timesheet_summary=timesheet_summary, leave_balances=leave_balances,
     )
 
 
@@ -614,7 +621,8 @@ def delete_payslip(payslip_id):
 def download_payslip_docx(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
-    buf = payroll_documents.generate_payslip_docx(payslip)
+    leave_balances = leave_calc.sync_all_balances_for_employee(payslip.employee) if payslip.employee else []
+    buf = payroll_documents.generate_payslip_docx(payslip, leave_balances=leave_balances)
     filename = f"Payslip_{payslip.employee.full_name.replace(' ', '_')}_{payslip.period.name.replace(' ', '_')}.docx"
     return send_file(
         buf, as_attachment=True, download_name=filename,
@@ -627,6 +635,7 @@ def download_payslip_docx(payslip_id):
 def download_payslip_pdf(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
-    buf = payroll_documents.generate_payslip_pdf(payslip)
+    leave_balances = leave_calc.sync_all_balances_for_employee(payslip.employee) if payslip.employee else []
+    buf = payroll_documents.generate_payslip_pdf(payslip, leave_balances=leave_balances)
     filename = f"Payslip_{payslip.employee.full_name.replace(' ', '_')}_{payslip.period.name.replace(' ', '_')}.pdf"
     return send_file(buf, as_attachment=True, download_name=filename, mimetype="application/pdf")
