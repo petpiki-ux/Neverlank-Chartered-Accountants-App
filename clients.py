@@ -139,6 +139,7 @@ def view_client(client_id):
         tax_heads=TAX_HEADS,
         can_delete_filing_archive=user_has_permission(current_user, "delete_documents"),
         legislative_updates_for_tagging=LegislativeUpdate.query.order_by(LegislativeUpdate.created_at.desc()).all(),
+        can_manage_qpd=user_has_permission(current_user, "manage_qpd"),
     )
 
 

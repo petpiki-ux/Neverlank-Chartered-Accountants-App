@@ -42,6 +42,16 @@
       if paid in local currency equivalent, or if the ceiling is later revised.
     </p>
 
+    <label for="apwcs_pct">APWCS - Accident Prevention and Workers' Compensation Scheme (% of Basic Salary, payable to NSSA)</label>
+    <input type="number" step="0.01" min="0" id="apwcs_pct" name="apwcs_pct" value="{{ settings.apwcs_pct }}">
+    <p class="muted" style="font-size:11px;margin-top:4px;">
+      A separate NSSA-administered scheme from the employee/employer contributions above - defaults to 1% of
+      Basic Salary ONLY (not the full Insurable Earnings base, and not capped by the ceiling above), as
+      confirmed by the firm. Paid entirely by the employer and never deducted from or shown on the employee's
+      own payslip - shown only in each payroll period's Statutory Payments Summary, for the firm's own NSSA
+      remittance.
+    </p>
+
     <label for="source_notes">Source / notes (where these rates came from, and when they were last checked)</label>
     <textarea id="source_notes" name="source_notes" rows="3">{{ settings.source_notes }}</textarea>
 

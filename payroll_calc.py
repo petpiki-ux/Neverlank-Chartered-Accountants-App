@@ -61,6 +61,17 @@ zero - a credit can't turn into a refund here). Neither category's exact
 CURRENT statutory amount could be reliably confirmed when this was built -
 see PAYROLL_TAX_CAVEAT in models.py - so nothing is pre-filled; the firm
 enters them per employee/payslip once confirmed against ZIMRA.
+
+APWCS (Accident Prevention and Workers' Compensation Scheme,
+PayrollTaxSettings.apwcs_pct, 1% of Basic Salary by default) is computed
+here purely for the firm's own NSSA remittance records (see
+PayrollPeriod.total_apwcs in models.py, summarised on a period's
+Finalisation page) - it is a SEPARATE NSSA scheme/rate from the ordinary
+NSSA employee/employer contributions above, calculated on Basic Salary
+ONLY (never the broader `nssa_earnings` base, and never capped by
+`nssa_insurable_ceiling`), paid entirely by the employer, and never
+deducted from gross/net pay, taxable income or anything else on the
+employee's own payslip.
 """
 
 
@@ -163,6 +174,13 @@ def calculate_payslip(basic_salary, items, settings, bands):
 
     net_pay = round(gross_pay - paye_tax - aids_levy - nssa_employee - other_deductions_total, 2)
 
+    # APWCS (see module docstring above) - Basic Salary only, never the
+    # broader nssa_earnings/nssa_base used for NSSA's own contributions
+    # above, and never capped by the Insurable Earnings ceiling. Purely
+    # informational (firm's NSSA remittance records): never touches
+    # gross_pay, taxable_income or net_pay.
+    apwcs = round(basic_salary * (settings.apwcs_pct or 0.0) / 100.0, 2)
+
     return {
         "basic_salary": round(basic_salary, 2),
         "allowances_total": round(allowances_total, 2),
@@ -175,6 +193,7 @@ def calculate_payslip(basic_salary, items, settings, bands):
         "aids_levy": aids_levy,
         "nssa_employee": nssa_employee,
         "nssa_employer": nssa_employer,
+        "apwcs": apwcs,
         "other_deductions_total": other_deductions_total,
         "net_pay": net_pay,
     }

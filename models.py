@@ -344,6 +344,9 @@ PERMISSIONS = [
     ("manage_company_documents", "Manage Company Documents",
      "Upload or delete a client's company documents (incorporation certificate, CR6, share register, etc.), confirm/edit/delete the Directors & Shareholders picked up from them, and run the public-information scan on a client's business.",
      tuple(USER_ROLES)),
+    ("manage_qpd", "Manage QPD / Provisional Tax Estimates",
+     "Create or edit a client's Quarterly Payment Date (provisional income tax) estimate - import/enter a Trial Balance or monthly VAT turnover, adjust the estimate, and record what's been paid.",
+     tuple(USER_ROLES)),
     ("manage_checklist_templates", "Manage Checklist Templates",
      "Create, edit or delete the checklist templates used to start new engagements (previously unrestricted).",
      tuple(USER_ROLES)),
@@ -4027,6 +4030,231 @@ class DeferredTaxItem(db.Model):
 
     def __repr__(self):
         return f"<DeferredTaxItem computation={self.computation_id}>"
+
+
+# ---------- Quarterly Payment Dates (QPDs) / Provisional Income Tax ----------
+# Zimbabwe requires a company to pay its estimated corporate income tax in
+# four instalments DURING the tax year itself (QPDs), based on an ESTIMATE
+# of annual taxable income - underestimating exposes the client to ZIMRA
+# interest/penalties (see PenaltyInterestCalculation above), so the whole
+# point of this working paper is to let the estimate be refined quarter by
+# quarter as better information comes in (an updated Trial Balance, another
+# month or two of VAT turnover), not to get it right once and forget it.
+#
+# Deliberately CLIENT-level (client_id, not engagement_id) and one per
+# (client, tax_year): a client owes QPDs every year whether or not the firm
+# happens to have an open engagement for them that year - same reasoning as
+# TaxAccountingFilingDocument above, and unlike IncomeTaxComputation/
+# TaxReturnRecord, which are tied to one specific engagement's own file.
+#
+# Per the firm's own choice, NEITHER the QPD due dates NOR the statutory
+# cumulative percentages (QPDInstalmentRate below) are hardcoded - both stay
+# firm-editable, consistent with this app's long-standing rule of never
+# hardcoding a figure that could change with a Finance Act (see
+# IncomeTaxComputation's own module comment above: tax_rate_pct/
+# aids_levy_pct on QPDEstimate below are preparer-entered the same way, with
+# no pre-filled default).
+#
+# Two ways to arrive at an estimate of annual taxable income, offered side
+# by side with no system preference (the firm picks per client/quarter):
+#   - "Trial Balance": a YTD trial balance is entered/imported (QPDTrialBalanceLine,
+#     mapped to the SAME IAS 1 categories as an audit engagement's Trial
+#     Balance - reusing financials.compute_totals/build_income_statement to
+#     get a YTD profit before tax), annualized by tb_months_covered, then
+#     reconciled to taxable income via the SAME engine as an audited
+#     engagement's Income Tax Computation (financials.build_income_tax_
+#     computation, with QPDAdjustmentLine add-back/deduction rows - reusing
+#     IncomeTaxAdjustmentLine's own item_type/INCOME_TAX_ITEM_TYPES values
+#     so no translation layer is needed between the two). More accurate
+#     once there's a TB to work from, since it's built on actual YTD
+#     results rather than a margin assumption.
+#   - "VAT Turnover": monthly VAT-return turnover figures (QPDMonthlyTurnover
+#     - this app has no monthly VAT Return tracking model to pull from
+#     automatically; VATInvoice above is an engagement-scoped invoice
+#     register, not a return-filing history, so these are entered by hand)
+#     are annualized and multiplied by a preparer-entered net margin % -
+#     turnover is not profit, so this is inherently a rougher estimate, but
+#     useful early in the year before a TB is ready.
+# Whichever method was used, the result only becomes the estimate QPDs are
+# actually computed from once copied into estimated_annual_taxable_income/
+# estimated_annual_tax_charge below - the same "system suggests, preparer's
+# save action commits it, and it stays directly editable afterwards" pattern
+# as Payslip.is_auto_calculated, so a Partner can always see (and override)
+# today's best figure regardless of how it was arrived at.
+QPD_ESTIMATION_METHODS = ["Trial Balance", "VAT Turnover", "Manual"]
+
+
+class QPDInstalmentRate(db.Model):
+    """One of the firm-wide QPD instalments - ordinarily four (25 March,
+    25 June, 25 September, 20 December) - firm-editable, including the date
+    and cumulative_pct themselves (see module comment above on why, unlike
+    most of this app's "well-corroborated" statutory dates, the firm asked
+    for these to stay adjustable too). cumulative_pct is the % of the
+    ESTIMATED ANNUAL tax charge that should have been paid BY this
+    instalment's due date - ZIMRA publishes these as cumulative figures
+    (e.g. 10%, 35%, 65%, 100%), not as four independent slices - so each
+    instalment's own amount is this instalment's cumulative_pct minus the
+    previous instalment's cumulative_pct, of the CURRENT estimate at the
+    time it's computed (see qpd_calc.build_instalments)."""
+    id = db.Column(db.Integer, primary_key=True)
+    label = db.Column(db.String(60), nullable=False)
+    due_month = db.Column(db.Integer, nullable=False)  # 1-12
+    due_day = db.Column(db.Integer, nullable=False)  # 1-31
+    cumulative_pct = db.Column(db.Float, nullable=False)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<QPDInstalmentRate {self.label!r} {self.cumulative_pct}% by {self.due_month}/{self.due_day}>"
+
+
+class QPDEstimate(db.Model):
+    """One client's provisional income tax estimate for one tax year - see
+    the module comment above for the client-level scoping and the two
+    estimation methods. estimated_annual_taxable_income/tax_rate_pct/
+    aids_levy_pct/estimated_annual_tax_charge are the "current best
+    estimate" - always directly editable regardless of which method (or
+    neither) last touched them. QPDInstalmentRecord rows (below) are
+    computed FROM this estimate on demand, each one a frozen snapshot, so
+    recomputing instalments after revising the estimate never silently
+    rewrites an instalment already recorded as paid."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    tax_year = db.Column(db.Integer, nullable=False)  # calendar tax year, e.g. 2026
+
+    estimation_method = db.Column(db.String(20), default="Manual")  # QPD_ESTIMATION_METHODS
+
+    # ---- Trial Balance method working fields ----
+    tb_months_covered = db.Column(db.Integer)  # how many months of the tax year the TB below covers, for annualizing
+    tb_tax_loss_brought_forward = db.Column(db.Float, default=0.0)
+
+    # ---- VAT Turnover method working fields ----
+    vat_net_margin_pct = db.Column(db.Float)  # preparer's estimated net profit margin on annualized turnover
+
+    # ---- The current best estimate - the "flex" layer, see module comment ----
+    estimated_annual_taxable_income = db.Column(db.Float, default=0.0)
+    tax_rate_pct = db.Column(db.Float)  # preparer-entered, never hardcoded - see module comment
+    aids_levy_pct = db.Column(db.Float)
+    estimated_annual_tax_charge = db.Column(db.Float, default=0.0)
+
+    notes = db.Column(db.Text)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("qpd_estimates", lazy=True, cascade="all, delete-orphan"))
+    updated_by = db.relationship("User")
+    tb_lines = db.relationship("QPDTrialBalanceLine", backref="estimate", lazy=True, cascade="all, delete-orphan", order_by="QPDTrialBalanceLine.id")
+    adjustment_lines = db.relationship("QPDAdjustmentLine", backref="estimate", lazy=True, cascade="all, delete-orphan", order_by="QPDAdjustmentLine.order")
+    monthly_turnovers = db.relationship("QPDMonthlyTurnover", backref="estimate", lazy=True, cascade="all, delete-orphan", order_by="QPDMonthlyTurnover.month")
+    instalments = db.relationship("QPDInstalmentRecord", backref="estimate", lazy=True, cascade="all, delete-orphan", order_by="QPDInstalmentRecord.order")
+
+    __table_args__ = (db.UniqueConstraint("client_id", "tax_year", name="uq_qpd_estimate_client_year"),)
+
+    @property
+    def annualized_turnover(self):
+        """Average monthly turnover entered so far x 12 - 0 if none entered
+        yet, so templates can show a clear "enter at least one month" state
+        rather than a misleading 0.00 estimate."""
+        months = len(self.monthly_turnovers)
+        if not months:
+            return 0.0
+        total = sum(t.turnover_amount or 0.0 for t in self.monthly_turnovers)
+        return round((total / months) * 12, 2)
+
+    @property
+    def unmapped_tb_line_count(self):
+        return sum(1 for l in self.tb_lines if not l.fs_category)
+
+    def __repr__(self):
+        return f"<QPDEstimate client={self.client_id} tax_year={self.tax_year}>"
+
+
+class QPDTrialBalanceLine(db.Model):
+    """One account on a QPDEstimate's YTD trial balance - same shape as
+    TrialBalanceLine above (duck-type compatible with financials.
+    compute_totals/build_income_statement: .fs_category, .current_debit,
+    .current_credit, .prior_debit, .prior_credit) so this estimate's YTD
+    profit before tax is computed with the EXACT same engine as an audited
+    engagement's Statement of Profit or Loss - deliberately not a full
+    second trial balance implementation. prior_debit/prior_credit are
+    always 0 here (a QPD estimate has no "prior year comparative" of its
+    own) but kept for duck-type compatibility rather than a parallel
+    current-year-only version of compute_totals."""
+    id = db.Column(db.Integer, primary_key=True)
+    estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
+    account_code = db.Column(db.String(50))
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50))  # code from financials.FS_CATEGORIES, or blank if unmapped
+    current_debit = db.Column(db.Float, default=0.0)
+    current_credit = db.Column(db.Float, default=0.0)
+    prior_debit = db.Column(db.Float, default=0.0)
+    prior_credit = db.Column(db.Float, default=0.0)
+
+    def __repr__(self):
+        return f"<QPDTrialBalanceLine {self.account_name}>"
+
+
+class QPDAdjustmentLine(db.Model):
+    """One add-back/deduction/capital-allowance line reconciling a
+    QPDEstimate's annualized Trial Balance profit to estimated taxable
+    income - reuses IncomeTaxAdjustmentLine's own item_type values
+    (INCOME_TAX_ITEM_TYPES above) so financials.build_income_tax_
+    computation() can be called with these rows directly, unchanged, the
+    same way it already is for an audited engagement's own computation."""
+    id = db.Column(db.Integer, primary_key=True)
+    estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
+    item_type = db.Column(db.String(20), default="addback")  # see INCOME_TAX_ITEM_TYPES
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, default=0.0)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<QPDAdjustmentLine estimate={self.estimate_id}>"
+
+
+class QPDMonthlyTurnover(db.Model):
+    """One month's VAT-return turnover figure, as filed with ZIMRA - entered
+    by hand (see the module comment above on why this app has no monthly
+    VAT Return model to pull from automatically)."""
+    id = db.Column(db.Integer, primary_key=True)
+    estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
+    month = db.Column(db.Date, nullable=False)  # first day of the month it covers
+    turnover_amount = db.Column(db.Float, default=0.0)
+
+    __table_args__ = (db.UniqueConstraint("estimate_id", "month", name="uq_qpd_monthly_turnover"),)
+
+    def __repr__(self):
+        return f"<QPDMonthlyTurnover estimate={self.estimate_id} {self.month}>"
+
+
+class QPDInstalmentRecord(db.Model):
+    """One computed QPD instalment for one QPDEstimate - a frozen snapshot
+    of a QPDInstalmentRate row (label/due date/cumulative_pct) AND the
+    annual estimate that was current at the moment this instalment was
+    (re)computed (see qpd_calc.build_instalments), so neither editing the
+    firm-wide QPDInstalmentRate table nor revising the estimate later
+    silently changes an instalment already recorded as paid.
+    paid_amount/paid_date/paid_reference are then recorded separately, once
+    actually remitted to ZIMRA."""
+    id = db.Column(db.Integer, primary_key=True)
+    estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
+    label = db.Column(db.String(60))
+    due_date = db.Column(db.Date)
+    cumulative_pct = db.Column(db.Float)
+    computed_amount = db.Column(db.Float, default=0.0)  # this instalment's own share (cumulative - previous), of the estimate at computation time
+    annual_tax_charge_snapshot = db.Column(db.Float)  # what estimated_annual_tax_charge was when this was computed
+    computed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    order = db.Column(db.Integer, default=0)
+
+    paid_amount = db.Column(db.Float)
+    paid_date = db.Column(db.Date)
+    paid_reference = db.Column(db.String(100))  # e.g. a ZIMRA payment reference/receipt number
+
+    @property
+    def is_paid(self):
+        return self.paid_amount is not None
+
+    def __repr__(self):
+        return f"<QPDInstalmentRecord {self.label!r} estimate={self.estimate_id}>"
 
 
 class SubstantiveProcedureArea(db.Model):
@@ -7846,7 +8074,15 @@ PAYROLL_TAX_CAVEAT = (
     "PAYE payable directly, after the tax tables, before AIDS Levy) - the "
     "current statutory exempt/credit AMOUNTS couldn't be reliably confirmed "
     "either, so nothing is pre-filled: enter them per employee once "
-    "confirmed against ZIMRA."
+    "confirmed against ZIMRA. The Accident Prevention and Workers' "
+    "Compensation Scheme (APWCS) is pre-loaded at 1% of Basic Salary, as "
+    "confirmed by the firm - it is payable to NSSA alongside the NSSA "
+    "employee/employer contributions, but is a SEPARATE scheme/rate, is "
+    "calculated on Basic Salary only (not full Insurable Earnings, and not "
+    "capped by the Insurable Earnings ceiling), and never affects the "
+    "employee's own payslip - like the employer's own NSSA contribution, "
+    "it's an employer cost shown for the firm's own remittance records "
+    "only."
 )
 
 
@@ -7873,6 +8109,14 @@ class PayrollTaxSettings(db.Model):
     nssa_employee_pct = db.Column(db.Float, default=4.5)
     nssa_employer_pct = db.Column(db.Float, default=4.5)
     nssa_insurable_ceiling = db.Column(db.Float, default=700.0)  # None = no ceiling applied
+    # Accident Prevention and Workers' Compensation Scheme (APWCS) - a
+    # SEPARATE NSSA-administered scheme from the ordinary NSSA employee/
+    # employer contributions above, calculated on Basic Salary only (not
+    # Insurable Earnings, and never capped by nssa_insurable_ceiling), paid
+    # entirely by the employer and never deducted from or shown on the
+    # employee's own payslip - see PAYROLL_TAX_CAVEAT above and
+    # payroll_calc.calculate_payslip for exactly where it's computed.
+    apwcs_pct = db.Column(db.Float, default=1.0)
     source_notes = db.Column(db.Text)
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -7980,6 +8224,46 @@ class PayrollPeriod(db.Model):
     def total_gross_pay(self):
         return sum(p.gross_pay or 0.0 for p in self.payslips)
 
+    # ---- Statutory payments summary (Finalisation) - one figure per
+    # authority the firm actually remits to, totalled across every payslip
+    # in the period. PAYE and AIDS Levy go to ZIMRA; NSSA Employee, NSSA
+    # Employer and APWCS all go to NSSA (as three separate line items - see
+    # Payslip.apwcs/PayrollTaxSettings.apwcs_pct - APWCS is a different
+    # scheme/rate from the ordinary NSSA contributions, not a sub-total of
+    # them). None of this changes any employee's own net pay; it's purely a
+    # remittance-planning summary for the firm.
+    @property
+    def total_paye(self):
+        return sum(p.paye_tax or 0.0 for p in self.payslips)
+
+    @property
+    def total_aids_levy(self):
+        return sum(p.aids_levy or 0.0 for p in self.payslips)
+
+    @property
+    def total_nssa_employee(self):
+        return sum(p.nssa_employee or 0.0 for p in self.payslips)
+
+    @property
+    def total_nssa_employer(self):
+        return sum(p.nssa_employer or 0.0 for p in self.payslips)
+
+    @property
+    def total_apwcs(self):
+        return sum(p.apwcs or 0.0 for p in self.payslips)
+
+    @property
+    def total_zimra_remittance(self):
+        """PAYE + AIDS Levy - what the firm pays ZIMRA for this period."""
+        return self.total_paye + self.total_aids_levy
+
+    @property
+    def total_nssa_remittance(self):
+        """NSSA Employee + NSSA Employer + APWCS - what the firm pays NSSA
+        for this period (three separate line items on NSSA's own return,
+        summed here only for a single "total due to NSSA" figure)."""
+        return self.total_nssa_employee + self.total_nssa_employer + self.total_apwcs
+
     def __repr__(self):
         return f"<PayrollPeriod {self.name!r} ({self.scope})>"
 
@@ -8018,6 +8302,12 @@ class Payslip(db.Model):
     aids_levy = db.Column(db.Float, default=0.0)
     nssa_employee = db.Column(db.Float, default=0.0)
     nssa_employer = db.Column(db.Float, default=0.0)  # employer cost, informational - not deducted from the employee
+    # Accident Prevention and Workers' Compensation Scheme (APWCS) - 1% of
+    # Basic Salary (PayrollTaxSettings.apwcs_pct), payable to NSSA by the
+    # employer alongside (but separately from) nssa_employer above;
+    # informational only, like nssa_employer - never deducted from or shown
+    # on the employee's own payslip.
+    apwcs = db.Column(db.Float, default=0.0)
     other_deductions_total = db.Column(db.Float, default=0.0)
 
     net_pay = db.Column(db.Float, default=0.0)

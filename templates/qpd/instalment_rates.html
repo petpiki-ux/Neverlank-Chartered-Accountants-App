@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}QPD Instalment Structure - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>QPD Instalment Structure</h1>
+    <div class="subtitle">Firm-wide Quarterly Payment Dates structure used by every client's provisional tax estimator. Nothing here is hardcoded by the system - confirm each instalment's cumulative percentage and due date yourself and keep this table current if ZIMRA changes the structure. Instalments are applied in the order below, lowest cumulative % first.</div>
+  </div>
+</div>
+
+<div class="card">
+  {% if rates %}
+  <table>
+    <thead><tr><th>Order</th><th>Label</th><th>Due date (month / day)</th><th>Cumulative %</th><th>This instalment's share</th><th></th><th></th></tr></thead>
+    <tbody>
+      {% set prev = namespace(pct=0.0) %}
+      {% for r in rates %}
+      <tr>
+        <form method="post" action="{{ url_for('qpd.update_instalment_rate', rate_id=r.id) }}" class="inline">
+        <td>{{ loop.index }}</td>
+        <td><input type="text" name="label" value="{{ r.label }}" style="width:10em;"></td>
+        <td>
+          <input type="number" name="due_month" value="{{ r.due_month }}" min="1" max="12" style="width:4em;" title="Month">
+          /
+          <input type="number" name="due_day" value="{{ r.due_day }}" min="1" max="31" style="width:4em;" title="Day">
+        </td>
+        <td><input type="number" step="0.01" name="cumulative_pct" value="{{ r.cumulative_pct }}" style="width:6em;">%</td>
+        <td>{{ "%.2f"|format(r.cumulative_pct - prev.pct) }}%{% set prev.pct = r.cumulative_pct %}</td>
+        <td><button type="submit" class="btn small">Save</button></td>
+        </form>
+        <td><form method="post" action="{{ url_for('qpd.delete_instalment_rate', rate_id=r.id) }}" class="inline" onsubmit="return confirm('Delete this instalment?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% if rates and (rates[-1].cumulative_pct != 100) %}
+  <p class="text-muted" style="margin-top:0.75rem;">Note: the last instalment's cumulative % is {{ "%.2f"|format(rates[-1].cumulative_pct) }}%, not 100%. Each client's instalments are still scaled so they sum exactly to that client's estimated annual tax charge, but you may want to confirm this structure is complete.</p>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">No instalments configured yet - add the first one below.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Add an instalment</h3>
+  <form method="post" action="{{ url_for('qpd.instalment_rates') }}" class="form-row" style="flex-wrap:wrap;">
+    <div><label for="label">Label *</label><input type="text" id="label" name="label" placeholder="e.g. 1st QPD" required></div>
+    <div><label for="due_month">Due month (1-12) *</label><input type="number" id="due_month" name="due_month" min="1" max="12" required></div>
+    <div><label for="due_day">Due day *</label><input type="number" id="due_day" name="due_day" min="1" max="31" required></div>
+    <div><label for="cumulative_pct">Cumulative % *</label><input type="number" step="0.01" id="cumulative_pct" name="cumulative_pct" required></div>
+    <div><button type="submit" class="btn gold">Add instalment</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <a href="{{ url_for('clients.list_clients') }}" class="btn">&larr; Back to clients</a>
+</div>
+{% endblock %}

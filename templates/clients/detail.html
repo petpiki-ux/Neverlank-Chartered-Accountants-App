@@ -74,6 +74,19 @@
 </div>
 
 <div class="card">
+  <h3 class="mt-0">Quarterly Payment Dates (QPDs)</h3>
+  <p class="muted" style="font-size:12px;">
+    Estimate this client's annual taxable income - from an imported/entered Trial Balance or from monthly VAT
+    turnover - and track the resulting provisional corporate income tax instalments due to ZIMRA across the year.
+    The estimate stays directly editable at any time regardless of which method was last used.
+  </p>
+  <a href="{{ url_for('qpd.view_qpd', client_id=client.id) }}" class="btn gold">Open QPD Estimator</a>
+  {% if can_manage_qpd %}
+  <a href="{{ url_for('qpd.instalment_rates') }}" class="btn secondary">QPD Instalment Structure</a>
+  {% endif %}
+</div>
+
+<div class="card">
   <h3 class="mt-0">Company Documents</h3>
   <p class="muted" style="font-size:12px;">
     Upload this client's incorporation documents, CR6, share register, etc. once here - every engagement's Client

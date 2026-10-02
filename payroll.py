@@ -143,6 +143,7 @@ def tax_settings():
         settings.nssa_employer_pct = _parse_float(request.form.get("nssa_employer_pct"), 0.0)
         ceiling = request.form.get("nssa_insurable_ceiling", "").strip()
         settings.nssa_insurable_ceiling = _parse_float(ceiling) if ceiling else None
+        settings.apwcs_pct = _parse_float(request.form.get("apwcs_pct"), settings.apwcs_pct or 0.0)
         settings.source_notes = request.form.get("source_notes", "").strip()
         settings.updated_by_id = current_user.id
         settings.updated_at = datetime.utcnow()
@@ -541,6 +542,7 @@ def update_payslip(payslip_id):
     payslip.aids_levy = _parse_float(request.form.get("aids_levy"), payslip.aids_levy or 0.0)
     payslip.nssa_employee = _parse_float(request.form.get("nssa_employee"), payslip.nssa_employee or 0.0)
     payslip.nssa_employer = _parse_float(request.form.get("nssa_employer"), payslip.nssa_employer or 0.0)
+    payslip.apwcs = _parse_float(request.form.get("apwcs"), payslip.apwcs or 0.0)
     payslip.other_deductions_total = _parse_float(request.form.get("other_deductions_total"), payslip.other_deductions_total or 0.0)
     payslip.net_pay = _parse_float(request.form.get("net_pay"), payslip.net_pay or 0.0)
     payslip.notes = request.form.get("notes", "").strip()

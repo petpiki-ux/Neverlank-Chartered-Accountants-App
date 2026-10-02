@@ -14,7 +14,7 @@ from models import (
     User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES,
     FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PayrollTaxSettings, PAYROLL_PAY_FREQUENCIES,
     LeaveType, LEAVE_TYPES_STATUTORY_ZW, CompanyDocument, SubstantiveProcedureItem, FinalisationChecklist,
-    FinalisationChecklistItem,
+    FinalisationChecklistItem, QPDInstalmentRate,
 )
 from config import Config
 
@@ -653,6 +653,32 @@ def seed_statutory_deadlines():
     for due_date, description in qpd_dates:
         db.session.add(StatutoryDeadline(
             tax_head="Provisional Tax (QPDs)", description=description, due_date=due_date,
+        ))
+    db.session.commit()
+
+
+def seed_qpd_instalment_rates():
+    """Pre-load the standard ZIMRA QPD instalment structure onto the
+    firm-wide, firm-editable QPDInstalmentRate table used by the client-
+    level QPD (provisional income tax) estimator - see QPDInstalmentRate's
+    own docstring in models.py. 10%/35%/65%/100% cumulative by 25 March/
+    25 June/25 September/20 December is the same well-corroborated
+    structure already pre-loaded as plain due-date reminders in
+    seed_statutory_deadlines() above - the firm asked for these to stay
+    editable here too (unlike the due dates in StatutoryDeadline), so this
+    only pre-loads a sensible starting point. Only called once, when the
+    table is completely empty (see app.py) - never re-run after that, so a
+    row the firm has since edited (including the dates/percentages
+    themselves, or adding/removing an instalment) stays exactly as edited."""
+    rows = [
+        ("1st QPD", 3, 25, 10.0, 0),
+        ("2nd QPD", 6, 25, 35.0, 1),
+        ("3rd QPD", 9, 25, 65.0, 2),
+        ("4th QPD", 12, 20, 100.0, 3),
+    ]
+    for label, due_month, due_day, cumulative_pct, order in rows:
+        db.session.add(QPDInstalmentRate(
+            label=label, due_month=due_month, due_day=due_day, cumulative_pct=cumulative_pct, order=order,
         ))
     db.session.commit()
 

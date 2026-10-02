@@ -8,7 +8,7 @@ from sqlalchemy.engine import Engine
 
 from config import Config, INSTANCE_DIR
 from extensions import db, login_manager, socketio
-from models import User, DocumentTemplate, Permission, FilingIndexSection, StatutoryDeadline
+from models import User, DocumentTemplate, Permission, FilingIndexSection, StatutoryDeadline, QPDInstalmentRate
 
 
 @event.listens_for(Engine, "connect")
@@ -265,7 +265,24 @@ def _add_missing_columns():
             ("exempt_income_total", "FLOAT DEFAULT 0"),
             ("paye_before_credits", "FLOAT DEFAULT 0"),
             ("tax_credits_total", "FLOAT DEFAULT 0"),
+            # apwcs - see models.Payslip's docstring and PAYROLL_TAX_CAVEAT:
+            # Accident Prevention and Workers' Compensation Scheme, 1% of
+            # Basic Salary payable to NSSA by the employer, never affecting
+            # the employee's own payslip. Existing payslips default to 0,
+            # same reasoning as the three fields above - nothing
+            # retroactively changes an already-stored payslip; a reviewer
+            # can backfill it manually (see update_payslip) or by hitting
+            # Recalculate.
+            ("apwcs", "FLOAT DEFAULT 0"),
         ],
+        # apwcs_pct - see models.PayrollTaxSettings's docstring and
+        # PAYROLL_TAX_CAVEAT: unlike the payslip-level column above, this
+        # DEFAULT backfills the firm's single existing settings row
+        # immediately (SQLite applies a literal ALTER TABLE ... DEFAULT to
+        # existing rows, not just new ones) - so an existing install picks
+        # up the firm-confirmed 1% rate automatically, exactly like a fresh
+        # install's column default would.
+        "payroll_tax_settings": [("apwcs_pct", "FLOAT DEFAULT 1.0")],
         # nssa_applicable - see PayslipItem's docstring in models.py: lets an
         # Allowance/Exempt Income item (e.g. the EMPLOYER's own medical aid
         # contribution) be excluded from NSSA Insurable Earnings specifically,
@@ -457,6 +474,7 @@ def create_app():
     from filing_archive import filing_archive_bp
     from tax import tax_bp
     from accounting import accounting_bp
+    from qpd import qpd_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -477,6 +495,7 @@ def create_app():
     app.register_blueprint(filing_archive_bp)
     app.register_blueprint(tax_bp)
     app.register_blueprint(accounting_bp)
+    app.register_blueprint(qpd_bp)
 
     @app.route("/")
     def index():
@@ -569,6 +588,13 @@ def create_app():
         if StatutoryDeadline.query.count() == 0:
             from seed import seed_statutory_deadlines
             seed_statutory_deadlines()
+        # QPD Instalment Rates (QPDInstalmentRate): the $ split/dates behind
+        # the client-level QPD (provisional income tax) estimator - seeded
+        # the same way as Statutory Deadlines above, once, as an editable
+        # starting point (see seed_qpd_instalment_rates's own docstring).
+        if QPDInstalmentRate.query.count() == 0:
+            from seed import seed_qpd_instalment_rates
+            seed_qpd_instalment_rates()
         # Document Templates whose reference codes were renumbered to the
         # Filing Index's N-codes (e.g. SA-02 -> N9006) need already-seeded
         # rows on an existing install updated to match - safe/cheap to run

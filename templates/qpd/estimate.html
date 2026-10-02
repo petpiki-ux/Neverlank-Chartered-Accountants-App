@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block title %}QPDs {{ tax_year }} - {{ client.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Quarterly Payment Dates (QPDs) - {{ client.name }}</h1>
+    <div class="subtitle">
+      Provisional income tax for tax year {{ tax_year }} - estimate, refine and track each instalment.
+      Revisit the estimate before each QPD falls due, as better information (another month of VAT
+      turnover, an updated Trial Balance) comes in.
+    </div>
+  </div>
+  <div>
+    <a href="{{ url_for('clients.view_client', client_id=client.id) }}" class="btn secondary">Back to client</a>
+    {% if can_manage %}<a href="{{ url_for('qpd.instalment_rates') }}" class="btn secondary">QPD instalment structure</a>{% endif %}
+  </div>
+</div>
+
+<div class="card" style="max-width:420px;">
+  <h2 style="margin-top:0;font-size:16px;">Tax year</h2>
+  <form method="get" style="display:flex;gap:8px;align-items:flex-end;">
+    <div>
+      <label for="tax_year">Tax year</label>
+      <input type="number" id="tax_year" name="tax_year" value="{{ tax_year }}" style="width:110px;">
+    </div>
+    <button type="submit" class="btn secondary">Open</button>
+  </form>
+  {% if other_years %}
+  <p class="muted" style="font-size:11.5px;margin-top:8px;margin-bottom:0;">
+    Other years on file:
+    {% for y in other_years %}<a href="{{ url_for('qpd.view_qpd', client_id=client.id, tax_year=y) }}">{{ y }}</a>{% if not loop.last %}, {% endif %}{% endfor %}
+  </p>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h2 style="margin-top:0;font-size:16px;">Current estimate <span class="badge status-{{ 'Finalized' if estimate.estimation_method != 'Manual' else 'Draft' }}">{{ estimate.estimation_method }}</span></h2>
+  <p class="muted" style="font-size:12px;">
+    This is what QPD instalments are actually computed from - always directly editable here regardless of
+    whether it came from the Trial Balance or VAT Turnover working below, or was typed in by hand. Tax rate
+    and AIDS Levy % are never pre-filled - enter the figures confirmed for this tax year.
+  </p>
+  {% if estimate.updated_at %}
+  <p class="muted" style="font-size:11px;">Last updated {{ estimate.updated_at.strftime('%d %b %Y %H:%M') }}{% if estimate.updated_by %} by {{ estimate.updated_by.name }}{% endif %}.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('qpd.update_estimate', client_id=client.id, tax_year=tax_year) }}">
+    <div class="form-row">
+      <div>
+        <label for="estimated_annual_taxable_income">Estimated annual taxable income</label>
+        <input type="number" step="0.01" id="estimated_annual_taxable_income" name="estimated_annual_taxable_income" value="{{ estimate.estimated_annual_taxable_income or 0 }}" {% if not can_manage %}disabled{% endif %}>
+      </div>
+      <div>
+        <label for="estimated_annual_tax_charge">Estimated annual tax charge</label>
+        <input type="number" step="0.01" id="estimated_annual_tax_charge" name="estimated_annual_tax_charge" value="{{ estimate.estimated_annual_tax_charge or 0 }}" style="font-weight:bold;" {% if not can_manage %}disabled{% endif %}>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="tax_rate_pct">Corporate tax rate %</label>
+        <input type="number" step="0.01" id="tax_rate_pct" name="tax_rate_pct" value="{{ estimate.tax_rate_pct if estimate.tax_rate_pct is not none else '' }}" {% if not can_manage %}disabled{% endif %}>
+      </div>
+      <div>
+        <label for="aids_levy_pct">AIDS Levy %</label>
+        <input type="number" step="0.01" id="aids_levy_pct" name="aids_levy_pct" value="{{ estimate.aids_levy_pct if estimate.aids_levy_pct is not none else '' }}" {% if not can_manage %}disabled{% endif %}>
+      </div>
+    </div>
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="2" {% if not can_manage %}disabled{% endif %}>{{ estimate.notes or '' }}</textarea>
+    {% if can_manage %}<button type="submit" class="btn gold">Save estimate</button>{% endif %}
+  </form>
+</div>
+
+<div class="card" style="max-width:820px;">
+  <h2 style="margin-top:0;font-size:16px;">Method 1 - Trial Balance</h2>
+  <p class="muted" style="font-size:12px;">
+    Import or enter a YTD trial balance, map each account to an IAS 1 category (reuses this client's own
+    account mapping), say how many months of the tax year it covers, add any add-backs/deductions, then use
+    the suggested figure below. More accurate than VAT turnover once a TB is ready, since it's built on
+    actual results rather than a margin assumption.
+  </p>
+
+  {% if can_manage %}
+  <form method="post" action="{{ url_for('qpd.upload_tb', client_id=client.id, tax_year=tax_year) }}" enctype="multipart/form-data" style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+    <div>
+      <label for="file">Upload Trial Balance (.xlsx or .csv)</label>
+      <input type="file" id="file" name="file" accept=".xlsx,.xls,.csv">
+    </div>
+    <button type="submit" class="btn secondary">Import (replaces current lines)</button>
+  </form>
+  {% endif %}
+
+  <table style="margin-top:10px;">
+    <thead><tr><th>Code</th><th>Account</th><th>IAS 1 category</th><th class="text-right">Current Dr</th><th class="text-right">Current Cr</th><th></th></tr></thead>
+    <tbody>
+      {% for line in estimate.tb_lines %}
+      <tr{% if not line.fs_category %} class="danger"{% endif %}>
+        <form method="post" action="{{ url_for('qpd.update_tb_line', client_id=client.id, line_id=line.id) }}" class="inline">
+        <td><input type="text" name="account_code" value="{{ line.account_code or '' }}" style="width:70px;margin-bottom:0;" {% if not can_manage %}disabled{% endif %}></td>
+        <td><input type="text" name="account_name" value="{{ line.account_name }}" style="width:170px;margin-bottom:0;" {% if not can_manage %}disabled{% endif %}></td>
+        <td>
+          <select name="fs_category" style="margin-bottom:0;" {% if not can_manage %}disabled{% endif %}>
+            <option value="">Unmapped</option>
+            {% for group_label, choices in fs_category_choices %}
+            <optgroup label="{{ group_label }}">
+              {% for code, label in choices %}<option value="{{ code }}" {% if line.fs_category==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </optgroup>
+            {% endfor %}
+          </select>
+        </td>
+        <td><input type="number" step="0.01" name="current_debit" value="{{ line.current_debit or 0 }}" style="width:95px;margin-bottom:0;" {% if not can_manage %}disabled{% endif %}></td>
+        <td><input type="number" step="0.01" name="current_credit" value="{{ line.current_credit or 0 }}" style="width:95px;margin-bottom:0;" {% if not can_manage %}disabled{% endif %}></td>
+        <td>
+          {% if can_manage %}<button type="submit" class="btn small secondary">Save</button>{% endif %}
+        </form>
+        {% if can_manage %}
+        <form method="post" action="{{ url_for('qpd.delete_tb_line', client_id=client.id, line_id=line.id) }}" class="inline">
+          <button type="submit" class="btn small danger">Remove</button>
+        </form>
+        {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not estimate.tb_lines %}
+      <tr><td colspan="6" class="empty-state">No Trial Balance lines yet - import a file above or add one below.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+  {% if estimate.unmapped_tb_line_count %}
+  <p class="muted" style="font-size:11px;color:#b91c1c;">{{ estimate.unmapped_tb_line_count }} account(s) still unmapped - they're excluded from the profit before tax figure below until mapped.</p>
+  {% endif %}
+
+  {% if can_manage %}
+  <form method="post" action="{{ url_for('qpd.add_tb_line', client_id=client.id, tax_year=tax_year) }}" class="form-row" style="align-items:flex-end;margin-top:6px;">
+    <div><label for="account_name">Account name</label><input type="text" id="account_name" name="account_name" placeholder="e.g. Revenue" required></div>
+    <div><label for="current_debit">Debit</label><input type="number" step="0.01" id="current_debit" name="current_debit"></div>
+    <div><label for="current_credit">Credit</label><input type="number" step="0.01" id="current_credit" name="current_credit"></div>
+    <div><button type="submit" class="btn secondary">+ Add account</button></div>
+  </form>
+  {% endif %}
+
+  <div class="form-row" style="margin-top:14px;">
+    <div>
+      <label for="tb_months_covered">Months of the tax year this Trial Balance covers</label>
+      <form method="post" action="{{ url_for('qpd.update_tb_settings', client_id=client.id, tax_year=tax_year) }}" style="display:flex;gap:8px;align-items:flex-end;">
+        <input type="number" min="1" max="12" id="tb_months_covered" name="tb_months_covered" value="{{ estimate.tb_months_covered or '' }}" style="width:90px;" {% if not can_manage %}disabled{% endif %}>
+        <label for="tb_tax_loss_brought_forward" class="muted" style="margin:0;">Tax loss b/f
+          <input type="number" step="0.01" id="tb_tax_loss_brought_forward" name="tb_tax_loss_brought_forward" value="{{ estimate.tb_tax_loss_brought_forward or 0 }}" style="width:110px;" {% if not can_manage %}disabled{% endif %}>
+        </label>
+        {% if can_manage %}<button type="submit" class="btn small secondary">Save</button>{% endif %}
+      </form>
+    </div>
+  </div>
+
+  <h3 style="font-size:13.5px;margin:14px 0 6px;">Add-backs / deductions</h3>
+  <table>
+    <thead><tr><th>Type</th><th>Description</th><th class="text-right">Amount</th><th></th></tr></thead>
+    <tbody>
+      {% for line in estimate.adjustment_lines %}
+      <tr>
+        <td>{{ income_tax_item_type_labels.get(line.item_type, line.item_type) }}</td>
+        <td>{{ line.description }}</td>
+        <td class="text-right">{{ '%.2f'|format(line.amount or 0) }}</td>
+        <td class="text-right">
+          {% if can_manage %}
+          <form method="post" action="{{ url_for('qpd.delete_tb_adjustment', client_id=client.id, line_id=line.id) }}" class="inline">
+            <button type="submit" class="btn small danger">Remove</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not estimate.adjustment_lines %}
+      <tr><td colspan="4" class="empty-state">No add-backs/deductions added.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+  {% if can_manage %}
+  <form method="post" action="{{ url_for('qpd.add_tb_adjustment', client_id=client.id, tax_year=tax_year) }}" class="form-row" style="align-items:flex-end;">
+    <div>
+      <label for="item_type">Type</label>
+      <select id="item_type" name="item_type">
+        {% for t in income_tax_item_types %}<option value="{{ t }}">{{ income_tax_item_type_labels.get(t, t) }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label for="description">Description</label><input type="text" id="description" name="description" placeholder="e.g. Depreciation" required></div>
+    <div><label for="amount">Amount</label><input type="number" step="0.01" id="amount" name="amount"></div>
+    <div><button type="submit" class="btn secondary">+ Add</button></div>
+  </form>
+  {% endif %}
+
+  {% if tb_suggestion %}
+  <div class="flash info" style="margin-top:14px;">
+    <strong>Suggested from Trial Balance:</strong>
+    YTD profit before tax {{ '%.2f'|format(tb_suggestion.pbt_ytd) }}, annualized {{ '%.2f'|format(tb_suggestion.annualized_pbt) }}
+    -&gt; taxable income {{ '%.2f'|format(tb_suggestion.taxable_income) }}, tax charge {{ '%.2f'|format(tb_suggestion.total_tax_charge) }}.
+    {% if can_manage %}
+    <form method="post" action="{{ url_for('qpd.use_tb_estimate', client_id=client.id, tax_year=tax_year) }}" class="inline" style="margin-top:6px;">
+      <button type="submit" class="btn gold small">Use this estimate</button>
+    </form>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted" style="font-size:11.5px;margin-top:10px;">Enter the months covered and at least one mapped account above to see a suggested figure here.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:720px;">
+  <h2 style="margin-top:0;font-size:16px;">Method 2 - VAT Turnover</h2>
+  <p class="muted" style="font-size:12px;">
+    Enter each month's VAT-return turnover as it's filed (this app has no monthly VAT Return tracking of its
+    own to pull from automatically), annualized and multiplied by an estimated net margin %. Turnover isn't
+    profit, so this is inherently rougher than the Trial Balance method - most useful early in the year
+    before a TB is ready.
+  </p>
+  <table>
+    <thead><tr><th>Month</th><th class="text-right">Turnover</th><th></th></tr></thead>
+    <tbody>
+      {% for row in estimate.monthly_turnovers %}
+      <tr>
+        <td>{{ row.month.strftime('%B %Y') }}</td>
+        <td class="text-right">{{ '%.2f'|format(row.turnover_amount or 0) }}</td>
+        <td class="text-right">
+          {% if can_manage %}
+          <form method="post" action="{{ url_for('qpd.delete_vat_turnover', client_id=client.id, row_id=row.id) }}" class="inline">
+            <button type="submit" class="btn small danger">Remove</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not estimate.monthly_turnovers %}
+      <tr><td colspan="3" class="empty-state">No months entered yet.</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+  {% if can_manage %}
+  <form method="post" action="{{ url_for('qpd.save_vat_turnover', client_id=client.id, tax_year=tax_year) }}" class="form-row" style="align-items:flex-end;">
+    <div><label for="month">Month</label><input type="month" id="month" name="month" required></div>
+    <div><label for="turnover_amount">Turnover</label><input type="number" step="0.01" id="turnover_amount" name="turnover_amount" required></div>
+    <div><button type="submit" class="btn secondary">+ Save month</button></div>
+  </form>
+  {% endif %}
+
+  <p style="margin-top:10px;">Annualized turnover: <strong>{{ '%.2f'|format(estimate.annualized_turnover) }}</strong></p>
+  <form method="post" action="{{ url_for('qpd.update_vat_settings', client_id=client.id, tax_year=tax_year) }}" style="display:flex;gap:8px;align-items:flex-end;">
+    <label for="vat_net_margin_pct">Estimated net profit margin %
+      <input type="number" step="0.01" id="vat_net_margin_pct" name="vat_net_margin_pct" value="{{ estimate.vat_net_margin_pct if estimate.vat_net_margin_pct is not none else '' }}" style="width:110px;" {% if not can_manage %}disabled{% endif %}>
+    </label>
+    {% if can_manage %}<button type="submit" class="btn small secondary">Save</button>{% endif %}
+  </form>
+
+  {% if vat_suggestion %}
+  <div class="flash info" style="margin-top:12px;">
+    <strong>Suggested from VAT Turnover:</strong>
+    annualized turnover {{ '%.2f'|format(vat_suggestion.annualized_turnover) }} x {{ estimate.vat_net_margin_pct }}% margin
+    -&gt; taxable income {{ '%.2f'|format(vat_suggestion.taxable_income) }}, tax charge {{ '%.2f'|format(vat_suggestion.total_tax_charge) }}.
+    {% if can_manage %}
+    <form method="post" action="{{ url_for('qpd.use_vat_estimate', client_id=client.id, tax_year=tax_year) }}" class="inline" style="margin-top:6px;">
+      <button type="submit" class="btn gold small">Use this estimate</button>
+    </form>
+    {% endif %}
+  </div>
+  {% else %}
+  <p class="muted" style="font-size:11.5px;margin-top:10px;">Enter at least one month's turnover and a net margin % to see a suggested figure here.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="max-width:820px;">
+  <h2 style="margin-top:0;font-size:16px;">QPD instalments</h2>
+  <p class="muted" style="font-size:12px;">
+    Each instalment's own amount is its cumulative % minus the previous instalment's, of the current
+    estimated annual tax charge above - see <a href="{{ url_for('qpd.instalment_rates') }}">QPD instalment
+    structure</a> for the firm-wide dates/percentages. Recomputing never changes an instalment already
+    recorded as paid.
+  </p>
+  {% if can_manage %}
+  <form method="post" action="{{ url_for('qpd.compute_instalments', client_id=client.id, tax_year=tax_year) }}">
+    <button type="submit" class="btn gold">(Re)compute instalments from the current estimate</button>
+  </form>
+  {% endif %}
+  <table style="margin-top:10px;">
+    <thead><tr><th>Instalment</th><th>Due date</th><th class="text-right">Cumulative %</th><th class="text-right">Amount</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for inst in estimate.instalments %}
+      <tr>
+        <td>{{ inst.label }}</td>
+        <td>{{ inst.due_date.strftime('%d %b %Y') if inst.due_date else '—' }}</td>
+        <td class="text-right">{{ inst.cumulative_pct }}%</td>
+        <td class="text-right"><strong>{{ '%.2f'|format(inst.computed_amount or 0) }}</strong></td>
+        <td>
+          {% if inst.is_paid %}
+          <span class="badge status-Finalized">Paid {{ inst.paid_date.strftime('%d %b %Y') if inst.paid_date else '' }}</span>
+          {% if inst.paid_reference %}<div class="muted" style="font-size:10.5px;">Ref: {{ inst.paid_reference }}</div>{% endif %}
+          {% else %}
+          <span class="badge status-Draft">Unpaid</span>
+          {% endif %}
+        </td>
+        <td class="text-right">
+          {% if can_manage %}
+          {% if inst.is_paid %}
+          <form method="post" action="{{ url_for('qpd.unpay_instalment', client_id=client.id, instalment_id=inst.id) }}" class="inline">
+            <button type="submit" class="btn small secondary">Reopen</button>
+          </form>
+          {% else %}
+          <form method="post" action="{{ url_for('qpd.pay_instalment', client_id=client.id, instalment_id=inst.id) }}" class="inline" style="display:inline-flex;gap:4px;align-items:center;">
+            <input type="number" step="0.01" name="paid_amount" value="{{ inst.computed_amount }}" style="width:85px;margin-bottom:0;">
+            <input type="date" name="paid_date" style="margin-bottom:0;">
+            <input type="text" name="paid_reference" placeholder="Reference" style="width:90px;margin-bottom:0;">
+            <button type="submit" class="btn small gold">Mark paid</button>
+          </form>
+          {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+      {% if not estimate.instalments %}
+      <tr><td colspan="6" class="empty-state">No instalments computed yet - set an estimate above, then click "(Re)compute instalments".</td></tr>
+      {% endif %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

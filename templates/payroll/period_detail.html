@@ -38,6 +38,50 @@
   </div>
 </div>
 
+{% if period.payslips %}
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px;">Statutory Payments Summary</h2>
+  <p class="muted" style="font-size:12px;">
+    Totalled across every payslip in this period - for the firm's own remittance, not shown to any employee.
+    NSSA Employer and APWCS are informational (employer costs that never reduce an employee's net pay); APWCS
+    is a separate NSSA scheme from the ordinary NSSA contributions, calculated on Basic Salary only - see
+    <a href="{{ url_for('payroll.tax_settings') }}">Payroll Tax Settings</a>.
+  </p>
+  <div class="form-row">
+    <div class="stat-card">
+      <div class="num" style="font-size:16px;">{{ period.currency }} {{ '%.2f'|format(period.total_paye) }}</div>
+      <div class="label">PAYE</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" style="font-size:16px;">{{ period.currency }} {{ '%.2f'|format(period.total_aids_levy) }}</div>
+      <div class="label">AIDS Levy</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" style="font-size:16px;font-weight:600;">{{ period.currency }} {{ '%.2f'|format(period.total_zimra_remittance) }}</div>
+      <div class="label">Total due to ZIMRA</div>
+    </div>
+  </div>
+  <div class="form-row">
+    <div class="stat-card">
+      <div class="num" style="font-size:16px;">{{ period.currency }} {{ '%.2f'|format(period.total_nssa_employee) }}</div>
+      <div class="label">NSSA - Employee</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" style="font-size:16px;">{{ period.currency }} {{ '%.2f'|format(period.total_nssa_employer) }}</div>
+      <div class="label">NSSA - Employer</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" style="font-size:16px;">{{ period.currency }} {{ '%.2f'|format(period.total_apwcs) }}</div>
+      <div class="label">APWCS</div>
+    </div>
+    <div class="stat-card">
+      <div class="num" style="font-size:16px;font-weight:600;">{{ period.currency }} {{ '%.2f'|format(period.total_nssa_remittance) }}</div>
+      <div class="label">Total due to NSSA</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 {% if period.status != 'Finalized' and pending_employees %}
 <div class="card">
   <h2 style="margin-top:0;font-size:16px;">Generate payslips</h2>
