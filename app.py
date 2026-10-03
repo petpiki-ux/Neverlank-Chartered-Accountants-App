@@ -313,11 +313,20 @@ def _add_missing_columns():
         # default to NULL for both (no currency split shown) until a
         # preparer enters the actual USD % for that estimate.
         "qpd_estimate": [("estimated_annual_revenue", "FLOAT"), ("revenue_usd_pct", "FLOAT")],
-        # usd_pct_snapshot - see models.QPDInstalmentRecord's docstring:
+        # usd_pct_snapshot/fx_rate_snapshot/paid_amount_usd/paid_amount_zwg -
+        # see models.QPDInstalmentRecord's docstring: usd_pct_snapshot
         # freezes the USD/ZWG split in effect when an instalment was
-        # computed. Existing instalments default to NULL (no split shown)
-        # until recomputed under an estimate that has a currency mix set.
-        "qpd_instalment_record": [("usd_pct_snapshot", "FLOAT")],
+        # computed; fx_rate_snapshot additionally freezes the firm's logged
+        # USD:ZWG FxRate as of that date, so the ZWG-denominated portion can
+        # be converted into an actual ZWG currency amount; paid_amount_usd/
+        # paid_amount_zwg optionally record the actual currency breakdown of
+        # what was remitted. Existing instalments default to NULL for all
+        # four (no split/conversion/breakdown shown) until recomputed or
+        # re-paid.
+        "qpd_instalment_record": [
+            ("usd_pct_snapshot", "FLOAT"), ("fx_rate_snapshot", "FLOAT"),
+            ("paid_amount_usd", "FLOAT"), ("paid_amount_zwg", "FLOAT"),
+        ],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
@@ -495,7 +504,7 @@ def create_app():
     from filing_archive import filing_archive_bp
     from tax import tax_bp
     from accounting import accounting_bp
-    from qpd import qpd_bp
+    from qpd import qpd_bp, qpd_dashboard_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -517,6 +526,7 @@ def create_app():
     app.register_blueprint(tax_bp)
     app.register_blueprint(accounting_bp)
     app.register_blueprint(qpd_bp)
+    app.register_blueprint(qpd_dashboard_bp)
 
     @app.route("/")
     def index():

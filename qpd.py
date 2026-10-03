@@ -20,7 +20,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     Client, QPDEstimate, QPDTrialBalanceLine, QPDAdjustmentLine, QPDMonthlyTurnover,
-    QPDInstalmentRate, QPDInstalmentRecord, INCOME_TAX_ITEM_TYPES, INCOME_TAX_ITEM_TYPE_LABELS,
+    QPDInstalmentRate, QPDInstalmentRecord, FxRate, INCOME_TAX_ITEM_TYPES, INCOME_TAX_ITEM_TYPE_LABELS,
     COAMapping, user_has_permission,
 )
 import financials as fin
@@ -54,10 +54,26 @@ def _parse_date(value):
 def _get_or_create_estimate(client_id, tax_year):
     estimate = QPDEstimate.query.filter_by(client_id=client_id, tax_year=tax_year).first()
     if not estimate:
+        # QPD only applies to clients with a Tax Services engagement ticked
+        # (see models.Client.qualifies_for_qpd) - this only gates CREATING a
+        # brand-new estimate, so a client already grandfathered in via
+        # existing QPD data keeps working even if that's the only reason
+        # they still qualify.
+        client = Client.query.get_or_404(client_id)
+        if not client.qualifies_for_qpd:
+            abort(403)
         estimate = QPDEstimate(client_id=client_id, tax_year=tax_year)
         db.session.add(estimate)
         db.session.flush()
     return estimate
+
+
+def get_fx_rate_as_of(target_date):
+    """The most recently logged FxRate on or before target_date - None if
+    nothing has been logged yet on or before that date."""
+    if target_date is None:
+        return None
+    return FxRate.query.filter(FxRate.rate_date <= target_date).order_by(FxRate.rate_date.desc()).first()
 
 
 def _lookup_coa_mapping(client_id, account_name):
@@ -134,6 +150,9 @@ def compute_vat_suggestion(estimate):
 @login_required
 def view_qpd(client_id):
     client = Client.query.get_or_404(client_id)
+    if not client.qualifies_for_qpd:
+        flash("QPD / provisional tax applies only to clients with a Tax Services engagement ticked.", "danger")
+        return redirect(url_for("clients.view_client", client_id=client_id))
     tax_year = request.args.get("tax_year", type=int) or date.today().year
     estimate = _get_or_create_estimate(client_id, tax_year)
     db.session.commit()  # persist a freshly-created blank estimate so the page's own forms have a stable id to post against
@@ -442,6 +461,7 @@ def compute_instalments(client_id, tax_year):
     built = qpd_calc.build_instalments(estimate.estimated_annual_tax_charge or 0.0, rates)
     existing_by_order = {r.order: r for r in estimate.instalments}
     skipped_paid = 0
+    fx_rate_today = get_fx_rate_as_of(date.today())
     for item in built:
         record = existing_by_order.get(item["order"])
         if record and record.is_paid:
@@ -461,6 +481,10 @@ def compute_instalments(client_id, tax_year):
         # the currency mix never silently reshuffles an instalment that's
         # already been computed (or paid).
         record.usd_pct_snapshot = estimate.effective_usd_pct
+        # Freeze today's logged USD:ZWG rate too (see
+        # models.QPDInstalmentRecord.fx_rate_snapshot/zwg_amount_converted)
+        # - None if nothing has been logged in the FX Rates log yet.
+        record.fx_rate_snapshot = fx_rate_today.rate if fx_rate_today else None
         record.computed_at = datetime.utcnow()
     db.session.commit()
     if skipped_paid:
@@ -479,6 +503,13 @@ def pay_instalment(client_id, instalment_id):
     record.paid_amount = _parse_float(request.form.get("paid_amount"), record.computed_amount or 0.0)
     record.paid_date = _parse_date(request.form.get("paid_date")) or date.today()
     record.paid_reference = request.form.get("paid_reference", "").strip()
+    # Actual currency breakdown of what was remitted - optional, independent
+    # of paid_amount above (see models.QPDInstalmentRecord's docstring on
+    # why these are entered separately rather than derived).
+    usd_paid = request.form.get("paid_amount_usd", "").strip()
+    record.paid_amount_usd = _parse_float(usd_paid) if usd_paid else None
+    zwg_paid = request.form.get("paid_amount_zwg", "").strip()
+    record.paid_amount_zwg = _parse_float(zwg_paid) if zwg_paid else None
     db.session.commit()
     flash(f"{record.label} marked paid.", "success")
     return redirect(url_for("qpd.view_qpd", client_id=client_id, tax_year=tax_year))
@@ -493,6 +524,8 @@ def unpay_instalment(client_id, instalment_id):
     record.paid_amount = None
     record.paid_date = None
     record.paid_reference = None
+    record.paid_amount_usd = None
+    record.paid_amount_zwg = None
     db.session.commit()
     flash(f"{record.label} reopened.", "info")
     return redirect(url_for("qpd.view_qpd", client_id=client_id, tax_year=tax_year))
@@ -553,3 +586,81 @@ def delete_instalment_rate(rate_id):
     db.session.commit()
     flash("Instalment removed.", "success")
     return redirect(url_for("qpd.instalment_rates"))
+
+
+# ---------- Firm-wide FX Rate log (USD:ZWG) ----------
+# Dated rates logged by a preparer (e.g. the RBZ auction/interbank rate),
+# used to convert a QPD instalment's ZWG-denominated portion from a USD-
+# equivalent figure into an actual ZWG currency amount - see
+# models.FxRate/QPDInstalmentRecord.zwg_amount_converted.
+
+@qpd_bp.route("/qpd/fx-rates", methods=["GET", "POST"])
+@login_required
+def fx_rates():
+    _ensure_qpd_access()
+    if request.method == "POST":
+        rate_date = _parse_date(request.form.get("rate_date", "").strip())
+        rate_value = request.form.get("rate", "").strip()
+        if not rate_date or not rate_value:
+            flash("Enter both a date and a rate.", "danger")
+            return redirect(url_for("qpd.fx_rates"))
+        existing = FxRate.query.filter_by(rate_date=rate_date).first()
+        if not existing:
+            existing = FxRate(rate_date=rate_date)
+            db.session.add(existing)
+        existing.rate = _parse_float(rate_value, existing.rate or 0.0)
+        existing.source = request.form.get("source", "").strip()
+        existing.notes = request.form.get("notes", "").strip()
+        existing.created_by_id = current_user.id
+        existing.created_at = datetime.utcnow()
+        db.session.commit()
+        flash(f"USD:ZWG rate for {rate_date.strftime('%d %b %Y')} logged.", "success")
+        return redirect(url_for("qpd.fx_rates"))
+    rates = FxRate.query.order_by(FxRate.rate_date.desc()).all()
+    return render_template("qpd/fx_rates.html", rates=rates)
+
+
+@qpd_bp.route("/qpd/fx-rates/<int:rate_id>/delete", methods=["POST"])
+@login_required
+def delete_fx_rate(rate_id):
+    _ensure_qpd_access()
+    rate = FxRate.query.get_or_404(rate_id)
+    db.session.delete(rate)
+    db.session.commit()
+    flash("Rate removed.", "success")
+    return redirect(url_for("qpd.fx_rates"))
+
+
+# ---------- Top-level QPD dashboard (its own section, not nested under a
+# client page) - a separate, unprefixed blueprint purely for the dashboard
+# itself, so existing qpd_bp routes (all under /clients, unchanged) keep
+# their URLs; only this new entry point gets a clean top-level /qpd URL. ----------
+
+qpd_dashboard_bp = Blueprint("qpd_dashboard", __name__, url_prefix="/qpd")
+
+
+@qpd_dashboard_bp.route("/")
+@login_required
+def dashboard():
+    tax_year = request.args.get("tax_year", type=int) or date.today().year
+    qualifying_clients = [c for c in Client.query.order_by(Client.name).all() if c.qualifies_for_qpd]
+    rows = []
+    for client in qualifying_clients:
+        estimate = QPDEstimate.query.filter_by(client_id=client.id, tax_year=tax_year).first()
+        instalments = estimate.instalments if estimate else []
+        next_due = next((i for i in instalments if not i.is_paid), None)
+        rows.append({
+            "client": client,
+            "estimate": estimate,
+            "instalment_count": len(instalments),
+            "unpaid_count": sum(1 for i in instalments if not i.is_paid),
+            "next_due": next_due,
+        })
+    other_years = sorted(
+        {e.tax_year for c in qualifying_clients for e in c.qpd_estimates if e.tax_year != tax_year},
+        reverse=True,
+    )
+    return render_template(
+        "qpd/dashboard.html", rows=rows, tax_year=tax_year, other_years=other_years,
+        can_manage=user_has_permission(current_user, "manage_qpd"),
+    )

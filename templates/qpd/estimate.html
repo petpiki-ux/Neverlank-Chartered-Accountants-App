@@ -11,8 +11,12 @@
     </div>
   </div>
   <div>
+    <a href="{{ url_for('qpd_dashboard.dashboard') }}" class="btn secondary">QPD Dashboard</a>
     <a href="{{ url_for('clients.view_client', client_id=client.id) }}" class="btn secondary">Back to client</a>
-    {% if can_manage %}<a href="{{ url_for('qpd.instalment_rates') }}" class="btn secondary">QPD instalment structure</a>{% endif %}
+    {% if can_manage %}
+    <a href="{{ url_for('qpd.instalment_rates') }}" class="btn secondary">QPD instalment structure</a>
+    <a href="{{ url_for('qpd.fx_rates') }}" class="btn secondary">FX Rates (USD:ZWG)</a>
+    {% endif %}
   </div>
 </div>
 
@@ -322,7 +326,9 @@
     Each instalment's own amount is its cumulative % minus the previous instalment's, of the current
     estimated annual tax charge above - see <a href="{{ url_for('qpd.instalment_rates') }}">QPD instalment
     structure</a> for the firm-wide dates/percentages. Recomputing never changes an instalment already
-    recorded as paid.
+    recorded as paid. The ZWG (local currency) column converts the ZWG-denominated portion using whichever
+    <a href="{{ url_for('qpd.fx_rates') }}">USD:ZWG rate</a> was most recently logged on or before the date
+    each instalment was (re)computed - that rate is then frozen on the instalment too.
   </p>
   {% if can_manage %}
   <form method="post" action="{{ url_for('qpd.compute_instalments', client_id=client.id, tax_year=tax_year) }}">
@@ -330,7 +336,7 @@
   </form>
   {% endif %}
   <table style="margin-top:10px;">
-    <thead><tr><th>Instalment</th><th>Due date</th><th class="text-right">Cumulative %</th><th class="text-right">Amount</th><th class="text-right">USD</th><th class="text-right">ZWG</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Instalment</th><th>Due date</th><th class="text-right">Cumulative %</th><th class="text-right">Amount</th><th class="text-right">USD</th><th class="text-right">ZWG (USD-equiv)</th><th class="text-right">ZWG (local)</th><th>Status</th><th></th></tr></thead>
     <tbody>
       {% for inst in estimate.instalments %}
       <tr>
@@ -340,10 +346,25 @@
         <td class="text-right"><strong>{{ '%.2f'|format(inst.computed_amount or 0) }}</strong></td>
         <td class="text-right">{{ '%.2f'|format(inst.usd_amount) if inst.usd_amount is not none else '—' }}</td>
         <td class="text-right">{{ '%.2f'|format(inst.zwg_amount) if inst.zwg_amount is not none else '—' }}</td>
+        <td class="text-right">
+          {% if inst.zwg_amount_converted is not none %}
+          {{ '%.2f'|format(inst.zwg_amount_converted) }}
+          <div class="muted" style="font-size:10px;">@ {{ '%.4f'|format(inst.fx_rate_snapshot) }}</div>
+          {% else %}
+          — <div class="muted" style="font-size:10px;">no rate logged</div>
+          {% endif %}
+        </td>
         <td>
           {% if inst.is_paid %}
           <span class="badge status-Finalized">Paid {{ inst.paid_date.strftime('%d %b %Y') if inst.paid_date else '' }}</span>
           {% if inst.paid_reference %}<div class="muted" style="font-size:10.5px;">Ref: {{ inst.paid_reference }}</div>{% endif %}
+          {% if inst.paid_amount_usd is not none or inst.paid_amount_zwg is not none %}
+          <div class="muted" style="font-size:10.5px;">
+            Actual:
+            {%- if inst.paid_amount_usd is not none %} USD {{ '%.2f'|format(inst.paid_amount_usd) }}{% endif %}
+            {%- if inst.paid_amount_zwg is not none %} / ZWG {{ '%.2f'|format(inst.paid_amount_zwg) }}{% endif %}
+          </div>
+          {% endif %}
           {% else %}
           <span class="badge status-Draft">Unpaid</span>
           {% endif %}
@@ -355,10 +376,12 @@
             <button type="submit" class="btn small secondary">Reopen</button>
           </form>
           {% else %}
-          <form method="post" action="{{ url_for('qpd.pay_instalment', client_id=client.id, instalment_id=inst.id) }}" class="inline" style="display:inline-flex;gap:4px;align-items:center;">
-            <input type="number" step="0.01" name="paid_amount" value="{{ inst.computed_amount }}" style="width:85px;margin-bottom:0;">
+          <form method="post" action="{{ url_for('qpd.pay_instalment', client_id=client.id, instalment_id=inst.id) }}" class="inline" style="display:inline-flex;gap:4px;flex-wrap:wrap;align-items:center;max-width:220px;">
+            <input type="number" step="0.01" name="paid_amount" value="{{ inst.computed_amount }}" style="width:80px;margin-bottom:0;" title="Total paid (USD-equivalent)">
             <input type="date" name="paid_date" style="margin-bottom:0;">
-            <input type="text" name="paid_reference" placeholder="Reference" style="width:90px;margin-bottom:0;">
+            <input type="text" name="paid_reference" placeholder="Reference" style="width:85px;margin-bottom:0;">
+            <input type="number" step="0.01" name="paid_amount_usd" placeholder="Actual USD" style="width:75px;margin-bottom:0;">
+            <input type="number" step="0.01" name="paid_amount_zwg" placeholder="Actual ZWG" style="width:75px;margin-bottom:0;">
             <button type="submit" class="btn small gold">Mark paid</button>
           </form>
           {% endif %}
@@ -367,7 +390,7 @@
       </tr>
       {% endfor %}
       {% if not estimate.instalments %}
-      <tr><td colspan="8" class="empty-state">No instalments computed yet - set an estimate above, then click "(Re)compute instalments".</td></tr>
+      <tr><td colspan="9" class="empty-state">No instalments computed yet - set an estimate above, then click "(Re)compute instalments".</td></tr>
       {% endif %}
     </tbody>
   </table>

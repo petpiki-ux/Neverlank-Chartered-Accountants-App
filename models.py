@@ -1644,6 +1644,25 @@ class Client(db.Model):
         filed under has closed."""
         return any(e.has_tax_module or e.has_accounting_module for e in self.engagements)
 
+    @property
+    def has_tax_engagement(self):
+        """Whether this client has at least one engagement with a Tax
+        service switched on (see Engagement.has_tax_module) - narrower than
+        has_tax_or_accounting_engagement above (Tax only, not Accounting).
+        Used to gate whether QPD / provisional tax applies to this client at
+        all - see qualifies_for_qpd below."""
+        return any(e.has_tax_module for e in self.engagements)
+
+    @property
+    def qualifies_for_qpd(self):
+        """Whether the Quarterly Payment Dates (QPD) / provisional tax
+        module applies to this client. QPD is only relevant to clients with
+        a Tax Services engagement ticked - but any QPD data already on file
+        is grandfathered in even if that engagement is later removed or
+        changes type, so historical work a preparer already did here is
+        never hidden or orphaned."""
+        return self.has_tax_engagement or bool(self.qpd_estimates)
+
     def __repr__(self):
         return f"<Client {self.name}>"
 
@@ -4184,6 +4203,30 @@ class QPDInstalmentRate(db.Model):
         return f"<QPDInstalmentRate {self.label!r} {self.cumulative_pct}% by {self.due_month}/{self.due_day}>"
 
 
+class FxRate(db.Model):
+    """A firm-wide, dated USD:ZWG (ZiG) exchange rate - e.g. the RBZ
+    auction/interbank rate on a given day - logged by a preparer once filed/
+    observed, so QPD instalments (see QPDInstalmentRecord.fx_rate_snapshot
+    below) can convert the USD-equivalent ZWG-denominated portion of an
+    instalment into the actual ZWG currency amount payable, using whatever
+    rate was in effect at the time, rather than this app hardcoding or
+    guessing one. `rate` is expressed as ZWG per 1 USD (e.g. 35.5 means
+    USD 1 = ZWG 35.50). One row per calendar date - re-logging the same date
+    updates that day's rate rather than creating a duplicate."""
+    id = db.Column(db.Integer, primary_key=True)
+    rate_date = db.Column(db.Date, nullable=False, unique=True)
+    rate = db.Column(db.Float, nullable=False)  # ZWG per 1 USD
+    source = db.Column(db.String(120))  # e.g. "RBZ auction", "RBZ interbank", "Bank rate"
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<FxRate {self.rate_date} {self.rate}>"
+
+
 class QPDEstimate(db.Model):
     """One client's provisional income tax estimate for one tax year - see
     the module comment above for the client-level scoping and the two
@@ -4376,7 +4419,22 @@ class QPDInstalmentRecord(db.Model):
     currency USD/ZWG split - see QPDEstimate's class docstring) at the same
     moment, for the same reason as annual_tax_charge_snapshot: editing the
     estimate's currency mix later must never reshuffle how much of an
-    already-computed (or already-paid) instalment was USD vs ZWG."""
+    already-computed (or already-paid) instalment was USD vs ZWG.
+
+    fx_rate_snapshot freezes the firm's logged FxRate (ZWG per 1 USD) as of
+    the day this instalment was (re)computed, for the same reason again -
+    see zwg_amount_converted below, which is the actual ZWG currency amount
+    payable (as opposed to zwg_amount, which is only the USD-equivalent
+    value of the ZWG-denominated portion). None if no FxRate had been logged
+    yet on or before the computation date.
+
+    paid_amount/paid_date/paid_reference record what was actually remitted
+    to ZIMRA, as a single USD-equivalent total (unchanged, original
+    behaviour). paid_amount_usd/paid_amount_zwg are an optional, independent
+    record of the actual currency breakdown of that payment - e.g. off the
+    ZIMRA receipt - entered separately rather than derived, since the real
+    payment may not exactly match the computed split (the FX rate can move
+    between computation and actual payment)."""
     id = db.Column(db.Integer, primary_key=True)
     estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
     label = db.Column(db.String(60))
@@ -4385,12 +4443,15 @@ class QPDInstalmentRecord(db.Model):
     computed_amount = db.Column(db.Float, default=0.0)  # this instalment's own share (cumulative - previous), of the estimate at computation time
     annual_tax_charge_snapshot = db.Column(db.Float)  # what estimated_annual_tax_charge was when this was computed
     usd_pct_snapshot = db.Column(db.Float)  # what estimate.effective_usd_pct was when this was computed - see class docstring
+    fx_rate_snapshot = db.Column(db.Float)  # ZWG per 1 USD, as of the computation date - see class docstring
     computed_at = db.Column(db.DateTime, default=datetime.utcnow)
     order = db.Column(db.Integer, default=0)
 
     paid_amount = db.Column(db.Float)
     paid_date = db.Column(db.Date)
     paid_reference = db.Column(db.String(100))  # e.g. a ZIMRA payment reference/receipt number
+    paid_amount_usd = db.Column(db.Float)  # actual USD remitted - optional, see class docstring
+    paid_amount_zwg = db.Column(db.Float)  # actual ZWG (local currency units) remitted - optional, see class docstring
 
     @property
     def is_paid(self):
@@ -4407,9 +4468,23 @@ class QPDInstalmentRecord(db.Model):
 
     @property
     def zwg_amount(self):
+        """The USD-EQUIVALENT value of the portion that must be remitted in
+        ZWG - not yet converted to actual ZWG currency units. See
+        zwg_amount_converted for the actual amount of ZWG to pay."""
         if self.usd_amount is None:
             return None
         return round((self.computed_amount or 0.0) - self.usd_amount, 2)
+
+    @property
+    def zwg_amount_converted(self):
+        """The actual ZWG currency amount payable for this instalment's
+        ZWG-denominated portion - zwg_amount (a USD-equivalent figure)
+        multiplied by the USD:ZWG rate frozen at computation time
+        (fx_rate_snapshot). None until both the currency split AND a logged
+        FX rate were available when this instalment was computed."""
+        if self.zwg_amount is None or self.fx_rate_snapshot is None:
+            return None
+        return round(self.zwg_amount * self.fx_rate_snapshot, 2)
 
     def __repr__(self):
         return f"<QPDInstalmentRecord {self.label!r} estimate={self.estimate_id}>"

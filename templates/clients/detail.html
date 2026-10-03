@@ -73,18 +73,16 @@
   {% endif %}
 </div>
 
+{% if client.qualifies_for_qpd %}
 <div class="card">
   <h3 class="mt-0">Quarterly Payment Dates (QPDs)</h3>
   <p class="muted" style="font-size:12px;">
-    Estimate this client's annual taxable income - from an imported/entered Trial Balance or from monthly VAT
-    turnover - and track the resulting provisional corporate income tax instalments due to ZIMRA across the year.
-    The estimate stays directly editable at any time regardless of which method was last used.
+    This client's Quarterly Payment Dates (provisional tax) estimator now has its own dedicated section -
+    see the <a href="{{ url_for('qpd_dashboard.dashboard') }}">QPD</a> link in the main navigation, or jump
+    straight to <a href="{{ url_for('qpd.view_qpd', client_id=client.id) }}">this client's QPD estimate</a>.
   </p>
-  <a href="{{ url_for('qpd.view_qpd', client_id=client.id) }}" class="btn gold">Open QPD Estimator</a>
-  {% if can_manage_qpd %}
-  <a href="{{ url_for('qpd.instalment_rates') }}" class="btn secondary">QPD Instalment Structure</a>
-  {% endif %}
 </div>
+{% endif %}
 
 <div class="card">
   <h3 class="mt-0">Company Documents</h3>
