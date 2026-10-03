@@ -92,16 +92,21 @@
     Upload this client's incorporation documents, CR6, share register, etc. once here - every engagement's Client
     Acceptance tab reuses the same Directors &amp; Shareholders list below, rather than re-entering it each time. The
     app reads the text out of each document automatically, including scanned/photographed pages (via the Claude API),
-    and suggests every Director/Shareholder/Beneficial Owner/Company Secretary it finds for review below.
+    and suggests every Director/Shareholder/Beneficial Owner/Company Secretary it finds for review below. Incorporation,
+    registry and ownership document types are also automatically filed to the Permanent File below (see its own P-code
+    reference in the table) - no need to upload them a second time there.
   </p>
   {% if client.company_documents %}
   <table>
-    <thead><tr><th>Type</th><th>Title</th><th>Uploaded</th><th>Reading status</th><th></th></tr></thead>
+    <thead><tr><th>Type</th><th>Title</th><th>Permanent File</th><th>Uploaded</th><th>Reading status</th><th></th></tr></thead>
     <tbody>
       {% for doc in client.company_documents %}
       <tr>
         <td><span class="badge">{{ doc.document_type }}</span></td>
         <td>{{ doc.title }}{% if doc.notes %}<div class="muted" style="font-size:12px;">{{ doc.notes }}</div>{% endif %}</td>
+        <td class="muted">
+          {% if doc.permanent_file_entry %}{{ doc.permanent_file_entry.reference_code }}{% else %}—{% endif %}
+        </td>
         <td class="muted">{{ doc.uploaded_at.strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
         <td>
           {% if doc.ai_status == 'done' %}
@@ -157,16 +162,35 @@
     Information of continuing relevance across audit years - filed once here rather than re-uploaded to every
     engagement (see the firm's <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index &amp; Manual</a>
     for the full P-series policy). The engagement's own Documents tab is for working papers specific to the year
-    under audit.
+    under audit. Each P-code is a category (e.g. "P1000" = Incorporation &amp; Statutory) - every document filed
+    under it gets its own numbered sub-reference (P1001, P1002, P1003, ...) rather than sharing the bare code, and
+    documents auto-filed from Company Documents above are marked "Auto".
   </p>
   {% if client.permanent_file_documents %}
   <table>
-    <thead><tr><th>File</th><th>WP No.</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+    <thead><tr><th>File</th><th>Reference</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
     <tbody>
       {% for doc in client.permanent_file_documents %}
       <tr>
-        <td>{{ doc.original_filename }}{% if doc.notes %}<div class="muted" style="font-size:11.5px;">{{ doc.notes }}</div>{% endif %}</td>
-        <td class="muted">{{ doc.filing_index.display_label if doc.filing_index else '—' }}</td>
+        <td>
+          {{ doc.original_filename }}
+          {% if doc.source_company_document_id %}<span class="badge" title="Auto-filed from Company Documents">Auto</span>{% endif %}
+        </td>
+        <td>
+          {% if doc.reference_code %}<strong>{{ doc.reference_code }}</strong><br>{% endif %}
+          <form method="post" action="{{ url_for('permanent_file.update_permanent_file_document', doc_id=doc.id) }}" class="inline form-row" style="flex-wrap:nowrap;gap:4px;">
+            <select name="filing_index_id" style="width:9em;" onchange="if(this.form.reference_number){this.form.reference_number.value=''}">
+              <option value="">No P-code</option>
+              {% for s in permanent_file_sections %}<option value="{{ s.id }}" {% if doc.filing_index_id == s.id %}selected{% endif %}>{{ s.code }} — {{ s.section }}</option>{% endfor %}
+            </select>
+            {% if doc.filing_index_id %}
+            <span class="muted">{{ doc.filing_index.code[0] }}</span>
+            <input type="number" name="reference_number" value="{{ doc.reference_number or '' }}" style="width:5.5em;" title="Sub-reference number">
+            {% endif %}
+            <button type="submit" class="btn small secondary">Save</button>
+          </form>
+          {% if doc.notes %}<div class="muted" style="font-size:11.5px;">{{ doc.notes }}</div>{% endif %}
+        </td>
         <td>v{{ doc.version }}</td>
         <td>{{ doc.uploaded_by.name if doc.uploaded_by else '—' }}</td>
         <td>{{ doc.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
@@ -186,7 +210,7 @@
   <form method="post" action="{{ url_for('permanent_file.upload_permanent_file_document', client_id=client.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;margin-top:10px;">
     <div><label for="perm_file">File *</label><input type="file" id="perm_file" name="file" required></div>
     <div>
-      <label for="perm_filing_index_id">WP No.</label>
+      <label for="perm_filing_index_id">P-code</label>
       <select id="perm_filing_index_id" name="filing_index_id">
         <option value="">No WP number</option>
         {% for s in permanent_file_sections %}<option value="{{ s.id }}">{{ s.code }} — {{ s.section }}</option>{% endfor %}

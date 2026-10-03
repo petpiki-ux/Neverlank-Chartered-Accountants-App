@@ -2253,23 +2253,100 @@ class PermanentFileDocument(db.Model):
     to the year under audit. Deliberately a simple file + tag + notes
     record (unlike CompanyDocument, which runs AI extraction to find
     Directors/Shareholders) - the Permanent File just needs a place to live
-    and a P-code, not extraction."""
+    and a P-code, not extraction.
+
+    Two more things layered on top of that original design:
+
+    1. Sub-references. A FilingIndexSection P-code (e.g. "P1000") names a
+       whole category ("Incorporation & Statutory"), not one specific
+       document - a client may have several actual documents that belong
+       under it (certificate of incorporation, memorandum & articles, CR6,
+       ...). Rather than every one of them sharing the literal code
+       "P1000", each document filed under a P-code is given its own
+       sequential sub-reference the moment it's filed - P1001, P1002,
+       P1003, etc (see permanent_file._next_reference_number) - stored in
+       reference_number below. Numbering is per client, per P-code, and
+       (like the Filing Index's own codes) never reused even if a document
+       is later deleted, so a deleted P1002 never gets silently reassigned
+       to a different document later. reference_code is the computed
+       display/filename form ("P1001"); a document filed with no P-code at
+       all (filing_index_id is None) has no reference_code either.
+
+    2. Auto-filing from Company Documents. Certain CompanyDocument types
+       (certificate of incorporation, CR6, share register, etc - see
+       models.COMPANY_DOCUMENT_TYPE_TO_FILING_CODE) are themselves exactly
+       the kind of "continuing relevance" document the Permanent File
+       exists for, so uploading one there also files a copy here
+       automatically (see company_documents.upload_document /
+       permanent_file.file_upload_to_permanent_file) - a preparer never has
+       to upload the same file twice. source_company_document_id records
+       where an auto-filed copy came from, purely for display ("auto-filed
+       from Company Documents"); it's cleared (not cascaded) if that source
+       document is later deleted, the same "detach, don't delete"
+       treatment ClientKeyPerson.source_document_id gets - the Permanent
+       File copy is independent and continues to exist once filed."""
     id = db.Column(db.Integer, primary_key=True)
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
     original_filename = db.Column(db.String(255), nullable=False)
     stored_filename = db.Column(db.String(255), nullable=False)
     filing_index_id = db.Column(db.Integer, db.ForeignKey("filing_index_section.id"))
+    # The auto- or preparer-assigned sub-reference number under filing_index's
+    # own code - see point 1 in the docstring above. e.g. 1001 under "P1000"
+    # displays as "P1001" (see reference_code below).
+    reference_number = db.Column(db.Integer)
     notes = db.Column(db.Text)
     version = db.Column(db.Integer, default=1)
     uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Set only when this row was filed automatically from a CompanyDocument
+    # upload - see point 2 in the docstring above.
+    source_company_document_id = db.Column(db.Integer, db.ForeignKey("company_document.id"))
 
     client = db.relationship("Client", backref=db.backref("permanent_file_documents", lazy=True, order_by="PermanentFileDocument.uploaded_at.desc()", cascade="all, delete-orphan"))
     filing_index = db.relationship("FilingIndexSection")
     uploaded_by = db.relationship("User")
+    source_company_document = db.relationship("CompanyDocument", backref=db.backref("permanent_file_entry", uselist=False))
+
+    @property
+    def reference_code(self):
+        """"P1001"-style display/filename reference: the filing_index
+        code's leading letter plus this document's own reference_number -
+        see point 1 in the class docstring. Falls back to the bare
+        filing_index code (e.g. "P1000") for an older row filed before
+        sub-references existed (reference_number is None), and to None if
+        no P-code was chosen at all."""
+        if not self.filing_index:
+            return None
+        if self.reference_number:
+            return f"{self.filing_index.code[0]}{self.reference_number}"
+        return self.filing_index.code
 
     def __repr__(self):
         return f"<PermanentFileDocument {self.original_filename!r}>"
+
+
+class PermanentFileReferenceCounter(db.Model):
+    """Tracks the highest Permanent File sub-reference number ever handed
+    out per (client, P-code) - see PermanentFileDocument's docstring, point
+    1. Needed because PermanentFileDocument rows can be deleted: looking at
+    MAX(PermanentFileDocument.reference_number) directly would happily go
+    backwards and hand out an already-used number again once the document
+    that had it is gone. This table remembers the high-water mark
+    independently of which documents currently exist, so a number is never
+    reused - the same principle the Filing Index's own codes follow (see
+    FilingIndexSection's docstring), applied here to the per-client, per-
+    code sequence underneath each one. Entirely internal bookkeeping - never
+    shown in the UI, only read/written by
+    permanent_file._next_reference_number."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    filing_index_id = db.Column(db.Integer, db.ForeignKey("filing_index_section.id"), nullable=False)
+    last_number = db.Column(db.Integer, nullable=False, default=0)
+
+    __table_args__ = (db.UniqueConstraint("client_id", "filing_index_id", name="uq_permfile_refcounter_client_code"),)
+
+    def __repr__(self):
+        return f"<PermanentFileReferenceCounter client={self.client_id} filing_index={self.filing_index_id} last={self.last_number}>"
 
 
 class TaxAccountingFilingDocument(db.Model):
@@ -7126,6 +7203,33 @@ COMPANY_DOCUMENT_TYPES = [
     "Director/Shareholder ID Documents",
     "Other",
 ]
+
+# Which Permanent File (P-series) FilingIndexSection a Company Document is
+# automatically filed under the moment it's uploaded (see
+# company_documents.upload_document / permanent_file.
+# file_upload_to_permanent_file) - so a preparer never has to upload the
+# same incorporation document twice, once here and once to the Permanent
+# File below. Matches the firm's own Filing Index typical_contents for each
+# P-code (see seed.FILING_INDEX_PERMANENT_SEED): statutory
+# incorporation/registry documents go to P1000 "Incorporation & Statutory",
+# documents about who holds/controls the company go to P5000 "Structure &
+# Governance". "Other" is deliberately left unmapped (None) - a
+# miscellaneous upload is left for a preparer to file by hand if it belongs
+# in the Permanent File at all, rather than guessing a P-code for it. If the
+# matching code hasn't been seeded/exists yet on a given install, auto-
+# filing is simply skipped - this never blocks the Company Document upload
+# itself.
+COMPANY_DOCUMENT_TYPE_TO_FILING_CODE = {
+    "Certificate of Incorporation": "P1000",
+    "Memorandum & Articles of Association": "P1000",
+    "CR6 - Return of Directors": "P1000",
+    "CR5 - Notice of Situation of Registered Office": "P1000",
+    "Company Summary": "P1000",
+    "Share Register / Share Certificates": "P5000",
+    "Beneficial Ownership Declaration": "P5000",
+    "Director/Shareholder ID Documents": "P5000",
+    "Other": None,
+}
 
 PERSON_ROLES = ["Director", "Shareholder", "Beneficial Owner", "Company Secretary", "Other"]
 PERSON_STATUSES = ["Suggested", "Confirmed"]

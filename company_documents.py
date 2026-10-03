@@ -16,6 +16,13 @@ Confirmed people can be pulled straight into an engagement's Sanctions &
 Adverse Notice Screening list with one click (see acceptance.py's
 add_key_person_to_screening) instead of being retyped in for every
 engagement.
+
+Certain document types (certificate of incorporation, CR6, share register,
+etc - see models.COMPANY_DOCUMENT_TYPE_TO_FILING_CODE) are also exactly the
+"continuing relevance" documents the Permanent File exists for, so
+uploading one here automatically files a copy there too (see
+permanent_file.file_upload_to_permanent_file) - a preparer never has to
+upload the same document twice, once here and once to the Permanent File.
 """
 import os
 import uuid
@@ -29,14 +36,15 @@ from werkzeug.utils import secure_filename
 
 from extensions import db
 from models import (
-    Client, CompanyDocument, ClientKeyPerson, EntityPublicResearch,
-    COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PERSON_STATUSES, PUBLIC_RESEARCH_SCOPES,
+    Client, CompanyDocument, ClientKeyPerson, EntityPublicResearch, PermanentFileDocument,
+    COMPANY_DOCUMENT_TYPES, COMPANY_DOCUMENT_TYPE_TO_FILING_CODE, PERSON_ROLES, PERSON_STATUSES, PUBLIC_RESEARCH_SCOPES,
     user_has_permission,
 )
 from config import Config
 import sanctions_data
 import entity_extraction
 import entity_research
+from permanent_file import file_upload_to_permanent_file
 
 company_documents_bp = Blueprint("company_documents", __name__, url_prefix="/clients")
 
@@ -122,6 +130,26 @@ def upload_document(client_id):
 
     db.session.commit()  # save the upload itself before attempting the AI call, so a slow/failed AI step never loses the file
 
+    # Auto-file a copy to the Permanent File for document types that belong
+    # there (see models.COMPANY_DOCUMENT_TYPE_TO_FILING_CODE and this
+    # module's docstring) - best-effort: a Permanent File filing hiccup
+    # (e.g. disk full, or the P-code not seeded yet) never costs the
+    # preparer the Company Document upload itself, which has already
+    # succeeded above.
+    filing_code = COMPANY_DOCUMENT_TYPE_TO_FILING_CODE.get(document_type)
+    permanent_file_note = None
+    if filing_code:
+        try:
+            filed = file_upload_to_permanent_file(
+                client_id, filepath, original_name, filing_code,
+                notes=f"Auto-filed from Company Documents: {doc.title}",
+                uploaded_by_id=current_user.id, source_company_document_id=doc.id,
+            )
+            if filed:
+                permanent_file_note = f" Also filed to the Permanent File as {filed.reference_code}."
+        except OSError:
+            pass
+
     people, ai_status, ai_error = entity_extraction.extract_people_from_document(
         filepath, is_image, doc.extracted_text, doc.extraction_status,
     )
@@ -146,13 +174,13 @@ def upload_document(client_id):
 
     if ai_status == "done":
         if people:
-            flash(f"'{doc.title}' uploaded - {len(people)} person(s) suggested below for review under Directors & Shareholders.", "success")
+            flash(f"'{doc.title}' uploaded - {len(people)} person(s) suggested below for review under Directors & Shareholders.{permanent_file_note or ''}", "success")
         else:
-            flash(f"'{doc.title}' uploaded - no directors/shareholders/etc were found in it.", "info")
+            flash(f"'{doc.title}' uploaded - no directors/shareholders/etc were found in it.{permanent_file_note or ''}", "info")
     elif ai_status == "not_configured":
-        flash(f"'{doc.title}' uploaded, but automatic extraction isn't set up yet ({ai_error}) - add people manually below, or reprocess this document once it's configured.", "warning")
+        flash(f"'{doc.title}' uploaded, but automatic extraction isn't set up yet ({ai_error}) - add people manually below, or reprocess this document once it's configured.{permanent_file_note or ''}", "warning")
     else:
-        flash(f"'{doc.title}' uploaded, but automatic extraction failed ({ai_error}) - add people manually below, or use \"Reprocess\" to try again.", "warning")
+        flash(f"'{doc.title}' uploaded, but automatic extraction failed ({ai_error}) - add people manually below, or use \"Reprocess\" to try again.{permanent_file_note or ''}", "warning")
     return redirect(url_for("clients.view_client", client_id=client_id))
 
 
@@ -222,6 +250,12 @@ def delete_document(doc_id):
     # still describe the client even once the source file is gone,
     # especially any that have since been reviewed and confirmed.
     ClientKeyPerson.query.filter_by(source_document_id=doc.id).update({"source_document_id": None})
+    # Same treatment for an auto-filed Permanent File copy (see
+    # permanent_file.file_upload_to_permanent_file) - it's an independent
+    # copy with its own P-reference, so it stays in the Permanent File even
+    # once the Company Document it was filed from is gone; only the "filed
+    # from" link is cleared.
+    PermanentFileDocument.query.filter_by(source_company_document_id=doc.id).update({"source_company_document_id": None})
     title = doc.title
     db.session.delete(doc)
     db.session.commit()

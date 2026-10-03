@@ -297,6 +297,16 @@ def _add_missing_columns():
         # to NULL for both, i.e. an ordinary hours-worked entry, exactly as
         # before this feature existed.
         "time_entry": [("leave_type_id", "INTEGER"), ("leave_days", "FLOAT")],
+        # reference_number/source_company_document_id - see models.
+        # PermanentFileDocument's docstring: a document filed under a
+        # Permanent File P-code now gets its own numbered sub-reference
+        # (P1001, P1002, ...) instead of every document under the same code
+        # sharing its bare "P1000", and a document auto-filed here from a
+        # Company Document upload records where it came from. Existing rows
+        # default to NULL for both - unchanged (bare P-code, "manually
+        # filed") until a preparer renumbers them or re-uploads via Company
+        # Documents.
+        "permanent_file_document": [("reference_number", "INTEGER"), ("source_company_document_id", "INTEGER")],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
