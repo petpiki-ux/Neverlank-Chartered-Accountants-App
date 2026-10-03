@@ -46,12 +46,12 @@
   <form method="post" action="{{ url_for('qpd.update_estimate', client_id=client.id, tax_year=tax_year) }}">
     <div class="form-row">
       <div>
-        <label for="estimated_annual_taxable_income">Estimated annual taxable income</label>
-        <input type="number" step="0.01" id="estimated_annual_taxable_income" name="estimated_annual_taxable_income" value="{{ estimate.estimated_annual_taxable_income or 0 }}" {% if not can_manage %}disabled{% endif %}>
+        <label for="estimated_annual_revenue">Estimated annual revenue</label>
+        <input type="number" step="0.01" id="estimated_annual_revenue" name="estimated_annual_revenue" value="{{ estimate.estimated_annual_revenue if estimate.estimated_annual_revenue is not none else '' }}" {% if not can_manage %}disabled{% endif %}>
       </div>
       <div>
-        <label for="estimated_annual_tax_charge">Estimated annual tax charge</label>
-        <input type="number" step="0.01" id="estimated_annual_tax_charge" name="estimated_annual_tax_charge" value="{{ estimate.estimated_annual_tax_charge or 0 }}" style="font-weight:bold;" {% if not can_manage %}disabled{% endif %}>
+        <label for="estimated_annual_taxable_income">Estimated annual taxable income</label>
+        <input type="number" step="0.01" id="estimated_annual_taxable_income" name="estimated_annual_taxable_income" value="{{ estimate.estimated_annual_taxable_income or 0 }}" {% if not can_manage %}disabled{% endif %}>
       </div>
     </div>
     <div class="form-row">
@@ -63,11 +63,61 @@
         <label for="aids_levy_pct">AIDS Levy %</label>
         <input type="number" step="0.01" id="aids_levy_pct" name="aids_levy_pct" value="{{ estimate.aids_levy_pct if estimate.aids_levy_pct is not none else '' }}" {% if not can_manage %}disabled{% endif %}>
       </div>
+      <div>
+        <label for="estimated_annual_tax_charge">Estimated annual tax charge</label>
+        <input type="number" step="0.01" id="estimated_annual_tax_charge" name="estimated_annual_tax_charge" value="{{ estimate.estimated_annual_tax_charge or 0 }}" style="font-weight:bold;" {% if not can_manage %}disabled{% endif %}>
+      </div>
+    </div>
+    <div class="form-row">
+      <div>
+        <label for="revenue_usd_pct">Actual % of revenue earned in USD</label>
+        <input type="number" step="0.01" min="0" max="100" id="revenue_usd_pct" name="revenue_usd_pct" value="{{ estimate.revenue_usd_pct if estimate.revenue_usd_pct is not none else '' }}" {% if not can_manage %}disabled{% endif %}>
+      </div>
     </div>
     <label for="notes">Notes</label>
     <textarea id="notes" name="notes" rows="2" {% if not can_manage %}disabled{% endif %}>{{ estimate.notes or '' }}</textarea>
     {% if can_manage %}<button type="submit" class="btn gold">Save estimate</button>{% endif %}
   </form>
+</div>
+
+<div class="card" style="max-width:640px;">
+  <h2 style="margin-top:0;font-size:16px;">Currency Split (USD / ZWG)</h2>
+  <p class="muted" style="font-size:12px;">
+    ZIMRA's rule on splitting provisional tax between currencies is not a plain read of the actual mix both
+    ways: if more than 50% of revenue was earned in USD, the tax is split evenly 50:50 USD/ZWG (ZiG) regardless
+    of exactly how far over 50% USD was; if ZWG is instead the majority currency, the split follows the ACTUAL
+    proportion earned (e.g. 30% USD/70% ZWG stays 30:70). Set the actual % of revenue earned in USD above to
+    see the split below - it applies to Revenue, (implied) Expenses, Taxable Income, Tax Charge and each
+    instalment.
+  </p>
+  {% if estimate.effective_usd_pct is not none %}
+  <p>
+    Actual mix: <strong>{{ estimate.revenue_usd_pct }}% USD</strong> / {{ (100 - estimate.revenue_usd_pct)|round(2) }}% ZWG
+    &rarr; split applied: <strong>{{ estimate.effective_usd_pct }}% USD</strong> / {{ estimate.effective_zwg_pct }}% ZWG
+    {% if estimate.revenue_usd_pct > 50 %}<span class="badge status-Draft">50:50 rule applied (USD majority)</span>{% else %}<span class="badge status-Completed">Actual proportion (ZWG majority)</span>{% endif %}
+  </p>
+  <table>
+    <thead><tr><th></th><th class="text-right">Total</th><th class="text-right">USD</th><th class="text-right">ZWG</th></tr></thead>
+    <tbody>
+      {% for label, amount in [
+        ("Revenue", estimate.estimated_annual_revenue),
+        ("Expenses (implied: Revenue less Taxable Income)", estimate.implied_annual_expenses),
+        ("Taxable income", estimate.estimated_annual_taxable_income),
+        ("Tax charge", estimate.estimated_annual_tax_charge),
+      ] %}
+      {% set usd, zwg = estimate.currency_split(amount) %}
+      <tr>
+        <td>{{ label }}</td>
+        <td class="text-right">{{ '%.2f'|format(amount) if amount is not none else '—' }}</td>
+        <td class="text-right">{{ '%.2f'|format(usd) if usd is not none else '—' }}</td>
+        <td class="text-right">{{ '%.2f'|format(zwg) if zwg is not none else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="font-size:11.5px;">Enter the actual % of revenue earned in USD above (in the Current estimate card) to see the currency split.</p>
+  {% endif %}
 </div>
 
 <div class="card" style="max-width:820px;">
@@ -191,6 +241,7 @@
   {% if tb_suggestion %}
   <div class="flash info" style="margin-top:14px;">
     <strong>Suggested from Trial Balance:</strong>
+    Annualized revenue {{ '%.2f'|format(tb_suggestion.annualized_revenue) }}.
     YTD profit before tax {{ '%.2f'|format(tb_suggestion.pbt_ytd) }}, annualized {{ '%.2f'|format(tb_suggestion.annualized_pbt) }}
     -&gt; taxable income {{ '%.2f'|format(tb_suggestion.taxable_income) }}, tax charge {{ '%.2f'|format(tb_suggestion.total_tax_charge) }}.
     {% if can_manage %}
@@ -279,7 +330,7 @@
   </form>
   {% endif %}
   <table style="margin-top:10px;">
-    <thead><tr><th>Instalment</th><th>Due date</th><th class="text-right">Cumulative %</th><th class="text-right">Amount</th><th>Status</th><th></th></tr></thead>
+    <thead><tr><th>Instalment</th><th>Due date</th><th class="text-right">Cumulative %</th><th class="text-right">Amount</th><th class="text-right">USD</th><th class="text-right">ZWG</th><th>Status</th><th></th></tr></thead>
     <tbody>
       {% for inst in estimate.instalments %}
       <tr>
@@ -287,6 +338,8 @@
         <td>{{ inst.due_date.strftime('%d %b %Y') if inst.due_date else '—' }}</td>
         <td class="text-right">{{ inst.cumulative_pct }}%</td>
         <td class="text-right"><strong>{{ '%.2f'|format(inst.computed_amount or 0) }}</strong></td>
+        <td class="text-right">{{ '%.2f'|format(inst.usd_amount) if inst.usd_amount is not none else '—' }}</td>
+        <td class="text-right">{{ '%.2f'|format(inst.zwg_amount) if inst.zwg_amount is not none else '—' }}</td>
         <td>
           {% if inst.is_paid %}
           <span class="badge status-Finalized">Paid {{ inst.paid_date.strftime('%d %b %Y') if inst.paid_date else '' }}</span>
@@ -314,7 +367,7 @@
       </tr>
       {% endfor %}
       {% if not estimate.instalments %}
-      <tr><td colspan="6" class="empty-state">No instalments computed yet - set an estimate above, then click "(Re)compute instalments".</td></tr>
+      <tr><td colspan="8" class="empty-state">No instalments computed yet - set an estimate above, then click "(Re)compute instalments".</td></tr>
       {% endif %}
     </tbody>
   </table>

@@ -307,6 +307,17 @@ def _add_missing_columns():
         # filed") until a preparer renumbers them or re-uploads via Company
         # Documents.
         "permanent_file_document": [("reference_number", "INTEGER"), ("source_company_document_id", "INTEGER")],
+        # estimated_annual_revenue/revenue_usd_pct - see models.QPDEstimate's
+        # docstring: the dual-currency (USD/ZWG) split ZIMRA requires once a
+        # client earns revenue in more than one currency. Existing estimates
+        # default to NULL for both (no currency split shown) until a
+        # preparer enters the actual USD % for that estimate.
+        "qpd_estimate": [("estimated_annual_revenue", "FLOAT"), ("revenue_usd_pct", "FLOAT")],
+        # usd_pct_snapshot - see models.QPDInstalmentRecord's docstring:
+        # freezes the USD/ZWG split in effect when an instalment was
+        # computed. Existing instalments default to NULL (no split shown)
+        # until recomputed under an estimate that has a currency mix set.
+        "qpd_instalment_record": [("usd_pct_snapshot", "FLOAT")],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():

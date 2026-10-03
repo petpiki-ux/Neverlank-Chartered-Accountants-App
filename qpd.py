@@ -95,6 +95,8 @@ def compute_tb_suggestion(estimate):
     pl = fin.build_income_statement(totals)
     pbt_ytd = pl["profit_before_tax"]["current"]
     annualized_pbt = round(pbt_ytd / estimate.tb_months_covered * 12, 2)
+    revenue_ytd = totals["revenue"]["current"]
+    annualized_revenue = round(revenue_ytd / estimate.tb_months_covered * 12, 2)
     lines = [{"item_type": l.item_type, "description": l.description, "amount": l.amount} for l in estimate.adjustment_lines]
     result = fin.build_income_tax_computation(
         annualized_pbt, lines,
@@ -103,6 +105,7 @@ def compute_tb_suggestion(estimate):
     )
     result["pbt_ytd"] = pbt_ytd
     result["annualized_pbt"] = annualized_pbt
+    result["annualized_revenue"] = annualized_revenue
     return result
 
 
@@ -121,6 +124,7 @@ def compute_vat_suggestion(estimate):
         tax_rate_percent=estimate.tax_rate_pct, aids_levy_percent=estimate.aids_levy_pct,
     )
     result["annualized_turnover"] = annualized_turnover
+    result["annualized_revenue"] = annualized_turnover  # turnover IS revenue for this method - same key name as compute_tb_suggestion so use_vat_estimate/use_tb_estimate can share one code path
     return result
 
 
@@ -313,6 +317,7 @@ def use_tb_estimate(client_id, tax_year):
         flash("Enter the months covered and at least one mapped Trial Balance account before using this estimate.", "danger")
         return redirect(url_for("qpd.view_qpd", client_id=client_id, tax_year=tax_year))
     estimate.estimation_method = "Trial Balance"
+    estimate.estimated_annual_revenue = result["annualized_revenue"]
     estimate.estimated_annual_taxable_income = result["taxable_income"]
     estimate.estimated_annual_tax_charge = result["total_tax_charge"]
     estimate.updated_by_id = current_user.id
@@ -381,6 +386,7 @@ def use_vat_estimate(client_id, tax_year):
         flash("Enter at least one month's VAT turnover and a net margin % before using this estimate.", "danger")
         return redirect(url_for("qpd.view_qpd", client_id=client_id, tax_year=tax_year))
     estimate.estimation_method = "VAT Turnover"
+    estimate.estimated_annual_revenue = result["annualized_revenue"]
     estimate.estimated_annual_taxable_income = result["taxable_income"]
     estimate.estimated_annual_tax_charge = result["total_tax_charge"]
     estimate.updated_by_id = current_user.id
@@ -397,6 +403,8 @@ def use_vat_estimate(client_id, tax_year):
 def update_estimate(client_id, tax_year):
     _ensure_qpd_access()
     estimate = _get_or_create_estimate(client_id, tax_year)
+    revenue = request.form.get("estimated_annual_revenue", "").strip()
+    estimate.estimated_annual_revenue = _parse_float(revenue) if revenue else None
     estimate.estimated_annual_taxable_income = _parse_float(
         request.form.get("estimated_annual_taxable_income"), estimate.estimated_annual_taxable_income or 0.0,
     )
@@ -407,6 +415,10 @@ def update_estimate(client_id, tax_year):
     estimate.estimated_annual_tax_charge = _parse_float(
         request.form.get("estimated_annual_tax_charge"), estimate.estimated_annual_tax_charge or 0.0,
     )
+    # Dual-currency (USD/ZWG) split - see models.QPDEstimate.effective_usd_pct
+    # for ZIMRA's "50% rule" this drives.
+    usd_pct = request.form.get("revenue_usd_pct", "").strip()
+    estimate.revenue_usd_pct = _parse_float(usd_pct) if usd_pct else None
     estimate.notes = request.form.get("notes", "").strip()
     estimate.estimation_method = "Manual"
     estimate.updated_by_id = current_user.id
@@ -443,6 +455,12 @@ def compute_instalments(client_id, tax_year):
         record.cumulative_pct = item["cumulative_pct"]
         record.computed_amount = item["amount"]
         record.annual_tax_charge_snapshot = estimate.estimated_annual_tax_charge or 0.0
+        # Freeze the USD/ZWG split in effect right now too (see
+        # models.QPDEstimate.effective_usd_pct) - same "frozen snapshot"
+        # treatment as annual_tax_charge_snapshot above, so later editing
+        # the currency mix never silently reshuffles an instalment that's
+        # already been computed (or paid).
+        record.usd_pct_snapshot = estimate.effective_usd_pct
         record.computed_at = datetime.utcnow()
     db.session.commit()
     if skipped_paid:

@@ -4187,13 +4187,30 @@ class QPDInstalmentRate(db.Model):
 class QPDEstimate(db.Model):
     """One client's provisional income tax estimate for one tax year - see
     the module comment above for the client-level scoping and the two
-    estimation methods. estimated_annual_taxable_income/tax_rate_pct/
-    aids_levy_pct/estimated_annual_tax_charge are the "current best
-    estimate" - always directly editable regardless of which method (or
-    neither) last touched them. QPDInstalmentRecord rows (below) are
-    computed FROM this estimate on demand, each one a frozen snapshot, so
-    recomputing instalments after revising the estimate never silently
-    rewrites an instalment already recorded as paid."""
+    estimation methods. estimated_annual_revenue/estimated_annual_taxable_
+    income/tax_rate_pct/aids_levy_pct/estimated_annual_tax_charge are the
+    "current best estimate" - always directly editable regardless of which
+    method (or neither) last touched them. QPDInstalmentRecord rows (below)
+    are computed FROM this estimate on demand, each one a frozen snapshot,
+    so recomputing instalments after revising the estimate never silently
+    rewrites an instalment already recorded as paid.
+
+    Dual-currency (USD/ZWG) split: Zimbabwe taxpayers earning revenue in
+    more than one currency must split their provisional tax liability
+    between USD and ZWG (ZiG) - and ZIMRA's rule for HOW to split it is
+    asymmetric, not a straight read of the actual currency mix both ways:
+      - If more than 50% of revenue was earned in USD, the tax is split
+        evenly 50:50 USD/ZWG regardless of exactly how far over 50% USD
+        actually was.
+      - If ZWG is instead the majority currency (USD is 50% or less), the
+        split follows the ACTUAL proportion earned - e.g. 30% USD/70% ZWG
+        stays 30:70, it is never forced to 50:50.
+    revenue_usd_pct is the preparer-entered ACTUAL % of revenue earned in
+    USD for the year (the figure a preparer reads off the client's own
+    records); effective_usd_pct below applies the rule above to it, and
+    that effective split is what Revenue/Expenses/Taxable Income/Tax
+    Charge (and, frozen per instalment, each QPDInstalmentRecord) are
+    actually divided by - see currency_split()."""
     id = db.Column(db.Integer, primary_key=True)
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
     tax_year = db.Column(db.Integer, nullable=False)  # calendar tax year, e.g. 2026
@@ -4208,10 +4225,14 @@ class QPDEstimate(db.Model):
     vat_net_margin_pct = db.Column(db.Float)  # preparer's estimated net profit margin on annualized turnover
 
     # ---- The current best estimate - the "flex" layer, see module comment ----
+    estimated_annual_revenue = db.Column(db.Float)  # preparer-entered/suggested annualized revenue - see effective_usd_pct/currency_split below
     estimated_annual_taxable_income = db.Column(db.Float, default=0.0)
     tax_rate_pct = db.Column(db.Float)  # preparer-entered, never hardcoded - see module comment
     aids_levy_pct = db.Column(db.Float)
     estimated_annual_tax_charge = db.Column(db.Float, default=0.0)
+
+    # ---- Dual-currency (USD/ZWG) split - see class docstring above ----
+    revenue_usd_pct = db.Column(db.Float)  # preparer-entered ACTUAL % of revenue earned in USD; remainder assumed ZWG (ZiG)
 
     notes = db.Column(db.Text)
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -4240,6 +4261,44 @@ class QPDEstimate(db.Model):
     @property
     def unmapped_tb_line_count(self):
         return sum(1 for l in self.tb_lines if not l.fs_category)
+
+    @property
+    def effective_usd_pct(self):
+        """The USD % actually used to split Revenue/Expenses/Taxable
+        Income/Tax Charge/Instalments between USD and ZWG - ZIMRA's "50%
+        rule" described in the class docstring. None until revenue_usd_pct
+        has been entered."""
+        if self.revenue_usd_pct is None:
+            return None
+        return 50.0 if self.revenue_usd_pct > 50 else self.revenue_usd_pct
+
+    @property
+    def effective_zwg_pct(self):
+        if self.effective_usd_pct is None:
+            return None
+        return 100.0 - self.effective_usd_pct
+
+    @property
+    def implied_annual_expenses(self):
+        """Estimated annual revenue less estimated annual taxable income -
+        a simple derived figure that exists purely so the dual-currency
+        split has an "Expenses" amount to apply to alongside Revenue/
+        Taxable Income/Tax Charge. Not a substitute for an actual expense
+        schedule - the Trial Balance method's own expense lines are already
+        folded into Taxable Income via its add-back/deduction
+        reconciliation. None if either figure hasn't been entered yet."""
+        if self.estimated_annual_revenue is None or self.estimated_annual_taxable_income is None:
+            return None
+        return round(self.estimated_annual_revenue - self.estimated_annual_taxable_income, 2)
+
+    def currency_split(self, amount):
+        """(usd_amount, zwg_amount) for `amount` using effective_usd_pct -
+        (None, None) if no currency mix has been entered yet or amount
+        itself is None."""
+        if self.effective_usd_pct is None or amount is None:
+            return None, None
+        usd = round(amount * self.effective_usd_pct / 100.0, 2)
+        return usd, round(amount - usd, 2)
 
     def __repr__(self):
         return f"<QPDEstimate client={self.client_id} tax_year={self.tax_year}>"
@@ -4311,7 +4370,13 @@ class QPDInstalmentRecord(db.Model):
     firm-wide QPDInstalmentRate table nor revising the estimate later
     silently changes an instalment already recorded as paid.
     paid_amount/paid_date/paid_reference are then recorded separately, once
-    actually remitted to ZIMRA."""
+    actually remitted to ZIMRA.
+
+    usd_pct_snapshot freezes QPDEstimate.effective_usd_pct (the dual-
+    currency USD/ZWG split - see QPDEstimate's class docstring) at the same
+    moment, for the same reason as annual_tax_charge_snapshot: editing the
+    estimate's currency mix later must never reshuffle how much of an
+    already-computed (or already-paid) instalment was USD vs ZWG."""
     id = db.Column(db.Integer, primary_key=True)
     estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
     label = db.Column(db.String(60))
@@ -4319,6 +4384,7 @@ class QPDInstalmentRecord(db.Model):
     cumulative_pct = db.Column(db.Float)
     computed_amount = db.Column(db.Float, default=0.0)  # this instalment's own share (cumulative - previous), of the estimate at computation time
     annual_tax_charge_snapshot = db.Column(db.Float)  # what estimated_annual_tax_charge was when this was computed
+    usd_pct_snapshot = db.Column(db.Float)  # what estimate.effective_usd_pct was when this was computed - see class docstring
     computed_at = db.Column(db.DateTime, default=datetime.utcnow)
     order = db.Column(db.Integer, default=0)
 
@@ -4329,6 +4395,21 @@ class QPDInstalmentRecord(db.Model):
     @property
     def is_paid(self):
         return self.paid_amount is not None
+
+    @property
+    def usd_amount(self):
+        """This instalment's own USD portion, using the currency split
+        frozen at computation time - None if no currency mix was entered
+        when it was computed."""
+        if self.usd_pct_snapshot is None:
+            return None
+        return round((self.computed_amount or 0.0) * self.usd_pct_snapshot / 100.0, 2)
+
+    @property
+    def zwg_amount(self):
+        if self.usd_amount is None:
+            return None
+        return round((self.computed_amount or 0.0) - self.usd_amount, 2)
 
     def __repr__(self):
         return f"<QPDInstalmentRecord {self.label!r} estimate={self.estimate_id}>"
