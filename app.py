@@ -336,6 +336,9 @@ def _add_missing_columns():
         # original_rate_zwl - see models.FxRate: remembers the pre-conversion
         # ZWL figure on a rate converted to ZWG, so it can't be converted
         # twice and can be undone. NULL on everything entered in ZWG.
+        # estimated_annual_salaries - see models.QPDEstimate: the Salaries &
+        # wages line of the return's expenses split; NULL until entered.
+        "qpd_estimate": [("estimated_annual_salaries", "FLOAT")],
         "fx_rate": [("original_rate_zwl", "FLOAT")],
         "fx_average_rate": [("original_rate_zwl", "FLOAT")],
         "coa_mapping": [("coa_account_number", "VARCHAR(20)")],

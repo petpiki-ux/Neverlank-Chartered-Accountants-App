@@ -179,6 +179,7 @@ def view_qpd(client_id):
 
     return render_template(
         "qpd/estimate.html", client=client, estimate=estimate, tax_year=tax_year, other_years=other_years,
+        annual_avg_rate=get_average_fx_rate(tax_year, "FY"),
         tb_suggestion=compute_tb_suggestion(estimate), vat_suggestion=compute_vat_suggestion(estimate),
         fs_category_choices=fin.category_choices(), coa_accounts=coa_account_choices(),
         income_tax_item_types=INCOME_TAX_ITEM_TYPES, income_tax_item_type_labels=INCOME_TAX_ITEM_TYPE_LABELS,
@@ -468,6 +469,12 @@ def update_estimate(client_id, tax_year):
     # for ZIMRA's "50% rule" this drives.
     usd_pct = request.form.get("revenue_usd_pct", "").strip()
     estimate.revenue_usd_pct = _parse_float(usd_pct) if usd_pct else None
+    # Salaries & wages (the return's separate line within expenses) - only
+    # touched when the form actually carries the field, so any other caller
+    # posting to this route never silently wipes a saved figure.
+    if "estimated_annual_salaries" in request.form:
+        salaries = request.form.get("estimated_annual_salaries", "").strip()
+        estimate.estimated_annual_salaries = _parse_float(salaries) if salaries else None
     estimate.notes = request.form.get("notes", "").strip()
     estimate.estimation_method = "Manual"
     estimate.updated_by_id = current_user.id

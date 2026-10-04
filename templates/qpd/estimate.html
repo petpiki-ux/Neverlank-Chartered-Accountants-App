@@ -77,6 +77,11 @@
         <label for="revenue_usd_pct">Actual % of revenue earned in USD</label>
         <input type="number" step="0.01" min="0" max="100" id="revenue_usd_pct" name="revenue_usd_pct" value="{{ estimate.revenue_usd_pct if estimate.revenue_usd_pct is not none else '' }}" {% if not can_manage %}disabled{% endif %}>
       </div>
+      <div>
+        <label for="estimated_annual_salaries">Salaries &amp; wages (annual)</label>
+        <input type="number" step="0.01" min="0" id="estimated_annual_salaries" name="estimated_annual_salaries" value="{{ estimate.estimated_annual_salaries if estimate.estimated_annual_salaries is not none else '' }}" {% if not can_manage %}disabled{% endif %}>
+        <div class="muted" style="font-size:10.5px;">Part of total expenses - shown on its own line in the split below, as on the return.</div>
+      </div>
     </div>
     <label for="notes">Notes</label>
     <textarea id="notes" name="notes" rows="2" {% if not can_manage %}disabled{% endif %}>{{ estimate.notes or '' }}</textarea>
@@ -91,8 +96,8 @@
     ways: if more than 50% of revenue was earned in USD, the tax is split evenly 50:50 USD/ZWG (ZiG) regardless
     of exactly how far over 50% USD was; if ZWG is instead the majority currency, the split follows the ACTUAL
     proportion earned (e.g. 30% USD/70% ZWG stays 30:70). Set the actual % of revenue earned in USD above to
-    see the split below - it applies to Revenue, (implied) Expenses, Taxable Income, Tax Charge and each
-    instalment.
+    see the split below - it applies to Revenue, Expenses (Salaries and Other expenses each on their own line, as on
+    the return), Taxable Income, Tax Charge and each instalment.
   </p>
   {% if estimate.effective_usd_pct is not none %}
   <p>
@@ -100,21 +105,21 @@
     &rarr; split applied: <strong>{{ estimate.effective_usd_pct }}% USD</strong> / {{ estimate.effective_zwg_pct }}% ZWG
     {% if estimate.revenue_usd_pct > 50 %}<span class="badge status-Draft">50:50 rule applied (USD majority)</span>{% else %}<span class="badge status-Completed">Actual proportion (ZWG majority)</span>{% endif %}
   </p>
+  {% if annual_avg_rate %}
+  <p style="font-size:12px;margin-bottom:6px;">ZWG converted at the {{ tax_year }} annual average rate of <strong>{{ '%.4f'|format(annual_avg_rate.rate) }}</strong> ZWG per 1 USD{% if annual_avg_rate.source %} ({{ annual_avg_rate.source }}){% endif %}.</p>
+  {% else %}
+  <p class="muted" style="font-size:12px;margin-bottom:6px;">No {{ tax_year }} <strong>Annual</strong> average rate captured yet - capture it on <a href="{{ url_for('qpd.fx_rates') }}">FX Rates (USD:ZWG)</a> to see the ZWG column in actual ZWG. Until then the ZWG column is a USD equivalent.</p>
+  {% endif %}
   <table>
-    <thead><tr><th></th><th class="text-right">Total</th><th class="text-right">USD</th><th class="text-right">ZWG</th></tr></thead>
+    <thead><tr><th></th><th class="text-right">Total (USD)</th><th class="text-right">USD</th><th class="text-right">ZWG (USD equiv.)</th><th class="text-right">ZWG{% if annual_avg_rate %} (@ {{ '%.4f'|format(annual_avg_rate.rate) }}){% endif %}</th></tr></thead>
     <tbody>
-      {% for label, amount in [
-        ("Revenue", estimate.estimated_annual_revenue),
-        ("Expenses (implied: Revenue less Taxable Income)", estimate.implied_annual_expenses),
-        ("Taxable income", estimate.estimated_annual_taxable_income),
-        ("Tax charge", estimate.estimated_annual_tax_charge),
-      ] %}
-      {% set usd, zwg = estimate.currency_split(amount) %}
-      <tr>
-        <td>{{ label }}</td>
-        <td class="text-right">{{ '%.2f'|format(amount) if amount is not none else '—' }}</td>
-        <td class="text-right">{{ '%.2f'|format(usd) if usd is not none else '—' }}</td>
-        <td class="text-right">{{ '%.2f'|format(zwg) if zwg is not none else '—' }}</td>
+      {% for r in estimate.currency_split_table(annual_avg_rate.rate if annual_avg_rate else none) %}
+      <tr{% if r.sub %} class="muted"{% endif %}>
+        <td{% if r.sub %} style="padding-left:24px;"{% endif %}>{{ r.label }}{% if r.label == 'Salaries & wages' and r.amount is none %} <span class="muted" style="font-size:10.5px;">(not entered)</span>{% endif %}</td>
+        <td class="text-right">{{ '%.2f'|format(r.amount) if r.amount is not none else '—' }}</td>
+        <td class="text-right">{{ '%.2f'|format(r.usd) if r.usd is not none else '—' }}</td>
+        <td class="text-right">{{ '%.2f'|format(r.zwg) if r.zwg is not none else '—' }}</td>
+        <td class="text-right"><strong>{{ '{:,.2f}'.format(r.zwg_local) if r.zwg_local is not none else '—' }}</strong></td>
       </tr>
       {% endfor %}
     </tbody>

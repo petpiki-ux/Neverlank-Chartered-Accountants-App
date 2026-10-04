@@ -4360,6 +4360,11 @@ class QPDEstimate(db.Model):
 
     # ---- Dual-currency (USD/ZWG) split - see class docstring above ----
     revenue_usd_pct = db.Column(db.Float)  # preparer-entered ACTUAL % of revenue earned in USD; remainder assumed ZWG (ZiG)
+    # Salaries & wages (annual), entered by hand: the return shows Salaries
+    # and Other expenses as separate lines of the expenses total, so the
+    # Currency Split table breaks the (implied) expenses figure into the two.
+    # NULL = not entered yet (Other expenses then shows the whole total).
+    estimated_annual_salaries = db.Column(db.Float)
 
     notes = db.Column(db.Text)
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -4417,6 +4422,50 @@ class QPDEstimate(db.Model):
         if self.estimated_annual_revenue is None or self.estimated_annual_taxable_income is None:
             return None
         return round(self.estimated_annual_revenue - self.estimated_annual_taxable_income, 2)
+
+    @property
+    def other_annual_expenses(self):
+        """Implied total expenses less Salaries & wages - the "Other
+        expenses" line of the return. The whole expenses total when
+        salaries haven't been entered; None if expenses can't be derived."""
+        total = self.implied_annual_expenses
+        if total is None:
+            return None
+        return round(total - (self.estimated_annual_salaries or 0.0), 2)
+
+    def currency_split_table(self, zwg_rate=None):
+        """Rows for the annual Currency Split table, laid out like the
+        return: Revenue; Expenses broken into Salaries and Other expenses
+        (each its own line, both divided with the same effective USD % as
+        everything else); Taxable income; Tax charge. Each row is a dict:
+        label, amount, usd, zwg (USD-equivalent, as split), zwg_local (the
+        ZWG column converted into actual ZWG at zwg_rate - ZWG per 1 USD -
+        or None without a rate) and sub (indented breakdown line).
+        Other expenses is derived as total expenses less Salaries in EACH
+        currency, so Salaries + Other always adds back to the Expenses
+        line exactly, with no rounding drift."""
+        def row(label, amount, usd, zwg, sub=False):
+            local = round(zwg * zwg_rate, 2) if (zwg is not None and zwg_rate) else None
+            return {"label": label, "amount": amount, "usd": usd, "zwg": zwg, "zwg_local": local, "sub": sub}
+
+        def plain(label, amount, sub=False):
+            usd, zwg = self.currency_split(amount)
+            return row(label, amount, usd, zwg, sub)
+
+        exp_total = self.implied_annual_expenses
+        exp_usd, exp_zwg = self.currency_split(exp_total)
+        rows = [plain("Revenue", self.estimated_annual_revenue),
+                row("Expenses (implied: Revenue less Taxable Income)", exp_total, exp_usd, exp_zwg)]
+        sal = self.estimated_annual_salaries
+        sal_usd, sal_zwg = self.currency_split(sal)
+        rows.append(row("Salaries & wages", sal, sal_usd, sal_zwg, sub=True))
+        other_amount = self.other_annual_expenses
+        other_usd = round(exp_usd - (sal_usd or 0.0), 2) if exp_usd is not None else None
+        other_zwg = round(exp_zwg - (sal_zwg or 0.0), 2) if exp_zwg is not None else None
+        rows.append(row("Other expenses", other_amount, other_usd, other_zwg, sub=True))
+        rows.append(plain("Taxable income", self.estimated_annual_taxable_income))
+        rows.append(plain("Tax charge", self.estimated_annual_tax_charge))
+        return rows
 
     def currency_split(self, amount):
         """(usd_amount, zwg_amount) for `amount` using effective_usd_pct -
