@@ -333,6 +333,11 @@ def _add_missing_columns():
         # Accounts entries, alongside the existing bare fs_category.
         # Existing rows default to NULL (no standard account chosen yet)
         # until a preparer picks one.
+        # original_rate_zwl - see models.FxRate: remembers the pre-conversion
+        # ZWL figure on a rate converted to ZWG, so it can't be converted
+        # twice and can be undone. NULL on everything entered in ZWG.
+        "fx_rate": [("original_rate_zwl", "FLOAT")],
+        "fx_average_rate": [("original_rate_zwl", "FLOAT")],
         "coa_mapping": [("coa_account_number", "VARCHAR(20)")],
         "trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
         "qpd_trial_balance_line": [("coa_account_number", "VARCHAR(20)")],

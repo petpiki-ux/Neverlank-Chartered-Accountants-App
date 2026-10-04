@@ -52,7 +52,9 @@
         <td><strong>{{ year }}</strong></td>
         {% for code, label in average_periods %}
         {% set a = by_period.get(code) %}
-        <td class="text-right">{% if a %}<span title="{{ a.source or '' }}{{ ' - ' + a.notes if a.notes else '' }}">{{ '%.4f'|format(a.rate) }}</span>
+        <td class="text-right">{% if a %}<span title="{{ a.source or '' }}{{ ' - ' + a.notes if a.notes else '' }}">{{ '%.4f'|format(a.rate) }}</span>{% if a.original_rate_zwl is not none %}
+          <div class="muted" style="font-size:10px;">was ZWL {{ '{:,.2f}'.format(a.original_rate_zwl) }}
+            <form method="post" action="{{ url_for('qpd.revert_zwl_conversion', kind='average', rate_id=a.id) }}" class="inline" onsubmit="return confirm('Undo this conversion and restore the original ZWL rate?')"><button type="submit" class="btn small secondary" style="padding:0 4px;font-size:9px;">undo</button></form></div>{% endif %}
           <form method="post" action="{{ url_for('qpd.delete_fx_average_rate', rate_id=a.id) }}" class="inline" onsubmit="return confirm('Delete this average rate?')"><button type="submit" class="btn small danger" style="padding:0 5px;">&times;</button></form>{% else %}&mdash;{% endif %}</td>
         {% endfor %}
       </tr>
@@ -61,6 +63,65 @@
   </table>
   {% else %}
   <p class="muted" style="font-size:12px;margin:10px 0 0;">No average rates captured yet.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Convert ZWL rates to ZWG</h3>
+  <p class="muted" style="font-size:12.5px;">For rates captured while the currency was still ZWL (quoted as ZWL per 1 USD): each selected rate is divided by the conversion factor (ZWG 1 = ZWL {{ '{:,.4f}'.format(zwl_factor_default) }}) to give ZWG per 1 USD. Nothing changes until you review the preview and confirm. Each converted rate remembers its original ZWL figure, can't be converted twice, and can be undone with its "undo" link.</p>
+  <form method="post" action="{{ url_for('qpd.convert_zwl_rates') }}" style="margin-bottom:0;">
+    <div class="form-row" style="flex-wrap:wrap;">
+      <div><label for="cv_factor">Factor (ZWL per 1 ZWG) *</label><input type="number" step="0.0001" min="0" id="cv_factor" name="factor" value="{{ conversion_form.factor }}" required style="width:11em;"></div>
+      <div><label for="cv_from">Dated rates from</label><input type="date" id="cv_from" name="date_from" value="{{ conversion_form.date_from }}"></div>
+      <div><label for="cv_to">to</label><input type="date" id="cv_to" name="date_to" value="{{ conversion_form.date_to }}"></div>
+    </div>
+    <p class="muted" style="font-size:11.5px;margin:4px 0;">Leave both dates blank to convert average rates only.</p>
+    {% set all_averages = [] %}
+    {% for year, by_period in averages_by_year.items() %}{% for code, a in by_period.items() %}{% if all_averages.append((year, code, a)) %}{% endif %}{% endfor %}{% endfor %}
+    {% if all_averages %}
+    <div style="margin:6px 0;"><strong style="font-size:12.5px;">Average rates to convert</strong>
+      <div style="display:flex;flex-wrap:wrap;gap:6px 18px;margin-top:4px;">
+        {% for year, code, a in all_averages|sort(attribute='0,1') %}
+        <label style="font-weight:normal;font-size:12.5px;">
+          <input type="checkbox" name="avg" value="{{ year }}|{{ code }}" {% if (year, code) in conversion_form.selected_avg %}checked{% endif %}>
+          {{ year }} {{ 'Annual' if code == 'FY' else code }} ({{ '%.4f'|format(a.rate) }}{{ ', already converted' if a.original_rate_zwl is not none else '' }})
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <p class="muted" style="font-size:12px;">No average rates captured yet - add them above first to include them.</p>
+    {% endif %}
+    <button type="submit" name="action" value="preview" class="btn secondary">Preview conversion</button>
+  </form>
+
+  {% if conversion_preview %}
+  <div style="margin-top:14px;border-top:1px solid #ddd;padding-top:10px;">
+    <h4 style="margin:0 0 6px;">Preview - nothing has been changed yet</h4>
+    {% if conversion_preview.spot or conversion_preview.average %}
+    <table>
+      <thead><tr><th>Rate</th><th class="text-right">Now (ZWL per USD)</th><th class="text-right">After (ZWG per USD)</th></tr></thead>
+      <tbody>
+        {% for r, new_rate in conversion_preview.spot %}
+        <tr><td>Dated {{ r.rate_date.strftime('%d %b %Y') }}</td><td class="text-right">{{ '{:,.4f}'.format(r.rate) }}</td><td class="text-right">{{ '%.4f'|format(new_rate) }}</td></tr>
+        {% endfor %}
+        {% for a, new_rate in conversion_preview.average %}
+        <tr><td>Average {{ a.rate_year }} {{ 'Annual' if a.period == 'FY' else a.period }}</td><td class="text-right">{{ '{:,.4f}'.format(a.rate) }}</td><td class="text-right">{{ '%.4f'|format(new_rate) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:11.5px;">{{ conversion_preview.spot|length }} dated and {{ conversion_preview.average|length }} average rate(s) will be converted (÷ {{ '{:,.4f}'.format(conversion_preview.factor) }}).{% if conversion_preview.already %} {{ conversion_preview.already }} already-converted rate(s) in your selection will be left alone.{% endif %} Check the "Now" column really is in ZWL before confirming.</p>
+    <form method="post" action="{{ url_for('qpd.convert_zwl_rates') }}">
+      <input type="hidden" name="factor" value="{{ conversion_form.factor }}">
+      <input type="hidden" name="date_from" value="{{ conversion_form.date_from }}">
+      <input type="hidden" name="date_to" value="{{ conversion_form.date_to }}">
+      {% for year, code in conversion_form.selected_avg %}<input type="hidden" name="avg" value="{{ year }}|{{ code }}">{% endfor %}
+      <button type="submit" name="action" value="apply" class="btn gold">Confirm and convert</button>
+    </form>
+    {% else %}
+    <p class="muted" style="font-size:12.5px;">Nothing to convert in that selection{% if conversion_preview.already %} ({{ conversion_preview.already }} already converted){% endif %}.</p>
+    {% endif %}
+  </div>
   {% endif %}
 </div>
 
@@ -85,7 +146,9 @@
       {% for r in rates %}
       <tr>
         <td>{{ r.rate_date.strftime('%d %b %Y') }}</td>
-        <td class="text-right">{{ '%.4f'|format(r.rate) }}</td>
+        <td class="text-right">{{ '%.4f'|format(r.rate) }}{% if r.original_rate_zwl is not none %}
+          <div class="muted" style="font-size:10.5px;">converted from ZWL {{ '{:,.4f}'.format(r.original_rate_zwl) }}
+            <form method="post" action="{{ url_for('qpd.revert_zwl_conversion', kind='spot', rate_id=r.id) }}" class="inline" onsubmit="return confirm('Undo this conversion and restore the original ZWL rate?')"><button type="submit" class="btn small secondary" style="padding:0 5px;font-size:10px;">undo</button></form></div>{% endif %}</td>
         <td>{{ r.source or '—' }}</td>
         <td>{{ r.notes or '—' }}</td>
         <td>{{ r.created_by.name if r.created_by else '—' }}</td>

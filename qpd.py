@@ -639,6 +639,7 @@ def fx_rates():
             existing = FxRate(rate_date=rate_date)
             db.session.add(existing)
         existing.rate = _parse_float(rate_value, existing.rate or 0.0)
+        existing.original_rate_zwl = None  # a freshly entered rate is no longer "converted"
         existing.source = request.form.get("source", "").strip()
         existing.notes = request.form.get("notes", "").strip()
         existing.created_by_id = current_user.id
@@ -654,7 +655,131 @@ def fx_rates():
     return render_template(
         "qpd/fx_rates.html", rates=rates, averages_by_year=averages_by_year,
         average_periods=FX_AVERAGE_PERIODS, current_year=date.today().year,
+        zwl_factor_default=ZWL_TO_ZWG_FACTOR, conversion_preview=None,
+        conversion_form=_default_conversion_form(),
     )
+
+
+# ---------- ZWL -> ZWG conversion of legacy rates ----------
+# Rates captured before the ZiG (ZWG) was introduced were quoted as ZWL per
+# 1 USD. ZWG 1 = ZWL 2,498.7242, so a ZWG-per-USD rate is the old ZWL rate
+# divided by that factor. This tool converts chosen existing rates in place,
+# remembering each original figure (original_rate_zwl) so a row can never be
+# converted twice and any conversion can be undone.
+
+ZWL_TO_ZWG_FACTOR = 2498.7242
+
+
+def _default_conversion_form():
+    """What the conversion form shows before anything's been previewed: the
+    standard factor, all of calendar 2023 for the dated rates, and Q1-Q4/FY
+    2023 plus Q1 2024 pre-ticked for the average rates."""
+    return {
+        "factor": ZWL_TO_ZWG_FACTOR,
+        "date_from": "2023-01-01",
+        "date_to": "2023-12-31",
+        "selected_avg": {(2023, "Q1"), (2023, "Q2"), (2023, "Q3"), (2023, "Q4"), (2023, "FY"), (2024, "Q1")},
+    }
+
+
+def _parse_conversion_request():
+    """(form dict, error) from the conversion form's POST data."""
+    factor = _parse_float(request.form.get("factor", "").strip(), 0.0)
+    if factor <= 0 or factor == 1:
+        return None, "Enter a conversion factor greater than zero (and not 1)."
+    date_from = _parse_date(request.form.get("date_from", "").strip())
+    date_to = _parse_date(request.form.get("date_to", "").strip())
+    if bool(date_from) != bool(date_to) or (date_from and date_from > date_to):
+        return None, "Enter both a start and end date for the dated rates (start on or before end), or leave both blank to skip them."
+    selected_avg = set()
+    for token in request.form.getlist("avg"):
+        try:
+            year_text, period = token.split("|")
+            selected_avg.add((int(year_text), period))
+        except ValueError:
+            continue
+    return {"factor": factor, "date_from": date_from.isoformat() if date_from else "",
+            "date_to": date_to.isoformat() if date_to else "", "selected_avg": selected_avg}, None
+
+
+def _conversion_targets(form):
+    """The not-yet-converted dated rates and average rates the form selects,
+    as (spot_rows, average_rows, already_converted_count)."""
+    spot_rows, already = [], 0
+    if form["date_from"] and form["date_to"]:
+        d_from, d_to = date.fromisoformat(form["date_from"]), date.fromisoformat(form["date_to"])
+        for r in FxRate.query.filter(FxRate.rate_date >= d_from, FxRate.rate_date <= d_to).order_by(FxRate.rate_date).all():
+            if r.original_rate_zwl is not None:
+                already += 1
+            else:
+                spot_rows.append(r)
+    average_rows = []
+    for a in FxAverageRate.query.order_by(FxAverageRate.rate_year, FxAverageRate.period).all():
+        if (a.rate_year, a.period) in form["selected_avg"]:
+            if a.original_rate_zwl is not None:
+                already += 1
+            else:
+                average_rows.append(a)
+    return spot_rows, average_rows, already
+
+
+@qpd_bp.route("/qpd/fx-rates/convert-zwl", methods=["POST"])
+@login_required
+def convert_zwl_rates():
+    _ensure_qpd_access()
+    form, error = _parse_conversion_request()
+    if error:
+        flash(error, "danger")
+        return redirect(url_for("qpd.fx_rates"))
+    spot_rows, average_rows, already = _conversion_targets(form)
+    factor = form["factor"]
+
+    if request.form.get("action") != "apply":
+        # Preview only - nothing is changed.
+        preview = {
+            "factor": factor, "already": already,
+            "spot": [(r, round(r.rate / factor, 6)) for r in spot_rows],
+            "average": [(a, round(a.rate / factor, 6)) for a in average_rows],
+        }
+        rates = FxRate.query.order_by(FxRate.rate_date.desc()).all()
+        average_by_year = {}
+        for a in FxAverageRate.query.order_by(FxAverageRate.rate_year.desc()).all():
+            average_by_year.setdefault(a.rate_year, {})[a.period] = a
+        return render_template(
+            "qpd/fx_rates.html", rates=rates, averages_by_year=average_by_year,
+            average_periods=FX_AVERAGE_PERIODS, current_year=date.today().year,
+            zwl_factor_default=ZWL_TO_ZWG_FACTOR, conversion_preview=preview, conversion_form=form,
+        )
+
+    for r in spot_rows:
+        r.original_rate_zwl = r.rate
+        r.rate = round(r.rate / factor, 6)
+    for a in average_rows:
+        a.original_rate_zwl = a.rate
+        a.rate = round(a.rate / factor, 6)
+    db.session.commit()
+    msg = f"Converted {len(spot_rows)} dated rate(s) and {len(average_rows)} average rate(s) from ZWL to ZWG (÷ {factor:,.4f})."
+    if already:
+        msg += f" {already} already-converted rate(s) were left alone."
+    flash(msg, "success" if (spot_rows or average_rows) else "warning")
+    return redirect(url_for("qpd.fx_rates"))
+
+
+@qpd_bp.route("/qpd/fx-rates/<kind>/<int:rate_id>/revert-conversion", methods=["POST"])
+@login_required
+def revert_zwl_conversion(kind, rate_id):
+    _ensure_qpd_access()
+    if kind not in ("spot", "average"):
+        abort(404)
+    row = (FxRate if kind == "spot" else FxAverageRate).query.get_or_404(rate_id)
+    if row.original_rate_zwl is None:
+        flash("That rate hasn't been converted, so there's nothing to undo.", "warning")
+    else:
+        row.rate = row.original_rate_zwl
+        row.original_rate_zwl = None
+        db.session.commit()
+        flash("Conversion undone - the original ZWL rate is back.", "success")
+    return redirect(url_for("qpd.fx_rates"))
 
 
 def get_average_fx_rate(rate_year, period):
@@ -679,6 +804,7 @@ def save_fx_average_rate():
         existing = FxAverageRate(rate_year=year, period=period)
         db.session.add(existing)
     existing.rate = rate_value
+    existing.original_rate_zwl = None
     existing.source = request.form.get("source", "").strip()
     existing.notes = request.form.get("notes", "").strip()
     existing.created_by_id = current_user.id
@@ -808,6 +934,7 @@ def import_fx_rates():
             db.session.add(existing)
             created += 1
         existing.rate = rate_value
+        existing.original_rate_zwl = None
         existing.source = str(row.get(source_key) or "").strip() if source_key else (existing.source or "")
         existing.notes = str(row.get(notes_key) or "").strip() if notes_key else (existing.notes or "")
         existing.created_by_id = current_user.id

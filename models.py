@@ -4256,6 +4256,11 @@ class FxRate(db.Model):
     rate = db.Column(db.Float, nullable=False)  # ZWG per 1 USD
     source = db.Column(db.String(120))  # e.g. "RBZ auction", "RBZ interbank", "Bank rate"
     notes = db.Column(db.Text)
+    # Set only when this rate was converted from ZWL per USD to ZWG per USD
+    # by the "Convert ZWL rates to ZWG" tool (qpd.convert_zwl_rates): holds
+    # the ORIGINAL ZWL figure, so the conversion can't be applied twice and
+    # can be undone. NULL for every rate entered directly in ZWG.
+    original_rate_zwl = db.Column(db.Float)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -4290,6 +4295,7 @@ class FxAverageRate(db.Model):
     rate = db.Column(db.Float, nullable=False)  # ZWG per 1 USD
     source = db.Column(db.String(120))
     notes = db.Column(db.Text)
+    original_rate_zwl = db.Column(db.Float)  # see FxRate.original_rate_zwl
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
