@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}Standard Chart of Accounts - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Standard Chart of Accounts (Neverlank Standard)</h1>
+    <div class="subtitle">
+      The firm's own numbered account list - nothing here is externally mandated, it's a drafted starting point for
+      the firm to adjust. Picking one of these accounts when mapping a client's trial balance (in an engagement's
+      Trial Balance tab, or in a client's QPD estimator) fills in both a firm-standard account number and the
+      correct IAS 1 category in one step. This is separate from an Accounting engagement's own General Ledger
+      Chart of Accounts, which is built up fresh for each bookkeeping engagement.
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  {% if accounts %}
+  <table>
+    <thead><tr><th>Account #</th><th>Account name</th><th>IAS 1 category</th><th>Notes</th><th>Active</th><th></th></tr></thead>
+    <tbody>
+      {% for a in accounts %}
+      <tr{% if not a.is_active %} class="muted"{% endif %}>
+        <form method="post" action="{{ url_for('standard_coa.update_account', account_id=a.id) }}" class="inline">
+        <td><input type="text" name="account_number" value="{{ a.account_number }}" style="width:7em;"></td>
+        <td><input type="text" name="account_name" value="{{ a.account_name }}" style="width:16em;"></td>
+        <td>
+          <select name="fs_category" style="margin-bottom:0;">
+            {% for group_label, options in fs_category_choices %}
+            <optgroup label="{{ group_label }}">
+              {% for code, label in options %}
+              <option value="{{ code }}" {% if a.fs_category == code %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </optgroup>
+            {% endfor %}
+          </select>
+        </td>
+        <td><input type="text" name="notes" value="{{ a.notes or '' }}" style="width:10em;"></td>
+        <td><input type="checkbox" name="is_active" {% if a.is_active %}checked{% endif %}></td>
+        <td><button type="submit" class="btn small">Save</button></td>
+        </form>
+        <td><form method="post" action="{{ url_for('standard_coa.delete_account', account_id=a.id) }}" class="inline" onsubmit="return confirm('Delete this account?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No accounts yet - add the first one below.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Add an account</h3>
+  <form method="post" action="{{ url_for('standard_coa.list_accounts') }}" class="form-row" style="flex-wrap:wrap;">
+    <div><label for="account_number">Account # *</label><input type="text" id="account_number" name="account_number" style="width:7em;" required></div>
+    <div><label for="account_name">Account name *</label><input type="text" id="account_name" name="account_name" style="width:18em;" required></div>
+    <div>
+      <label for="fs_category">IAS 1 category *</label>
+      <select id="fs_category" name="fs_category" required>
+        <option value="">Choose...</option>
+        {% for group_label, options in fs_category_choices %}
+        <optgroup label="{{ group_label }}">
+          {% for code, label in options %}
+          <option value="{{ code }}">{{ label }}</option>
+          {% endfor %}
+        </optgroup>
+        {% endfor %}
+      </select>
+    </div>
+    <div><label for="notes">Notes</label><input type="text" id="notes" name="notes" style="width:14em;"></div>
+    <div><button type="submit" class="btn gold">Add account</button></div>
+  </form>
+</div>
+{% endblock %}

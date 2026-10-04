@@ -23,7 +23,7 @@ from models import (
     SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, REGULATORY_NOTICE_SOURCE_LABELS,
     SanctionsListStatus, RegulatoryNotice, ClientKeyPerson,
-    COAMapping, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
+    COAMapping, StandardChartOfAccounts, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
     REPORTING_FRAMEWORKS, REPORTING_FRAMEWORK_LABELS,
     CASH_FLOW_METHODS, CASH_FLOW_METHOD_LABELS, PIE_CRITERIA, SME_ACT_SECTORS, SME_ACT_SIZE_BANDS,
     SubstantiveProcedureArea, SubstantiveProcedureItem,
@@ -84,6 +84,7 @@ from models import (
 )
 import financials as fin
 import workpapers as wp
+from standard_coa import coa_account_choices
 
 engagements_bp = Blueprint("engagements", __name__, url_prefix="/engagements")
 
@@ -936,6 +937,7 @@ def view_engagement(engagement_id):
         sme_act_size_thresholds=fin.SME_ACT_SIZE_THRESHOLDS,
         suggested_sme_size_band=fin.classify_sme_size(engagement.sme_staff_headcount, engagement.sme_annual_turnover, engagement.sme_gross_assets),
         category_choices=fin.category_choices(),
+        coa_accounts=coa_account_choices(),
         it_change_plan_risk_levels=IT_CHANGE_PLAN_RISK_LEVELS,
         category_label=fin.category_label,
         audit_areas=substantive_area_names,
@@ -3456,7 +3458,7 @@ def _lookup_coa_mapping(client_id, account_name):
     return COAMapping.query.filter_by(client_id=client_id, account_name=norm).first()
 
 
-def _upsert_coa_mapping(client_id, account_name, fs_category, user_id):
+def _upsert_coa_mapping(client_id, account_name, fs_category, user_id, coa_account_number=None):
     norm = fin.normalize_account_name(account_name)
     if not norm or not fs_category:
         return
@@ -3465,8 +3467,21 @@ def _upsert_coa_mapping(client_id, account_name, fs_category, user_id):
         mapping = COAMapping(client_id=client_id, account_name=norm)
         db.session.add(mapping)
     mapping.fs_category = fs_category
+    mapping.coa_account_number = coa_account_number
     mapping.updated_by_id = user_id
     mapping.updated_at = datetime.utcnow()
+
+
+def _resolve_coa_account(coa_account_number):
+    """The active StandardChartOfAccounts row for coa_account_number, or
+    None if blank or not an active standard account - same helper as
+    qpd.py's (kept local rather than imported, same existing convention as
+    _lookup_coa_mapping/_upsert_coa_mapping above, which are already
+    duplicated between the two files rather than shared)."""
+    coa_account_number = (coa_account_number or "").strip()
+    if not coa_account_number:
+        return None
+    return StandardChartOfAccounts.query.filter_by(account_number=coa_account_number, is_active=True).first()
 
 
 @engagements_bp.route("/<int:engagement_id>/trial-balance/upload", methods=["POST"])
@@ -3502,7 +3517,7 @@ def upload_trial_balance(engagement_id):
     # mapping yet) before replacing them with the freshly imported rows.
     for existing_line in tb.lines:
         if existing_line.fs_category:
-            _upsert_coa_mapping(engagement.client_id, existing_line.account_name, existing_line.fs_category, current_user.id)
+            _upsert_coa_mapping(engagement.client_id, existing_line.account_name, existing_line.fs_category, current_user.id, existing_line.coa_account_number)
     TrialBalanceLine.query.filter_by(trial_balance_id=tb.id).delete()
 
     for row in cleaned_rows:
@@ -3512,6 +3527,7 @@ def upload_trial_balance(engagement_id):
             account_code=row["account_code"],
             account_name=row["account_name"],
             fs_category=mapping.fs_category if mapping else None,
+            coa_account_number=mapping.coa_account_number if mapping else None,
             current_debit=row["current_debit"], current_credit=row["current_credit"],
             prior_debit=row["prior_debit"], prior_credit=row["prior_credit"],
         ))
@@ -3547,10 +3563,14 @@ def confirm_suggested_tb_mappings(engagement_id):
         if line.fs_category:
             continue  # already mapped - this batch only ever touches unmapped rows
         category = request.form.get(f"fs_category__{line.id}", "").strip()
+        coa_account = _resolve_coa_account(request.form.get(f"coa_account_number__{line.id}"))
+        if coa_account:
+            category = coa_account.fs_category  # a chosen standard account is authoritative - see update_trial_balance_line
         if not category or category not in fin.CATEGORY_BY_CODE:
             continue  # left as "Unmapped" (or an unrecognized value) - skip, don't guess
         line.fs_category = category
-        _upsert_coa_mapping(engagement.client_id, line.account_name, category, current_user.id)
+        line.coa_account_number = coa_account.account_number if coa_account else None
+        _upsert_coa_mapping(engagement.client_id, line.account_name, category, current_user.id, line.coa_account_number)
         mapped_count += 1
 
     if mapped_count == 0:
@@ -3586,16 +3606,20 @@ def add_trial_balance_line(engagement_id):
 
     tb = _get_or_create_trial_balance(engagement_id, source="manual")
     category = request.form.get("fs_category", "").strip() or None
+    coa_account = _resolve_coa_account(request.form.get("coa_account_number"))
+    if coa_account:
+        category = coa_account.fs_category
     db.session.add(TrialBalanceLine(
         trial_balance_id=tb.id,
         account_code=request.form.get("account_code", "").strip(),
         account_name=name,
         fs_category=category,
+        coa_account_number=coa_account.account_number if coa_account else None,
         current_debit=to_float("current_debit"), current_credit=to_float("current_credit"),
         prior_debit=to_float("prior_debit"), prior_credit=to_float("prior_credit"),
     ))
     if category:
-        _upsert_coa_mapping(engagement.client_id, name, category, current_user.id)
+        _upsert_coa_mapping(engagement.client_id, name, category, current_user.id, coa_account.account_number if coa_account else None)
     _touch_trial_balance(tb)
     db.session.commit()
     flash("Account added.", "success")
@@ -3625,13 +3649,23 @@ def update_trial_balance_line(line_id):
     line.account_code = request.form.get("account_code", line.account_code or "").strip()
     line.account_name = request.form.get("account_name", line.account_name).strip() or line.account_name
     category = request.form.get("fs_category", "").strip() or None
+    # Picking a Standard Chart of Accounts account is authoritative - it
+    # drives BOTH the account number and the IAS 1 category together (the
+    # template also auto-fills the category dropdown client-side via JS,
+    # but this is enforced server-side too for a direct POST).
+    coa_account = _resolve_coa_account(request.form.get("coa_account_number"))
+    if coa_account:
+        category = coa_account.fs_category
+        line.coa_account_number = coa_account.account_number
+    else:
+        line.coa_account_number = None
     line.fs_category = category
     line.current_debit = to_float("current_debit", line.current_debit)
     line.current_credit = to_float("current_credit", line.current_credit)
     line.prior_debit = to_float("prior_debit", line.prior_debit)
     line.prior_credit = to_float("prior_credit", line.prior_credit)
     if category:
-        _upsert_coa_mapping(engagement.client_id, line.account_name, category, current_user.id)
+        _upsert_coa_mapping(engagement.client_id, line.account_name, category, current_user.id, line.coa_account_number)
     _touch_trial_balance(tb)
     db.session.commit()
     flash("Account updated.", "success")

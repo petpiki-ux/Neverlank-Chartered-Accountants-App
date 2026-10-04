@@ -144,13 +144,23 @@
   {% endif %}
 
   <table style="margin-top:10px;">
-    <thead><tr><th>Code</th><th>Account</th><th>IAS 1 category</th><th class="text-right">Current Dr</th><th class="text-right">Current Cr</th><th></th></tr></thead>
+    <thead><tr><th>Code</th><th>Account</th><th>Standard Account</th><th>IAS 1 category</th><th class="text-right">Current Dr</th><th class="text-right">Current Cr</th><th></th></tr></thead>
     <tbody>
       {% for line in estimate.tb_lines %}
       <tr{% if not line.fs_category %} class="danger"{% endif %}>
         <form method="post" action="{{ url_for('qpd.update_tb_line', client_id=client.id, line_id=line.id) }}" class="inline">
         <td><input type="text" name="account_code" value="{{ line.account_code or '' }}" style="width:70px;margin-bottom:0;" {% if not can_manage %}disabled{% endif %}></td>
         <td><input type="text" name="account_name" value="{{ line.account_name }}" style="width:170px;margin-bottom:0;" {% if not can_manage %}disabled{% endif %}></td>
+        <td>
+          <select name="coa_account_number" style="margin-bottom:0;" {% if not can_manage %}disabled{% endif %}
+                  onchange="var cat=this.options[this.selectedIndex].getAttribute('data-cat'); if(cat){ this.form.fs_category.value = cat; }"
+                  title="Picking one of the firm's Standard Chart of Accounts entries fills in the IAS 1 category too.">
+            <option value="">—</option>
+            {% for number, label, cat in coa_accounts %}
+            <option value="{{ number }}" data-cat="{{ cat }}" {% if line.coa_account_number==number %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </td>
         <td>
           <select name="fs_category" style="margin-bottom:0;" {% if not can_manage %}disabled{% endif %}>
             <option value="">Unmapped</option>
@@ -175,7 +185,7 @@
       </tr>
       {% endfor %}
       {% if not estimate.tb_lines %}
-      <tr><td colspan="6" class="empty-state">No Trial Balance lines yet - import a file above or add one below.</td></tr>
+      <tr><td colspan="7" class="empty-state">No Trial Balance lines yet - import a file above or add one below.</td></tr>
       {% endif %}
     </tbody>
   </table>

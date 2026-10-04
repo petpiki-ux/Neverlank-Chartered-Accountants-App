@@ -1771,12 +1771,22 @@
     <p class="muted" style="font-size:12.5px;">Rows below are pre-filled with a suggested category based on the account's name, marked <strong>(suggested)</strong> - it's a starting point only, nothing is saved until you review it. Check each one, change any that look wrong, leave a row as "Unmapped" to decide later, then confirm the batch at once.</p>
     <form method="post" action="{{ url_for('engagements.confirm_suggested_tb_mappings', engagement_id=engagement.id) }}">
     <table>
-      <thead><tr><th>Account</th><th>IAS 1 category</th></tr></thead>
+      <thead><tr><th>Account</th><th>Standard Account</th><th>IAS 1 category</th></tr></thead>
       <tbody>
       {% for line in trial_balance.lines if not line.fs_category %}
         {% set suggestion = suggested_categories.get(line.id) %}
         <tr class="danger">
           <td>{{ line.account_code + ' - ' if line.account_code }}{{ line.account_name }}</td>
+          <td>
+            <select name="coa_account_number__{{ line.id }}" style="margin-bottom:0;"
+                    onchange="var cat=this.options[this.selectedIndex].getAttribute('data-cat'); if(cat){ this.form.elements['fs_category__{{ line.id }}'].value = cat; }"
+                    title="Picking one of the firm's Standard Chart of Accounts entries fills in the IAS 1 category too.">
+              <option value="">—</option>
+              {% for number, label, cat in coa_accounts %}
+              <option value="{{ number }}" data-cat="{{ cat }}">{{ label }}</option>
+              {% endfor %}
+            </select>
+          </td>
           <td>
             <select name="fs_category__{{ line.id }}" style="margin-bottom:0;">
               <option value="" {% if not suggestion %}selected{% endif %}>Unmapped</option>
@@ -1804,6 +1814,17 @@
       <div><label for="account_code">Code</label><input type="text" id="account_code" name="account_code" style="width:90px;"></div>
       <div><label for="account_name">Account name *</label><input type="text" id="account_name" name="account_name" required></div>
       <div>
+        <label for="add_coa_account_number">Standard Account</label>
+        <select id="add_coa_account_number" name="coa_account_number"
+                onchange="var cat=this.options[this.selectedIndex].getAttribute('data-cat'); if(cat){ this.form.elements['fs_category'].value = cat; }"
+                title="Picking one of the firm's Standard Chart of Accounts entries fills in the IAS 1 category too.">
+          <option value="">—</option>
+          {% for number, label, cat in coa_accounts %}
+          <option value="{{ number }}" data-cat="{{ cat }}">{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
         <label for="fs_category">Category</label>
         <select id="fs_category" name="fs_category">
           <option value="">Select...</option>
@@ -1825,13 +1846,23 @@
   <div class="card">
     {% if trial_balance.lines %}
     <table>
-      <thead><tr><th>Code</th><th>Account</th><th>IAS 1 category</th><th>Current Dr</th><th>Current Cr</th><th>Prior Dr</th><th>Prior Cr</th><th></th></tr></thead>
+      <thead><tr><th>Code</th><th>Account</th><th>Standard Account</th><th>IAS 1 category</th><th>Current Dr</th><th>Current Cr</th><th>Prior Dr</th><th>Prior Cr</th><th></th></tr></thead>
       <tbody>
       {% for line in trial_balance.lines %}
         <tr{% if not line.fs_category %} class="danger"{% endif %}>
           <form method="post" action="{{ url_for('engagements.update_trial_balance_line', line_id=line.id) }}" class="inline">
           <td><input type="text" name="account_code" value="{{ line.account_code or '' }}" style="width:70px;margin-bottom:0;"></td>
           <td><input type="text" name="account_name" value="{{ line.account_name }}" style="width:170px;margin-bottom:0;"></td>
+          <td>
+            <select name="coa_account_number" style="margin-bottom:0;"
+                    onchange="var cat=this.options[this.selectedIndex].getAttribute('data-cat'); if(cat){ this.form.fs_category.value = cat; }"
+                    title="Picking one of the firm's Standard Chart of Accounts entries fills in the IAS 1 category too.">
+              <option value="">—</option>
+              {% for number, label, cat in coa_accounts %}
+              <option value="{{ number }}" data-cat="{{ cat }}" {% if line.coa_account_number==number %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </td>
           <td>
             <select name="fs_category" style="margin-bottom:0;">
               <option value="">Unmapped</option>

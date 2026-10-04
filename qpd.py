@@ -11,8 +11,11 @@ Deliberately reuses financials.py's existing Trial Balance -> IAS 1 ->
 Profit Before Tax -> Income Tax Computation pipeline rather than
 reimplementing any of that maths here - see compute_tb_suggestion() below.
 """
+import csv
+import io
 from datetime import date, datetime
 
+import openpyxl
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -21,11 +24,12 @@ from extensions import db
 from models import (
     Client, QPDEstimate, QPDTrialBalanceLine, QPDAdjustmentLine, QPDMonthlyTurnover,
     QPDInstalmentRate, QPDInstalmentRecord, FxRate, INCOME_TAX_ITEM_TYPES, INCOME_TAX_ITEM_TYPE_LABELS,
-    COAMapping, user_has_permission,
+    COAMapping, StandardChartOfAccounts, user_has_permission,
 )
 import financials as fin
 import qpd_calc
 from engagements import _read_tb_upload_rows, _allowed_tb_file  # same flexible TB file reader an audit engagement's own TB import uses
+from standard_coa import coa_account_choices
 
 qpd_bp = Blueprint("qpd", __name__, url_prefix="/clients")
 
@@ -83,7 +87,7 @@ def _lookup_coa_mapping(client_id, account_name):
     return COAMapping.query.filter_by(client_id=client_id, account_name=norm).first()
 
 
-def _upsert_coa_mapping(client_id, account_name, fs_category, user_id):
+def _upsert_coa_mapping(client_id, account_name, fs_category, user_id, coa_account_number=None):
     norm = fin.normalize_account_name(account_name)
     if not norm or not fs_category:
         return
@@ -92,8 +96,20 @@ def _upsert_coa_mapping(client_id, account_name, fs_category, user_id):
         mapping = COAMapping(client_id=client_id, account_name=norm)
         db.session.add(mapping)
     mapping.fs_category = fs_category
+    mapping.coa_account_number = coa_account_number
     mapping.updated_by_id = user_id
     mapping.updated_at = datetime.utcnow()
+
+
+def _resolve_coa_account(coa_account_number):
+    """The active StandardChartOfAccounts row for coa_account_number, or
+    None if blank or not an active standard account - used so a direct POST
+    can never set a line's coa_account_number to something that doesn't (or
+    no longer) exist."""
+    coa_account_number = (coa_account_number or "").strip()
+    if not coa_account_number:
+        return None
+    return StandardChartOfAccounts.query.filter_by(account_number=coa_account_number, is_active=True).first()
 
 
 def compute_tb_suggestion(estimate):
@@ -164,7 +180,7 @@ def view_qpd(client_id):
     return render_template(
         "qpd/estimate.html", client=client, estimate=estimate, tax_year=tax_year, other_years=other_years,
         tb_suggestion=compute_tb_suggestion(estimate), vat_suggestion=compute_vat_suggestion(estimate),
-        fs_category_choices=fin.category_choices(),
+        fs_category_choices=fin.category_choices(), coa_accounts=coa_account_choices(),
         income_tax_item_types=INCOME_TAX_ITEM_TYPES, income_tax_item_type_labels=INCOME_TAX_ITEM_TYPE_LABELS,
         instalment_rates=instalment_rates,
         can_manage=user_has_permission(current_user, "manage_qpd"),
@@ -202,7 +218,7 @@ def upload_tb(client_id, tax_year):
     # as engagements.upload_trial_balance.
     for existing_line in estimate.tb_lines:
         if existing_line.fs_category:
-            _upsert_coa_mapping(client_id, existing_line.account_name, existing_line.fs_category, current_user.id)
+            _upsert_coa_mapping(client_id, existing_line.account_name, existing_line.fs_category, current_user.id, existing_line.coa_account_number)
     QPDTrialBalanceLine.query.filter_by(estimate_id=estimate.id).delete()
 
     for row in cleaned_rows:
@@ -211,6 +227,7 @@ def upload_tb(client_id, tax_year):
             estimate_id=estimate.id,
             account_code=row["account_code"], account_name=row["account_name"],
             fs_category=mapping.fs_category if mapping else None,
+            coa_account_number=mapping.coa_account_number if mapping else None,
             current_debit=row["current_debit"], current_credit=row["current_credit"],
         ))
     estimate.estimation_method = "Trial Balance"
@@ -236,6 +253,7 @@ def add_tb_line(client_id, tax_year):
     db.session.add(QPDTrialBalanceLine(
         estimate_id=estimate.id, account_name=account_name,
         fs_category=mapping.fs_category if mapping else None,
+        coa_account_number=mapping.coa_account_number if mapping else None,
         current_debit=_parse_float(request.form.get("current_debit"), 0.0),
         current_credit=_parse_float(request.form.get("current_credit"), 0.0),
     ))
@@ -268,11 +286,23 @@ def update_tb_line(client_id, line_id):
     category = request.form.get("fs_category", "").strip()
     if category and category not in fin.CATEGORY_BY_CODE:
         category = ""
+    # Picking a Standard Chart of Accounts account is authoritative - it
+    # drives BOTH the account number and the IAS 1 category together (the
+    # template also auto-fills the category dropdown client-side via JS,
+    # but this is enforced server-side too for a direct POST). Leaving the
+    # standard-account picker blank keeps the plain category-only mapping
+    # behaviour exactly as before this feature existed.
+    coa_account = _resolve_coa_account(request.form.get("coa_account_number"))
+    if coa_account:
+        line.coa_account_number = coa_account.account_number
+        category = coa_account.fs_category
+    else:
+        line.coa_account_number = None
     line.fs_category = category or None
     line.current_debit = _parse_float(request.form.get("current_debit"), line.current_debit or 0.0)
     line.current_credit = _parse_float(request.form.get("current_credit"), line.current_credit or 0.0)
     if category:
-        _upsert_coa_mapping(client_id, line.account_name, category, current_user.id)
+        _upsert_coa_mapping(client_id, line.account_name, category, current_user.id, line.coa_account_number)
     db.session.commit()
     flash("Account updated.", "success")
     return redirect(url_for("qpd.view_qpd", client_id=client_id, tax_year=tax_year))
@@ -618,6 +648,138 @@ def fx_rates():
         return redirect(url_for("qpd.fx_rates"))
     rates = FxRate.query.order_by(FxRate.rate_date.desc()).all()
     return render_template("qpd/fx_rates.html", rates=rates)
+
+
+def _parse_import_date(value):
+    """Accepts a real Excel date/datetime cell, or a string in one of a
+    few common layouts (ISO, or day-first d/m/Y as used locally), and
+    returns a date or None if it's not recognizable."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _read_fx_rate_upload_rows(file_storage, filename):
+    """Returns a list of {header: value} dicts from an uploaded .xlsx/.xls
+    or .csv file of FX rates. Raises ValueError with a plain-English
+    message if it can't find a usable header row (one containing both
+    'date' and 'rate')."""
+    ext = filename.rsplit(".", 1)[-1].lower()
+    if ext == "csv":
+        content = file_storage.read().decode("utf-8-sig", errors="replace")
+        all_rows = list(csv.reader(io.StringIO(content)))
+    else:
+        workbook = openpyxl.load_workbook(file_storage, data_only=True)
+        all_rows = list(workbook.active.iter_rows(values_only=True))
+
+    header_idx = None
+    for i, row in enumerate(all_rows):
+        cells = [str(c).strip().lower() if c is not None else "" for c in row]
+        if any("date" in c for c in cells) and any("rate" in c for c in cells):
+            header_idx = i
+            break
+    if header_idx is None:
+        raise ValueError(
+            "Could not find a header row containing both 'Date' and 'Rate' columns in that file. "
+            "Download the template below and use its column headers."
+        )
+
+    headers = [str(c).strip() if c is not None else "" for c in all_rows[header_idx]]
+    data_rows = []
+    for row in all_rows[header_idx + 1:]:
+        if row is None or all(c is None or str(c).strip() == "" for c in row):
+            continue
+        data_rows.append({h: v for h, v in zip(headers, row) if h})
+    return data_rows
+
+
+@qpd_bp.route("/qpd/fx-rates/import", methods=["POST"])
+@login_required
+def import_fx_rates():
+    _ensure_qpd_access()
+    file = request.files.get("file")
+    if not file or file.filename == "":
+        flash("Please choose a file to upload.", "danger")
+        return redirect(url_for("qpd.fx_rates"))
+    if not _allowed_tb_file(file.filename):
+        flash("Please upload a .xlsx, .xls or .csv file.", "danger")
+        return redirect(url_for("qpd.fx_rates"))
+
+    try:
+        rows = _read_fx_rate_upload_rows(file, secure_filename(file.filename))
+    except ValueError as exc:
+        flash(str(exc), "danger")
+        return redirect(url_for("qpd.fx_rates"))
+
+    date_key = rate_key = source_key = notes_key = None
+    for h in (rows[0].keys() if rows else []):
+        hl = h.strip().lower()
+        if date_key is None and "date" in hl:
+            date_key = h
+        elif rate_key is None and "rate" in hl:
+            rate_key = h
+        elif source_key is None and "source" in hl:
+            source_key = h
+        elif notes_key is None and "note" in hl:
+            notes_key = h
+
+    created = updated = 0
+    skipped = []
+    for i, row in enumerate(rows, start=2):  # +1 for 1-indexing, +1 for header row
+        rate_date = _parse_import_date(row.get(date_key)) if date_key else None
+        rate_raw = row.get(rate_key) if rate_key else None
+        if not rate_date:
+            skipped.append(f"row {i}: unreadable or missing date")
+            continue
+        try:
+            rate_value = float(rate_raw)
+        except (TypeError, ValueError):
+            skipped.append(f"row {i}: missing or non-numeric rate")
+            continue
+        if rate_value <= 0:
+            skipped.append(f"row {i}: rate must be greater than zero")
+            continue
+
+        existing = FxRate.query.filter_by(rate_date=rate_date).first()
+        if existing:
+            updated += 1
+        else:
+            existing = FxRate(rate_date=rate_date)
+            db.session.add(existing)
+            created += 1
+        existing.rate = rate_value
+        existing.source = str(row.get(source_key) or "").strip() if source_key else (existing.source or "")
+        existing.notes = str(row.get(notes_key) or "").strip() if notes_key else (existing.notes or "")
+        existing.created_by_id = current_user.id
+        existing.created_at = datetime.utcnow()
+
+    db.session.commit()
+
+    parts = []
+    if created:
+        parts.append(f"{created} rate(s) added")
+    if updated:
+        parts.append(f"{updated} existing date(s) updated")
+    summary = ", ".join(parts) if parts else "No rates were imported"
+    if skipped:
+        shown = "; ".join(skipped[:5])
+        more = f" (+{len(skipped) - 5} more)" if len(skipped) > 5 else ""
+        flash(f"{summary}. Skipped {len(skipped)} row(s): {shown}{more}.", "warning" if parts else "danger")
+    else:
+        flash(f"{summary} from '{file.filename}'.", "success")
+    return redirect(url_for("qpd.fx_rates"))
 
 
 @qpd_bp.route("/qpd/fx-rates/<int:rate_id>/delete", methods=["POST"])

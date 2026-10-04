@@ -372,6 +372,10 @@ PERMISSIONS = [
      "Upload or delete Acts, Government Notices and Statutory Instruments in the Legislative Update Control "
      "library, used to drive AI summarisation and client-relevance tagging.",
      ("partner", "admin")),
+    ("manage_chart_of_accounts", "Manage the Standard Chart of Accounts",
+     "Add, edit, deactivate or delete entries in the firm's Standard Chart of Accounts (Neverlank Standard) - the "
+     "numbered account list used to speed up mapping a client's trial balance accounts to an IAS 1 category.",
+     ("partner", "admin")),
     ("research_firm_library", "Research the Firm Library",
      "Use \"Ask the Firm Library\" to query the Policies & Procedures library with AI and see the AI-generated "
      "summary/key points on each document. Viewing and downloading policies is unaffected by this setting and "
@@ -3658,16 +3662,49 @@ class ITChangePlanItem(db.Model):
 
 # ---------- Trial Balance import & IAS 1 Financial Statements ----------
 
+class StandardChartOfAccounts(db.Model):
+    """The firm's own Standard Chart of Accounts ("Neverlank Standard") - a
+    single firm-wide, numbered list of accounts (not per client), seeded
+    once with a sensible draft (see seed.seed_chart_of_accounts) and fully
+    firm-editable from there, same "editable starting point" convention as
+    QPDInstalmentRate/StatutoryDeadline. Each account carries one of
+    financials.FS_CATEGORIES's codes, so picking a standard account for a
+    client's trial balance line (see COAMapping.coa_account_number below)
+    both gives that line a firm-standard account number AND fills in its
+    IAS 1 category in one step. account_number is kept as a string (not an
+    integer) so it can carry a leading-zero or non-numeric convention if
+    the structure is ever extended (e.g. sub-accounts like "1000.1")."""
+    id = db.Column(db.Integer, primary_key=True)
+    account_number = db.Column(db.String(20), nullable=False, unique=True)
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50), nullable=False)  # code from financials.FS_CATEGORIES
+    is_active = db.Column(db.Boolean, default=True)  # inactive accounts stay on file (history) but drop out of the picker
+    notes = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<StandardChartOfAccounts {self.account_number} {self.account_name}>"
+
+
 class COAMapping(db.Model):
     """A remembered mapping from one of a client's trial balance account
     names to an IAS 1 financial statement category (see financials.py) -
     reusable across every engagement/period for that client, so a repeat
     engagement's trial balance mostly auto-maps itself. Keyed on the
-    account name as typed/imported (matched case-insensitively)."""
+    account name as typed/imported (matched case-insensitively).
+
+    coa_account_number optionally links this account name to one of the
+    firm's own Standard Chart of Accounts entries (see StandardChartOfAccounts
+    above) - a plain string reference (not a hard foreign key) so
+    renumbering or deactivating a standard account never breaks an existing
+    mapping. None means this account name is only mapped to a bare IAS 1
+    category, with no firm-standard account number chosen (always true for
+    every mapping made before this feature existed)."""
     id = db.Column(db.Integer, primary_key=True)
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
     account_name = db.Column(db.String(200), nullable=False)
     fs_category = db.Column(db.String(50), nullable=False)
+    coa_account_number = db.Column(db.String(20))
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
@@ -3768,9 +3805,10 @@ class TrialBalance(db.Model):
 class TrialBalanceLine(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     trial_balance_id = db.Column(db.Integer, db.ForeignKey("trial_balance.id"), nullable=False)
-    account_code = db.Column(db.String(50))
+    account_code = db.Column(db.String(50))  # the CLIENT's own account code, as uploaded/typed - not the firm's standard numbering below
     account_name = db.Column(db.String(200), nullable=False)
     fs_category = db.Column(db.String(50))  # code from financials.FS_CATEGORIES, or "excluded" / blank if unmapped
+    coa_account_number = db.Column(db.String(20))  # optional link to one of the firm's own Standard Chart of Accounts entries - see StandardChartOfAccounts/COAMapping
     current_debit = db.Column(db.Float, default=0.0)
     current_credit = db.Column(db.Float, default=0.0)
     prior_debit = db.Column(db.Float, default=0.0)
@@ -4363,6 +4401,7 @@ class QPDTrialBalanceLine(db.Model):
     account_code = db.Column(db.String(50))
     account_name = db.Column(db.String(200), nullable=False)
     fs_category = db.Column(db.String(50))  # code from financials.FS_CATEGORIES, or blank if unmapped
+    coa_account_number = db.Column(db.String(20))  # optional link to one of the firm's own Standard Chart of Accounts entries - see StandardChartOfAccounts/COAMapping
     current_debit = db.Column(db.Float, default=0.0)
     current_credit = db.Column(db.Float, default=0.0)
     prior_debit = db.Column(db.Float, default=0.0)

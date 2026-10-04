@@ -8,7 +8,7 @@ from sqlalchemy.engine import Engine
 
 from config import Config, INSTANCE_DIR
 from extensions import db, login_manager, socketio
-from models import User, DocumentTemplate, Permission, FilingIndexSection, StatutoryDeadline, QPDInstalmentRate
+from models import User, DocumentTemplate, Permission, FilingIndexSection, StatutoryDeadline, QPDInstalmentRate, StandardChartOfAccounts
 
 
 @event.listens_for(Engine, "connect")
@@ -327,6 +327,15 @@ def _add_missing_columns():
             ("usd_pct_snapshot", "FLOAT"), ("fx_rate_snapshot", "FLOAT"),
             ("paid_amount_usd", "FLOAT"), ("paid_amount_zwg", "FLOAT"),
         ],
+        # coa_account_number - see models.StandardChartOfAccounts/COAMapping's
+        # docstrings: an optional link from a remembered/trial-balance
+        # account mapping to one of the firm's own Standard Chart of
+        # Accounts entries, alongside the existing bare fs_category.
+        # Existing rows default to NULL (no standard account chosen yet)
+        # until a preparer picks one.
+        "coa_mapping": [("coa_account_number", "VARCHAR(20)")],
+        "trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
+        "qpd_trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
@@ -505,6 +514,7 @@ def create_app():
     from tax import tax_bp
     from accounting import accounting_bp
     from qpd import qpd_bp, qpd_dashboard_bp
+    from standard_coa import standard_coa_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -527,6 +537,7 @@ def create_app():
     app.register_blueprint(accounting_bp)
     app.register_blueprint(qpd_bp)
     app.register_blueprint(qpd_dashboard_bp)
+    app.register_blueprint(standard_coa_bp)
 
     @app.route("/")
     def index():
@@ -626,6 +637,14 @@ def create_app():
         if QPDInstalmentRate.query.count() == 0:
             from seed import seed_qpd_instalment_rates
             seed_qpd_instalment_rates()
+        # Standard Chart of Accounts (StandardChartOfAccounts): a firm-wide numbered
+        # account list ("Neverlank Standard") used to speed up mapping a
+        # client's trial balance accounts to an IAS 1 category - seeded the
+        # same way as QPD Instalment Rates above, once, as an editable
+        # starting point (see seed_chart_of_accounts's own docstring).
+        if StandardChartOfAccounts.query.count() == 0:
+            from seed import seed_chart_of_accounts
+            seed_chart_of_accounts()
         # Document Templates whose reference codes were renumbered to the
         # Filing Index's N-codes (e.g. SA-02 -> N9006) need already-seeded
         # rows on an existing install updated to match - safe/cheap to run

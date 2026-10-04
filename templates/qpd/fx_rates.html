@@ -30,6 +30,19 @@
 </div>
 
 <div class="card">
+  <h3 class="mt-0">Import rates from Excel</h3>
+  <p class="muted" style="font-size:12.5px;">Bulk-load a run of dated rates at once instead of entering them one by one - handy for backfilling a period or pasting in a schedule from the bank/RBZ. The file needs a header row with "Date" and "Rate" columns (an optional "Source" and "Notes" column are picked up too); any other columns are ignored.</p>
+  <div class="form-row" style="align-items:flex-end;">
+    <form method="post" action="{{ url_for('qpd.import_fx_rates') }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end; grid-column: span 2;">
+      <div><label for="fx_file">Upload .xlsx / .csv</label><input type="file" id="fx_file" name="file" accept=".xlsx,.xls,.csv" required></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Import</button></div>
+    </form>
+    <div><a href="{{ url_for('static', filename='downloads/Neverlank_FX_Rates_Import_Template.xlsx') }}" class="btn secondary">Download template</a></div>
+  </div>
+  <p class="muted" style="font-size:11px;margin-bottom:0;">Importing a date that's already on file updates that day's rate, same as logging it manually above - nothing else is ever deleted.</p>
+</div>
+
+<div class="card">
   {% if rates %}
   <table>
     <thead><tr><th>Date</th><th class="text-right">Rate (ZWG : 1 USD)</th><th>Source</th><th>Notes</th><th>Logged by</th><th></th></tr></thead>

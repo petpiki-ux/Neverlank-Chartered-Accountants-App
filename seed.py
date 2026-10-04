@@ -14,7 +14,7 @@ from models import (
     User, ChecklistTemplate, ChecklistTemplateItem, DocumentTemplate, Permission, PERMISSIONS, USER_ROLES,
     FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PayrollTaxSettings, PAYROLL_PAY_FREQUENCIES,
     LeaveType, LEAVE_TYPES_STATUTORY_ZW, CompanyDocument, SubstantiveProcedureItem, FinalisationChecklist,
-    FinalisationChecklistItem, QPDInstalmentRate,
+    FinalisationChecklistItem, QPDInstalmentRate, StandardChartOfAccounts,
 )
 from config import Config
 
@@ -679,6 +679,158 @@ def seed_qpd_instalment_rates():
     for label, due_month, due_day, cumulative_pct, order in rows:
         db.session.add(QPDInstalmentRate(
             label=label, due_month=due_month, due_day=due_day, cumulative_pct=cumulative_pct, order=order,
+        ))
+    db.session.commit()
+
+
+# The Neverlank Standard Chart of Accounts - a drafted starting point (not
+# an externally-mandated numbering) organised in the usual SFP/PL block
+# order: 1000s non-current then current assets, 2000s equity, 2400s/2800s
+# non-current then current liabilities, 4000s revenue, 5000s cost of sales,
+# 6000s other income, 7000s distribution/admin/other expenses/depreciation/
+# finance costs, 8000s income tax, 9000s OCI/equity movements. Each entry
+# is (account_number, account_name, fs_category code from financials.
+# FS_CATEGORIES) - fully firm-editable from the Chart of Accounts settings
+# page once seeded (see seed_chart_of_accounts's own docstring below).
+CHART_OF_ACCOUNTS_STANDARD = [
+    # Non-current assets
+    ("1000", "Land and Buildings", "ppe"),
+    ("1010", "Plant and Machinery", "ppe"),
+    ("1020", "Motor Vehicles", "ppe"),
+    ("1030", "Furniture, Fittings and Equipment", "ppe"),
+    ("1040", "Computer Equipment", "ppe"),
+    ("1050", "Capital Work in Progress", "ppe"),
+    ("1100", "Goodwill", "intangible_assets"),
+    ("1110", "Software and Licences", "intangible_assets"),
+    ("1120", "Patents and Trademarks", "intangible_assets"),
+    ("1200", "Investment Property", "investment_property"),
+    ("1300", "Investments in Subsidiaries/Associates", "long_term_investments"),
+    ("1310", "Other Long-term Investments", "long_term_investments"),
+    ("1400", "Deferred Tax Asset", "deferred_tax_asset"),
+    ("1500", "Long-term Loans Receivable", "other_noncurrent_assets"),
+    ("1510", "Other Non-current Assets", "other_noncurrent_assets"),
+    # Current assets
+    ("1600", "Raw Materials Inventory", "inventories"),
+    ("1610", "Work in Progress Inventory", "inventories"),
+    ("1620", "Finished Goods Inventory", "inventories"),
+    ("1630", "Consumable Stores", "inventories"),
+    ("1700", "Trade Debtors", "trade_receivables"),
+    ("1710", "Allowance for Credit Losses", "trade_receivables"),
+    ("1720", "Other Receivables", "trade_receivables"),
+    ("1730", "Staff Loans and Advances", "trade_receivables"),
+    ("1800", "Prepayments", "other_current_assets"),
+    ("1810", "VAT Receivable/Control", "other_current_assets"),
+    ("1820", "Withholding Tax Receivable", "other_current_assets"),
+    ("1900", "Cash on Hand (Petty Cash)", "cash"),
+    ("1910", "Bank Accounts - USD", "cash"),
+    ("1920", "Bank Accounts - ZWG", "cash"),
+    ("1930", "Short-term Deposits/Money Market", "cash"),
+    # Equity
+    ("2000", "Ordinary Share Capital", "share_capital"),
+    ("2010", "Preference Share Capital", "share_capital"),
+    ("2100", "Share Premium", "share_premium"),
+    ("2200", "Retained Earnings", "retained_earnings"),
+    ("2300", "Revaluation Reserve", "other_reserves"),
+    ("2310", "Other Reserves", "other_reserves"),
+    # Non-current liabilities
+    ("2400", "Long-term Bank Loans", "long_term_borrowings"),
+    ("2410", "Finance Lease Liabilities (non-current)", "long_term_borrowings"),
+    ("2420", "Shareholder Loans (non-current)", "long_term_borrowings"),
+    ("2500", "Deferred Tax Liability", "deferred_tax_liability"),
+    ("2600", "Long-term Provisions (e.g. Leave Pay)", "long_term_provisions"),
+    ("2700", "Other Non-current Liabilities", "other_noncurrent_liabilities"),
+    # Current liabilities
+    ("2800", "Trade Creditors", "trade_payables"),
+    ("2810", "Accrued Expenses", "trade_payables"),
+    ("2820", "Other Payables", "trade_payables"),
+    ("2900", "Bank Overdraft", "short_term_borrowings"),
+    ("2910", "Short-term Loans", "short_term_borrowings"),
+    ("2920", "Current Portion of Long-term Loans", "short_term_borrowings"),
+    ("3000", "Income Tax Payable", "current_tax_payable"),
+    ("3010", "QPD / Provisional Tax Payable", "current_tax_payable"),
+    ("3100", "Short-term Provisions", "short_term_provisions"),
+    ("3200", "VAT Payable/Control", "other_current_liabilities"),
+    ("3210", "PAYE Payable", "other_current_liabilities"),
+    ("3220", "NSSA Payable", "other_current_liabilities"),
+    ("3230", "NEC/Pension Payable", "other_current_liabilities"),
+    ("3240", "Withholding Tax Payable", "other_current_liabilities"),
+    ("3250", "Dividends Payable", "other_current_liabilities"),
+    # Revenue
+    ("4000", "Sale of Goods", "revenue"),
+    ("4010", "Rendering of Services", "revenue"),
+    ("4020", "Rental Income (trading)", "revenue"),
+    ("4030", "Export Sales", "revenue"),
+    # Cost of sales
+    ("5000", "Opening Inventory", "cost_of_sales"),
+    ("5010", "Purchases", "cost_of_sales"),
+    ("5020", "Direct Labour", "cost_of_sales"),
+    ("5030", "Manufacturing Overheads", "cost_of_sales"),
+    ("5040", "Closing Inventory (contra)", "cost_of_sales"),
+    ("5050", "Freight and Carriage Inwards", "cost_of_sales"),
+    # Other income
+    ("6000", "Interest Received", "other_income"),
+    ("6010", "Dividends Received", "other_income"),
+    ("6020", "Profit on Disposal of Assets", "other_income"),
+    ("6030", "Foreign Exchange Gains", "other_income"),
+    ("6040", "Sundry Income", "other_income"),
+    # Distribution costs
+    ("7000", "Sales Salaries and Commissions", "distribution_costs"),
+    ("7010", "Advertising and Marketing", "distribution_costs"),
+    ("7020", "Freight and Carriage Outwards", "distribution_costs"),
+    ("7030", "Travel and Entertainment (Sales)", "distribution_costs"),
+    # Administrative expenses
+    ("7100", "Salaries and Wages", "admin_expenses"),
+    ("7110", "Directors' Emoluments", "admin_expenses"),
+    ("7120", "Rent and Rates", "admin_expenses"),
+    ("7130", "Electricity and Water", "admin_expenses"),
+    ("7140", "Telephone and Internet", "admin_expenses"),
+    ("7150", "Printing and Stationery", "admin_expenses"),
+    ("7160", "Insurance", "admin_expenses"),
+    ("7170", "Repairs and Maintenance", "admin_expenses"),
+    ("7180", "Audit and Accounting Fees", "admin_expenses"),
+    ("7190", "Legal and Professional Fees", "admin_expenses"),
+    ("7200", "Bank Charges", "admin_expenses"),
+    ("7210", "Motor Vehicle Running Expenses", "admin_expenses"),
+    ("7220", "Subscriptions and Licences", "admin_expenses"),
+    ("7230", "Staff Welfare and Training", "admin_expenses"),
+    ("7240", "NSSA and NEC Contributions (Employer)", "admin_expenses"),
+    ("7250", "Security Costs", "admin_expenses"),
+    ("7260", "Donations", "admin_expenses"),
+    # Other expenses
+    ("7400", "Loss on Disposal of Assets", "other_expenses"),
+    ("7410", "Foreign Exchange Losses", "other_expenses"),
+    ("7420", "Impairment Losses", "other_expenses"),
+    ("7430", "Sundry Expenses", "other_expenses"),
+    # Depreciation & amortisation
+    ("7500", "Depreciation - Property, Plant and Equipment", "depreciation_amortisation"),
+    ("7510", "Amortisation - Intangible Assets", "depreciation_amortisation"),
+    # Finance costs
+    ("7600", "Interest on Loans", "finance_costs"),
+    ("7610", "Interest on Finance Leases", "finance_costs"),
+    ("7620", "Bank Overdraft Interest", "finance_costs"),
+    # Income tax expense
+    ("8000", "Current Income Tax Expense", "income_tax_expense"),
+    ("8010", "AIDS Levy", "income_tax_expense"),
+    ("8020", "Deferred Tax Expense/(Credit)", "income_tax_expense"),
+    # OCI / equity movements
+    ("9000", "Revaluation Surplus/(Deficit), net of tax", "oci_items"),
+    ("9100", "Dividends Declared/Paid", "dividends_paid"),
+]
+
+
+def seed_chart_of_accounts():
+    """Pre-load the Neverlank Standard Chart of Accounts (see
+    CHART_OF_ACCOUNTS_STANDARD above) onto the firm-wide, firm-editable
+    StandardChartOfAccounts table - same "editable starting point" convention as
+    seed_qpd_instalment_rates above: this is a drafted numbering, not an
+    externally-mandated one, so the firm is expected to adjust it to its
+    own real numbering/naming over time. Only called once, when the table
+    is completely empty (see app.py) - never re-run after that, so an
+    account the firm has since edited, renumbered, deactivated or added
+    stays exactly as the firm left it."""
+    for order, (account_number, account_name, fs_category) in enumerate(CHART_OF_ACCOUNTS_STANDARD):
+        db.session.add(StandardChartOfAccounts(
+            account_number=account_number, account_name=account_name, fs_category=fs_category, order=order,
         ))
     db.session.commit()
 
