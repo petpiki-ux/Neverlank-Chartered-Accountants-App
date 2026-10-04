@@ -23,7 +23,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     Client, QPDEstimate, QPDTrialBalanceLine, QPDAdjustmentLine, QPDMonthlyTurnover,
-    QPDInstalmentRate, QPDInstalmentRecord, FxRate, INCOME_TAX_ITEM_TYPES, INCOME_TAX_ITEM_TYPE_LABELS,
+    QPDInstalmentRate, QPDInstalmentRecord, FxRate, FxAverageRate, FX_AVERAGE_PERIODS, INCOME_TAX_ITEM_TYPES, INCOME_TAX_ITEM_TYPE_LABELS,
     COAMapping, StandardChartOfAccounts, user_has_permission,
 )
 import financials as fin
@@ -647,7 +647,55 @@ def fx_rates():
         flash(f"USD:ZWG rate for {rate_date.strftime('%d %b %Y')} logged.", "success")
         return redirect(url_for("qpd.fx_rates"))
     rates = FxRate.query.order_by(FxRate.rate_date.desc()).all()
-    return render_template("qpd/fx_rates.html", rates=rates)
+    average_rows = FxAverageRate.query.order_by(FxAverageRate.rate_year.desc()).all()
+    averages_by_year = {}
+    for a in average_rows:
+        averages_by_year.setdefault(a.rate_year, {})[a.period] = a
+    return render_template(
+        "qpd/fx_rates.html", rates=rates, averages_by_year=averages_by_year,
+        average_periods=FX_AVERAGE_PERIODS, current_year=date.today().year,
+    )
+
+
+def get_average_fx_rate(rate_year, period):
+    """The captured average USD:ZWG rate for a calendar year and period
+    ("Q1".."Q4" or "FY"), or None if it hasn't been captured."""
+    return FxAverageRate.query.filter_by(rate_year=rate_year, period=period).first()
+
+
+@qpd_bp.route("/qpd/fx-rates/averages", methods=["POST"])
+@login_required
+def save_fx_average_rate():
+    _ensure_qpd_access()
+    valid_periods = {code for code, _ in FX_AVERAGE_PERIODS}
+    year = request.form.get("rate_year", type=int)
+    period = (request.form.get("period") or "").strip().upper()
+    rate_value = _parse_float(request.form.get("rate", "").strip(), 0.0)
+    if not year or not (1990 <= year <= 2100) or period not in valid_periods or rate_value <= 0:
+        flash("Enter a valid year, period and a rate greater than zero.", "danger")
+        return redirect(url_for("qpd.fx_rates"))
+    existing = get_average_fx_rate(year, period)
+    if not existing:
+        existing = FxAverageRate(rate_year=year, period=period)
+        db.session.add(existing)
+    existing.rate = rate_value
+    existing.source = request.form.get("source", "").strip()
+    existing.notes = request.form.get("notes", "").strip()
+    existing.created_by_id = current_user.id
+    existing.created_at = datetime.utcnow()
+    db.session.commit()
+    flash(f"Average USD:ZWG rate for {dict(FX_AVERAGE_PERIODS)[period]} {year} saved.", "success")
+    return redirect(url_for("qpd.fx_rates"))
+
+
+@qpd_bp.route("/qpd/fx-rates/averages/<int:rate_id>/delete", methods=["POST"])
+@login_required
+def delete_fx_average_rate(rate_id):
+    _ensure_qpd_access()
+    db.session.delete(FxAverageRate.query.get_or_404(rate_id))
+    db.session.commit()
+    flash("Average rate removed.", "success")
+    return redirect(url_for("qpd.fx_rates"))
 
 
 def _parse_import_date(value):

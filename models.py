@@ -4265,6 +4265,46 @@ class FxRate(db.Model):
         return f"<FxRate {self.rate_date} {self.rate}>"
 
 
+FX_AVERAGE_PERIODS = [
+    ("Q1", "Quarter 1 (Jan - Mar)"),
+    ("Q2", "Quarter 2 (Apr - Jun)"),
+    ("Q3", "Quarter 3 (Jul - Sep)"),
+    ("Q4", "Quarter 4 (Oct - Dec)"),
+    ("FY", "Annual average (full year)"),
+]
+FX_AVERAGE_PERIOD_LABELS = dict(FX_AVERAGE_PERIODS)
+
+
+class FxAverageRate(db.Model):
+    """A manually captured USD:ZWG AVERAGE exchange rate for one calendar
+    quarter (Q1-Q4) or for the full year ("FY"), kept separately from the
+    dated spot-rate log (FxRate above) because an average is a figure the
+    preparer works out/obtains themselves (e.g. from the RBZ's published
+    averages) for a whole period, not an observation on one day. `rate` is
+    ZWG per 1 USD, same convention as FxRate. One row per (rate_year,
+    period) - capturing the same period again updates it rather than
+    duplicating."""
+    id = db.Column(db.Integer, primary_key=True)
+    rate_year = db.Column(db.Integer, nullable=False)
+    period = db.Column(db.String(2), nullable=False)  # "Q1".."Q4" or "FY"
+    rate = db.Column(db.Float, nullable=False)  # ZWG per 1 USD
+    source = db.Column(db.String(120))
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("rate_year", "period", name="uq_fx_average_rate_year_period"),)
+
+    @property
+    def period_label(self):
+        return FX_AVERAGE_PERIOD_LABELS.get(self.period, self.period)
+
+    def __repr__(self):
+        return f"<FxAverageRate {self.rate_year} {self.period} {self.rate}>"
+
+
 class QPDEstimate(db.Model):
     """One client's provisional income tax estimate for one tax year - see
     the module comment above for the client-level scoping and the two

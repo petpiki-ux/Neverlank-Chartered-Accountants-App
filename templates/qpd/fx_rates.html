@@ -30,6 +30,41 @@
 </div>
 
 <div class="card">
+  <h3 class="mt-0">Average rates (quarterly &amp; annual)</h3>
+  <p class="muted" style="font-size:12.5px;">Capture the average USD:ZWG rate for each calendar quarter and for the full year by hand - e.g. the RBZ's published averages. These are kept separately from the dated rates below; saving a year/period that's already captured updates it.</p>
+  <form method="post" action="{{ url_for('qpd.save_fx_average_rate') }}" class="form-row" style="flex-wrap:wrap;">
+    <div><label for="avg_year">Year *</label><input type="number" id="avg_year" name="rate_year" value="{{ current_year }}" min="1990" max="2100" required style="width:6em;"></div>
+    <div><label for="avg_period">Period *</label>
+      <select id="avg_period" name="period" required>
+        {% for code, label in average_periods %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+      </select></div>
+    <div><label for="avg_rate">Average rate (ZWG per 1 USD) *</label><input type="number" step="0.0001" min="0" id="avg_rate" name="rate" required></div>
+    <div><label for="avg_source">Source</label><input type="text" id="avg_source" name="source" placeholder="e.g. RBZ" style="width:12em;"></div>
+    <div><label for="avg_notes">Notes</label><input type="text" id="avg_notes" name="notes" style="width:14em;"></div>
+    <div><button type="submit" class="btn gold">Save average</button></div>
+  </form>
+  {% if averages_by_year %}
+  <table style="margin-top:12px;">
+    <thead><tr><th>Year</th>{% for code, label in average_periods %}<th class="text-right">{{ 'Annual' if code == 'FY' else code }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for year, by_period in averages_by_year.items() %}
+      <tr>
+        <td><strong>{{ year }}</strong></td>
+        {% for code, label in average_periods %}
+        {% set a = by_period.get(code) %}
+        <td class="text-right">{% if a %}<span title="{{ a.source or '' }}{{ ' - ' + a.notes if a.notes else '' }}">{{ '%.4f'|format(a.rate) }}</span>
+          <form method="post" action="{{ url_for('qpd.delete_fx_average_rate', rate_id=a.id) }}" class="inline" onsubmit="return confirm('Delete this average rate?')"><button type="submit" class="btn small danger" style="padding:0 5px;">&times;</button></form>{% else %}&mdash;{% endif %}</td>
+        {% endfor %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="font-size:12px;margin:10px 0 0;">No average rates captured yet.</p>
+  {% endif %}
+</div>
+
+<div class="card">
   <h3 class="mt-0">Import rates from Excel</h3>
   <p class="muted" style="font-size:12.5px;">Bulk-load a run of dated rates at once instead of entering them one by one - handy for backfilling a period or pasting in a schedule from the bank/RBZ. The file needs a header row with "Date" and "Rate" columns (an optional "Source" and "Notes" column are picked up too); any other columns are ignored.</p>
   <div class="form-row" style="align-items:flex-end;">
