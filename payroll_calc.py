@@ -63,7 +63,7 @@ see PAYROLL_TAX_CAVEAT in models.py - so nothing is pre-filled; the firm
 enters them per employee/payslip once confirmed against ZIMRA.
 
 APWCS (Accident Prevention and Workers' Compensation Scheme,
-PayrollTaxSettings.apwcs_pct, 1% of Basic Salary by default) is computed
+PayrollTaxSettings.apwcs_pct, 1.25% of Basic Salary by default) is computed
 here purely for the firm's own NSSA remittance records (see
 PayrollPeriod.total_apwcs in models.py, summarised on a period's
 Finalisation page) - it is a SEPARATE NSSA scheme/rate from the ordinary

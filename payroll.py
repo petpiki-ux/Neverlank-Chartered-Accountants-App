@@ -466,6 +466,33 @@ def finalize_period(period_id):
     return redirect(url_for("payroll.view_period", period_id=period.id))
 
 
+@payroll_bp.route("/periods/<int:period_id>/backfill-apwcs", methods=["POST"])
+@login_required
+def backfill_apwcs(period_id):
+    """Fill in APWCS on payslips that have none (e.g. generated before APWCS
+    was added). Touches ONLY the informational apwcs figure - gross, taxable
+    income, PAYE and net pay are never changed, and any payslip that already
+    has a figure (including a manual one) is left alone - so it is safe on a
+    finalized period too."""
+    _ensure_payroll_access()
+    period = PayrollPeriod.query.get_or_404(period_id)
+    settings = _get_tax_settings()
+    pct = settings.apwcs_pct or 0.0
+    if pct <= 0:
+        flash("The APWCS rate in Payroll Tax Settings is 0% - set it first (the firm rate is 1.25% of Basic Salary), then backfill.", "danger")
+        return redirect(url_for("payroll.view_period", period_id=period.id))
+    fixed = 0
+    for payslip in period.payslips_missing_apwcs:
+        payslip.apwcs = round((payslip.basic_salary or 0.0) * pct / 100.0, 2)
+        fixed += 1
+    db.session.commit()
+    if fixed:
+        flash(f"APWCS calculated at {pct:g}% of Basic Salary on {fixed} payslip(s).", "success")
+    else:
+        flash("Every payslip in this period already has an APWCS figure.", "info")
+    return redirect(url_for("payroll.view_period", period_id=period.id))
+
+
 @payroll_bp.route("/periods/<int:period_id>/delete", methods=["POST"])
 @login_required
 def delete_period(period_id):

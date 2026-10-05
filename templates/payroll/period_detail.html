@@ -47,6 +47,14 @@
     is a separate NSSA scheme from the ordinary NSSA contributions, calculated on Basic Salary only - see
     <a href="{{ url_for('payroll.tax_settings') }}">Payroll Tax Settings</a>.
   </p>
+  {% if period.payslips_missing_apwcs %}
+  <div class="flash danger" style="display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+    <span>APWCS has not been computed on {{ period.payslips_missing_apwcs|length }} payslip(s) in this period (they were generated before APWCS was added), so the employer's APWCS cost and "Total due to NSSA" below are understated (APWCS is paid by the employer only - it never reduces any employee's pay).</span>
+    <form method="post" action="{{ url_for('payroll.backfill_apwcs', period_id=period.id) }}" style="margin:0;">
+      <button type="submit" class="btn gold">Compute APWCS now</button>
+    </form>
+  </div>
+  {% endif %}
   <div class="form-row">
     <div class="stat-card">
       <div class="num" style="font-size:16px;">{{ period.currency }} {{ '%.2f'|format(period.total_paye) }}</div>

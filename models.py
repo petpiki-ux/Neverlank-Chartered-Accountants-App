@@ -8497,7 +8497,7 @@ PAYROLL_TAX_CAVEAT = (
     "current statutory exempt/credit AMOUNTS couldn't be reliably confirmed "
     "either, so nothing is pre-filled: enter them per employee once "
     "confirmed against ZIMRA. The Accident Prevention and Workers' "
-    "Compensation Scheme (APWCS) is pre-loaded at 1% of Basic Salary, as "
+    "Compensation Scheme (APWCS) is pre-loaded at 1.25% of Basic Salary, as "
     "confirmed by the firm - it is payable to NSSA alongside the NSSA "
     "employee/employer contributions, but is a SEPARATE scheme/rate, is "
     "calculated on Basic Salary only (not full Insurable Earnings, and not "
@@ -8538,7 +8538,7 @@ class PayrollTaxSettings(db.Model):
     # entirely by the employer and never deducted from or shown on the
     # employee's own payslip - see PAYROLL_TAX_CAVEAT above and
     # payroll_calc.calculate_payslip for exactly where it's computed.
-    apwcs_pct = db.Column(db.Float, default=1.0)
+    apwcs_pct = db.Column(db.Float, default=1.25)
     source_notes = db.Column(db.Text)
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -8675,6 +8675,13 @@ class PayrollPeriod(db.Model):
         return sum(p.apwcs or 0.0 for p in self.payslips)
 
     @property
+    def payslips_missing_apwcs(self):
+        """Payslips with a Basic Salary but no APWCS figure - typically ones
+        generated before APWCS existed in the app (the column defaulted to 0
+        and nothing recalculated them). See payroll.backfill_apwcs."""
+        return [p for p in self.payslips if (p.basic_salary or 0.0) > 0 and not (p.apwcs or 0.0)]
+
+    @property
     def total_zimra_remittance(self):
         """PAYE + AIDS Levy - what the firm pays ZIMRA for this period."""
         return self.total_paye + self.total_aids_levy
@@ -8724,7 +8731,7 @@ class Payslip(db.Model):
     aids_levy = db.Column(db.Float, default=0.0)
     nssa_employee = db.Column(db.Float, default=0.0)
     nssa_employer = db.Column(db.Float, default=0.0)  # employer cost, informational - not deducted from the employee
-    # Accident Prevention and Workers' Compensation Scheme (APWCS) - 1% of
+    # Accident Prevention and Workers' Compensation Scheme (APWCS) - 1.25% of
     # Basic Salary (PayrollTaxSettings.apwcs_pct), payable to NSSA by the
     # employer alongside (but separately from) nssa_employer above;
     # informational only, like nssa_employer - never deducted from or shown

@@ -266,7 +266,7 @@ def _add_missing_columns():
             ("paye_before_credits", "FLOAT DEFAULT 0"),
             ("tax_credits_total", "FLOAT DEFAULT 0"),
             # apwcs - see models.Payslip's docstring and PAYROLL_TAX_CAVEAT:
-            # Accident Prevention and Workers' Compensation Scheme, 1% of
+            # Accident Prevention and Workers' Compensation Scheme, 1.25% of
             # Basic Salary payable to NSSA by the employer, never affecting
             # the employee's own payslip. Existing payslips default to 0,
             # same reasoning as the three fields above - nothing
@@ -280,9 +280,9 @@ def _add_missing_columns():
         # DEFAULT backfills the firm's single existing settings row
         # immediately (SQLite applies a literal ALTER TABLE ... DEFAULT to
         # existing rows, not just new ones) - so an existing install picks
-        # up the firm-confirmed 1% rate automatically, exactly like a fresh
+        # up the firm-confirmed 1.25% rate automatically, exactly like a fresh
         # install's column default would.
-        "payroll_tax_settings": [("apwcs_pct", "FLOAT DEFAULT 1.0")],
+        "payroll_tax_settings": [("apwcs_pct", "FLOAT DEFAULT 1.25")],
         # nssa_applicable - see PayslipItem's docstring in models.py: lets an
         # Allowance/Exempt Income item (e.g. the EMPLOYER's own medical aid
         # contribution) be excluded from NSSA Insurable Earnings specifically,
