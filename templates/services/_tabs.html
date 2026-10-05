@@ -1,0 +1,35 @@
+{# Tab bar for the two stand-alone service engagements (Whistle-blower and
+   Training). Used by detail.html (for the shared Overview / Client Acceptance /
+   Documents / Tasks tabs) and by every page of the two service workspaces, so
+   the bar looks the same wherever you are. `active` is one of: overview,
+   acceptance, documents, tasks, subscription, cases, reports, sessions. #}
+{% macro service_tabs(engagement, active) %}
+<div class="tabs">
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='overview') }}" class="{% if active=='overview' %}active{% endif %}">Overview</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}" class="{% if active=='acceptance' %}active{% endif %}">Client Acceptance{% if engagement.acceptance_required %} &#128274;{% endif %}</a>
+  {% if engagement.is_whistleblower_service %}
+  <a href="{{ url_for('whistleblower.subscription', engagement_id=engagement.id) }}" class="{% if active=='subscription' %}active{% endif %}">Subscription &amp; Channels</a>
+  <a href="{{ url_for('whistleblower.cases', engagement_id=engagement.id) }}" class="{% if active=='cases' %}active{% endif %}">Cases{% set open_n = engagement.whistleblower_cases.all()|rejectattr('is_closed')|list|length %}{% if open_n %} ({{ open_n }} open){% endif %}</a>
+  <a href="{{ url_for('whistleblower.reports', engagement_id=engagement.id) }}" class="{% if active=='reports' %}active{% endif %}">Client Reports</a>
+  {% elif engagement.is_training_service %}
+  <a href="{{ url_for('training.sessions', engagement_id=engagement.id) }}" class="{% if active=='sessions' %}active{% endif %}">Sessions ({{ engagement.training_sessions.count() }})</a>
+  {% endif %}
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if active=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if active=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
+</div>
+{% endmacro %}
+
+{% macro service_header(engagement, title=none) %}
+<div class="page-header">
+  <div>
+    <h1>{{ title or engagement.title }}</h1>
+    <div class="subtitle">
+      <a href="{{ url_for('clients.view_client', client_id=engagement.client.id) }}">{{ engagement.client.name }}</a>
+      &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='overview') }}">{{ engagement.title }}</a>
+      &middot; <span class="badge type-{{ engagement.type|replace(' ', '') }}">{{ engagement.type }}</span>
+      &middot; <span class="badge status-{{ engagement.status|replace(' ', '') }}">{{ engagement.status }}</span>
+    </div>
+  </div>
+  <div><a href="{{ url_for('engagements.edit_engagement', engagement_id=engagement.id) }}" class="btn secondary">Edit engagement</a></div>
+</div>
+{% endmacro %}

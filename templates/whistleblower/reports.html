@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}Client Reports - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{{ svc.service_header(engagement) }}
+{{ svc.service_tabs(engagement, 'reports') }}
+
+<div class="card">
+  <p class="muted" style="font-size:12.5px;">The periodic summary for the client's {{ service.client_contact_role or 'audit committee' }}{% if service.client_contact_name %} ({{ service.client_contact_name }}){% endif %}. It carries counts and the case register only - never descriptions, notes or anything that could identify a reporter. Agreed reporting frequency: <strong>{{ service.reporting_frequency or 'Quarterly' }}</strong>.</p>
+  <form method="get" class="form-row" style="align-items:flex-end;">
+    <div><label for="year">Year</label><input type="number" id="year" name="year" value="{{ year }}" min="2000" max="2100" style="width:6em;"></div>
+    <div><label for="period">Period</label><select id="period" name="period">{% for code, label in periods %}<option value="{{ code }}" {% if period==code %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div><label style="font-weight:normal;"><input type="checkbox" name="include_subjects" value="1" {% if include_subjects %}checked{% endif %}> Include case subjects in the register</label></div>
+    <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Show</button></div>
+    <div><a href="{{ url_for('whistleblower.download_report', engagement_id=engagement.id, year=year, period=period, include_subjects=1 if include_subjects else 0) }}" class="btn gold" style="margin-bottom:14px;">Download Word report</a></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">{{ summary.period_label }} {{ summary.year }} <span class="muted" style="font-size:12px;">({{ summary.start.strftime('%d %b %Y') }} - {{ summary.end.strftime('%d %b %Y') }})</span></h3>
+  <div class="form-row">
+    <div><strong>{{ summary.received_count }}</strong><br><span class="muted">received</span></div>
+    <div><strong>{{ summary.closed_count }}</strong><br><span class="muted">closed</span></div>
+    <div><strong>{{ summary.open_at_end }}</strong><br><span class="muted">open at period end</span></div>
+    <div><strong>{{ summary.substantiated }}</strong><br><span class="muted">substantiated</span></div>
+    <div><strong>{{ summary.avg_days_to_close if summary.avg_days_to_close is not none else '—' }}</strong><br><span class="muted">avg days to close</span></div>
+  </div>
+  {% if summary.received_count %}
+  <div class="form-row" style="align-items:flex-start;">
+    <table style="max-width:320px;"><thead><tr><th>Category</th><th class="text-right">Reports</th></tr></thead><tbody>{% for label, n in summary.by_category %}<tr><td>{{ label }}</td><td class="text-right">{{ n }}</td></tr>{% endfor %}</tbody></table>
+    <table style="max-width:220px;"><thead><tr><th>Severity</th><th class="text-right">Reports</th></tr></thead><tbody>{% for label, n in summary.by_severity %}<tr><td>{{ label }}</td><td class="text-right">{{ n }}</td></tr>{% endfor %}</tbody></table>
+    <table style="max-width:260px;"><thead><tr><th>Channel</th><th class="text-right">Reports</th></tr></thead><tbody>{% for label, n in summary.by_channel %}<tr><td>{{ label }}</td><td class="text-right">{{ n }}</td></tr>{% endfor %}</tbody></table>
+  </div>
+  <h4>Case register</h4>
+  <table>
+    <thead><tr><th>Reference</th><th>Received</th><th>Category</th><th>Severity</th><th>Status</th>{% if include_subjects %}<th>Subject</th>{% endif %}</tr></thead>
+    <tbody>{% for c in summary.received %}<tr><td>{{ c.reference }}</td><td>{{ c.received_at.strftime('%d %b %Y') }}</td><td>{{ c.category_label }}</td><td>{{ c.severity }}</td><td>{{ c.status }}</td>{% if include_subjects %}<td>{{ c.subject or '' }}</td>{% endif %}</tr>{% endfor %}</tbody>
+  </table>
+  {% else %}
+  <p class="muted">No reports received in this period.</p>
+  {% endif %}
+</div>
+{% endblock %}

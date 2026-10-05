@@ -10,7 +10,15 @@ ENGAGEMENT_TYPES = [
     "Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement",
     "Business Intelligence and IT Engagements", "Tax Compliance", "Tax Advisory & Health Check",
     "Accounting & Bookkeeping",
+    "Neverlank Anonymous Whistle-blower Services", "Neverlank Training Services",
 ]
+
+# The two stand-alone service lines (not audit-style engagements): each gets
+# its own trimmed workspace instead of the audit tab set - see
+# Engagement.is_whistleblower_service/is_training_service, whistleblower.py
+# and training.py.
+WHISTLEBLOWER_SERVICE_TYPE = "Neverlank Anonymous Whistle-blower Services"
+TRAINING_SERVICE_TYPE = "Neverlank Training Services"
 
 # The financial reporting framework the client's Financial Statements are
 # prepared under (Finalisation tab). Only "full_ifrs" and "ifrs_for_smes"
@@ -346,6 +354,12 @@ PERMISSIONS = [
      tuple(USER_ROLES)),
     ("manage_qpd", "Manage QPD / Provisional Tax Estimates",
      "Create or edit a client's Quarterly Payment Date (provisional income tax) estimate - import/enter a Trial Balance or monthly VAT turnover, adjust the estimate, and record what's been paid.",
+     tuple(USER_ROLES)),
+    ("manage_whistleblower", "Manage Whistle-blower Service cases",
+     "See and work the confidential reports received through Neverlank's Anonymous Whistle-blower Services - log cases, investigate, update status, reply to reporters and produce client reports. Reports can be highly sensitive, so this is limited to supervisors and above by default (and still only on engagements the person is staffed on, unless Admin).",
+     ("supervisor", "partner", "admin")),
+    ("manage_training", "Manage Training Services",
+     "Set up training sessions, keep attendee registers, upload materials, record feedback and issue certificates under Neverlank Training Services.",
      tuple(USER_ROLES)),
     ("manage_checklist_templates", "Manage Checklist Templates",
      "Create, edit or delete the checklist templates used to start new engagements (previously unrestricted).",
@@ -1820,6 +1834,20 @@ class Engagement(db.Model):
         if not self.tax_services:
             return []
         return [s for s in self.tax_services.split(",") if s]
+
+    @property
+    def is_whistleblower_service(self):
+        return self.type == WHISTLEBLOWER_SERVICE_TYPE
+
+    @property
+    def is_training_service(self):
+        return self.type == TRAINING_SERVICE_TYPE
+
+    @property
+    def is_standalone_service(self):
+        """True for the two service lines that run in their own workspace
+        (no audit planning/fieldwork/finalisation tabs)."""
+        return self.type in (WHISTLEBLOWER_SERVICE_TYPE, TRAINING_SERVICE_TYPE)
 
     @property
     def has_tax_module(self):
@@ -8770,3 +8798,258 @@ class PayslipItem(db.Model):
 
     def __repr__(self):
         return f"<PayslipItem {self.label!r} {self.category} {self.amount}>"
+
+
+
+# ======================================================================
+# Neverlank Anonymous Whistle-blower Services
+# ======================================================================
+# One WhistleblowerService per client engagement of type "Neverlank
+# Anonymous Whistle-blower Services" (the subscription: channels, contacts,
+# fee, and the secret link to the client's public anonymous reporting
+# page), and any number of WhistleblowerCase rows under it (one per report
+# received). Reporter identity is NEVER stored: a portal report records no
+# name, IP address or browser details - the reporter just gets a reference
+# code plus a one-time follow-up key (only a hash of which is kept) to check
+# progress and reply anonymously.
+
+WB_CHANNELS = ["Web portal", "Email", "Phone / hotline", "WhatsApp / SMS", "In person", "Postal", "Other"]
+WB_CATEGORIES = [
+    ("fraud", "Fraud / financial misconduct"),
+    ("corruption", "Corruption / bribery"),
+    ("theft", "Theft / misappropriation of assets"),
+    ("procurement", "Procurement irregularities"),
+    ("reporting", "Financial reporting / accounting irregularities"),
+    ("conflict", "Conflict of interest"),
+    ("harassment", "Harassment / discrimination"),
+    ("safety", "Health, safety & environment"),
+    ("abuse_of_authority", "Abuse of authority / policy breach"),
+    ("data", "Data privacy / cybersecurity breach"),
+    ("other", "Other"),
+]
+WB_CATEGORY_LABELS = dict(WB_CATEGORIES)
+WB_SEVERITIES = ["Low", "Medium", "High", "Critical"]
+WB_STATUSES = [
+    "New", "Under review", "Investigating", "Referred to client",
+    "Closed - substantiated", "Closed - unsubstantiated", "Closed - insufficient information",
+]
+WB_REPORTING_FREQUENCIES = ["Quarterly", "Half-yearly", "Annual"]
+
+
+class WhistleblowerService(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    service_start = db.Column(db.Date)
+    service_end = db.Column(db.Date)
+    annual_fee = db.Column(db.Float)
+    currency = db.Column(db.String(10), default="USD")
+    # Secret URL segment of the client's public anonymous reporting page
+    # (/speak-up/<public_token>); regenerating it kills the old link.
+    public_token = db.Column(db.String(64), unique=True)
+    portal_enabled = db.Column(db.Boolean, default=False)
+    portal_welcome_text = db.Column(db.Text)  # shown on the public page, e.g. what to include in a report
+    hotline_phone = db.Column(db.String(60))
+    hotline_email = db.Column(db.String(120))
+    hotline_whatsapp = db.Column(db.String(60))
+    other_channels = db.Column(db.Text)
+    client_contact_name = db.Column(db.String(120))  # who at the client receives reports (e.g. audit committee chair)
+    client_contact_role = db.Column(db.String(120))
+    client_contact_email = db.Column(db.String(120))
+    reporting_frequency = db.Column(db.String(20), default="Quarterly")
+    notes = db.Column(db.Text)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("whistleblower_service", uselist=False))
+    updated_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<WhistleblowerService engagement={self.engagement_id}>"
+
+
+class WhistleblowerCase(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, index=True)
+    reference = db.Column(db.String(30), nullable=False, unique=True)  # anonymous, e.g. WB-3F9A21C4
+    followup_key_hash = db.Column(db.String(255))  # hash of the one-time key the reporter uses to check back
+    received_at = db.Column(db.DateTime, default=datetime.utcnow)
+    channel = db.Column(db.String(40), default="Web portal")
+    category = db.Column(db.String(30), default="other")  # WB_CATEGORIES key
+    severity = db.Column(db.String(20), default="Medium")
+    subject = db.Column(db.String(200))
+    description = db.Column(db.Text)
+    status = db.Column(db.String(40), default="New")
+    assigned_to_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    outcome = db.Column(db.Text)
+    closed_at = db.Column(db.DateTime)
+    source = db.Column(db.String(10), default="portal")  # "portal" (reporter) or "staff" (logged by Neverlank staff)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    engagement = db.relationship("Engagement", backref=db.backref("whistleblower_cases", lazy="dynamic"))
+    assigned_to = db.relationship("User", foreign_keys=[assigned_to_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    notes = db.relationship("WhistleblowerCaseNote", backref="case", cascade="all, delete-orphan",
+                            order_by="WhistleblowerCaseNote.created_at")
+
+    @property
+    def is_closed(self):
+        return bool(self.status) and self.status.startswith("Closed")
+
+    @property
+    def category_label(self):
+        return WB_CATEGORY_LABELS.get(self.category, self.category or "Other")
+
+    @property
+    def days_to_close(self):
+        if self.closed_at and self.received_at:
+            return max(0, (self.closed_at - self.received_at).days)
+        return None
+
+    @property
+    def has_unread_reporter_message(self):
+        """True when the newest note is a follow-up from the reporter that
+        staff haven't answered yet."""
+        return bool(self.notes) and self.notes[-1].kind == "from_reporter"
+
+    def __repr__(self):
+        return f"<WhistleblowerCase {self.reference}>"
+
+
+class WhistleblowerCaseNote(db.Model):
+    """One entry in a case's log. kind: "internal" (staff-only working note),
+    "to_reporter" (visible to the reporter on the anonymous status page) or
+    "from_reporter" (anonymous follow-up the reporter sent)."""
+    id = db.Column(db.Integer, primary_key=True)
+    case_id = db.Column(db.Integer, db.ForeignKey("whistleblower_case.id"), nullable=False, index=True)
+    kind = db.Column(db.String(20), default="internal")
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # NULL for reporter messages
+
+    created_by = db.relationship("User")
+
+
+# ======================================================================
+# Neverlank Training Services
+# ======================================================================
+
+TRAINING_MODES = ["In person", "Online", "Hybrid"]
+TRAINING_STATUSES = ["Planned", "Open for registration", "Completed", "Cancelled"]
+TRAINING_ATTENDANCE = ["Registered", "Attended", "Absent", "Cancelled"]
+
+
+class TrainingSession(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    trainer_user_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # internal trainer, optional
+    trainer_name = db.Column(db.String(200))  # external trainer(s), or a display override
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    start_time = db.Column(db.String(10))
+    end_time = db.Column(db.String(10))
+    mode = db.Column(db.String(20), default="In person")
+    venue = db.Column(db.String(300))  # venue, or the online meeting link
+    fee_per_participant = db.Column(db.Float)
+    currency = db.Column(db.String(10), default="USD")
+    seats = db.Column(db.Integer)
+    cpd_hours = db.Column(db.Float)  # CPD hours a participant earns by attending
+    status = db.Column(db.String(30), default="Planned")
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("training_sessions", lazy="dynamic"))
+    trainer_user = db.relationship("User", foreign_keys=[trainer_user_id])
+    attendees = db.relationship("TrainingAttendee", backref="session", cascade="all, delete-orphan",
+                                order_by="TrainingAttendee.full_name")
+    materials = db.relationship("TrainingMaterial", backref="session", cascade="all, delete-orphan",
+                                order_by="TrainingMaterial.uploaded_at")
+
+    @property
+    def trainer_display(self):
+        parts = []
+        if self.trainer_user:
+            parts.append(self.trainer_user.name)
+        if self.trainer_name:
+            parts.append(self.trainer_name)
+        return ", ".join(parts) or None
+
+    @property
+    def active_attendees(self):
+        return [a for a in self.attendees if a.status != "Cancelled"]
+
+    @property
+    def seats_left(self):
+        if not self.seats:
+            return None
+        return max(0, self.seats - len(self.active_attendees))
+
+    @property
+    def attended_count(self):
+        return sum(1 for a in self.attendees if a.status == "Attended")
+
+    @property
+    def certificates_issued(self):
+        return sum(1 for a in self.attendees if a.certificate_number)
+
+    @property
+    def total_cpd_hours_awarded(self):
+        return round(sum(a.cpd_hours_awarded or 0.0 for a in self.attendees), 2)
+
+    @property
+    def expected_revenue(self):
+        if self.fee_per_participant is None:
+            return None
+        return round(self.fee_per_participant * len(self.active_attendees), 2)
+
+    @property
+    def fees_collected(self):
+        return round(sum(a.fee_paid or 0.0 for a in self.attendees), 2)
+
+    def average_rating(self, field):
+        values = [getattr(a, field) for a in self.attendees if getattr(a, field)]
+        return round(sum(values) / len(values), 2) if values else None
+
+    @property
+    def feedback_count(self):
+        return sum(1 for a in self.attendees if a.rating_overall)
+
+    def __repr__(self):
+        return f"<TrainingSession {self.title}>"
+
+
+class TrainingAttendee(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey("training_session.id"), nullable=False, index=True)
+    full_name = db.Column(db.String(200), nullable=False)
+    email = db.Column(db.String(200))
+    phone = db.Column(db.String(60))
+    organisation = db.Column(db.String(200))
+    designation = db.Column(db.String(200))
+    status = db.Column(db.String(20), default="Registered")  # TRAINING_ATTENDANCE
+    fee_paid = db.Column(db.Float)
+    certificate_number = db.Column(db.String(60))
+    certificate_issued_at = db.Column(db.Date)
+    cpd_hours_awarded = db.Column(db.Float)
+    # Participant evaluation, 1 (poor) - 5 (excellent)
+    rating_overall = db.Column(db.Integer)
+    rating_trainer = db.Column(db.Integer)
+    rating_content = db.Column(db.Integer)
+    rating_materials = db.Column(db.Integer)
+    feedback_comments = db.Column(db.Text)
+    feedback_at = db.Column(db.DateTime)
+    registered_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class TrainingMaterial(db.Model):
+    """A file (slides, handout, exercise) attached to one training session -
+    stored as an ordinary engagement Document (category "Training Materials")
+    so it also appears under the engagement's Documents tab."""
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey("training_session.id"), nullable=False, index=True)
+    document_id = db.Column(db.Integer, db.ForeignKey("document.id"), nullable=False)
+    title = db.Column(db.String(200))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    document = db.relationship("Document")

@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}Cases - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{{ svc.service_header(engagement) }}
+{{ svc.service_tabs(engagement, 'cases') }}
+
+<div class="card">
+  <form method="get" class="form-row" style="align-items:flex-end;">
+    <div><label for="status">Show</label>
+      <select id="status" name="status">
+        <option value="open" {% if status_filter=='open' %}selected{% endif %}>Open cases</option>
+        <option value="closed" {% if status_filter=='closed' %}selected{% endif %}>Closed cases</option>
+        <option value="all" {% if status_filter=='all' %}selected{% endif %}>All cases</option>
+        {% for s in statuses %}<option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select></div>
+    <div><label for="category">Category</label>
+      <select id="category" name="category"><option value="">All</option>{% for key, label in categories %}<option value="{{ key }}" {% if category_filter==key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Filter</button></div>
+  </form>
+  {% if cases %}
+  <table>
+    <thead><tr><th>Reference</th><th>Received</th><th>Category</th><th>Severity</th><th>Status</th><th>Channel</th><th>Assigned to</th><th></th></tr></thead>
+    <tbody>
+      {% for c in cases %}
+      <tr>
+        <td><a href="{{ url_for('whistleblower.view_case', case_id=c.id) }}"><strong>{{ c.reference }}</strong></a>{% if c.has_unread_reporter_message and not c.is_closed %} <span class="badge overdue">reporter replied</span>{% endif %}</td>
+        <td>{{ c.received_at.strftime('%d %b %Y') if c.received_at else '—' }}</td>
+        <td>{{ c.category_label }}</td>
+        <td>{{ c.severity }}</td>
+        <td><span class="badge">{{ c.status }}</span></td>
+        <td>{{ c.channel or '—' }}</td>
+        <td>{{ c.assigned_to.name if c.assigned_to else '—' }}</td>
+        <td class="text-right"><a href="{{ url_for('whistleblower.view_case', case_id=c.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No cases match.</div>
+  {% endif %}
+</div>
+
+<form method="post" action="{{ url_for('whistleblower.add_case', engagement_id=engagement.id) }}" class="card" style="max-width:820px;">
+  <h3 class="mt-0">Log a report received by phone, email or in person</h3>
+  <p class="muted" style="font-size:12.5px;">Reports submitted through the client's anonymous page appear above automatically. Don't record the reporter's name unless they ask you to, and never in the description by default.</p>
+  <div class="form-row">
+    <div><label for="received_date">Date received</label><input type="date" id="received_date" name="received_date" value=""></div>
+    <div><label for="channel">Channel</label><select id="channel" name="channel">{% for ch in channels %}{% if ch != 'Web portal' %}<option>{{ ch }}</option>{% endif %}{% endfor %}</select></div>
+    <div><label for="new_category">Category</label><select id="new_category" name="category">{% for key, label in categories %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
+    <div><label for="new_severity">Severity</label><select id="new_severity" name="severity">{% for sev in severities %}<option {% if sev=='Medium' %}selected{% endif %}>{{ sev }}</option>{% endfor %}</select></div>
+  </div>
+  <label for="subject">Short subject</label>
+  <input type="text" id="subject" name="subject" maxlength="200">
+  <label for="description">What was reported *</label>
+  <textarea id="description" name="description" rows="5" required></textarea>
+  <button type="submit" class="btn gold">Log case</button>
+</form>
+{% endblock %}

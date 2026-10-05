@@ -1,0 +1,26 @@
+{% extends "whistleblower/public_base.html" %}
+{% block title %}Report a concern - {{ client_name }}{% endblock %}
+{% block body %}
+<div class="card">
+  <h1>Report a concern</h1>
+  <div class="sub">{{ client_name }} &middot; Anonymous whistle-blowing service</div>
+  {% if service.portal_welcome_text %}<p style="white-space:pre-wrap;">{{ service.portal_welcome_text }}</p>{% else %}
+  <p>Use this page to report fraud, corruption, misconduct or any other serious concern, safely and anonymously. Please include what happened, when and where, who was involved and how you know. You do <strong>not</strong> need to give your name.</p>{% endif %}
+  {% if error %}<div class="err">{{ error }}</div>{% endif %}
+  <form method="post" autocomplete="off">
+    <div class="hp"><label>Leave this empty <input type="text" name="website" tabindex="-1" autocomplete="off"></label></div>
+    <label for="category">What is it about?</label>
+    <select id="category" name="category">{% for key, label in categories %}<option value="{{ key }}" {% if form.get('category')==key %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+    <label for="subject">Short title (optional)</label>
+    <input type="text" id="subject" name="subject" maxlength="200" value="{{ form.get('subject','') }}">
+    <label for="description">Describe what happened *</label>
+    <textarea id="description" name="description" rows="9" required>{{ form.get('description','') }}</textarea>
+    <p class="muted">Avoid including details that could identify you unless you are comfortable with that.</p>
+    <button type="submit">Submit report</button>
+  </form>
+</div>
+<div class="card"><strong>Already reported?</strong> <a href="{{ url_for('whistleblower_public.status', token=token) }}">Check progress or add information</a> using your reference and key.
+{% if service.hotline_phone or service.hotline_email or service.hotline_whatsapp or service.other_channels %}
+<p class="muted" style="margin-bottom:0;">Other ways to report:
+{% if service.hotline_phone %} phone {{ service.hotline_phone }};{% endif %}{% if service.hotline_whatsapp %} WhatsApp/SMS {{ service.hotline_whatsapp }};{% endif %}{% if service.hotline_email %} email {{ service.hotline_email }};{% endif %}{% if service.other_channels %} {{ service.other_channels }}{% endif %}</p>{% endif %}</div>
+{% endblock %}

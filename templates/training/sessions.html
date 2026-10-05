@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}Sessions - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{{ svc.service_header(engagement) }}
+{{ svc.service_tabs(engagement, 'sessions') }}
+
+<div class="card">
+  {% if sessions %}
+  <table>
+    <thead><tr><th>Date</th><th>Session</th><th>Trainer</th><th>Mode</th><th class="text-right">Registered</th><th class="text-right">Attended</th><th class="text-right">Certificates</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for s in sessions %}
+      <tr>
+        <td>{{ s.start_date.strftime('%d %b %Y') if s.start_date else 'TBC' }}</td>
+        <td><a href="{{ url_for('training.view_session', session_id=s.id) }}"><strong>{{ s.title }}</strong></a></td>
+        <td>{{ s.trainer_display or '—' }}</td>
+        <td>{{ s.mode }}</td>
+        <td class="text-right">{{ s.active_attendees|length }}{% if s.seats %} / {{ s.seats }}{% endif %}</td>
+        <td class="text-right">{{ s.attended_count }}</td>
+        <td class="text-right">{{ s.certificates_issued }}</td>
+        <td><span class="badge">{{ s.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty-state">No sessions yet - add the first below.</div>{% endif %}
+</div>
+
+<form method="post" action="{{ url_for('training.add_session', engagement_id=engagement.id) }}" class="card" style="max-width:860px;">
+  <h3 class="mt-0">Add a training session</h3>
+  {% include 'training/_session_fields.html' %}
+  <button type="submit" class="btn gold">Create session</button>
+</form>
+{% endblock %}

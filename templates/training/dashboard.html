@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Training Services - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Neverlank Training Services</h1>
+    <div class="subtitle">Upcoming and recent training sessions across clients. Add sessions from a Training Services engagement.</div>
+  </div>
+</div>
+{% macro session_table(items) %}
+<table>
+  <thead><tr><th>Date</th><th>Session</th><th>Client</th><th>Trainer</th><th>Mode</th><th class="text-right">Registered</th><th class="text-right">Seats</th><th>Status</th></tr></thead>
+  <tbody>
+    {% for s in items %}
+    <tr>
+      <td>{{ s.start_date.strftime('%d %b %Y') if s.start_date else 'TBC' }}{% if s.end_date and s.end_date != s.start_date %} - {{ s.end_date.strftime('%d %b') }}{% endif %}</td>
+      <td><a href="{{ url_for('training.view_session', session_id=s.id) }}">{{ s.title }}</a></td>
+      <td>{{ s.engagement.client.name }}</td>
+      <td>{{ s.trainer_display or '—' }}</td>
+      <td>{{ s.mode }}</td>
+      <td class="text-right">{{ s.active_attendees|length }}</td>
+      <td class="text-right">{{ s.seats if s.seats else '—' }}</td>
+      <td><span class="badge">{{ s.status }}</span></td>
+    </tr>
+    {% endfor %}
+  </tbody>
+</table>
+{% endmacro %}
+<div class="card"><h3 class="mt-0">Upcoming</h3>
+  {% if upcoming %}{{ session_table(upcoming) }}{% else %}<div class="empty-state">No upcoming sessions.</div>{% endif %}</div>
+<div class="card"><h3 class="mt-0">Recent &amp; past</h3>
+  {% if recent %}{{ session_table(recent) }}{% else %}<div class="empty-state">Nothing yet.</div>{% endif %}</div>
+<div class="card"><h3 class="mt-0">Training engagements</h3>
+  {% if engagements %}<ul>{% for e in engagements %}<li><a href="{{ url_for('training.sessions', engagement_id=e.id) }}">{{ e.client.name }} - {{ e.title }}</a></li>{% endfor %}</ul>
+  {% else %}<div class="empty-state">No Training Services engagements yet. Create an engagement for a client and choose the type "Neverlank Training Services".</div>{% endif %}</div>
+{% endblock %}

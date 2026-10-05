@@ -1,0 +1,31 @@
+{# Shared by the add form (sessions.html) and the edit form (session.html);
+   `ts` is undefined when adding. #}
+{% set s = ts if ts is defined else none %}
+<label for="title">Course / session title *</label>
+<input type="text" id="title" name="title" value="{{ s.title if s else '' }}" required maxlength="200">
+<label for="description">Description / outline</label>
+<textarea id="description" name="description" rows="3">{{ s.description if s and s.description else '' }}</textarea>
+<div class="form-row">
+  <div><label for="start_date">Start date</label><input type="date" id="start_date" name="start_date" value="{{ s.start_date.isoformat() if s and s.start_date else '' }}"></div>
+  <div><label for="end_date">End date</label><input type="date" id="end_date" name="end_date" value="{{ s.end_date.isoformat() if s and s.end_date else '' }}"></div>
+  <div><label for="start_time">Start time</label><input type="text" id="start_time" name="start_time" placeholder="09:00" value="{{ s.start_time if s and s.start_time else '' }}" style="width:6em;"></div>
+  <div><label for="end_time">End time</label><input type="text" id="end_time" name="end_time" placeholder="16:00" value="{{ s.end_time if s and s.end_time else '' }}" style="width:6em;"></div>
+</div>
+<div class="form-row">
+  <div><label for="mode">Mode</label><select id="mode" name="mode">{% for m in modes %}<option {% if s and s.mode==m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+  <div style="flex:2;"><label for="venue">Venue or online meeting link</label><input type="text" id="venue" name="venue" value="{{ s.venue if s and s.venue else '' }}"></div>
+  <div><label for="status">Status</label><select id="status" name="status">{% for st in statuses %}<option {% if s and s.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></div>
+</div>
+<div class="form-row">
+  <div><label for="trainer_user_id">Neverlank trainer</label>
+    <select id="trainer_user_id" name="trainer_user_id"><option value="">None / external only</option>{% for u in staff %}<option value="{{ u.id }}" {% if s and s.trainer_user_id==u.id %}selected{% endif %}>{{ u.name }}</option>{% endfor %}</select></div>
+  <div><label for="trainer_name">External trainer(s)</label><input type="text" id="trainer_name" name="trainer_name" value="{{ s.trainer_name if s and s.trainer_name else '' }}"></div>
+</div>
+<div class="form-row">
+  <div><label for="fee_per_participant">Fee per participant</label><input type="number" step="0.01" min="0" id="fee_per_participant" name="fee_per_participant" value="{{ s.fee_per_participant if s and s.fee_per_participant is not none else '' }}"></div>
+  <div><label for="currency">Currency</label><input type="text" id="currency" name="currency" value="{{ s.currency if s and s.currency else 'USD' }}" style="width:6em;"></div>
+  <div><label for="seats">Seats</label><input type="number" min="0" id="seats" name="seats" value="{{ s.seats if s and s.seats else '' }}" style="width:7em;"></div>
+  <div><label for="cpd_hours">CPD hours</label><input type="number" step="0.25" min="0" id="cpd_hours" name="cpd_hours" value="{{ s.cpd_hours if s and s.cpd_hours is not none else '' }}" style="width:7em;"></div>
+</div>
+<label for="notes">Notes</label>
+<textarea id="notes" name="notes" rows="2">{{ s.notes if s and s.notes else '' }}</textarea>

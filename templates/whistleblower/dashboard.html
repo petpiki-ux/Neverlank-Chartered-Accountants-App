@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Whistle-blower Services - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Anonymous Whistle-blower Services</h1>
+    <div class="subtitle">Every client subscribed to Neverlank's anonymous whistle-blowing service, with the cases needing attention. Confidential - you only see clients whose engagement you're on.</div>
+  </div>
+</div>
+<div class="card">
+  {% if rows %}
+  <table>
+    <thead><tr><th>Client</th><th>Engagement</th><th>Service period</th><th class="text-right">Open cases</th><th class="text-right">New</th><th class="text-right">High / Critical</th><th class="text-right">Reporter replied</th><th class="text-right">Total</th><th>Portal</th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><a href="{{ url_for('whistleblower.cases', engagement_id=r.engagement.id) }}">{{ r.engagement.client.name }}</a></td>
+        <td>{{ r.engagement.title }}</td>
+        <td>{% if r.service and r.service.service_start %}{{ r.service.service_start.strftime('%d %b %Y') }}{% if r.service.service_end %} - {{ r.service.service_end.strftime('%d %b %Y') }}{% endif %}{% else %}&mdash;{% endif %}</td>
+        <td class="text-right">{{ r.open }}</td>
+        <td class="text-right">{% if r.new %}<span class="badge overdue">{{ r.new }}</span>{% else %}0{% endif %}</td>
+        <td class="text-right">{{ r.critical }}</td>
+        <td class="text-right">{% if r.awaiting_reply %}<span class="badge overdue">{{ r.awaiting_reply }}</span>{% else %}0{% endif %}</td>
+        <td class="text-right">{{ r.total }}</td>
+        <td>{% if r.service and r.service.portal_enabled %}<span class="badge status-Completed">On</span>{% else %}<span class="badge">Off</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No whistle-blower service engagements yet. Create an engagement for a client and choose the type "Neverlank Anonymous Whistle-blower Services".</div>
+  {% endif %}
+</div>
+{% endblock %}

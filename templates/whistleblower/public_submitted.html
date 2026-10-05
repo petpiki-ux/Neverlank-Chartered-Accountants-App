@@ -1,0 +1,13 @@
+{% extends "whistleblower/public_base.html" %}
+{% block title %}Report received{% endblock %}
+{% block body %}
+<div class="card">
+  <h1>Thank you - your report has been received</h1>
+  <div class="ok">
+    <p style="margin-top:0;"><strong>Write these two things down now.</strong> This is the only time your key is shown, and we cannot recover it.</p>
+    <div>Reference: <span class="key">{{ reference }}</span></div>
+    <div>Key: <span class="key">{{ key }}</span></div>
+  </div>
+  <p>Use them on the <a href="{{ url_for('whistleblower_public.status', token=token) }}">progress page</a> to see updates and answer questions from the investigators, without ever giving your name. Don't save them anywhere that identifies you.</p>
+</div>
+{% endblock %}

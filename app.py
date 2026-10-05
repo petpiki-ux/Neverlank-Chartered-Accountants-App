@@ -523,6 +523,8 @@ def create_app():
     from accounting import accounting_bp
     from qpd import qpd_bp, qpd_dashboard_bp
     from standard_coa import standard_coa_bp
+    from whistleblower import wb_bp, wb_public_bp
+    from training import training_bp
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(clients_bp)
@@ -546,6 +548,9 @@ def create_app():
     app.register_blueprint(qpd_bp)
     app.register_blueprint(qpd_dashboard_bp)
     app.register_blueprint(standard_coa_bp)
+    app.register_blueprint(wb_bp)
+    app.register_blueprint(wb_public_bp)
+    app.register_blueprint(training_bp)
 
     @app.route("/")
     def index():

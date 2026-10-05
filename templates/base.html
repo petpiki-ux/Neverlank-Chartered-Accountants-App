@@ -31,6 +31,12 @@
       <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
       <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
       <a href="{{ url_for('invoicing.list_invoices') }}">Invoices</a>
+      {% if user_has_permission(current_user, 'manage_whistleblower') %}
+      <a href="{{ url_for('whistleblower.dashboard') }}">Whistle-blower</a>
+      {% endif %}
+      {% if user_has_permission(current_user, 'manage_training') %}
+      <a href="{{ url_for('training.dashboard') }}">Training</a>
+      {% endif %}
       {% if user_has_permission(current_user, 'manage_chart_of_accounts') %}
       <a href="{{ url_for('standard_coa.list_accounts') }}">Chart of Accounts</a>
       {% endif %}

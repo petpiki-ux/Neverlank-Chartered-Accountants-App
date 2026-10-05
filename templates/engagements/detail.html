@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% import "engagements/_query_macros.html" as qmacros with context %}
 {% import "engagements/_review_macros.html" as rmacros with context %}
+{% import "services/_tabs.html" as svc with context %}
 {% block title %}{{ engagement.title }} - {{ firm_name }}{% endblock %}
 {% block content %}
 {% macro tickmark_picker(selected_id) %}
@@ -87,6 +88,9 @@
   </div>
 </div>
 
+{% if engagement.is_standalone_service %}
+{{ svc.service_tabs(engagement, tab) }}
+{% else %}
 <div class="tabs">
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='overview') }}" class="{% if tab=='overview' %}active{% endif %}">Overview</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}" class="{% if tab=='acceptance' %}active{% endif %}">Client Acceptance{% if client_acceptance and client_acceptance.is_partner_signed and acceptance_cleared %} &#10003;{% elif client_acceptance and client_acceptance.is_authorized_to_continue and acceptance_cleared %} (Provisional){% elif client_acceptance and client_acceptance.decision == 'Declined' %} (Declined){% elif engagement.acceptance_required %} &#128274;{% endif %}</a>
@@ -113,6 +117,7 @@
   {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}" class="{% if tab=='finalisation' %}active{% endif %}">Finalisation</a>
 </div>
+{% endif %}
 
 {% if tab == 'overview' %}
   <div class="card">

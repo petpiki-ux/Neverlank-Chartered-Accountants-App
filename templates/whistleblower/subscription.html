@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}Subscription & Channels - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{{ svc.service_header(engagement) }}
+{{ svc.service_tabs(engagement, 'subscription') }}
+
+<div class="card" style="max-width:820px;">
+  <h3 class="mt-0">Anonymous reporting page</h3>
+  <p class="muted" style="font-size:12.5px;">Each subscribing client gets their own secret link where employees, suppliers or anyone else can report a concern without logging in. No name, IP address or browser detail is recorded - the reporter is only given a reference and a one-time key to check back or reply. Switch the page on below and send the link to the client to circulate. The app has to be reachable online for people outside the firm to use it.</p>
+  <label>Link to give the client</label>
+  <input type="text" readonly value="{{ public_url }}" onclick="this.select()" style="font-family:monospace;">
+  <p style="font-size:12.5px;margin:6px 0;">Status: {% if service.portal_enabled %}<span class="badge status-Completed">Page is ON</span>{% else %}<span class="badge">Page is OFF - the link shows "not found"</span>{% endif %}</p>
+  <form method="post" action="{{ url_for('whistleblower.regenerate_link', engagement_id=engagement.id) }}" class="inline" onsubmit="return confirm('Generate a new link? The current link will stop working immediately.')"><button type="submit" class="btn small secondary">Generate a new link</button></form>
+</div>
+
+<form method="post" class="card" style="max-width:820px;">
+  <h3 class="mt-0">Subscription &amp; channels</h3>
+  <div class="form-row">
+    <div><label for="service_start">Service start</label><input type="date" id="service_start" name="service_start" value="{{ service.service_start.isoformat() if service.service_start else '' }}"></div>
+    <div><label for="service_end">Service end</label><input type="date" id="service_end" name="service_end" value="{{ service.service_end.isoformat() if service.service_end else '' }}"></div>
+    <div><label for="annual_fee">Annual fee</label><input type="number" step="0.01" min="0" id="annual_fee" name="annual_fee" value="{{ service.annual_fee if service.annual_fee is not none else '' }}"></div>
+    <div><label for="currency">Currency</label><input type="text" id="currency" name="currency" value="{{ service.currency or 'USD' }}" style="width:6em;"></div>
+  </div>
+  <label style="font-weight:normal;"><input type="checkbox" name="portal_enabled" value="1" {% if service.portal_enabled %}checked{% endif %}> Anonymous reporting page is switched on</label>
+  <label for="portal_welcome_text">Text shown at the top of the reporting page (what to include, what happens next)</label>
+  <textarea id="portal_welcome_text" name="portal_welcome_text" rows="3">{{ service.portal_welcome_text or '' }}</textarea>
+
+  <h4>Other ways to report</h4>
+  <div class="form-row">
+    <div><label for="hotline_phone">Hotline phone</label><input type="text" id="hotline_phone" name="hotline_phone" value="{{ service.hotline_phone or '' }}"></div>
+    <div><label for="hotline_whatsapp">WhatsApp / SMS</label><input type="text" id="hotline_whatsapp" name="hotline_whatsapp" value="{{ service.hotline_whatsapp or '' }}"></div>
+    <div><label for="hotline_email">Hotline email</label><input type="email" id="hotline_email" name="hotline_email" value="{{ service.hotline_email or '' }}"></div>
+  </div>
+  <label for="other_channels">Other channels (postal box, drop box, etc.)</label>
+  <input type="text" id="other_channels" name="other_channels" value="{{ service.other_channels or '' }}">
+
+  <h4>Who at the client receives reports</h4>
+  <div class="form-row">
+    <div><label for="client_contact_name">Name</label><input type="text" id="client_contact_name" name="client_contact_name" value="{{ service.client_contact_name or '' }}"></div>
+    <div><label for="client_contact_role">Role (e.g. Audit Committee Chair)</label><input type="text" id="client_contact_role" name="client_contact_role" value="{{ service.client_contact_role or '' }}"></div>
+    <div><label for="client_contact_email">Email</label><input type="email" id="client_contact_email" name="client_contact_email" value="{{ service.client_contact_email or '' }}"></div>
+    <div><label for="reporting_frequency">Report to client</label>
+      <select id="reporting_frequency" name="reporting_frequency">{% for f in frequencies %}<option {% if service.reporting_frequency == f %}selected{% endif %}>{{ f }}</option>{% endfor %}</select></div>
+  </div>
+  <label for="notes">Notes</label>
+  <textarea id="notes" name="notes" rows="2">{{ service.notes or '' }}</textarea>
+  {% if service.updated_at %}<p class="muted" style="font-size:11px;">Last saved {{ service.updated_at.strftime('%d %b %Y %H:%M') }}{% if service.updated_by %} by {{ service.updated_by.name }}{% endif %}.</p>{% endif %}
+  <button type="submit" class="btn gold">Save</button>
+</form>
+{% endblock %}

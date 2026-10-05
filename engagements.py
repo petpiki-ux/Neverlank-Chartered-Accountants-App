@@ -526,6 +526,11 @@ def view_engagement(engagement_id):
     # still points at it.
     if tab == "trial_balance" and engagement.type == "Secretarial":
         tab = "overview"
+    # The two stand-alone service lines (Whistle-blower / Training) only have
+    # the shared Overview / Client Acceptance / Documents / Tasks tabs here -
+    # their own workspaces live in whistleblower.py / training.py.
+    if engagement.is_standalone_service and tab not in ("overview", "acceptance", "documents", "tasks"):
+        tab = "overview"
     # Document Templates matching this engagement's type (Audit/Assurance/
     # Consulting) - shown on the Documents tab so the right blank
     # letters/workpapers for this client's engagement are one click away,

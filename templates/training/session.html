@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}{{ ts.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{{ svc.service_header(engagement, ts.title) }}
+{{ svc.service_tabs(engagement, 'sessions') }}
+<p><a href="{{ url_for('training.sessions', engagement_id=engagement.id) }}">&larr; All sessions</a></p>
+
+<div class="card">
+  <div class="form-row">
+    <div><strong>{{ ts.active_attendees|length }}</strong>{% if ts.seats %} / {{ ts.seats }}{% endif %}<br><span class="muted">registered{% if ts.seats_left is not none %} ({{ ts.seats_left }} seat(s) left){% endif %}</span></div>
+    <div><strong>{{ ts.attended_count }}</strong><br><span class="muted">attended</span></div>
+    <div><strong>{{ ts.certificates_issued }}</strong><br><span class="muted">certificates issued</span></div>
+    <div><strong>{{ ts.total_cpd_hours_awarded }}</strong><br><span class="muted">CPD hours awarded</span></div>
+    <div><strong>{{ ts.currency }} {{ '{:,.2f}'.format(ts.fees_collected) }}</strong>{% if ts.expected_revenue is not none %} / {{ '{:,.2f}'.format(ts.expected_revenue) }}{% endif %}<br><span class="muted">fees collected / expected</span></div>
+    <div><strong>{{ ts.average_rating('rating_overall') or '—' }}</strong>{% if ts.feedback_count %} / 5{% endif %}<br><span class="muted">avg overall rating ({{ ts.feedback_count }} response(s))</span></div>
+  </div>
+</div>
+
+<details class="card" style="max-width:860px;">
+  <summary style="cursor:pointer;font-weight:bold;">Session details ({{ ts.status }}{% if ts.start_date %} &middot; {{ ts.start_date.strftime('%d %b %Y') }}{% endif %}{% if ts.trainer_display %} &middot; {{ ts.trainer_display }}{% endif %}) - click to edit</summary>
+  <form method="post" action="{{ url_for('training.update_session', session_id=ts.id) }}" style="margin-top:10px;">
+    {% include 'training/_session_fields.html' %}
+    <button type="submit" class="btn gold">Save session</button>
+  </form>
+  <form method="post" action="{{ url_for('training.delete_session', session_id=ts.id) }}" class="inline" onsubmit="return confirm('Delete this session and its whole attendee register? This cannot be undone.')" style="margin-top:8px;"><button type="submit" class="btn small danger">Delete session</button></form>
+</details>
+
+<div class="card">
+  <h3 class="mt-0">Attendee register</h3>
+  <div style="margin-bottom:8px;">
+    <form method="post" action="{{ url_for('training.mark_all_attended', session_id=ts.id) }}" class="inline"><button type="submit" class="btn small secondary">Mark all registered as attended</button></form>
+    <a href="{{ url_for('training.download_register', session_id=ts.id) }}" class="btn small secondary">Download register (Excel)</a>
+  </div>
+  {% if ts.attendees %}
+  {% for a in ts.attendees %}<form method="post" action="{{ url_for('training.update_attendee', attendee_id=a.id) }}" id="att{{ a.id }}"></form>{% endfor %}
+  <table>
+    <thead><tr><th>Participant</th><th>Organisation / designation</th><th>Contact</th><th>Status</th><th>Fee paid</th><th>CPD hrs</th><th>Certificate</th><th></th></tr></thead>
+    <tbody>
+      {% for a in ts.attendees %}
+      <tr>
+        <td><input form="att{{ a.id }}" type="text" name="full_name" value="{{ a.full_name }}"></td>
+        <td><input form="att{{ a.id }}" type="text" name="organisation" value="{{ a.organisation or '' }}" placeholder="Organisation"><input form="att{{ a.id }}" type="text" name="designation" value="{{ a.designation or '' }}" placeholder="Designation"></td>
+        <td><input form="att{{ a.id }}" type="text" name="email" value="{{ a.email or '' }}" placeholder="Email"><input form="att{{ a.id }}" type="text" name="phone" value="{{ a.phone or '' }}" placeholder="Phone"></td>
+        <td><select form="att{{ a.id }}" name="status">{% for st in attendance_statuses %}<option {% if a.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></td>
+        <td><input form="att{{ a.id }}" type="number" step="0.01" min="0" name="fee_paid" value="{{ a.fee_paid if a.fee_paid is not none else '' }}" style="width:6em;"></td>
+        <td><input form="att{{ a.id }}" type="number" step="0.25" min="0" name="cpd_hours_awarded" value="{{ a.cpd_hours_awarded if a.cpd_hours_awarded is not none else '' }}" style="width:5em;"></td>
+        <td>{% if a.certificate_number %}{{ a.certificate_number }}<br><span class="muted" style="font-size:11px;">{{ a.certificate_issued_at.strftime('%d %b %Y') if a.certificate_issued_at }}</span>
+          {% elif a.status == 'Attended' %}<form method="post" action="{{ url_for('training.issue_certificate', attendee_id=a.id) }}" class="inline"><button type="submit" class="btn small secondary">Issue</button></form>
+          {% else %}<span class="muted">—</span>{% endif %}</td>
+        <td><button form="att{{ a.id }}" type="submit" class="btn small gold">Save</button>
+          <form method="post" action="{{ url_for('training.delete_attendee', attendee_id=a.id) }}" class="inline" onsubmit="return confirm('Remove this participant?')"><button type="submit" class="btn small danger">&times;</button></form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty-state">No participants registered yet.</div>{% endif %}
+
+  <form method="post" action="{{ url_for('training.add_attendee', session_id=ts.id) }}" style="margin-top:12px;">
+    <h4>Register a participant</h4>
+    <div class="form-row">
+      <div><label for="full_name">Name *</label><input type="text" id="full_name" name="full_name" required></div>
+      <div><label for="organisation">Organisation</label><input type="text" id="organisation" name="organisation"></div>
+      <div><label for="designation">Designation</label><input type="text" id="designation" name="designation"></div>
+      <div><label for="email">Email</label><input type="text" id="email" name="email"></div>
+      <div><label for="phone">Phone</label><input type="text" id="phone" name="phone"></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Register</button></div>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Trainer &amp; materials</h3>
+  <p style="font-size:13px;"><strong>Trainer:</strong> {{ ts.trainer_display or 'not set - add one under Session details' }}</p>
+  {% if ts.materials %}
+  <table>
+    <thead><tr><th>Material</th><th>File</th><th>Uploaded</th><th></th></tr></thead>
+    <tbody>
+      {% for m in ts.materials %}
+      <tr>
+        <td>{{ m.title }}</td>
+        <td><a href="{{ url_for('engagements.download_document', doc_id=m.document_id) }}">{{ m.document.original_filename }}</a></td>
+        <td>{{ m.uploaded_at.strftime('%d %b %Y') }}</td>
+        <td class="text-right"><form method="post" action="{{ url_for('training.delete_material', material_id=m.id) }}" class="inline" onsubmit="return confirm('Detach this material from the session?')"><button type="submit" class="btn small danger">Detach</button></form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="font-size:12.5px;">No materials attached yet.</p>{% endif %}
+  <form method="post" action="{{ url_for('training.upload_material', session_id=ts.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
+    <div><label for="mat_title">Title</label><input type="text" id="mat_title" name="title" placeholder="e.g. Day 1 slides"></div>
+    <div><label for="mat_file">File</label><input type="file" id="mat_file" name="file" required></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Participant feedback &amp; ratings</h3>
+  {% if ts.feedback_count %}
+  <p style="font-size:13px;">Averages (1-5) from {{ ts.feedback_count }} response(s): overall <strong>{{ ts.average_rating('rating_overall') }}</strong>, trainer <strong>{{ ts.average_rating('rating_trainer') or '—' }}</strong>, content <strong>{{ ts.average_rating('rating_content') or '—' }}</strong>, materials <strong>{{ ts.average_rating('rating_materials') or '—' }}</strong>.</p>
+  {% endif %}
+  {% if ts.attendees %}
+  {% for a in ts.attendees %}<form method="post" action="{{ url_for('training.save_feedback', attendee_id=a.id) }}" id="fb{{ a.id }}"></form>{% endfor %}
+  <table>
+    <thead><tr><th>Participant</th><th>Overall</th><th>Trainer</th><th>Content</th><th>Materials</th><th>Comments</th><th></th></tr></thead>
+    <tbody>
+      {% for a in ts.attendees %}
+      <tr>
+        <td>{{ a.full_name }}</td>
+        {% for field in ['rating_overall', 'rating_trainer', 'rating_content', 'rating_materials'] %}
+        <td><select form="fb{{ a.id }}" name="{{ field }}" style="width:4em;"><option value="">-</option>{% for n in range(1, 6) %}<option value="{{ n }}" {% if a[field]==n %}selected{% endif %}>{{ n }}</option>{% endfor %}</select></td>
+        {% endfor %}
+        <td><input form="fb{{ a.id }}" type="text" name="feedback_comments" value="{{ a.feedback_comments or '' }}"></td>
+        <td><button form="fb{{ a.id }}" type="submit" class="btn small secondary">Save</button></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="font-size:12.5px;">Register participants first to capture their feedback.</p>{% endif %}
+</div>
+{% endblock %}
