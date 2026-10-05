@@ -29,6 +29,13 @@
         {% for s in statuses %}<option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
       </select>
     </div>
+    <div>
+      <label for="category">Category</label>
+      <select name="category" id="category" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for c in categories %}<option value="{{ c }}" {% if category_filter==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+      </select>
+    </div>
     {% if is_reviewer %}
     <div>
       <label for="assigned_to">Staff</label>
@@ -77,10 +84,18 @@
       </div>
       <div><label for="due_date">Due date</label><input type="date" id="due_date" name="due_date"></div>
       <div>
+        <label for="add_category">Category</label>
+        <select id="add_category" name="category" onchange="var p=document.getElementById('priority');if(this.value==='Tax Services'){p.value='High';p.disabled=true;}else{p.disabled=false;}">
+          <option value="">Auto (from engagement, else Other)</option>
+          {% for c in categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
         <label for="priority">Priority</label>
         <select id="priority" name="priority">
           <option>Low</option><option selected>Normal</option><option>High</option>
         </select>
+        <div class="muted" style="font-size:11px;">Tax Services tasks are always High priority (penalties apply).</div>
       </div>
     </div>
     <label for="description">Notes</label>
@@ -99,7 +114,7 @@
       {% for t in engagement_tasks %}
       <tr>
         <td class="muted">{{ loop.index }}</td>
-        <td>{{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
+        <td>{{ t.title }}{% if t.category %}<div><span class="badge{% if t.category == 'Tax Services' %} overdue{% endif %}" style="font-size:10px;">{{ t.category }}</span></div>{% endif %}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
         <td><a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id, tab='tasks') }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></td>
         <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>
         <td>{{ t.due_date.strftime('%d %b %Y') if t.due_date else '—' }} {% if t.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
@@ -151,7 +166,7 @@
       <tr>
         <td class="muted">{{ loop.index }}</td>
         <td>
-          {{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}{% if t.engagement %}<div class="muted" style="font-size:11px;">Re: <a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id) }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></div>{% endif %}
+          {{ t.title }}{% if t.category %}<div><span class="badge{% if t.category == 'Tax Services' %} overdue{% endif %}" style="font-size:10px;">{{ t.category }}</span></div>{% endif %}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}{% if t.engagement %}<div class="muted" style="font-size:11px;">Re: <a href="{{ url_for('engagements.view_engagement', engagement_id=t.engagement_id) }}">{{ t.engagement.client.name }} - {{ t.engagement.title }}</a></div>{% endif %}
 
           <details style="margin-top:5px;">
             <summary style="font-size:11px;color:var(--gold, #a67c00);cursor:pointer;">Edit</summary>
@@ -162,6 +177,12 @@
               <label style="font-size:11px;">Notes</label>
               <textarea name="description" rows="2" style="font-size:12px;padding:4px 6px;">{{ t.description or '' }}</textarea>
               <div class="form-row">
+                <div>
+                  <label style="font-size:11px;">Category</label>
+                  <select name="category" style="font-size:12px;">
+                    {% for c in categories %}<option value="{{ c }}" {% if (t.category or 'Other')==c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+                  </select>
+                </div>
                 <div>
                   <label style="font-size:11px;">Assign to</label>
                   <select name="assigned_to_id" style="font-size:12px;">
@@ -179,6 +200,7 @@
                     <option {% if t.priority=='Normal' %}selected{% endif %}>Normal</option>
                     <option {% if t.priority=='High' %}selected{% endif %}>High</option>
                   </select>
+                  <div class="muted" style="font-size:10px;">Tax Services is always High.</div>
                 </div>
               </div>
               <button type="submit" class="btn small gold" style="margin-top:4px;">Save changes</button>

@@ -191,6 +191,53 @@ ACCOUNTING_AREAS = [
 
 ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"]
 TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
+
+# Task categories (EngagementTask and PersonalTask) - one per firm service
+# line, plus Other and Personal. Tax Services tasks are ALWAYS High priority
+# (penalties and interest accrue on late ZIMRA filings/payments), enforced
+# server-side by effective_task_priority() so no form, status change or
+# URL edit can leave one at Low/Normal.
+TASK_CATEGORIES = [
+    "Audit", "Forensic Audit", "Tax Services", "Consulting", "Accounting",
+    "Secretarial", "Neverlank Anonymous Tipoff Services", "Training",
+    "Other", "Personal",
+]
+TAX_TASK_CATEGORY = "Tax Services"
+
+# Engagement type -> the task category its tasks default to.
+ENGAGEMENT_TYPE_TASK_CATEGORY = {
+    "Audit": "Audit",
+    "Assurance": "Audit",
+    "Investigative Engagement": "Forensic Audit",
+    "Tax Compliance": "Tax Services",
+    "Tax Advisory & Health Check": "Tax Services",
+    "Consulting": "Consulting",
+    "Business Intelligence and IT Engagements": "Consulting",
+    "Accounting & Bookkeeping": "Accounting",
+    "Secretarial": "Secretarial",
+    "Neverlank Anonymous Whistle-blower Services": "Neverlank Anonymous Tipoff Services",
+    "Neverlank Training Services": "Training",
+}
+
+
+def resolve_task_category(requested, engagement=None, fallback="Other"):
+    """The category to store: the one asked for if it's valid, otherwise the
+    one implied by the task's engagement type, otherwise `fallback`."""
+    if requested in TASK_CATEGORIES:
+        return requested
+    if engagement is not None:
+        mapped = ENGAGEMENT_TYPE_TASK_CATEGORY.get(getattr(engagement, "type", None))
+        if mapped:
+            return mapped
+    return fallback if fallback in TASK_CATEGORIES else "Other"
+
+
+def effective_task_priority(category, priority):
+    """Tax Services tasks are always High; anything else keeps a valid
+    requested priority (default Normal)."""
+    if category == TAX_TASK_CATEGORY:
+        return "High"
+    return priority if priority in ("Low", "Normal", "High") else "Normal"
 CHECKLIST_STATUSES = ["Not Started", "In Progress", "Done", "N/A"]
 RISK_STATUSES = ["Open", "Mitigated", "Accepted", "Closed"]
 
@@ -2473,6 +2520,7 @@ class EngagementTask(db.Model):
     description = db.Column(db.Text)
     assigned_to_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     due_date = db.Column(db.Date)
+    category = db.Column(db.String(60))  # one of TASK_CATEGORIES - see effective_task_priority
     priority = db.Column(db.String(20), default="Normal")  # Low | Normal | High
     status = db.Column(db.String(20), default="To Do")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -2533,6 +2581,7 @@ class PersonalTask(db.Model):
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
     due_date = db.Column(db.Date)
+    category = db.Column(db.String(60))  # one of TASK_CATEGORIES - see effective_task_priority
     priority = db.Column(db.String(20), default="Normal")  # Low | Normal | High
     status = db.Column(db.String(20), default="To Do")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

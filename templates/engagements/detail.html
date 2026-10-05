@@ -2090,10 +2090,18 @@
       <div class="form-row">
         <div><label for="due_date">Due date</label><input type="date" id="due_date" name="due_date"></div>
         <div>
+          <label for="task_category">Category</label>
+          <select id="task_category" name="category" onchange="var p=document.getElementById('priority');if(this.value==='Tax Services'){p.value='High';p.disabled=true;}else{p.disabled=false;}">
+            <option value="">Auto (from engagement type)</option>
+            {% for c in task_categories %}<option value="{{ c }}">{{ c }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
           <label for="priority">Priority</label>
           <select id="priority" name="priority">
             <option>Low</option><option selected>Normal</option><option>High</option>
           </select>
+          <div class="muted" style="font-size:11px;">Tax Services tasks are always High priority (penalties apply).</div>
         </div>
         <div>
           <label for="status">Status</label>
@@ -2115,7 +2123,7 @@
       <tbody>
       {% for t in engagement.tasks|sort(attribute='due_date') %}
         <tr>
-          <td>{{ t.title }}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
+          <td>{{ t.title }}{% if t.category %}<div><span class="badge{% if t.category == 'Tax Services' %} overdue{% endif %}" style="font-size:10px;">{{ t.category }}</span></div>{% endif %}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
           <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>
           <td>{{ t.due_date.strftime('%d %b %Y') if t.due_date else '—' }} {% if t.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
           <td>{{ t.priority }}</td>

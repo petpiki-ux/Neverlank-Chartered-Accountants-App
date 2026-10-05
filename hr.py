@@ -20,7 +20,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, CheckInRecord, User, Engagement, Client,
-    EngagementTask, PersonalTask, PersonalSubtask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES,
+    EngagementTask, PersonalTask, PersonalSubtask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES, TASK_CATEGORIES, resolve_task_category, effective_task_priority,
     PayrollEmployee, LeaveType, LeaveBalance,
     user_has_permission, user_can_access_engagement, notify_task_assignment,
 )
@@ -935,6 +935,9 @@ def project_board():
     assignee_filter = request.args.get("assigned_to", "")
     view = request.args.get("view", "")  # "mine" narrows to tasks assigned to me
     search_query = request.args.get("q", "").strip()
+    category_filter = request.args.get("category", "")
+    if category_filter not in TASK_CATEGORIES:
+        category_filter = ""
 
     # Firm-wide visibility on this board is Partner-only: a Partner sees
     # everything, while Supervisor and Admin (and ordinary staff) only ever
@@ -955,6 +958,9 @@ def project_board():
     if status_filter:
         eng_query = eng_query.filter(EngagementTask.status == status_filter)
         personal_query = personal_query.filter(PersonalTask.status == status_filter)
+    if category_filter:
+        eng_query = eng_query.filter(EngagementTask.category == category_filter)
+        personal_query = personal_query.filter(PersonalTask.category == category_filter)
     if assignee_filter:
         eng_query = eng_query.filter(EngagementTask.assigned_to_id == assignee_filter)
         personal_query = personal_query.filter(PersonalTask.assigned_to_id == assignee_filter)
@@ -1008,6 +1014,8 @@ def project_board():
         people=people,
         engagements=engagements,
         statuses=TASK_STATUSES,
+        categories=TASK_CATEGORIES,
+        category_filter=category_filter,
         status_filter=status_filter,
         assignee_filter=assignee_filter,
         view=view,
@@ -1025,6 +1033,7 @@ def add_personal_task():
         engagement = Engagement.query.get_or_404(int(engagement_id))
         if current_user.role != "admin" and not user_can_access_engagement(current_user, engagement):
             abort(403)
+    category = resolve_task_category(request.form.get("category"), engagement if engagement_id else None, fallback="Other")
     task = PersonalTask(
         created_by_id=current_user.id,
         assigned_to_id=int(request.form.get("assigned_to_id")) if request.form.get("assigned_to_id") else current_user.id,
@@ -1032,7 +1041,9 @@ def add_personal_task():
         title=request.form.get("title", "").strip(),
         description=request.form.get("description", "").strip(),
         due_date=datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None,
-        priority=request.form.get("priority", "Normal"),
+        category=category,
+        # Tax Services is always High (penalties) - see effective_task_priority.
+        priority=effective_task_priority(category, request.form.get("priority", "Normal")),
         status=request.form.get("status", "To Do"),
     )
     if not task.title:
@@ -1067,7 +1078,8 @@ def update_personal_task(task_id):
     task.assigned_to_id = int(request.form.get("assigned_to_id")) if request.form.get("assigned_to_id") else task.assigned_to_id
     due_date = request.form.get("due_date")
     task.due_date = datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None
-    task.priority = request.form.get("priority", task.priority)
+    task.category = resolve_task_category(request.form.get("category") or task.category, task.engagement, fallback="Other")
+    task.priority = effective_task_priority(task.category, request.form.get("priority", task.priority))
     task.status = request.form.get("status", task.status)
     if task.assigned_to_id and task.assigned_to_id != old_assigned_to_id:
         notify_task_assignment(

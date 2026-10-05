@@ -26,6 +26,26 @@ def _set_sqlite_pragmas(dbapi_connection, connection_record):
         cursor.close()
 
 
+def _backfill_task_categories():
+    """One-time (idempotent) fill for tasks that pre-date task categories:
+    an engagement task takes the category implied by its engagement's type, a
+    general to-do takes its engagement's category if it references one and
+    "Other" otherwise. Tax Services tasks are then forced to High priority
+    (the firm's rule - penalties apply). Only touches rows with no category,
+    so it never overrides a category someone has chosen; the Tax Services
+    priority rule is re-applied on every save by effective_task_priority."""
+    from models import EngagementTask, PersonalTask, resolve_task_category, effective_task_priority
+    changed = False
+    for model in (EngagementTask, PersonalTask):
+        for task in model.query.filter(model.category.is_(None)).all():
+            engagement = task.engagement
+            task.category = resolve_task_category(None, engagement, fallback="Other")
+            task.priority = effective_task_priority(task.category, task.priority)
+            changed = True
+    if changed:
+        db.session.commit()
+
+
 def _add_missing_columns():
     """Lightweight auto-migration for SQLite: db.create_all() only creates
     brand-new tables, it never adds a column to a table that already exists.
@@ -86,7 +106,11 @@ def _add_missing_columns():
             ("completed_at", "DATETIME"),
             ("reviewed_by_id", "INTEGER"),
             ("reviewed_at", "DATETIME"),
+            # category - see models.TASK_CATEGORIES; backfilled from the
+            # engagement type by _backfill_task_categories on startup.
+            ("category", "VARCHAR(60)"),
         ] + partner_signoff_cols,
+        "personal_task": [("category", "VARCHAR(60)")],
         "risk_assessment": list(partner_signoff_cols) + [
             ("q_fraud_incentive", "INTEGER"),
             ("q_fraud_opportunity", "INTEGER"),
@@ -604,6 +628,7 @@ def create_app():
     with app.app_context():
         db.create_all()
         _add_missing_columns()
+        _backfill_task_categories()
         # First-run convenience: seed an admin login + starter checklist
         # templates automatically so a freshly-installed copy works with zero
         # command-line steps.

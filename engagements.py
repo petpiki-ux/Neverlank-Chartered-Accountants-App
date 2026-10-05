@@ -32,7 +32,7 @@ from models import (
     AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES, BUSINESS_IT_AREA_REFERENCES, SECRETARIAL_AREA_REFERENCES,
     EngagementQuery, QueryReply,
     WorkpaperReview, REVIEWABLE_TYPES, REVIEWABLE_TYPE_SUBSTANTIVE_ITEM, REVIEWABLE_TYPE_CHECKLIST_ITEM,
-    ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, CHECKLIST_STATUSES, RISK_STATUSES,
+    ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, TASK_CATEGORIES, resolve_task_category, effective_task_priority, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, SECRETARIAL_ACTIVITIES, SECRETARIAL_ACTIVITY_LABELS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS,
     FORENSIC_RISK_LIKELIHOOD_QUESTIONS, FORENSIC_RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
@@ -903,6 +903,7 @@ def view_engagement(engagement_id):
         checklist_statuses=CHECKLIST_STATUSES,
         risk_statuses=RISK_STATUSES,
         task_statuses=TASK_STATUSES,
+        task_categories=TASK_CATEGORIES,
         matching_templates=matching_templates,
         risk_assessment=risk_assessment,
         likelihood_questions=likelihood_questions,
@@ -2375,13 +2376,16 @@ def add_task(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement)
     due_date = request.form.get("due_date")
+    category = resolve_task_category(request.form.get("category"), engagement)
     task = EngagementTask(
         engagement_id=engagement_id,
         title=request.form.get("title", "").strip(),
         description=request.form.get("description", "").strip(),
         assigned_to_id=int(request.form.get("assigned_to_id")) if request.form.get("assigned_to_id") else None,
         due_date=datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None,
-        priority=request.form.get("priority", "Normal"),
+        category=category,
+        # Tax Services is always High (penalties) - see effective_task_priority.
+        priority=effective_task_priority(category, request.form.get("priority", "Normal")),
         status=request.form.get("status", "To Do"),
     )
     db.session.add(task)
@@ -2423,7 +2427,11 @@ def update_task(task_id):
     task.assigned_to_id = int(request.form.get("assigned_to_id")) if request.form.get("assigned_to_id") else None
     due_date = request.form.get("due_date")
     task.due_date = datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None
-    task.priority = request.form.get("priority", task.priority)
+    # A form that doesn't send a category (e.g. the status dropdown) keeps the
+    # stored one; a task with none yet gets the one implied by its engagement.
+    task.category = resolve_task_category(
+        request.form.get("category") or task.category, task.engagement)
+    task.priority = effective_task_priority(task.category, request.form.get("priority", task.priority))
     task.status = request.form.get("status", task.status)
     if task.assigned_to_id and task.assigned_to_id != old_assigned_to_id:
         notify_task_assignment(
