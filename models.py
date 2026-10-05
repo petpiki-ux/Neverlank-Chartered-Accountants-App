@@ -193,14 +193,14 @@ ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"
 TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
 
 # Task categories (EngagementTask and PersonalTask) - one per firm service
-# line, plus Other and Personal. Tax Services tasks are ALWAYS High priority
+# line, plus Admin Work, Other and Personal. Tax Services tasks are ALWAYS High priority
 # (penalties and interest accrue on late ZIMRA filings/payments), enforced
 # server-side by effective_task_priority() so no form, status change or
 # URL edit can leave one at Low/Normal.
 TASK_CATEGORIES = [
     "Audit", "Forensic Audit", "Tax Services", "Consulting", "Accounting",
     "Secretarial", "Neverlank Anonymous Tipoff Services", "Training",
-    "Other", "Personal",
+    "Admin Work", "Other", "Personal",
 ]
 TAX_TASK_CATEGORY = "Tax Services"
 

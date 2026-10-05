@@ -1002,6 +1002,15 @@ def project_board():
         # engagement-linked content.
         personal_tasks = [t for t in personal_tasks if not t.engagement or user_can_access_engagement(current_user, t.engagement)]
 
+    # General to-dos are shown grouped by category, in the firm's category
+    # order (a to-do with no category yet counts as "Other"); empty groups
+    # are left out.
+    personal_groups = []
+    for cat in TASK_CATEGORIES:
+        in_cat = [t for t in personal_tasks if (t.category if t.category in TASK_CATEGORIES else "Other") == cat]
+        if in_cat:
+            personal_groups.append((cat, in_cat))
+
     people = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
     engagements = Engagement.query.order_by(Engagement.title).all()
     if current_user.role != "admin":
@@ -1011,6 +1020,7 @@ def project_board():
         "projects/board.html",
         engagement_tasks=engagement_tasks,
         personal_tasks=personal_tasks,
+        personal_groups=personal_groups,
         people=people,
         engagements=engagements,
         statuses=TASK_STATUSES,
