@@ -18,6 +18,7 @@ log/structuring/disputes), the compliance checklist, and the firm-wide
 legislative update log and penalty/interest rate table.
 """
 import os
+import re
 import csv
 import io
 import json
@@ -806,13 +807,13 @@ VAT_SCHEDULE_REQUIRED_FIELDS = {"taxable_amount"}
 
 VAT_SCHEDULE_FIELD_SYNONYMS = {
     "invoice_date": ["invoice date", "date", "trans date", "transaction date", "tax point", "tax point date"],
-    "invoice_number": ["invoice no", "invoice number", "inv no", "invoice #", "reference", "ref", "ref no", "document no", "doc no"],
+    "invoice_number": ["bill of entry no", "bill of entry number", "boe no", "boe number", "boe #", "credit note no", "credit note number", "credit note #", "cn no", "cn number", "export invoice no", "invoice no", "invoice number", "inv no", "invoice #", "reference", "ref", "ref no", "document no", "doc no"],
     "counterparty_name": ["customer", "customer name", "client", "client name", "supplier", "supplier name", "vendor", "vendor name", "counterparty", "name", "trading name"],
     "description": ["description", "particulars", "details", "narrative", "goods/services", "nature of supply"],
-    "taxable_amount": ["taxable amount", "amount excl vat", "amount excluding vat", "net amount", "excl vat", "net", "value excl vat", "sales excl vat", "purchases excl vat", "amount (excl. vat)"],
-    "vat_amount": ["vat amount", "vat", "tax amount", "output vat", "input vat", "vat charged", "vat claimed", "tax"],
+    "taxable_amount": ["taxable value", "vat exclusive", "exclusive amount", "excl. vat", "ex vat", "nett", "net value", "net sales", "net purchases", "customs value", "vat value", "taxable amount", "amount excl vat", "amount excluding vat", "net amount", "excl vat", "net", "value excl vat", "sales excl vat", "purchases excl vat", "amount (excl. vat)"],
+    "vat_amount": ["vat amt", "vat value", "output tax", "input tax", "import vat", "vat paid", "vat amount", "vat", "tax amount", "output vat", "input vat", "vat charged", "vat claimed", "tax"],
     "rate_percent": ["vat rate", "rate", "vat %", "tax rate", "rate %", "vat rate %"],
-    "related_reference": ["original invoice", "original invoice no", "against invoice", "credited invoice", "related invoice", "boe no", "bill of entry no", "bill of entry number", "entry no", "entry number", "customs entry", "export entry", "export reference", "customs reference", "mrn"],
+    "related_reference": ["original invoice", "original invoice no", "against invoice", "credited invoice", "related invoice", "customs entry no", "entry reference", "customs entry", "export entry", "export reference", "customs reference", "mrn"],
     "customs_duty": ["customs duty", "duty", "import duty", "duty paid"],
 }
 
@@ -849,35 +850,139 @@ def _suggest_vat_column_mapping(headers):
     return mapping
 
 
-def _read_vat_schedule_rows(filepath, filename):
-    """Returns (headers, rows): the file's own column headers in order, and
-    a list of {header: value} dicts, for an uploaded Output/Input Tax
-    schedule already saved to `filepath`. Raises ValueError with a plain-
-    English message if no usable header row is found. Mirrors
-    engagements._read_tb_upload_rows's shape."""
-    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
-    if ext == "csv":
-        with open(filepath, "r", encoding="utf-8-sig", errors="replace") as f:
-            reader = csv.DictReader(f)
-            headers = [h for h in (reader.fieldnames or []) if h]
-            rows = [dict(r) for r in reader]
-        return headers, rows
-    if ext not in ("xlsx", "xls"):
-        raise ValueError("Please upload an Excel (.xlsx/.xls) or CSV file.")
-    workbook = openpyxl.load_workbook(filepath, data_only=True)
-    sheet = workbook.active
-    all_rows = list(sheet.iter_rows(values_only=True))
-    if not all_rows:
-        raise ValueError("That file appears to be empty.")
-    headers = [str(c).strip() if c is not None else "" for c in all_rows[0]]
-    if not any(headers):
-        raise ValueError("Could not find a header row in that file - the first row should contain column headings.")
+def _vat_header_score(cells):
+    """How many of a row's non-empty cells look like VAT schedule column
+    headings (date / invoice no / customer / amount excl. VAT / VAT ...). Used
+    to find the real header row in a schedule that has a title, company name
+    or blank lines above it - which a schedule exported from an accounting
+    system nearly always does."""
+    score = 0
+    for c in cells:
+        text = str(c).strip().lower() if c is not None else ""
+        if not text:
+            continue
+        for synonyms in VAT_SCHEDULE_FIELD_SYNONYMS.values():
+            if text in synonyms or any(len(s) > 3 and s in text for s in synonyms):
+                score += 1
+                break
+    return score
+
+
+def _vat_rows_to_table(all_rows):
+    """(headers, rows, score) from a sheet's raw rows (list of lists): finds
+    the header row (the earliest row among the first 40 that looks most like
+    VAT column headings; failing that the first row with 2+ filled cells),
+    de-duplicates repeated headings, and returns each later row as a
+    {heading: value} dict, skipping completely empty rows."""
+    best_i, best_score = None, 0
+    for i, row in enumerate(all_rows[:40]):
+        filled = [c for c in row if c is not None and str(c).strip() != ""]
+        if len(filled) < 2:
+            continue
+        score = _vat_header_score(filled)
+        if score > best_score:
+            best_i, best_score = i, score
+    if best_i is None:
+        for i, row in enumerate(all_rows[:40]):
+            if len([c for c in row if c is not None and str(c).strip() != ""]) >= 2:
+                best_i = i
+                break
+    if best_i is None:
+        return [], [], 0
+    headers, seen = [], {}
+    for c in all_rows[best_i]:
+        h = str(c).strip() if c is not None else ""
+        if h and h in seen:
+            seen[h] += 1
+            h = f"{h} ({seen[h]})"
+        elif h:
+            seen[h] = 1
+        headers.append(h)
     rows = []
-    for row in all_rows[1:]:
+    for row in all_rows[best_i + 1:]:
         if all(c is None or str(c).strip() == "" for c in row):
             continue
         rows.append({h: v for h, v in zip(headers, row) if h})
+    return [h for h in headers if h], rows, best_score
+
+
+def _read_vat_schedule_rows(filepath, filename):
+    """Returns (headers, rows): the file's own column headers in order, and
+    a list of {header: value} dicts, for an uploaded Output/Input Tax
+    schedule already saved to `filepath`. Tolerates what real exports look
+    like: title/company lines or blank rows above the headings (the header
+    row is found, not assumed to be row 1), several worksheets (the one with
+    the best-looking headings wins), old .xls files, and semicolon/tab
+    delimited CSVs. Raises ValueError with a plain-English message if
+    nothing usable is found."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext == "csv":
+        with open(filepath, "r", encoding="utf-8-sig", errors="replace", newline="") as f:
+            text = f.read()
+        # Pick the delimiter that actually separates columns on most of the
+        # first lines (a title line above the headings defeats csv.Sniffer).
+        sample_lines = text.splitlines()[:40]
+        delimiter = max(",;\t|", key=lambda d: sum(1 for ln in sample_lines if ln.count(d) >= 2))
+        if not any(ln.count(delimiter) >= 2 for ln in sample_lines):
+            delimiter = ","
+        all_rows = [row for row in csv.reader(io.StringIO(text), delimiter=delimiter)]
+        sheets = [all_rows]
+    elif ext == "xlsx":
+        workbook = openpyxl.load_workbook(filepath, data_only=True)
+        sheets = [list(ws.iter_rows(values_only=True)) for ws in workbook.worksheets]
+    elif ext == "xls":
+        try:
+            import xlrd
+        except ImportError:
+            raise ValueError("Old Excel (.xls) files need one extra step on this server - please open the file in Excel, choose Save As > Excel Workbook (.xlsx) (or CSV), and upload that instead.")
+        try:
+            book = xlrd.open_workbook(filepath)
+        except Exception:
+            raise ValueError("That .xls file could not be read - please open it in Excel and Save As an Excel Workbook (.xlsx) or CSV, then upload that.")
+        sheets = []
+        for sh in book.sheets():
+            sheet_rows = []
+            for r in range(sh.nrows):
+                row = []
+                for c in range(sh.ncols):
+                    cell = sh.cell(r, c)
+                    value = cell.value
+                    if cell.ctype == xlrd.XL_CELL_DATE:
+                        try:
+                            value = xlrd.xldate.xldate_as_datetime(value, book.datemode)
+                        except Exception:
+                            pass
+                    elif cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+                        value = None
+                    row.append(value)
+                sheet_rows.append(row)
+            sheets.append(sheet_rows)
+    else:
+        raise ValueError("Please upload an Excel (.xlsx/.xls) or CSV file.")
+
+    best = ([], [], -1)
+    for sheet_rows in sheets:
+        if not sheet_rows:
+            continue
+        table = _vat_rows_to_table(sheet_rows)
+        # prefer the sheet whose headings look most like a VAT schedule; on a
+        # tie keep the earlier sheet; a sheet with data beats one without
+        if (table[2], len(table[1]) > 0) > (best[2], len(best[1]) > 0):
+            best = table
+    headers, rows, _score = best
+    if not headers:
+        raise ValueError("Could not find a header row in that file - somewhere near the top there should be a row of column headings (e.g. Date, Invoice No, Customer, Amount excl. VAT, VAT).")
     return headers, rows
+
+
+_VAT_TOTAL_ROW = re.compile(r"^\s*(grand\s+|sub[\s-]*|net\s+)?totals?\b", re.IGNORECASE)
+
+
+def _is_vat_total_row(row):
+    """A 'Total' / 'Sub-total' / 'Grand total' line at the foot of a
+    schedule - never a real document, and importing it would double-count
+    every figure above it."""
+    return any(isinstance(v, str) and _VAT_TOTAL_ROW.match(v) for v in row.values())
 
 
 def _parse_vat_schedule_amount(value):
@@ -1042,6 +1147,9 @@ def confirm_vat_schedule_import(engagement_id):
     imported = 0
     skipped = 0
     for row in rows:
+        if _is_vat_total_row(row):
+            skipped += 1
+            continue
         taxable_amount = _parse_vat_schedule_amount(row.get(mapping["taxable_amount"])) if mapping.get("taxable_amount") else None
         if taxable_amount is None:
             skipped += 1
