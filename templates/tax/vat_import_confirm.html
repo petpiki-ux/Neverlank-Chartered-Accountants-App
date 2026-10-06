@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>Confirm column mapping</h1>
-    <div class="subtitle">Importing "{{ original_filename }}" as an {{ direction_label }} schedule for {{ engagement.client.name if engagement.client else '' }} - {{ engagement.title }}. Nothing is imported until you confirm the mapping below. {{ total_row_count }} data row(s) found; a preview of the first {{ preview_rows|length }} is shown.</div>
+    <div class="subtitle">Importing "{{ original_filename }}" as a "{{ direction_label }}" schedule for {{ engagement.client.name if engagement.client else '' }} - {{ engagement.title }}. Nothing is imported until you confirm the mapping below. {{ total_row_count }} data row(s) found; a preview of the first {{ preview_rows|length }} is shown.</div>
   </div>
 </div>
 
@@ -13,6 +13,7 @@
   <p class="muted" style="font-size:12px;">Each field below is pre-filled with the app's best guess at which column in your file matches it - check each one, and change any that guessed wrong. Leave a field set to "— not in this file —" if your schedule doesn't have that column at all.</p>
   <form method="post" action="{{ url_for('tax.confirm_vat_schedule_import', engagement_id=engagement.id) }}">
     <input type="hidden" name="direction" value="{{ direction }}">
+    <input type="hidden" name="kind" value="{{ kind or '' }}">
     <input type="hidden" name="staged_filename" value="{{ staged_filename }}">
     <input type="hidden" name="original_filename" value="{{ original_filename }}">
     <div class="form-row" style="flex-wrap:wrap;">

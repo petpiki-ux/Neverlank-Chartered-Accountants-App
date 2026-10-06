@@ -5480,6 +5480,7 @@ class VATImportBatch(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
     direction = db.Column(db.String(10), nullable=False)  # "Output" or "Input" - see VAT_INVOICE_DIRECTIONS
+    doc_type = db.Column(db.String(20), default="Invoice")  # see VAT_DOC_TYPES - applies to every row of the batch
     original_filename = db.Column(db.String(300))
     stored_filename = db.Column(db.String(300))  # kept in Config.VAT_IMPORTS_DATA_DIR for the audit trail
     column_mapping_json = db.Column(db.Text)  # the confirmed {field: source_column} mapping, for reference
@@ -5490,6 +5491,14 @@ class VATImportBatch(db.Model):
 
     engagement = db.relationship("Engagement", backref=db.backref("vat_import_batches", lazy=True, cascade="all, delete-orphan"))
     imported_by = db.relationship("User")
+
+    @property
+    def kind(self):
+        return vat_kind_code(self.direction, self.doc_type)
+
+    @property
+    def kind_label(self):
+        return VAT_KIND_LABELS.get(self.kind) or VAT_INVOICE_DIRECTION_LABELS.get(self.direction, self.direction)
 
     def __repr__(self):
         return f"<VATImportBatch {self.direction} rows={self.row_count} engagement={self.engagement_id}>"
@@ -5505,6 +5514,75 @@ VAT_INVOICE_DIRECTION_LABELS = {
 # (both are treated identically everywhere else); shown on the register so
 # a preparer can tell an imported row apart from one they typed themselves.
 VAT_INVOICE_SOURCES = ["manual", "import"]
+
+# What kind of document a VATInvoice row is. Everything used to be a plain
+# invoice; the firm asked for VAT credit notes, Bills of Entry (imports) and
+# export sales to be handled - and shown - separately:
+#   - Credit Note: a credit note issued to a customer (Output direction) or
+#     received from a supplier (Input direction). Captured as the positive
+#     figures printed on the credit note and SUBTRACTED in the totals.
+#   - Bill of Entry: an import declaration cleared through ZIMRA Customs; the
+#     VAT paid on import is Input Tax (Input direction only). taxable_amount is
+#     the VAT value for customs purposes; customs_duty is informational.
+#   - Export Sale: a zero-rated supply (Output direction only) - the taxable
+#     value is reported but the VAT is always 0.
+VAT_DOC_TYPES = ["Invoice", "Credit Note", "Bill of Entry", "Export Sale"]
+# (kind code, label, direction, doc_type) - the single list the add form and the
+# schedule import use, so a person picks ONE thing and direction/doc type
+# follow from it.
+VAT_DOCUMENT_KINDS = [
+    ("output_invoice", "Sales invoice (Output Tax)", "Output", "Invoice"),
+    ("export_sale", "Export sale - zero-rated (Output Tax)", "Output", "Export Sale"),
+    ("output_credit_note", "Credit note issued to a customer (reduces Output Tax)", "Output", "Credit Note"),
+    ("input_invoice", "Purchase/expense invoice (Input Tax)", "Input", "Invoice"),
+    ("bill_of_entry", "Bill of Entry - imports (Input Tax)", "Input", "Bill of Entry"),
+    ("input_credit_note", "Credit note received from a supplier (reduces Input Tax)", "Input", "Credit Note"),
+]
+VAT_KIND_LABELS = {k: label for k, label, _d, _t in VAT_DOCUMENT_KINDS}
+
+
+def resolve_vat_kind(kind=None, direction=None):
+    """(direction, doc_type) for a posted `kind` code; or, for older forms that
+    only post `direction`, (direction, "Invoice"). None if neither is valid."""
+    for code, _label, d, t in VAT_DOCUMENT_KINDS:
+        if kind == code:
+            return d, t
+    if not kind and direction in VAT_INVOICE_DIRECTIONS:
+        return direction, "Invoice"
+    return None
+
+
+def vat_kind_code(direction, doc_type):
+    for code, _label, d, t in VAT_DOCUMENT_KINDS:
+        if d == direction and t == (doc_type or "Invoice"):
+            return code
+    return None
+
+
+def vat_working_paper_summary(invoices):
+    """Totals for the VAT working paper, each document kind kept SEPARATE:
+    {kind_code: {"count", "taxable", "vat"}} plus net Output/Input tax and
+    taxable values (credit notes subtracted) and the net VAT position.
+    Positive net position = payable to ZIMRA, negative = refundable."""
+    buckets = {code: {"count": 0, "taxable": 0.0, "vat": 0.0, "duty": 0.0} for code, *_ in VAT_DOCUMENT_KINDS}
+    for inv in invoices:
+        code = vat_kind_code(inv.direction, inv.doc_type)
+        if code is None:
+            continue
+        b = buckets[code]
+        b["count"] += 1
+        b["taxable"] += inv.taxable_amount or 0.0
+        b["vat"] += inv.vat_amount or 0.0
+        b["duty"] += inv.customs_duty or 0.0
+    out = {"buckets": buckets}
+    out["output_taxable"] = (buckets["output_invoice"]["taxable"] + buckets["export_sale"]["taxable"]
+                             - buckets["output_credit_note"]["taxable"])
+    out["output_tax"] = buckets["output_invoice"]["vat"] + buckets["export_sale"]["vat"] - buckets["output_credit_note"]["vat"]
+    out["input_taxable"] = (buckets["input_invoice"]["taxable"] + buckets["bill_of_entry"]["taxable"]
+                            - buckets["input_credit_note"]["taxable"])
+    out["input_tax"] = buckets["input_invoice"]["vat"] + buckets["bill_of_entry"]["vat"] - buckets["input_credit_note"]["vat"]
+    out["net_position"] = out["output_tax"] - out["input_tax"]
+    return out
 
 
 class VATInvoice(db.Model):
@@ -5525,6 +5603,13 @@ class VATInvoice(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
     direction = db.Column(db.String(10), nullable=False)  # "Output" or "Input"
+    # Invoice | Credit Note | Bill of Entry | Export Sale - see VAT_DOC_TYPES.
+    # NULL (rows from before this existed) means a plain Invoice.
+    doc_type = db.Column(db.String(20), default="Invoice")
+    # Credit note: the original invoice number it credits. Bill of Entry /
+    # Export Sale: the customs entry / export document reference.
+    related_reference = db.Column(db.String(100))
+    customs_duty = db.Column(db.Float)  # Bill of Entry only - duty paid on the import (informational; not VAT)
     invoice_date = db.Column(db.Date)
     invoice_number = db.Column(db.String(100))
     counterparty_name = db.Column(db.String(200))  # the customer (Output) or supplier (Input) named on the invoice
@@ -5547,6 +5632,18 @@ class VATInvoice(db.Model):
     @property
     def total_amount(self):
         return (self.taxable_amount or 0.0) + (self.vat_amount or 0.0)
+
+    @property
+    def kind(self):
+        return vat_kind_code(self.direction, self.doc_type)
+
+    @property
+    def is_credit_note(self):
+        return (self.doc_type or "Invoice") == "Credit Note"
+
+    @property
+    def kind_label(self):
+        return VAT_KIND_LABELS.get(self.kind) or VAT_INVOICE_DIRECTION_LABELS.get(self.direction, self.direction)
 
     def __repr__(self):
         return f"<VATInvoice {self.direction} {self.invoice_number or ''} {self.vat_amount} engagement={self.engagement_id}>"

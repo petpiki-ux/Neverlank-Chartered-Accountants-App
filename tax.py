@@ -48,7 +48,7 @@ from models import (
     TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
     VATRate, VAT_RATE_TYPES,
     VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_INVOICE_SOURCES,
-    VATImportBatch,
+    VATImportBatch, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, resolve_vat_kind, vat_kind_code,
     LegislativeUpdate, LegislativeUpdateClientLink,
     LEGISLATIVE_UPDATE_TYPES, LEGISLATIVE_UPDATE_TYPE_LABELS, LEGISLATIVE_UPDATE_AREAS,
     CASE_AUTHORITY_STATUSES, CASE_AUTHORITY_LABELS,
@@ -728,10 +728,11 @@ def add_vat_invoice(engagement_id):
     engagement = _get_tax_engagement(engagement_id)
     if not _require_tax_module(engagement):
         return _tax_redirect(engagement_id)
-    direction = request.form.get("direction", "").strip()
-    if direction not in VAT_INVOICE_DIRECTIONS:
-        flash("Please choose whether this is a sales (Output) or purchase/expense (Input) invoice.", "danger")
+    resolved = resolve_vat_kind(request.form.get("kind"), request.form.get("direction"))
+    if not resolved:
+        flash("Please choose what you are capturing - a sales invoice, export sale, credit note, purchase invoice or Bill of Entry.", "danger")
         return _tax_redirect(engagement_id)
+    direction, doc_type = resolved
     taxable_amount = _parse_float(request.form.get("taxable_amount"))
     if taxable_amount is None:
         flash("Please enter the taxable amount (excluding VAT).", "danger")
@@ -739,10 +740,24 @@ def add_vat_invoice(engagement_id):
     rate_id = request.form.get("vat_rate_id") or None
     vat_rate = VATRate.query.get(int(rate_id)) if rate_id else None
     vat_amount_input = _parse_float(request.form.get("vat_amount"))
-    vat_amount, rate_percent_used = _resolve_vat_amount_and_rate(taxable_amount, vat_rate, vat_amount_input)
+    if doc_type == "Export Sale":
+        # Exports are zero-rated: the value is reported, the VAT is always 0.
+        zero_rate = (VATRate.query.filter_by(rate_type="Zero-rated")
+                     .order_by(VATRate.effective_from.desc()).first())
+        vat_rate = zero_rate
+        vat_amount, rate_percent_used = 0.0, 0.0
+    else:
+        vat_amount, rate_percent_used = _resolve_vat_amount_and_rate(taxable_amount, vat_rate, vat_amount_input)
+    if doc_type == "Credit Note":
+        # Figures are captured as printed on the credit note and subtracted in
+        # the totals - so never let a minus sign double-count.
+        taxable_amount, vat_amount = abs(taxable_amount), abs(vat_amount or 0.0)
     invoice = VATInvoice(
         engagement_id=engagement_id,
         direction=direction,
+        doc_type=doc_type,
+        related_reference=request.form.get("related_reference", "").strip() or None,
+        customs_duty=_parse_float(request.form.get("customs_duty")) if doc_type == "Bill of Entry" else None,
         invoice_date=_parse_date(request.form.get("invoice_date")),
         invoice_number=request.form.get("invoice_number", "").strip() or None,
         counterparty_name=request.form.get("counterparty_name", "").strip() or None,
@@ -756,7 +771,7 @@ def add_vat_invoice(engagement_id):
     )
     db.session.add(invoice)
     db.session.commit()
-    flash(f"{VAT_INVOICE_DIRECTION_LABELS.get(direction, direction)} invoice captured.", "success")
+    flash(f"{VAT_KIND_LABELS.get(invoice.kind) or VAT_INVOICE_DIRECTION_LABELS.get(direction, direction)} captured.", "success")
     return _tax_redirect(engagement_id)
 
 
@@ -784,6 +799,8 @@ VAT_SCHEDULE_FIELDS = [
     ("taxable_amount", "Taxable amount (excl. VAT)"),
     ("vat_amount", "VAT amount"),
     ("rate_percent", "VAT rate % (only used to compute the VAT amount when that column is blank)"),
+    ("related_reference", "Original invoice # (credit notes) / customs or export entry ref"),
+    ("customs_duty", "Customs duty (Bills of Entry only)"),
 ]
 VAT_SCHEDULE_REQUIRED_FIELDS = {"taxable_amount"}
 
@@ -795,6 +812,8 @@ VAT_SCHEDULE_FIELD_SYNONYMS = {
     "taxable_amount": ["taxable amount", "amount excl vat", "amount excluding vat", "net amount", "excl vat", "net", "value excl vat", "sales excl vat", "purchases excl vat", "amount (excl. vat)"],
     "vat_amount": ["vat amount", "vat", "tax amount", "output vat", "input vat", "vat charged", "vat claimed", "tax"],
     "rate_percent": ["vat rate", "rate", "vat %", "tax rate", "rate %", "vat rate %"],
+    "related_reference": ["original invoice", "original invoice no", "against invoice", "credited invoice", "related invoice", "boe no", "bill of entry no", "bill of entry number", "entry no", "entry number", "customs entry", "export entry", "export reference", "customs reference", "mrn"],
+    "customs_duty": ["customs duty", "duty", "import duty", "duty paid"],
 }
 
 
@@ -915,10 +934,11 @@ def stage_vat_schedule_import(engagement_id):
     engagement = _get_tax_engagement(engagement_id)
     if not _require_tax_module(engagement):
         return _tax_redirect(engagement_id)
-    direction = request.form.get("direction", "").strip()
-    if direction not in VAT_INVOICE_DIRECTIONS:
-        flash("Please choose whether this is an Output Tax (sales) or Input Tax (purchases/expenses) schedule.", "danger")
+    resolved = resolve_vat_kind(request.form.get("kind"), request.form.get("direction"))
+    if not resolved:
+        flash("Please choose what kind of schedule this is - sales invoices, export sales, credit notes, purchase invoices or Bills of Entry.", "danger")
         return _tax_redirect(engagement_id)
+    direction, doc_type = resolved
     file = request.files.get("file")
     if not file or not file.filename:
         flash("Please choose a file to import.", "danger")
@@ -948,8 +968,8 @@ def stage_vat_schedule_import(engagement_id):
     suggested_mapping = _suggest_vat_column_mapping(headers)
     return render_template(
         "tax/vat_import_confirm.html",
-        engagement=engagement, direction=direction,
-        direction_label=VAT_INVOICE_DIRECTION_LABELS.get(direction, direction),
+        engagement=engagement, direction=direction, kind=vat_kind_code(direction, doc_type),
+        direction_label=VAT_KIND_LABELS.get(vat_kind_code(direction, doc_type)) or VAT_INVOICE_DIRECTION_LABELS.get(direction, direction),
         staged_filename=staged_name, original_filename=original_name,
         headers=headers, preview_rows=rows[:10], total_row_count=len(rows),
         schedule_fields=VAT_SCHEDULE_FIELDS, suggested_mapping=suggested_mapping,
@@ -966,11 +986,12 @@ def confirm_vat_schedule_import(engagement_id):
     engagement = _get_tax_engagement(engagement_id)
     if not _require_tax_module(engagement):
         return _tax_redirect(engagement_id)
-    direction = request.form.get("direction", "").strip()
+    resolved = resolve_vat_kind(request.form.get("kind"), request.form.get("direction"))
+    direction, doc_type = resolved if resolved else ("", "Invoice")
     staged_filename = secure_filename(request.form.get("staged_filename", "").strip())
     original_filename = request.form.get("original_filename", "").strip()
     staged_path = os.path.join(_vat_imports_dir(), staged_filename) if staged_filename else ""
-    if direction not in VAT_INVOICE_DIRECTIONS or not staged_filename or not os.path.exists(staged_path):
+    if not resolved or not staged_filename or not os.path.exists(staged_path):
         flash("That import session has expired or the staged file could not be found - please upload the file again.", "danger")
         return _tax_redirect(engagement_id)
 
@@ -999,6 +1020,7 @@ def confirm_vat_schedule_import(engagement_id):
     batch = VATImportBatch(
         engagement_id=engagement_id,
         direction=direction,
+        doc_type=doc_type,
         original_filename=original_filename or staged_filename,
         stored_filename=stored_name,
         column_mapping_json=json.dumps(mapping),
@@ -1018,6 +1040,10 @@ def confirm_vat_schedule_import(engagement_id):
         rate_percent = _parse_vat_schedule_amount(row.get(mapping["rate_percent"])) if mapping.get("rate_percent") else None
         if vat_amount is None and rate_percent is not None:
             vat_amount = round(taxable_amount * (rate_percent / 100.0), 2)
+        if doc_type == "Export Sale":
+            vat_amount, rate_percent = 0.0, 0.0  # zero-rated, whatever the file says
+        if doc_type == "Credit Note":
+            taxable_amount, vat_amount = abs(taxable_amount), abs(vat_amount or 0.0)  # subtracted in the totals
 
         def _mapped_text(field):
             col = mapping.get(field)
@@ -1029,6 +1055,9 @@ def confirm_vat_schedule_import(engagement_id):
         invoice = VATInvoice(
             engagement_id=engagement_id,
             direction=direction,
+            doc_type=doc_type,
+            related_reference=_mapped_text("related_reference"),
+            customs_duty=(_parse_vat_schedule_amount(row.get(mapping["customs_duty"])) if (doc_type == "Bill of Entry" and mapping.get("customs_duty")) else None),
             invoice_date=_parse_vat_schedule_date(row.get(mapping["invoice_date"])) if mapping.get("invoice_date") else None,
             invoice_number=_mapped_text("invoice_number"),
             counterparty_name=_mapped_text("counterparty_name"),
@@ -1048,9 +1077,9 @@ def confirm_vat_schedule_import(engagement_id):
     db.session.commit()
 
     if skipped:
-        flash(f"Imported {imported} {direction.lower()} tax invoice(s) - {skipped} row(s) were skipped (no readable taxable amount).", "warning")
+        flash(f"Imported {imported} {VAT_KIND_LABELS.get(vat_kind_code(direction, doc_type), direction).lower()} row(s) - {skipped} row(s) were skipped (no readable taxable amount).", "warning")
     else:
-        flash(f"Imported {imported} {direction.lower()} tax invoice(s).", "success")
+        flash(f"Imported {imported} {VAT_KIND_LABELS.get(vat_kind_code(direction, doc_type), direction).lower()} row(s).", "success")
     return _tax_redirect(engagement_id)
 
 

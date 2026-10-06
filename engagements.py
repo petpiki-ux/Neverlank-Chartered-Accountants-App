@@ -62,7 +62,7 @@ from models import (
     TAX_POSITION_CLASSIFICATIONS, TAX_POSITION_APPROVAL_STATUSES,
     PenaltyInterestRate, PenaltyInterestCalculation, PENALTY_INTEREST_RATE_TYPES,
     VATRate, VAT_RATE_TYPES,
-    VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS,
+    VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, vat_working_paper_summary,
     VATImportBatch,
     TaxInformationRequest, TAX_INFO_REQUEST_STATUSES,
     TaxReturnRecord, TAX_RETURN_STATUSES,
@@ -844,14 +844,18 @@ def view_engagement(engagement_id):
     if engagement.has_tax_module:
         vat_invoices = VATInvoice.query.filter_by(engagement_id=engagement_id).order_by(VATInvoice.invoice_date.desc().nullslast(), VATInvoice.id.desc()).all()
         vat_import_batches = VATImportBatch.query.filter_by(engagement_id=engagement_id).order_by(VATImportBatch.imported_at.desc()).all()
-        for inv in vat_invoices:
-            if inv.direction == "Output":
-                vat_output_tax_total += inv.vat_amount or 0.0
-                vat_output_taxable_total += inv.taxable_amount or 0.0
-            elif inv.direction == "Input":
-                vat_input_tax_total += inv.vat_amount or 0.0
-                vat_input_taxable_total += inv.taxable_amount or 0.0
+        # Each kind (sales invoices, export sales, credit notes issued,
+        # purchase invoices, Bills of Entry, credit notes received) is totalled
+        # separately; the headline figures are the NET of credit notes.
+        vat_summary = vat_working_paper_summary(vat_invoices)
+        vat_output_tax_total = vat_summary["output_tax"]
+        vat_input_tax_total = vat_summary["input_tax"]
+        vat_output_taxable_total = vat_summary["output_taxable"]
+        vat_input_taxable_total = vat_summary["input_taxable"]
+    else:
+        vat_summary = vat_working_paper_summary([])
     vat_net_position = vat_output_tax_total - vat_input_tax_total
+    vat_invoices_by_kind = {code: [i for i in vat_invoices if i.kind == code] for code, *_ in VAT_DOCUMENT_KINDS}
 
     # ---------- Accounting tab (Financial/Cost/Management Accounting module) ----------
     # Only actually queried when the Accounting tab could be shown - see
@@ -1037,6 +1041,9 @@ def view_engagement(engagement_id):
         vat_invoices=vat_invoices,
         vat_import_batches=vat_import_batches,
         vat_invoice_directions=VAT_INVOICE_DIRECTIONS,
+        vat_document_kinds=VAT_DOCUMENT_KINDS,
+        vat_summary=vat_summary,
+        vat_invoices_by_kind=vat_invoices_by_kind,
         vat_invoice_direction_labels=VAT_INVOICE_DIRECTION_LABELS,
         vat_output_tax_total=vat_output_tax_total,
         vat_input_tax_total=vat_input_tax_total,
