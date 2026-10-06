@@ -9,6 +9,9 @@
 </div>
 
 <div class="card">
+  {% if problem %}
+  <div class="flash danger" role="alert" style="margin-bottom:12px;padding:10px 12px;border-radius:6px;background:#fdecea;border:1px solid #f5c2c0;color:#8a1f17;font-size:13px;"><strong>Not imported yet.</strong> {{ problem }}</div>
+  {% endif %}
   <h3 class="mt-0">Column mapping</h3>
   <p class="muted" style="font-size:12px;">Each field below is pre-filled with the app's best guess at which column in your file matches it - check each one, and change any that guessed wrong. Leave a field set to "— not in this file —" if your schedule doesn't have that column at all.</p>
   <form method="post" action="{{ url_for('tax.confirm_vat_schedule_import', engagement_id=engagement.id) }}">

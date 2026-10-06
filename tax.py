@@ -975,7 +975,7 @@ def _read_vat_schedule_rows(filepath, filename):
     return headers, rows
 
 
-_VAT_TOTAL_ROW = re.compile(r"^\s*(grand\s+|sub[\s-]*|net\s+)?totals?\b", re.IGNORECASE)
+_VAT_TOTAL_ROW = re.compile(r"^\s*(grand\s+|sub[\s-]*|net\s+|report\s+)?totals?\s*(for\b.*|carried\s+forward|c/?f|b/?f)?\s*[:\-]?\s*$", re.IGNORECASE)
 
 
 def _is_vat_total_row(row):
@@ -987,24 +987,49 @@ def _is_vat_total_row(row):
 
 def _parse_vat_schedule_amount(value):
     """Parses one spreadsheet cell into a float, tolerant of blanks,
-    currency-formatted text ("$1,234.50"), and bracketed negatives
-    ("(1,234.50)") - a schedule from another system is never guaranteed to
-    hand back plain numbers. Returns None (never raises) if it can't be
-    read as a number at all."""
-    if value is None:
+    currency-formatted text ("$1,234.50", "USD 1 234.50", "ZWG1,234.50"),
+    bracketed or trailing-minus negatives ("(1,234.50)", "1,234.50-") and
+    non-breaking spaces - a schedule from another system is never
+    guaranteed to hand back plain numbers. Returns None (never raises) if
+    it can't be read as a number at all."""
+    if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
         return float(value)
-    text = str(value).strip()
+    text = str(value).replace("\u00a0", " ").strip()
     if not text:
         return None
-    negative = text.startswith("(") and text.endswith(")")
-    text = text.strip("()").replace(",", "").replace("$", "").replace("USD", "").strip()
+    negative = (text.startswith("(") and text.endswith(")")) or text.endswith("-") or text.startswith("-")
+    cleaned = re.sub(r"[^0-9.]", "", text.replace(",", ""))
+    if not cleaned or cleaned.count(".") > 1:
+        return None
     try:
-        amount = float(text)
+        amount = abs(float(cleaned))
     except ValueError:
         return None
     return -amount if negative else amount
+
+
+def _norm_vat_header(text):
+    """Header text normalised for matching: case, runs of whitespace
+    (including line breaks inside a wrapped Excel heading) ignored."""
+    return " ".join(str(text or "").split()).lower()
+
+
+def _resolve_vat_mapping_header(posted, headers):
+    """The real file header a posted <select> value stands for, or None.
+    Browsers normalise line breaks and the server strips whitespace, so an
+    exact comparison can miss a heading like "Amount\n(excl. VAT)"; match
+    exactly first, then on normalised text."""
+    if not posted:
+        return None
+    if posted in headers:
+        return posted
+    wanted = _norm_vat_header(posted)
+    for h in headers:
+        if _norm_vat_header(h) == wanted:
+            return h
+    return None
 
 
 def _parse_vat_schedule_date(value):
@@ -1035,6 +1060,23 @@ def _require_vat_schedule_permission():
     default; an admin can change this per role or person)."""
     if not user_has_permission(current_user, "manage_vat_schedules"):
         abort(403)
+
+
+def _render_vat_mapping_screen(engagement, direction, doc_type, staged_name, original_name, headers, rows, mapping, problem=None):
+    """The "confirm column mapping" screen. Used for the first look at an
+    uploaded file AND to send the preparer straight back to it - with their
+    choices intact and the staged file kept - when the confirm step can't
+    import anything, so a bad mapping never just dumps them back on the tab
+    with their upload gone."""
+    code = vat_kind_code(direction, doc_type)
+    return render_template(
+        "tax/vat_import_confirm.html",
+        engagement=engagement, direction=direction, kind=code,
+        direction_label=VAT_KIND_LABELS.get(code) or VAT_INVOICE_DIRECTION_LABELS.get(direction, direction),
+        staged_filename=staged_name, original_filename=original_name,
+        headers=headers, preview_rows=rows[:10], total_row_count=len(rows),
+        schedule_fields=VAT_SCHEDULE_FIELDS, suggested_mapping=mapping, problem=problem,
+    )
 
 
 @tax_bp.route("/<int:engagement_id>/vat/import/stage", methods=["POST"])
@@ -1079,14 +1121,9 @@ def stage_vat_schedule_import(engagement_id):
         flash("That file has a header row but no data rows to import.", "danger")
         return _tax_redirect(engagement_id)
 
-    suggested_mapping = _suggest_vat_column_mapping(headers)
-    return render_template(
-        "tax/vat_import_confirm.html",
-        engagement=engagement, direction=direction, kind=vat_kind_code(direction, doc_type),
-        direction_label=VAT_KIND_LABELS.get(vat_kind_code(direction, doc_type)) or VAT_INVOICE_DIRECTION_LABELS.get(direction, direction),
-        staged_filename=staged_name, original_filename=original_name,
-        headers=headers, preview_rows=rows[:10], total_row_count=len(rows),
-        schedule_fields=VAT_SCHEDULE_FIELDS, suggested_mapping=suggested_mapping,
+    return _render_vat_mapping_screen(
+        engagement, direction, doc_type, staged_name, original_name, headers, rows,
+        _suggest_vat_column_mapping(headers),
     )
 
 
@@ -1110,19 +1147,36 @@ def confirm_vat_schedule_import(engagement_id):
         flash("That import session has expired or the staged file could not be found - please upload the file again.", "danger")
         return _tax_redirect(engagement_id)
 
-    mapping = {field: (request.form.get(f"map_{field}", "").strip() or None) for field, _ in VAT_SCHEDULE_FIELDS}
-    missing_required = [label for field, label in VAT_SCHEDULE_FIELDS if field in VAT_SCHEDULE_REQUIRED_FIELDS and not mapping.get(field)]
-    if missing_required:
-        os.remove(staged_path)
-        flash(f"Please map a column to: {', '.join(missing_required)} - required to import a schedule.", "danger")
-        return _tax_redirect(engagement_id)
-
     try:
-        _headers, rows = _read_vat_schedule_rows(staged_path, original_filename or staged_filename)
+        headers, rows = _read_vat_schedule_rows(staged_path, original_filename or staged_filename)
     except ValueError as exc:
         os.remove(staged_path)
         flash(str(exc), "danger")
         return _tax_redirect(engagement_id)
+
+    posted = {field: (request.form.get(f"map_{field}", "").strip() or None) for field, _ in VAT_SCHEDULE_FIELDS}
+    mapping = {field: _resolve_vat_mapping_header(value, headers) for field, value in posted.items()}
+
+    def _back_to_mapping(message):
+        # keep the staged file and the preparer's choices; explain what to fix
+        return _render_vat_mapping_screen(
+            engagement, direction, doc_type, staged_filename, original_filename or staged_filename,
+            headers, rows, mapping, problem=message,
+        )
+
+    missing_required = [label for field, label in VAT_SCHEDULE_FIELDS if field in VAT_SCHEDULE_REQUIRED_FIELDS and not mapping.get(field)]
+    if missing_required:
+        return _back_to_mapping(f"Please choose which column holds: {', '.join(missing_required)} - it is required to import a schedule.")
+
+    # Dry run first: nothing is saved unless at least one row is readable.
+    readable = [r for r in rows if not _is_vat_total_row(r) and _parse_vat_schedule_amount(r.get(mapping["taxable_amount"])) is not None]
+    if not readable:
+        sample = next((r.get(mapping["taxable_amount"]) for r in rows if r.get(mapping["taxable_amount"]) not in (None, "")), None)
+        hint = f' The first value found in the "{mapping["taxable_amount"]}" column is "{sample}".' if sample is not None else f' The "{mapping["taxable_amount"]}" column is empty in every row.'
+        return _back_to_mapping(
+            f"Nothing was imported: none of the {len(rows)} row(s) has a readable number in the column mapped to Taxable amount.{hint} "
+            "Check that Taxable amount is the column holding the amount excluding VAT, then confirm again."
+        )
 
     # Move the staged file into a permanent, engagement-scoped name for the
     # audit trail rather than leaving it under its transient staging name -
