@@ -2834,7 +2834,7 @@
           <td>{{ b.skipped_row_count or 0 }}</td>
           <td>{{ b.imported_by.name if b.imported_by else '—' }}</td>
           <td>{{ b.imported_at.strftime('%d %b %Y') if b.imported_at else '—' }}</td>
-          <td><form method="post" action="{{ url_for('tax.delete_vat_import_batch', batch_id=b.id) }}" class="inline" onsubmit="return confirm('Delete this import batch and every invoice it created?');"><button type="submit" class="btn small danger">Delete batch</button></form></td>
+          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.delete_vat_import_batch', batch_id=b.id) }}" class="inline" onsubmit="return confirm('Delete this import batch and every invoice it created?');"><button type="submit" class="btn small danger">Delete batch</button></form>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
@@ -2898,6 +2898,7 @@
       <div><button type="submit" class="btn small gold">Add to VAT register</button></div>
     </form>
 
+    {% if user_has_permission(current_user, 'manage_vat_schedules') %}
     <p style="font-size:12.5px;margin-bottom:4px;"><strong>Import an already-prepared Output/Input Tax schedule</strong></p>
     <p class="muted" style="font-size:11.5px;">Upload an Excel (.xlsx/.xls) or CSV schedule - the app suggests which column is the date, invoice number, customer/supplier, taxable amount, VAT amount, etc.; you review and confirm the mapping before anything is imported.</p>
     <form method="post" action="{{ url_for('tax.stage_vat_schedule_import', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="flex-wrap:wrap;">
@@ -2911,6 +2912,9 @@
       <div><label for="vat_import_file">Schedule file *</label><input type="file" id="vat_import_file" name="file" accept=".xlsx,.xls,.csv" required></div>
       <div><button type="submit" class="btn small secondary">Upload &amp; map columns</button></div>
     </form>
+    {% else %}
+    <p class="muted" style="font-size:11.5px;">Uploading and mapping Output/Input VAT schedules is limited to Supervisors, Partners and Admins. You can still capture individual VAT documents above, or ask a supervisor to upload the schedule.</p>
+    {% endif %}
   </div>
 
   <!-- ---------- Dynamic Information Request List ---------- -->

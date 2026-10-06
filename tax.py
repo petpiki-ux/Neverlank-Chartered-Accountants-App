@@ -924,6 +924,14 @@ def _parse_vat_schedule_date(value):
     return None
 
 
+def _require_vat_schedule_permission():
+    """Uploading/mapping/confirming/deleting a VAT schedule import needs the
+    "manage_vat_schedules" permission (Supervisor, Partner and Admin by
+    default; an admin can change this per role or person)."""
+    if not user_has_permission(current_user, "manage_vat_schedules"):
+        abort(403)
+
+
 @tax_bp.route("/<int:engagement_id>/vat/import/stage", methods=["POST"])
 @login_required
 def stage_vat_schedule_import(engagement_id):
@@ -931,6 +939,7 @@ def stage_vat_schedule_import(engagement_id):
     suggest a column mapping, and show the preparer a confirmation screen -
     nothing is imported yet. See models.VATImportBatch's docstring for why
     this is a two-step flow."""
+    _require_vat_schedule_permission()
     engagement = _get_tax_engagement(engagement_id)
     if not _require_tax_module(engagement):
         return _tax_redirect(engagement_id)
@@ -983,6 +992,7 @@ def confirm_vat_schedule_import(engagement_id):
     actually applied, row by row, and a VATImportBatch + one VATInvoice per
     readable row are created. Re-reads the staged file rather than trusting
     anything posted from the browser about its contents."""
+    _require_vat_schedule_permission()
     engagement = _get_tax_engagement(engagement_id)
     if not _require_tax_module(engagement):
         return _tax_redirect(engagement_id)
@@ -1089,6 +1099,7 @@ def cancel_vat_schedule_import():
     """Discards a staged file the preparer decided not to import after all
     (e.g. they picked the wrong file), rather than leaving it orphaned in
     Config.VAT_IMPORTS_DATA_DIR."""
+    _require_vat_schedule_permission()
     engagement_id = request.form.get("engagement_id")
     staged_filename = secure_filename(request.form.get("staged_filename", "").strip())
     if staged_filename:
@@ -1109,6 +1120,7 @@ def delete_vat_import_batch(batch_id):
     """Reverses a mistaken schedule import in one action - deletes the
     batch record and, via the cascade on VATImportBatch.invoices (see
     models.py), every VATInvoice row it produced."""
+    _require_vat_schedule_permission()
     batch = VATImportBatch.query.get_or_404(batch_id)
     _ensure_engagement_access(batch.engagement)
     engagement_id = batch.engagement_id
