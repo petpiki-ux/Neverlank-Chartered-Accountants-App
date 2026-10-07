@@ -8,6 +8,7 @@
       <a href="{{ url_for('clients.view_client', client_id=invoice.client.id) }}">{{ invoice.client.name }}</a>
       {% if invoice.engagement %} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=invoice.engagement.id) }}">{{ invoice.engagement.title }}</a>{% endif %}
       &middot; <span class="badge status-{{ invoice.status }}">{{ invoice.status }}</span>
+      {% if invoice.quotation %}&middot; From quotation <a href="{{ url_for('quotations.view_quotation', quotation_id=invoice.quotation.id) }}"><strong>{{ invoice.quotation.quote_number }}</strong></a>{% endif %}
       {% if invoice.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}
     </div>
   </div>

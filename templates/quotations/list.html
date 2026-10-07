@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Quotations - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Quotations</h1>
+    <div class="subtitle">{{ quotations|length }} quotation(s) &middot; accepted quotations convert to invoices in one click</div>
+  </div>
+  <a href="{{ url_for('quotations.new_quotation') }}" class="btn gold">+ New Quotation</a>
+</div>
+
+<div class="form-row" style="flex-wrap:wrap;">
+  {% for key, label in [('waiting', 'Awaiting client response'), ('ready', 'Accepted - ready to invoice'), ('invoiced', 'Converted to invoices')] %}
+  {% set count, money = summary[key] %}
+  <div class="card" style="flex:1;min-width:200px;padding:12px;border-top:3px solid var(--gold);">
+    <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;">{{ label }}</div>
+    <div style="font-size:22px;font-weight:700;">{{ count }}</div>
+    <div class="muted" style="font-size:12px;">{% if money %}{% for cur, amt in money.items() %}{{ cur }} {{ '{:,.2f}'.format(amt) }}{% if not loop.last %} &middot; {% endif %}{% endfor %}{% else %}&mdash;{% endif %}</div>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <form method="get" class="form-row" style="align-items:flex-end;margin-bottom:0;">
+    <div>
+      <label for="status">Status</label>
+      <select id="status" name="status" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for s in statuses %}<option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="client_id">Client</label>
+      <select id="client_id" name="client_id" onchange="this.form.submit()">
+        <option value="">All</option>
+        {% for c in clients %}<option value="{{ c.id }}" {% if client_filter==c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select>
+    </div>
+  </form>
+</div>
+
+<div class="card">
+  {% if quotations %}
+  <table>
+    <thead><tr><th>Quotation #</th><th>Client</th><th>Subject</th><th>Issued</th><th>Valid until</th><th class="text-right">Total</th><th>Status</th><th>Invoice</th><th></th></tr></thead>
+    <tbody>
+      {% for q in quotations %}
+      <tr>
+        <td><a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}">{{ q.quote_number }}</a></td>
+        <td>{{ q.client.name }}</td>
+        <td>{{ q.subject or (q.engagement.title if q.engagement else '—') }}</td>
+        <td>{{ q.issue_date.strftime('%d %b %Y') if q.issue_date else '—' }}</td>
+        <td>{{ q.valid_until.strftime('%d %b %Y') if q.valid_until else '—' }}</td>
+        <td class="text-right">{{ q.currency }} {{ '{:,.2f}'.format(q.total) }}</td>
+        <td><span class="badge status-{{ q.display_status }}">{{ q.display_status }}</span></td>
+        <td>{% if q.invoice %}<a href="{{ url_for('invoicing.view_invoice', invoice_id=q.invoice.id) }}">{{ q.invoice.invoice_number }}</a>{% else %}—{% endif %}</td>
+        <td class="text-right"><a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No quotations yet. <a href="{{ url_for('quotations.new_quotation') }}">Create your first quotation</a>.</div>
+  {% endif %}
+</div>
+{% endblock %}

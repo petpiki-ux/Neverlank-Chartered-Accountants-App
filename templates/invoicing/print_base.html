@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block doc_title %}{% endblock %} {{ doc_number }} - {{ firm.name }}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/neverlank-logo.png') }}">
+  <style>
+    :root { --navy:#0f2942; --navy-dark:#0a1c2e; --gold:#b8934a; --gold-light:#d4af6a; --ink:#1f2933; --muted:#6b7684; --line:#e3e8ee; --tint:#f6f8fb; }
+    * { box-sizing: border-box; }
+    html { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { margin: 0; background: #dfe5ec; font-family: 'Segoe UI', Calibri, 'Helvetica Neue', Arial, sans-serif; color: var(--ink); font-size: 13px; line-height: 1.45; }
+    .toolbar { max-width: 210mm; margin: 14px auto 0; display: flex; justify-content: flex-end; gap: 8px; padding: 0 4px; }
+    .toolbar button, .toolbar a { background: var(--navy); color: #fff; border: 0; border-radius: 6px; padding: 9px 16px; font-size: 13px; cursor: pointer; text-decoration: none; font-family: inherit; }
+    .toolbar a.secondary { background: #fff; color: var(--navy); border: 1px solid #c9d2dc; }
+    .sheet { width: 210mm; min-height: 297mm; margin: 12px auto 30px; background: #fff; box-shadow: 0 6px 30px rgba(15,41,66,.22); display: flex; flex-direction: column; position: relative; overflow: hidden; }
+
+    /* ---- letterhead band ---- */
+    .band { background: linear-gradient(120deg, var(--navy-dark) 0%, var(--navy) 100%); color: #fff; padding: 26px 34px 24px; display: flex; align-items: center; gap: 24px; border-bottom: 6px solid var(--gold); position: relative; }
+    .band::after { content: ""; position: absolute; right: -60px; top: -60px; width: 220px; height: 220px; border-radius: 50%; border: 26px solid rgba(212,175,106,.10); }
+    .band .logo { width: 132px; height: 132px; flex: none; filter: drop-shadow(0 3px 10px rgba(0,0,0,.45)); }
+    .band .firm { flex: 1; min-width: 0; }
+    .band .firm .name { font-family: Georgia, 'Times New Roman', serif; font-size: 27px; font-weight: 700; letter-spacing: .02em; line-height: 1.15; }
+    .band .firm .tag { color: var(--gold-light); font-size: 11.5px; letter-spacing: .22em; text-transform: uppercase; margin-top: 6px; font-weight: 600; }
+    .band .firm .contact { margin-top: 12px; font-size: 11.5px; color: #cdd8e4; line-height: 1.55; }
+    .band .doc { text-align: right; position: relative; z-index: 1; }
+    .band .doc .label { font-family: Georgia, serif; font-size: 36px; font-weight: 700; letter-spacing: .10em; color: var(--gold-light); line-height: 1; text-transform: uppercase; }
+    .band .doc .number { margin-top: 10px; font-size: 16px; font-weight: 700; letter-spacing: .04em; }
+    .band .doc .sub { margin-top: 4px; font-size: 11.5px; color: #cdd8e4; }
+
+    .body { padding: 26px 34px 10px; flex: 1; position: relative; }
+
+    /* ---- meta + parties ---- */
+    .meta { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; margin-bottom: 22px; }
+    .meta div { padding: 10px 14px; background: var(--tint); border-right: 1px solid var(--line); }
+    .meta div:last-child { border-right: 0; }
+    .meta .k { font-size: 9.5px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); font-weight: 700; }
+    .meta .v { margin-top: 3px; font-size: 13.5px; font-weight: 600; color: var(--navy); }
+    .party { border-left: 5px solid var(--gold); background: var(--tint); padding: 12px 16px; border-radius: 0 8px 8px 0; margin-bottom: 18px; }
+    .party .k { font-size: 9.5px; text-transform: uppercase; letter-spacing: .14em; color: var(--gold); font-weight: 800; }
+    .party .who { font-size: 15px; font-weight: 700; color: var(--navy); margin-top: 3px; white-space: pre-line; }
+    .party .re { margin-top: 8px; font-size: 12.5px; color: var(--ink); }
+    .party .re b { color: var(--navy); }
+    .intro { margin: 0 0 16px; white-space: pre-line; color: #333; }
+
+    /* ---- items ---- */
+    table.items { width: 100%; border-collapse: collapse; margin-top: 4px; }
+    table.items thead th { background: var(--navy); color: #fff; font-size: 10.5px; letter-spacing: .1em; text-transform: uppercase; padding: 10px 12px; text-align: left; font-weight: 700; }
+    table.items thead th:first-child { border-top-left-radius: 8px; } table.items thead th:last-child { border-top-right-radius: 8px; }
+    table.items td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+    table.items tbody tr:nth-child(even) td { background: #fafbfd; }
+    table.items .r { text-align: right; white-space: nowrap; }
+    table.items td.desc { width: 56%; }
+
+    /* ---- totals ---- */
+    .totals-wrap { display: flex; justify-content: flex-end; margin-top: 16px; }
+    .totals { width: 300px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+    .totals .row { display: flex; justify-content: space-between; padding: 9px 14px; border-bottom: 1px solid var(--line); }
+    .totals .row.grand { background: var(--navy); color: #fff; border-bottom: 0; padding: 13px 14px; font-size: 16px; font-weight: 700; }
+    .totals .row.grand span:last-child { color: var(--gold-light); }
+
+    .block { margin-top: 22px; }
+    .block h4 { margin: 0 0 6px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em; color: var(--gold); font-weight: 800; }
+    .block .txt { white-space: pre-line; font-size: 12px; color: #3b4652; }
+    .accept { margin-top: 26px; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+    .accept .sig { border-top: 1.5px solid var(--navy); padding-top: 6px; font-size: 11px; color: var(--muted); margin-top: 38px; }
+
+    /* ---- stamp ---- */
+    .stamp { position: absolute; right: 44px; top: 142px; z-index: 2; transform: rotate(-12deg); border: 4px solid; padding: 4px 18px; font-size: 26px; font-weight: 800; letter-spacing: .18em; text-transform: uppercase; border-radius: 8px; opacity: .8; font-family: Georgia, serif; }
+    .stamp.paid, .stamp.accepted { color: #1e8a4c; border-color: #1e8a4c; }
+    .stamp.declined, .stamp.cancelled { color: #c0392b; border-color: #c0392b; }
+    .stamp.expired { color: #b8860b; border-color: #b8860b; }
+
+    /* ---- footer ---- */
+    .foot { background: var(--navy-dark); color: #cdd8e4; padding: 14px 34px; display: flex; justify-content: space-between; align-items: center; border-top: 4px solid var(--gold); font-size: 11px; margin-top: 24px; }
+    .foot .thanks { color: var(--gold-light); font-family: Georgia, serif; font-size: 14px; font-style: italic; }
+
+    @page { size: A4; margin: 0; }
+    @media print {
+      body { background: #fff; }
+      .toolbar { display: none; }
+      .sheet { margin: 0; box-shadow: none; width: 100%; min-height: 297mm; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    {% block back_link %}{% endblock %}
+    <button onclick="window.print()">Print / Save as PDF</button>
+  </div>
+
+  <div class="sheet">
+    <div class="band">
+      <img class="logo" src="{{ url_for('static', filename='img/neverlank-logo.png') }}" alt="{{ firm.name }}">
+      <div class="firm">
+        <div class="name">{{ firm.name }}</div>
+        <div class="tag">{{ firm.strapline or firm.tagline }}</div>
+        <div class="contact">
+          {% if firm.address %}{{ firm.address }}<br>{% endif %}
+          {{ [firm.web, firm.email, firm.phone]|select|join('  &middot;  ')|safe }}
+          {% if firm.vat_number or firm.tin %}<br>{% if firm.vat_number %}VAT No: {{ firm.vat_number }}{% endif %}{% if firm.vat_number and firm.tin %}  &middot;  {% endif %}{% if firm.tin %}TIN: {{ firm.tin }}{% endif %}{% endif %}
+        </div>
+      </div>
+      <div class="doc">
+        <div class="label">{% block doc_label %}{% endblock %}</div>
+        <div class="number">{{ doc_number }}</div>
+        <div class="sub">{{ doc.currency }} &middot; {% block doc_sub %}{% endblock %}</div>
+      </div>
+    </div>
+
+    <div class="body">
+      {% block stamp %}{% endblock %}
+      <div class="meta">
+        {% block meta %}{% endblock %}
+      </div>
+
+      <div class="party">
+        <div class="k">{% block party_label %}Bill to{% endblock %}</div>
+        <div class="who">{{ doc.bill_to or doc.client.name }}</div>
+        {% block party_re %}{% endblock %}
+      </div>
+
+      {% block intro %}{% endblock %}
+
+      <table class="items">
+        <thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Unit price</th><th class="r">Amount ({{ doc.currency }})</th></tr></thead>
+        <tbody>
+          {% for line in doc.lines %}
+          <tr>
+            <td class="desc">{{ line.description }}</td>
+            <td class="r">{{ '%g'|format(line.quantity) }}</td>
+            <td class="r">{{ '{:,.2f}'.format(line.unit_price or 0) }}</td>
+            <td class="r"><strong>{{ '{:,.2f}'.format(line.line_total) }}</strong></td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+
+      <div class="totals-wrap">
+        <div class="totals">
+          <div class="row"><span>Subtotal</span><span>{{ doc.currency }} {{ '{:,.2f}'.format(doc.subtotal) }}</span></div>
+          <div class="row"><span>VAT ({{ '%g'|format(doc.vat_pct) }}%)</span><span>{{ doc.currency }} {{ '{:,.2f}'.format(doc.vat_amount) }}</span></div>
+          <div class="row grand"><span>{% block total_label %}Total{% endblock %}</span><span>{{ doc.currency }} {{ '{:,.2f}'.format(doc.total) }}</span></div>
+        </div>
+      </div>
+
+      {% block extras %}{% endblock %}
+      {% if firm.bank_details %}
+      <div class="block"><h4>Payment details</h4><div class="txt">{{ firm.bank_details }}</div></div>
+      {% endif %}
+    </div>
+
+    <div class="foot">
+      <span class="thanks">{% block thanks %}Thank you for choosing {{ firm.name }}.{% endblock %}</span>
+      <span>{{ firm.web }}</span>
+    </div>
+  </div>
+</body>
+</html>

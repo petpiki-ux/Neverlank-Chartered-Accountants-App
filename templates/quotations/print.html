@@ -1,0 +1,29 @@
+{% extends "invoicing/print_base.html" %}
+{% set doc_number = quotation.quote_number %}
+{% block doc_title %}Quotation{% endblock %}
+{% block back_link %}<a class="secondary" href="{{ url_for('quotations.view_quotation', quotation_id=quotation.id) }}">Back</a>{% endblock %}
+{% block doc_label %}Quotation{% endblock %}
+{% block doc_sub %}Valid until {{ quotation.valid_until.strftime('%d %b %Y') if quotation.valid_until else '—' }}{% endblock %}
+{% block stamp %}{% set ds = quotation.display_status %}{% if ds in ('Accepted', 'Declined', 'Expired') %}<div class="stamp {{ ds|lower }}">{{ ds }}</div>{% endif %}{% endblock %}
+{% block meta %}
+  <div><div class="k">Quotation no.</div><div class="v">{{ quotation.quote_number }}</div></div>
+  <div><div class="k">Date</div><div class="v">{{ quotation.issue_date.strftime('%d %b %Y') if quotation.issue_date else '—' }}</div></div>
+  <div><div class="k">Valid until</div><div class="v">{{ quotation.valid_until.strftime('%d %b %Y') if quotation.valid_until else '—' }}</div></div>
+  <div><div class="k">Currency</div><div class="v">{{ quotation.currency }}</div></div>
+{% endblock %}
+{% block party_label %}Prepared for{% endblock %}
+{% block party_re %}
+  {% if quotation.subject or quotation.engagement %}
+  <div class="re"><b>Re:</b> {{ quotation.subject or quotation.engagement.title }}</div>
+  {% endif %}
+{% endblock %}
+{% block intro %}{% if quotation.notes %}<p class="intro">{{ quotation.notes }}</p>{% endif %}{% endblock %}
+{% block total_label %}Total quoted{% endblock %}
+{% block extras %}
+  {% if quotation.terms %}<div class="block"><h4>Terms &amp; conditions</h4><div class="txt">{{ quotation.terms }}</div></div>{% endif %}
+  <div class="accept">
+    <div><div class="sig">Accepted for and on behalf of {{ quotation.client.name }} (name, signature &amp; date)</div></div>
+    <div><div class="sig">For {{ firm.name }}</div></div>
+  </div>
+{% endblock %}
+{% block thanks %}We look forward to working with you.{% endblock %}

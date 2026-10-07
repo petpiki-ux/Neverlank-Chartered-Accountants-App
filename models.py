@@ -8609,6 +8609,102 @@ class InvoiceLineItem(db.Model):
         return f"<InvoiceLineItem {self.description!r}>"
 
 
+# ---------- Quotations (convert to Invoices) ----------
+
+# Draft > Sent > Accepted / Declined / Expired > Invoiced. "Expired" is also
+# shown automatically for a Sent quote whose valid-until date has passed
+# (see Quotation.display_status); "Invoiced" is only ever set by converting
+# the quotation into an Invoice, never by hand.
+QUOTATION_STATUSES = ["Draft", "Sent", "Accepted", "Declined", "Expired", "Invoiced"]
+QUOTATION_MANUAL_STATUSES = ["Draft", "Sent", "Accepted", "Declined", "Expired"]
+QUOTATION_DEFAULT_VALIDITY_DAYS = 30
+QUOTATION_DEFAULT_TERMS = (
+    "1. This quotation is valid until the date shown above; fees may be revised after that date.\n"
+    "2. Fees are quoted exclusive of VAT, which is added at the prevailing rate unless stated otherwise.\n"
+    "3. The quotation covers only the services described. Any additional work will be agreed with you "
+    "and billed separately.\n"
+    "4. Our engagement is subject to our client acceptance procedures and a signed engagement letter.\n"
+    "5. Invoices are payable within the period stated on the invoice, in the currency of this quotation."
+)
+
+
+class Quotation(db.Model):
+    """A fee quotation for a client, which becomes an Invoice with one click
+    once accepted (tax.py-style two-way link: Quotation.invoice_id points at
+    the invoice it produced and Invoice.quotation points back). Same shape
+    as Invoice - client, optional engagement, currency, VAT % and manual
+    line items - so conversion is a straight copy. ZWG and USD quotes are
+    separate documents; a quotation is in exactly one currency."""
+    id = db.Column(db.Integer, primary_key=True)
+    quote_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+
+    subject = db.Column(db.String(300))  # what the quote is for, e.g. "Statutory audit - FY2026"
+    currency = db.Column(db.String(10), default="USD", nullable=False)
+    vat_pct = db.Column(db.Float, default=15.0, nullable=False)
+    status = db.Column(db.String(20), default="Draft", nullable=False)
+
+    issue_date = db.Column(db.Date, default=date.today)
+    valid_until = db.Column(db.Date)
+    bill_to = db.Column(db.Text)
+    notes = db.Column(db.Text)  # scope / introduction shown above the line items
+    terms = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    accepted_at = db.Column(db.DateTime)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"))
+
+    client = db.relationship("Client", backref=db.backref("quotations", lazy=True, cascade="all, delete-orphan", order_by="Quotation.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("quotations", lazy=True, order_by="Quotation.id.desc()"))
+    created_by = db.relationship("User")
+    invoice = db.relationship("Invoice", backref=db.backref("quotation", uselist=False))
+    lines = db.relationship(
+        "QuotationLineItem", backref="quotation", lazy=True,
+        cascade="all, delete-orphan", order_by="QuotationLineItem.id",
+    )
+
+    @property
+    def subtotal(self):
+        return sum((l.quantity or 0) * (l.unit_price or 0) for l in self.lines)
+
+    @property
+    def vat_amount(self):
+        return self.subtotal * (self.vat_pct or 0) / 100.0
+
+    @property
+    def total(self):
+        return self.subtotal + self.vat_amount
+
+    @property
+    def is_expired(self):
+        """Past its valid-until date and still waiting on the client."""
+        return bool(self.valid_until and self.valid_until < date.today() and self.status in ("Draft", "Sent"))
+
+    @property
+    def display_status(self):
+        return "Expired" if self.is_expired else self.status
+
+    def __repr__(self):
+        return f"<Quotation {self.quote_number}>"
+
+
+class QuotationLineItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    quotation_id = db.Column(db.Integer, db.ForeignKey("quotation.id"), nullable=False)
+    description = db.Column(db.String(300), nullable=False)
+    quantity = db.Column(db.Float, default=1.0)
+    unit_price = db.Column(db.Float, default=0.0)
+
+    @property
+    def line_total(self):
+        return (self.quantity or 0) * (self.unit_price or 0)
+
+    def __repr__(self):
+        return f"<QuotationLineItem {self.description!r}>"
+
+
 # ---------------------------------------------------------------------------
 # Payroll Management
 #

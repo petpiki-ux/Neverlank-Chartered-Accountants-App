@@ -179,6 +179,7 @@
   <div class="card">
     <div class="page-header" style="margin-bottom:10px;">
       <h3 class="mt-0">Invoices</h3>
+      <a href="{{ url_for('quotations.new_quotation', client_id=engagement.client_id, engagement_id=engagement.id) }}" class="btn small secondary">+ New Quotation</a>
       <a href="{{ url_for('invoicing.new_invoice', client_id=engagement.client_id, engagement_id=engagement.id) }}" class="btn small gold">+ New Invoice</a>
     </div>
     {% if engagement.invoices %}

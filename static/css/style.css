@@ -176,6 +176,10 @@ select[multiple] { min-height: 110px; }
 .badge.status-Sent { background: #e8eef7; color: var(--info); }
 .badge.status-Paid { background: #e5f6ea; color: var(--success); }
 .badge.status-Cancelled { background: #f4f4f4; color: #888; }
+.badge.status-Accepted { background: #e5f6ea; color: var(--success); }
+.badge.status-Declined { background: #fdecea; color: var(--danger); }
+.badge.status-Expired { background: #fdf1dc; color: var(--warning); }
+.badge.status-Invoiced { background: #0f2942; color: #d4af6a; }
 .badge.status-Finalized { background: #e5f6ea; color: var(--success); }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; flex-wrap: wrap; }

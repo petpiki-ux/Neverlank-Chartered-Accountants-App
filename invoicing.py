@@ -27,11 +27,38 @@ def _ensure_invoice_access(invoice):
         abort(403)
 
 
+def next_sequence_number(column, prefix):
+    """prefix + the next 4-digit number after the highest one already used.
+    (Counting rows would hand out a number twice once any document in the
+    series had been deleted.)"""
+    top = 0
+    for (value,) in db.session.query(column).filter(column.like(f"{prefix}%")).all():
+        try:
+            top = max(top, int(value[len(prefix):]))
+        except ValueError:
+            pass
+    return f"{prefix}{top + 1:04d}"
+
+
 def _next_invoice_number():
-    year = date.today().year
-    prefix = f"INV-{year}-"
-    count = Invoice.query.filter(Invoice.invoice_number.like(f"{prefix}%")).count()
-    return f"{prefix}{count + 1:04d}"
+    return next_sequence_number(Invoice.invoice_number, f"INV-{date.today().year}-")
+
+
+# Printed on every quotation and invoice letterhead. Fill in any of the
+# blank ones (email, phone, VAT / TIN number, bank details) and they appear
+# on the printed documents automatically; blank ones are simply left out.
+FIRM_LETTERHEAD = {
+    "name": "Neverlank Chartered Accountants",
+    "tagline": "Chartered Accountants",
+    "strapline": "World Class Financial Services",
+    "address": "2nd Floor, Michael House, 62 Nelson Mandela Avenue, Harare, Zimbabwe",
+    "web": "www.neverlank.co.zw",
+    "email": "",
+    "phone": "",
+    "vat_number": "",
+    "tin": "",
+    "bank_details": "",
+}
 
 
 @invoicing_bp.route("/")
@@ -137,7 +164,7 @@ def view_invoice(invoice_id):
 def print_invoice(invoice_id):
     invoice = Invoice.query.get_or_404(invoice_id)
     _ensure_invoice_access(invoice)
-    return render_template("invoicing/print.html", invoice=invoice)
+    return render_template("invoicing/print.html", invoice=invoice, doc=invoice, firm=FIRM_LETTERHEAD)
 
 
 @invoicing_bp.route("/<int:invoice_id>/lines/add", methods=["POST"])
@@ -247,6 +274,12 @@ def delete_invoice(invoice_id):
     if invoice.status != "Draft" and current_user.role not in ("partner", "admin"):
         flash("Only a Partner or Admin can delete an invoice that's already been sent.", "danger")
         return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
+    quotation = invoice.quotation
+    if quotation is not None:
+        # the quotation it came from goes back to Accepted so it can be
+        # converted again, rather than staying "Invoiced" with no invoice
+        quotation.status = "Accepted"
+        quotation.invoice_id = None
     db.session.delete(invoice)
     db.session.commit()
     flash("Invoice deleted.", "info")
