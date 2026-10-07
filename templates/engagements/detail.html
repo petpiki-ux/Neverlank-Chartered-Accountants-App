@@ -2781,54 +2781,17 @@
     <h3 class="mt-0">VAT Invoice Register &amp; Input/Output Tax</h3>
     <p class="muted" style="font-size:11.5px;">Nothing here is a fabricated/hardcoded VAT rate - every invoice uses a rate you (or a colleague) entered on the <a href="{{ url_for('tax.list_vat_rates') }}">firm-wide VAT Rates</a> page (including any rate lower than Standard), or the invoice's own stated VAT amount typed in directly.</p>
 
-    <div class="form-row" style="flex-wrap:wrap;margin-bottom:10px;">
-      <div class="card" style="flex:1;min-width:160px;padding:10px;">
-        <div class="muted" style="font-size:11px;">Net Output Tax</div>
-        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(vat_output_tax_total) }}</div>
-        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(vat_output_taxable_total) }} net taxable sales (after credit notes)</div>
-      </div>
-      <div class="card" style="flex:1;min-width:160px;padding:10px;">
-        <div class="muted" style="font-size:11px;">Net Input Tax</div>
-        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(vat_input_tax_total) }}</div>
-        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(vat_input_taxable_total) }} net taxable purchases &amp; imports (after credit notes)</div>
-      </div>
-      <div class="card" style="flex:1;min-width:160px;padding:10px;">
-        <div class="muted" style="font-size:11px;">Net VAT position</div>
-        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(vat_net_position|abs) }}</div>
-        <div class="muted" style="font-size:11px;">{% if vat_net_position > 0 %}Payable to ZIMRA{% elif vat_net_position < 0 %}Refundable{% else %}Nil{% endif %}</div>
-      </div>
-    </div>
-
-    {% set vb = vat_summary.buckets %}
-    <p style="font-size:12.5px;margin-bottom:4px;"><strong>VAT working paper - each kind shown separately</strong></p>
-    <table style="margin-bottom:14px;">
-      <thead><tr><th>Output Tax (sales)</th><th class="text-right">Docs</th><th class="text-right">Taxable value</th><th class="text-right">VAT</th></tr></thead>
-      <tbody>
-        <tr><td>Sales invoices</td><td class="text-right">{{ vb.output_invoice.count }}</td><td class="text-right">{{ '%.2f'|format(vb.output_invoice.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.output_invoice.vat) }}</td></tr>
-        <tr><td>Export sales <span class="muted" style="font-size:11px;">(zero-rated)</span></td><td class="text-right">{{ vb.export_sale.count }}</td><td class="text-right">{{ '%.2f'|format(vb.export_sale.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.export_sale.vat) }}</td></tr>
-        <tr><td>Less: credit notes issued</td><td class="text-right">{{ vb.output_credit_note.count }}</td><td class="text-right">({{ '%.2f'|format(vb.output_credit_note.taxable) }})</td><td class="text-right">({{ '%.2f'|format(vb.output_credit_note.vat) }})</td></tr>
-        <tr style="font-weight:600;"><td>Net Output Tax</td><td></td><td class="text-right">{{ '%.2f'|format(vat_output_taxable_total) }}</td><td class="text-right">{{ '%.2f'|format(vat_output_tax_total) }}</td></tr>
-      </tbody>
-      <thead><tr><th>Input Tax (purchases &amp; imports)</th><th class="text-right">Docs</th><th class="text-right">Taxable value</th><th class="text-right">VAT</th></tr></thead>
-      <tbody>
-        <tr><td>Purchase/expense invoices</td><td class="text-right">{{ vb.input_invoice.count }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.vat) }}</td></tr>
-        <tr><td>Bills of Entry <span class="muted" style="font-size:11px;">(import VAT{% if vb.bill_of_entry.duty %}; customs duty {{ '%.2f'|format(vb.bill_of_entry.duty) }}{% endif %})</span></td><td class="text-right">{{ vb.bill_of_entry.count }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.vat) }}</td></tr>
-        <tr><td>Less: credit notes received</td><td class="text-right">{{ vb.input_credit_note.count }}</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.taxable) }})</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.vat) }})</td></tr>
-        <tr style="font-weight:600;"><td>Net Input Tax</td><td></td><td class="text-right">{{ '%.2f'|format(vat_input_taxable_total) }}</td><td class="text-right">{{ '%.2f'|format(vat_input_tax_total) }}</td></tr>
-      </tbody>
-      <tbody>
-        <tr style="font-weight:700;"><td colspan="3">Net VAT {% if vat_net_position > 0 %}payable to ZIMRA{% elif vat_net_position < 0 %}refundable{% else %}position (nil){% endif %}</td><td class="text-right">{{ '%.2f'|format(vat_net_position|abs) }}</td></tr>
-      </tbody>
-    </table>
-
+    {% if vat_by_currency %}
+    <p class="muted" style="font-size:11.5px;">ZIMRA requires VAT to be accounted for and paid in the currency of trade, so each currency below is its own VAT working paper and net position - ZWG and USD are never added together or set off against each other.</p>
     {% if vat_import_batches %}
     <p style="font-size:12.5px;margin-bottom:4px;"><strong>Imported schedules</strong></p>
     <table style="margin-bottom:12px;">
-      <thead><tr><th>Schedule type</th><th>File</th><th>Rows</th><th>Skipped</th><th>Imported by</th><th>Date</th><th></th></tr></thead>
+      <thead><tr><th>Schedule type</th><th>Currency</th><th>File</th><th>Rows</th><th>Skipped</th><th>Imported by</th><th>Date</th><th></th></tr></thead>
       <tbody>
         {% for b in vat_import_batches %}
         <tr>
           <td>{{ b.kind_label }}</td>
+          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.set_vat_import_batch_currency', batch_id=b.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change the currency of this whole schedule">{% for cur in vat_currencies %}<option value="{{ cur }}" {% if (b.currency or vat_default_currency) == cur %}selected{% endif %}>{{ cur }}</option>{% endfor %}</select></form>{% else %}{{ b.currency or vat_default_currency }}{% endif %}</td>
           <td>{{ b.original_filename or '—' }}</td>
           <td>{{ b.row_count }}</td>
           <td>{{ b.skipped_row_count or 0 }}</td>
@@ -2841,13 +2804,56 @@
     </table>
     {% endif %}
 
-    {% if vat_invoices %}
+    {% for cur, sm in vat_by_currency.items() %}
+    <div class="card" style="margin:12px 0;padding:12px;border-left:4px solid #b8923a;">
+    <h4 style="margin:0 0 8px 0;">{{ cur }} VAT - {% if cur == 'ZWG' %}Zimbabwe Gold (ZiG){% else %}US dollars{% endif %}</h4>
+    <div class="form-row" style="flex-wrap:wrap;margin-bottom:10px;">
+      <div class="card" style="flex:1;min-width:160px;padding:10px;">
+        <div class="muted" style="font-size:11px;">Net Output Tax</div>
+        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.output_tax) }}</div>
+        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(sm.output_taxable) }} net taxable sales (after credit notes)</div>
+      </div>
+      <div class="card" style="flex:1;min-width:160px;padding:10px;">
+        <div class="muted" style="font-size:11px;">Net Input Tax</div>
+        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.input_tax) }}</div>
+        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(sm.input_taxable) }} net taxable purchases &amp; imports (after credit notes)</div>
+      </div>
+      <div class="card" style="flex:1;min-width:160px;padding:10px;">
+        <div class="muted" style="font-size:11px;">Net VAT position</div>
+        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.net_position|abs) }}</div>
+        <div class="muted" style="font-size:11px;">{% if sm.net_position > 0 %}Payable to ZIMRA in {{ cur }}{% elif sm.net_position < 0 %}Refundable{% else %}Nil{% endif %}</div>
+      </div>
+    </div>
+
+    {% set vb = sm.buckets %}
+    <p style="font-size:12.5px;margin-bottom:4px;"><strong>{{ cur }} VAT working paper - each kind shown separately</strong></p>
+    <table style="margin-bottom:14px;">
+      <thead><tr><th>Output Tax (sales)</th><th class="text-right">Docs</th><th class="text-right">Taxable value</th><th class="text-right">VAT</th></tr></thead>
+      <tbody>
+        <tr><td>Sales invoices</td><td class="text-right">{{ vb.output_invoice.count }}</td><td class="text-right">{{ '%.2f'|format(vb.output_invoice.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.output_invoice.vat) }}</td></tr>
+        <tr><td>Export sales <span class="muted" style="font-size:11px;">(zero-rated)</span></td><td class="text-right">{{ vb.export_sale.count }}</td><td class="text-right">{{ '%.2f'|format(vb.export_sale.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.export_sale.vat) }}</td></tr>
+        <tr><td>Less: credit notes issued</td><td class="text-right">{{ vb.output_credit_note.count }}</td><td class="text-right">({{ '%.2f'|format(vb.output_credit_note.taxable) }})</td><td class="text-right">({{ '%.2f'|format(vb.output_credit_note.vat) }})</td></tr>
+        <tr style="font-weight:600;"><td>Net Output Tax</td><td></td><td class="text-right">{{ '%.2f'|format(sm.output_taxable) }}</td><td class="text-right">{{ '%.2f'|format(sm.output_tax) }}</td></tr>
+      </tbody>
+      <thead><tr><th>Input Tax (purchases &amp; imports)</th><th class="text-right">Docs</th><th class="text-right">Taxable value</th><th class="text-right">VAT</th></tr></thead>
+      <tbody>
+        <tr><td>Purchase/expense invoices</td><td class="text-right">{{ vb.input_invoice.count }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.vat) }}</td></tr>
+        <tr><td>Bills of Entry <span class="muted" style="font-size:11px;">(import VAT{% if vb.bill_of_entry.duty %}; customs duty {{ '%.2f'|format(vb.bill_of_entry.duty) }}{% endif %})</span></td><td class="text-right">{{ vb.bill_of_entry.count }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.vat) }}</td></tr>
+        <tr><td>Less: credit notes received</td><td class="text-right">{{ vb.input_credit_note.count }}</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.taxable) }})</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.vat) }})</td></tr>
+        <tr style="font-weight:600;"><td>Net Input Tax</td><td></td><td class="text-right">{{ '%.2f'|format(sm.input_taxable) }}</td><td class="text-right">{{ '%.2f'|format(sm.input_tax) }}</td></tr>
+      </tbody>
+      <tbody>
+        <tr style="font-weight:700;"><td colspan="3">Net VAT {% if sm.net_position > 0 %}payable to ZIMRA in {{ cur }}{% elif sm.net_position < 0 %}refundable{% else %}position (nil){% endif %}</td><td class="text-right">{{ '%.2f'|format(sm.net_position|abs) }}</td></tr>
+      </tbody>
+    </table>
+
+
     {% for code, label, kdir, ktype in vat_document_kinds %}
-    {% set items = vat_invoices_by_kind.get(code, []) %}
+    {% set items = vat_invoices_by_currency_kind[cur].get(code, []) %}
     {% if items %}
     <p style="font-size:12.5px;margin:12px 0 4px 0;"><strong>{{ label }}</strong> <span class="muted" style="font-size:11px;">({{ items|length }})</span></p>
     <table style="margin-bottom:8px;">
-      <thead><tr><th>Date</th><th>{% if ktype == 'Bill of Entry' %}Bill of Entry #{% elif ktype == 'Credit Note' %}Credit note #{% else %}Invoice #{% endif %}</th><th>{% if ktype == 'Credit Note' %}Original invoice / ref{% elif ktype in ('Bill of Entry', 'Export Sale') %}Customs / export ref{% else %}Ref{% endif %}</th><th>{% if kdir == 'Output' %}Customer{% else %}Supplier{% endif %}</th><th>{% if ktype == 'Bill of Entry' %}VAT value{% else %}Taxable{% endif %}</th>{% if ktype == 'Bill of Entry' %}<th>Duty</th>{% endif %}<th>Rate</th><th>VAT</th><th>Total</th><th>Src</th><th></th></tr></thead>
+      <thead><tr><th>Date</th><th>{% if ktype == 'Bill of Entry' %}Bill of Entry #{% elif ktype == 'Credit Note' %}Credit note #{% else %}Invoice #{% endif %}</th><th>{% if ktype == 'Credit Note' %}Original invoice / ref{% elif ktype in ('Bill of Entry', 'Export Sale') %}Customs / export ref{% else %}Ref{% endif %}</th><th>{% if kdir == 'Output' %}Customer{% else %}Supplier{% endif %}</th><th>{% if ktype == 'Bill of Entry' %}VAT value{% else %}Taxable{% endif %}</th>{% if ktype == 'Bill of Entry' %}<th>Duty</th>{% endif %}<th>Rate</th><th>VAT</th><th>Total</th><th>Src</th><th>Currency</th><th></th></tr></thead>
       <tbody>
         {% for inv in items %}
         <tr>
@@ -2861,6 +2867,7 @@
           <td>{{ '%.2f'|format(inv.vat_amount) }}</td>
           <td>{{ '%.2f'|format(inv.total_amount) }}</td>
           <td class="muted" style="font-size:11px;">{{ inv.source }}</td>
+          <td><form method="post" action="{{ url_for('tax.set_vat_invoice_currency', invoice_id=inv.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change currency of trade">{% for c2 in vat_currencies %}<option value="{{ c2 }}" {% if (inv.currency or vat_default_currency) == c2 %}selected{% endif %}>{{ c2 }}</option>{% endfor %}</select></form></td>
           <td><form method="post" action="{{ url_for('tax.delete_vat_invoice', invoice_id=inv.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form></td>
         </tr>
         {% endfor %}
@@ -2868,7 +2875,31 @@
     </table>
     {% endif %}
     {% endfor %}
+
+    </div>
+    {% endfor %}
     {% else %}
+    {% if vat_import_batches %}
+    <p style="font-size:12.5px;margin-bottom:4px;"><strong>Imported schedules</strong></p>
+    <table style="margin-bottom:12px;">
+      <thead><tr><th>Schedule type</th><th>Currency</th><th>File</th><th>Rows</th><th>Skipped</th><th>Imported by</th><th>Date</th><th></th></tr></thead>
+      <tbody>
+        {% for b in vat_import_batches %}
+        <tr>
+          <td>{{ b.kind_label }}</td>
+          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.set_vat_import_batch_currency', batch_id=b.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change the currency of this whole schedule">{% for cur in vat_currencies %}<option value="{{ cur }}" {% if (b.currency or vat_default_currency) == cur %}selected{% endif %}>{{ cur }}</option>{% endfor %}</select></form>{% else %}{{ b.currency or vat_default_currency }}{% endif %}</td>
+          <td>{{ b.original_filename or '—' }}</td>
+          <td>{{ b.row_count }}</td>
+          <td>{{ b.skipped_row_count or 0 }}</td>
+          <td>{{ b.imported_by.name if b.imported_by else '—' }}</td>
+          <td>{{ b.imported_at.strftime('%d %b %Y') if b.imported_at else '—' }}</td>
+          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.delete_vat_import_batch', batch_id=b.id) }}" class="inline" onsubmit="return confirm('Delete this import batch and every invoice it created?');"><button type="submit" class="btn small danger">Delete batch</button></form>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
     <div class="empty-state">No VAT documents captured yet.</div>
     {% endif %}
 
@@ -2878,6 +2909,12 @@
         <select id="vat_kind" name="kind" required>
           <option value="">—</option>
           {% for code, label, kdir, ktype in vat_document_kinds %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="vat_currency">Currency of trade *</label>
+        <select id="vat_currency" name="currency" required>
+          {% for cur in vat_currencies %}<option value="{{ cur }}" {% if cur == vat_default_currency %}selected{% endif %}>{{ cur }}</option>{% endfor %}
         </select>
       </div>
       <div><label for="vat_invoice_date">Date</label><input type="date" id="vat_invoice_date" name="invoice_date"></div>
@@ -2907,6 +2944,12 @@
         <select id="vat_import_kind" name="kind" required>
           <option value="">—</option>
           {% for code, label, kdir, ktype in vat_document_kinds %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="vat_import_currency">Currency of trade *</label>
+        <select id="vat_import_currency" name="currency" required>
+          {% for cur in vat_currencies %}<option value="{{ cur }}" {% if cur == vat_default_currency %}selected{% endif %}>{{ cur }}</option>{% endfor %}
         </select>
       </div>
       <div><label for="vat_import_file">Schedule file *</label><input type="file" id="vat_import_file" name="file" accept=".xlsx,.xls,.csv" required></div>

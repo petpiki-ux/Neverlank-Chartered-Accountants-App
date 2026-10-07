@@ -114,8 +114,8 @@ def _add_missing_columns():
         # doc_type/related_reference/customs_duty - see models.VAT_DOC_TYPES:
         # credit notes, Bills of Entry and export sales. Existing rows
         # default to a plain 'Invoice', exactly what they were.
-        "vat_invoice": [("doc_type", "VARCHAR(20) DEFAULT 'Invoice'"), ("related_reference", "VARCHAR(100)"), ("customs_duty", "FLOAT")],
-        "vat_import_batch": [("doc_type", "VARCHAR(20) DEFAULT 'Invoice'")],
+        "vat_invoice": [("doc_type", "VARCHAR(20) DEFAULT 'Invoice'"), ("related_reference", "VARCHAR(100)"), ("customs_duty", "FLOAT"), ("currency", "VARCHAR(3) DEFAULT 'USD'")],
+        "vat_import_batch": [("doc_type", "VARCHAR(20) DEFAULT 'Invoice'"), ("currency", "VARCHAR(3) DEFAULT 'USD'")],
         "risk_assessment": list(partner_signoff_cols) + [
             ("q_fraud_incentive", "INTEGER"),
             ("q_fraud_opportunity", "INTEGER"),

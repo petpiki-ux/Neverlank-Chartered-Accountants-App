@@ -48,6 +48,7 @@ from models import (
     TaxReturnRecord, TAX_RETURN_STATUSES,
     TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
     VATRate, VAT_RATE_TYPES,
+    VAT_CURRENCIES, VAT_DEFAULT_CURRENCY, normalize_vat_currency,
     VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_INVOICE_SOURCES,
     VATImportBatch, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, resolve_vat_kind, vat_kind_code,
     LegislativeUpdate, LegislativeUpdateClientLink,
@@ -757,6 +758,7 @@ def add_vat_invoice(engagement_id):
         engagement_id=engagement_id,
         direction=direction,
         doc_type=doc_type,
+        currency=normalize_vat_currency(request.form.get("currency"), VAT_DEFAULT_CURRENCY),
         related_reference=request.form.get("related_reference", "").strip() or None,
         customs_duty=_parse_float(request.form.get("customs_duty")) if doc_type == "Bill of Entry" else None,
         invoice_date=_parse_date(request.form.get("invoice_date")),
@@ -802,6 +804,7 @@ VAT_SCHEDULE_FIELDS = [
     ("rate_percent", "VAT rate % (only used to compute the VAT amount when that column is blank)"),
     ("related_reference", "Original invoice # (credit notes) / customs or export entry ref"),
     ("customs_duty", "Customs duty (Bills of Entry only)"),
+    ("currency", "Currency column (ZWG / USD) - optional, overrides the currency chosen at upload"),
 ]
 VAT_SCHEDULE_REQUIRED_FIELDS = {"taxable_amount"}
 
@@ -815,6 +818,7 @@ VAT_SCHEDULE_FIELD_SYNONYMS = {
     "rate_percent": ["vat rate", "rate", "vat %", "tax rate", "rate %", "vat rate %"],
     "related_reference": ["original invoice", "original invoice no", "against invoice", "credited invoice", "related invoice", "customs entry no", "entry reference", "customs entry", "export entry", "export reference", "customs reference", "mrn"],
     "customs_duty": ["customs duty", "duty", "import duty", "duty paid"],
+    "currency": ["currency", "currency code", "ccy", "curr", "trade currency"],
 }
 
 
@@ -1062,7 +1066,7 @@ def _require_vat_schedule_permission():
         abort(403)
 
 
-def _render_vat_mapping_screen(engagement, direction, doc_type, staged_name, original_name, headers, rows, mapping, problem=None):
+def _render_vat_mapping_screen(engagement, direction, doc_type, staged_name, original_name, headers, rows, mapping, problem=None, currency=VAT_DEFAULT_CURRENCY):
     """The "confirm column mapping" screen. Used for the first look at an
     uploaded file AND to send the preparer straight back to it - with their
     choices intact and the staged file kept - when the confirm step can't
@@ -1076,6 +1080,7 @@ def _render_vat_mapping_screen(engagement, direction, doc_type, staged_name, ori
         staged_filename=staged_name, original_filename=original_name,
         headers=headers, preview_rows=rows[:10], total_row_count=len(rows),
         schedule_fields=VAT_SCHEDULE_FIELDS, suggested_mapping=mapping, problem=problem,
+        currency=currency,
     )
 
 
@@ -1095,6 +1100,11 @@ def stage_vat_schedule_import(engagement_id):
         flash("Please choose what kind of schedule this is - sales invoices, export sales, credit notes, purchase invoices or Bills of Entry.", "danger")
         return _tax_redirect(engagement_id)
     direction, doc_type = resolved
+    raw_currency = request.form.get("currency", "").strip()
+    currency = normalize_vat_currency(raw_currency, VAT_DEFAULT_CURRENCY if not raw_currency else None)
+    if not currency:
+        flash("Please choose the currency of trade this schedule is in (ZWG or USD) - ZIMRA requires VAT to be accounted for in the currency of trade.", "danger")
+        return _tax_redirect(engagement_id)
     file = request.files.get("file")
     if not file or not file.filename:
         flash("Please choose a file to import.", "danger")
@@ -1123,7 +1133,7 @@ def stage_vat_schedule_import(engagement_id):
 
     return _render_vat_mapping_screen(
         engagement, direction, doc_type, staged_name, original_name, headers, rows,
-        _suggest_vat_column_mapping(headers),
+        _suggest_vat_column_mapping(headers), currency=currency,
     )
 
 
@@ -1140,6 +1150,7 @@ def confirm_vat_schedule_import(engagement_id):
         return _tax_redirect(engagement_id)
     resolved = resolve_vat_kind(request.form.get("kind"), request.form.get("direction"))
     direction, doc_type = resolved if resolved else ("", "Invoice")
+    currency = normalize_vat_currency(request.form.get("currency"), VAT_DEFAULT_CURRENCY)
     staged_filename = secure_filename(request.form.get("staged_filename", "").strip())
     original_filename = request.form.get("original_filename", "").strip()
     staged_path = os.path.join(_vat_imports_dir(), staged_filename) if staged_filename else ""
@@ -1161,7 +1172,7 @@ def confirm_vat_schedule_import(engagement_id):
         # keep the staged file and the preparer's choices; explain what to fix
         return _render_vat_mapping_screen(
             engagement, direction, doc_type, staged_filename, original_filename or staged_filename,
-            headers, rows, mapping, problem=message,
+            headers, rows, mapping, problem=message, currency=currency,
         )
 
     missing_required = [label for field, label in VAT_SCHEDULE_FIELDS if field in VAT_SCHEDULE_REQUIRED_FIELDS and not mapping.get(field)]
@@ -1190,6 +1201,7 @@ def confirm_vat_schedule_import(engagement_id):
         engagement_id=engagement_id,
         direction=direction,
         doc_type=doc_type,
+        currency=currency,
         original_filename=original_filename or staged_filename,
         stored_filename=stored_name,
         column_mapping_json=json.dumps(mapping),
@@ -1228,6 +1240,7 @@ def confirm_vat_schedule_import(engagement_id):
             engagement_id=engagement_id,
             direction=direction,
             doc_type=doc_type,
+            currency=normalize_vat_currency(row.get(mapping["currency"]), currency) if mapping.get("currency") else currency,
             related_reference=_mapped_text("related_reference"),
             customs_duty=(_parse_vat_schedule_amount(row.get(mapping["customs_duty"])) if (doc_type == "Bill of Entry" and mapping.get("customs_duty")) else None),
             invoice_date=_parse_vat_schedule_date(row.get(mapping["invoice_date"])) if mapping.get("invoice_date") else None,
@@ -1253,6 +1266,39 @@ def confirm_vat_schedule_import(engagement_id):
     else:
         flash(f"Imported {imported} {VAT_KIND_LABELS.get(vat_kind_code(direction, doc_type), direction).lower()} row(s).", "success")
     return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/vat/invoices/<int:invoice_id>/currency", methods=["POST"])
+@login_required
+def set_vat_invoice_currency(invoice_id):
+    """Re-tag one VAT document's currency of trade (e.g. a row captured
+    before currencies were recorded, which are treated as USD)."""
+    invoice = VATInvoice.query.get_or_404(invoice_id)
+    _ensure_engagement_access(invoice.engagement)
+    currency = normalize_vat_currency(request.form.get("currency"))
+    if currency:
+        invoice.currency = currency
+        db.session.commit()
+        flash(f"Document moved to the {currency} VAT working paper.", "success")
+    return _tax_redirect(invoice.engagement_id)
+
+
+@tax_bp.route("/vat/import-batches/<int:batch_id>/currency", methods=["POST"])
+@login_required
+def set_vat_import_batch_currency(batch_id):
+    """Re-tag a whole imported schedule (and every row it produced) with the
+    right currency of trade - e.g. a ZWG schedule uploaded as USD."""
+    _require_vat_schedule_permission()
+    batch = VATImportBatch.query.get_or_404(batch_id)
+    _ensure_engagement_access(batch.engagement)
+    currency = normalize_vat_currency(request.form.get("currency"))
+    if currency:
+        batch.currency = currency
+        for inv in batch.invoices:
+            inv.currency = currency
+        db.session.commit()
+        flash(f"Imported schedule moved to the {currency} VAT working paper ({len(batch.invoices)} document(s)).", "success")
+    return _tax_redirect(batch.engagement_id)
 
 
 @tax_bp.route("/vat/import/cancel", methods=["POST"])

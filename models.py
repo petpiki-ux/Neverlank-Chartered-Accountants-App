@@ -5484,6 +5484,7 @@ class VATImportBatch(db.Model):
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
     direction = db.Column(db.String(10), nullable=False)  # "Output" or "Input" - see VAT_INVOICE_DIRECTIONS
     doc_type = db.Column(db.String(20), default="Invoice")  # see VAT_DOC_TYPES - applies to every row of the batch
+    currency = db.Column(db.String(3), default="USD")  # currency of trade the schedule is in (a Currency column in the file can override per row)
     original_filename = db.Column(db.String(300))
     stored_filename = db.Column(db.String(300))  # kept in Config.VAT_IMPORTS_DATA_DIR for the audit trail
     column_mapping_json = db.Column(db.Text)  # the confirmed {field: source_column} mapping, for reference
@@ -5562,6 +5563,38 @@ def vat_kind_code(direction, doc_type):
     return None
 
 
+# ZIMRA requires VAT to be accounted for and paid in the currency of trade, so
+# every VAT document carries a currency and the working paper is produced
+# SEPARATELY for each one - ZWG and USD are never added together or netted off.
+VAT_CURRENCIES = ["ZWG", "USD"]
+VAT_DEFAULT_CURRENCY = "USD"  # also what rows captured before currencies existed are treated as
+_VAT_CURRENCY_ALIASES = {
+    "zwg": "ZWG", "zig": "ZWG", "zimgold": "ZWG", "zimbabwe gold": "ZWG", "zwl": "ZWG", "zwg$": "ZWG",
+    "usd": "USD", "us$": "USD", "us dollar": "USD", "us dollars": "USD", "$": "USD", "usd$": "USD",
+}
+
+
+def normalize_vat_currency(value, default=None):
+    """'ZWG' or 'USD' for whatever a person typed or a schedule contained
+    ("ZiG", "zwg", "US$", "USD "...); `default` if it isn't recognised."""
+    text = " ".join(str(value or "").split()).lower()
+    if not text:
+        return default
+    return _VAT_CURRENCY_ALIASES.get(text, default)
+
+
+def vat_working_paper_by_currency(invoices):
+    """{currency: vat_working_paper_summary(...)} for each currency that has
+    documents, in VAT_CURRENCIES order - one independent working paper per
+    currency of trade. A row with no currency counts as VAT_DEFAULT_CURRENCY."""
+    out = {}
+    for cur in VAT_CURRENCIES:
+        subset = [i for i in invoices if (i.currency or VAT_DEFAULT_CURRENCY) == cur]
+        if subset:
+            out[cur] = vat_working_paper_summary(subset)
+    return out
+
+
 def vat_working_paper_summary(invoices):
     """Totals for the VAT working paper, each document kind kept SEPARATE:
     {kind_code: {"count", "taxable", "vat"}} plus net Output/Input tax and
@@ -5609,6 +5642,9 @@ class VATInvoice(db.Model):
     # Invoice | Credit Note | Bill of Entry | Export Sale - see VAT_DOC_TYPES.
     # NULL (rows from before this existed) means a plain Invoice.
     doc_type = db.Column(db.String(20), default="Invoice")
+    # Currency of trade (ZWG | USD) - VAT is declared and paid per currency.
+    # NULL (rows from before this existed) is treated as VAT_DEFAULT_CURRENCY.
+    currency = db.Column(db.String(3), default="USD")
     # Credit note: the original invoice number it credits. Bill of Entry /
     # Export Sale: the customs entry / export document reference.
     related_reference = db.Column(db.String(100))

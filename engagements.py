@@ -62,7 +62,7 @@ from models import (
     TAX_POSITION_CLASSIFICATIONS, TAX_POSITION_APPROVAL_STATUSES,
     PenaltyInterestRate, PenaltyInterestCalculation, PENALTY_INTEREST_RATE_TYPES,
     VATRate, VAT_RATE_TYPES,
-    VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, vat_working_paper_summary,
+    VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, vat_working_paper_summary, vat_working_paper_by_currency, VAT_CURRENCIES, VAT_DEFAULT_CURRENCY,
     VATImportBatch,
     TaxInformationRequest, TAX_INFO_REQUEST_STATUSES,
     TaxReturnRecord, TAX_RETURN_STATUSES,
@@ -856,6 +856,13 @@ def view_engagement(engagement_id):
         vat_summary = vat_working_paper_summary([])
     vat_net_position = vat_output_tax_total - vat_input_tax_total
     vat_invoices_by_kind = {code: [i for i in vat_invoices if i.kind == code] for code, *_ in VAT_DOCUMENT_KINDS}
+    # ZIMRA wants VAT accounted for and paid in the currency of trade, so the
+    # working paper and the register are produced separately per currency.
+    vat_by_currency = vat_working_paper_by_currency(vat_invoices)
+    vat_invoices_by_currency_kind = {
+        cur: {code: [i for i in vat_invoices if (i.currency or VAT_DEFAULT_CURRENCY) == cur and i.kind == code] for code, *_ in VAT_DOCUMENT_KINDS}
+        for cur in vat_by_currency
+    }
 
     # ---------- Accounting tab (Financial/Cost/Management Accounting module) ----------
     # Only actually queried when the Accounting tab could be shown - see
@@ -1044,6 +1051,10 @@ def view_engagement(engagement_id):
         vat_document_kinds=VAT_DOCUMENT_KINDS,
         vat_summary=vat_summary,
         vat_invoices_by_kind=vat_invoices_by_kind,
+        vat_by_currency=vat_by_currency,
+        vat_invoices_by_currency_kind=vat_invoices_by_currency_kind,
+        vat_currencies=VAT_CURRENCIES,
+        vat_default_currency=VAT_DEFAULT_CURRENCY,
         vat_invoice_direction_labels=VAT_INVOICE_DIRECTION_LABELS,
         vat_output_tax_total=vat_output_tax_total,
         vat_input_tax_total=vat_input_tax_total,
