@@ -2121,7 +2121,7 @@
     <table>
       <thead><tr><th>Task</th><th>Assigned to</th><th>Due</th><th>Priority</th><th>Status</th><th>Review</th><th>Partner sign-off</th><th></th></tr></thead>
       <tbody>
-      {% for t in engagement.tasks|sort(attribute='due_date') %}
+      {% for t in engagement_tasks_sorted %}
         <tr>
           <td>{{ t.title }}{% if t.category %}<div><span class="badge{% if t.category == 'Tax Services' %} overdue{% endif %}" style="font-size:10px;">{{ t.category }}</span></div>{% endif %}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
           <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>

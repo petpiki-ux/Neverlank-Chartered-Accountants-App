@@ -1,6 +1,7 @@
 import os
 import uuid
 
+from datetime import date
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, current_app, send_from_directory
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -109,6 +110,9 @@ def view_client(client_id):
         client.engagements if current_user.role == "admin"
         else [e for e in client.engagements if user_can_access_engagement(current_user, e)]
     )
+    # Soonest deadline first; an engagement with no deadline set goes last
+    # (comparing a blank deadline with a date used to crash this page).
+    visible_engagements = sorted(visible_engagements, key=lambda e: (e.deadline is None, e.deadline or date.max))
     suggested_people = [p for p in client.key_people if p.status == "Suggested"]
     confirmed_people = [p for p in client.key_people if p.status == "Confirmed"]
     has_legacy_details = any(

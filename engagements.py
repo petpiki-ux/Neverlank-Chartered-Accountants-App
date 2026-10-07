@@ -855,6 +855,9 @@ def view_engagement(engagement_id):
     else:
         vat_summary = vat_working_paper_summary([])
     vat_net_position = vat_output_tax_total - vat_input_tax_total
+    # Tasks by due date, soonest first; a task with no due date goes last
+    # (sorting a blank against a date used to crash the engagement page).
+    engagement_tasks_sorted = sorted(engagement.tasks, key=lambda t: (t.due_date is None, t.due_date or date.max))
     vat_invoices_by_kind = {code: [i for i in vat_invoices if i.kind == code] for code, *_ in VAT_DOCUMENT_KINDS}
     # ZIMRA wants VAT accounted for and paid in the currency of trade, so the
     # working paper and the register are produced separately per currency.
@@ -1051,6 +1054,7 @@ def view_engagement(engagement_id):
         vat_document_kinds=VAT_DOCUMENT_KINDS,
         vat_summary=vat_summary,
         vat_invoices_by_kind=vat_invoices_by_kind,
+        engagement_tasks_sorted=engagement_tasks_sorted,
         vat_by_currency=vat_by_currency,
         vat_invoices_by_currency_kind=vat_invoices_by_currency_kind,
         vat_currencies=VAT_CURRENCIES,

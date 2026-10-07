@@ -55,7 +55,7 @@
   <table>
     <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Deadline</th><th>Partner</th></tr></thead>
     <tbody>
-      {% for e in visible_engagements|sort(attribute='deadline') %}
+      {% for e in visible_engagements %}
       <tr>
         <td><a href="{{ url_for('engagements.view_engagement', engagement_id=e.id) }}">{{ e.title }}</a></td>
         <td><span class="badge type-{{ e.type|replace(' ', '') }}">{{ e.type }}</span></td>
