@@ -25,6 +25,7 @@ from models import (
     user_has_permission, user_can_access_engagement, notify_task_assignment,
 )
 from config import Config
+from timeutil import to_cat
 import leave_calc
 
 import file_text_extraction
@@ -417,13 +418,13 @@ def check_in():
     in - see check_out below for where the elapsed time actually lands."""
     open_existing = CheckInRecord.query.filter_by(user_id=current_user.id, check_out_at=None).first()
     if open_existing:
-        flash(f"You're already checked in since {open_existing.check_in_at.strftime('%H:%M')}.", "info")
+        flash(f"You're already checked in since {to_cat(open_existing.check_in_at).strftime('%H:%M')}.", "info")
     else:
         now = datetime.utcnow()
-        record = CheckInRecord(user_id=current_user.id, work_date=now.date(), check_in_at=now)
+        record = CheckInRecord(user_id=current_user.id, work_date=to_cat(now).date(), check_in_at=now)
         db.session.add(record)
         db.session.commit()
-        flash(f"Checked in at {now.strftime('%H:%M')}.", "success")
+        flash(f"Checked in at {to_cat(now).strftime('%H:%M')}.", "success")
     return redirect(request.referrer or url_for("engagements.dashboard"))
 
 
@@ -453,7 +454,7 @@ def check_out():
     if sheet.status == "Approved":
         db.session.commit()
         flash(
-            f"Checked out at {record.check_out_at.strftime('%H:%M')} ({hours} hrs) - "
+            f"Checked out at {to_cat(record.check_out_at).strftime('%H:%M')} ({hours} hrs) - "
             "that week's timesheet is already approved, so it wasn't added automatically. "
             "Ask your reviewer to reopen it, then add the hours by hand.",
             "danger",
@@ -464,7 +465,7 @@ def check_out():
         entry = TimeEntry(
             timesheet_id=sheet.id,
             work_date=record.work_date,
-            description=f"Checked in {record.check_in_at.strftime('%H:%M')} - checked out {record.check_out_at.strftime('%H:%M')}",
+            description=f"Checked in {to_cat(record.check_in_at).strftime('%H:%M')} - checked out {to_cat(record.check_out_at).strftime('%H:%M')}",
             hours=hours,
         )
         db.session.add(entry)
@@ -472,7 +473,7 @@ def check_out():
         record.time_entry_id = entry.id
 
     db.session.commit()
-    flash(f"Checked out at {record.check_out_at.strftime('%H:%M')} - {hours} hrs added to this week's timesheet.", "success")
+    flash(f"Checked out at {to_cat(record.check_out_at).strftime('%H:%M')} - {hours} hrs added to this week's timesheet.", "success")
     return redirect(request.referrer or url_for("engagements.dashboard"))
 
 

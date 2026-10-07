@@ -25,7 +25,7 @@
       {% for c in cases %}
       <tr>
         <td><a href="{{ url_for('whistleblower.view_case', case_id=c.id) }}"><strong>{{ c.reference }}</strong></a>{% if c.has_unread_reporter_message and not c.is_closed %} <span class="badge overdue">reporter replied</span>{% endif %}</td>
-        <td>{{ c.received_at.strftime('%d %b %Y') if c.received_at else '—' }}</td>
+        <td>{{ (c.received_at|cat).strftime('%d %b %Y') if c.received_at else '—' }}</td>
         <td>{{ c.category_label }}</td>
         <td>{{ c.severity }}</td>
         <td><span class="badge">{{ c.status }}</span></td>

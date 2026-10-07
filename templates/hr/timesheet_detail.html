@@ -7,7 +7,7 @@
     <div class="subtitle">
       Week of {{ sheet.week_start.strftime('%d %b %Y') }}
       &middot; <span class="badge status-{{ sheet.status }}">{{ sheet.status }}</span>
-      {% if sheet.is_reviewed %}&middot; Reviewed by {{ sheet.reviewed_by.name }} on {{ sheet.reviewed_at.strftime('%d %b %Y') }}{% endif %}
+      {% if sheet.is_reviewed %}&middot; Reviewed by {{ sheet.reviewed_by.name }} on {{ (sheet.reviewed_at|cat).strftime('%d %b %Y') }}{% endif %}
     </div>
   </div>
   <div>
@@ -111,7 +111,7 @@
 <div class="card">
   <h3 class="mt-0">Review</h3>
   {% if sheet.status == 'Approved' %}
-  <p class="muted" style="font-size:13px;">Approved by {{ sheet.reviewed_by.name }} on {{ sheet.reviewed_at.strftime('%d %b %Y') }}.</p>
+  <p class="muted" style="font-size:13px;">Approved by {{ sheet.reviewed_by.name }} on {{ (sheet.reviewed_at|cat).strftime('%d %b %Y') }}.</p>
   <form method="post" action="{{ url_for('hr.unapprove_timesheet', timesheet_id=sheet.id) }}"><button type="submit" class="btn secondary">Reopen for editing</button></form>
   {% else %}
   <form method="post" action="{{ url_for('hr.approve_timesheet', timesheet_id=sheet.id) }}"><button type="submit" class="btn gold">Approve timesheet</button></form>

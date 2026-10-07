@@ -68,7 +68,7 @@
       {% endif %}
       Effective {{ u.effective_date.strftime('%d %b %Y') if u.effective_date else '—' }}
       {% if u.source_reference %}&middot; {{ u.source_reference }}{% endif %}
-      &middot; logged by {{ u.created_by.name if u.created_by else '—' }} on {{ u.created_at.strftime('%d %b %Y') }}
+      &middot; logged by {{ u.created_by.name if u.created_by else '—' }} on {{ (u.created_at|cat).strftime('%d %b %Y') }}
     </p>
     {% if u.instrument_type == 'Case' %}
       {% set authority_label = u.authority_label or u.ai_authority_label %}
@@ -168,7 +168,7 @@
       <div style="flex:3;"><input type="text" name="impact_assessment" placeholder="Impact assessment" value="{{ u.impact_assessment or '' }}"></div>
       <div><button type="submit" class="btn small gold">Save &amp; mark reviewed</button></div>
     </form>
-    {% if u.is_reviewed %}<p class="muted" style="font-size:11px;">Reviewed by {{ u.reviewed_by.name if u.reviewed_by else '—' }} on {{ u.reviewed_at.strftime('%d %b %Y') if u.reviewed_at else '—' }}.</p>{% endif %}
+    {% if u.is_reviewed %}<p class="muted" style="font-size:11px;">Reviewed by {{ u.reviewed_by.name if u.reviewed_by else '—' }} on {{ (u.reviewed_at|cat).strftime('%d %b %Y') if u.reviewed_at else '—' }}.</p>{% endif %}
     {% if can_edit %}
     <form method="post" action="{{ url_for('tax.delete_legislative_update', update_id=u.id) }}" onsubmit="return confirm('Delete this update?')"><button type="submit" class="btn small danger">Delete</button></form>
     {% endif %}

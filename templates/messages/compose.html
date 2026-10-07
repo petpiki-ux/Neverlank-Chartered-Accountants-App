@@ -30,7 +30,7 @@
           <label style="font-weight:400;margin-bottom:0;">
             <input type="checkbox" name="recipient_ids" value="{{ person.id }}" style="width:auto;"
               {% if person.id|string in prefill_to %}checked{% endif %}>
-            <span title="{{ 'Online now' if person.is_online else ('Last seen ' + person.last_seen_at.strftime('%d %b %H:%M') if person.last_seen_at else 'Never logged in') }}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ '#2ecc71' if person.is_online else '#bbb' }};margin-right:5px;"></span>
+            <span title="{{ 'Online now' if person.is_online else ('Last seen ' + (person.last_seen_at|cat).strftime('%d %b %H:%M') if person.last_seen_at else 'Never logged in') }}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ '#2ecc71' if person.is_online else '#bbb' }};margin-right:5px;"></span>
             {{ person.name }} <span class="muted" style="font-size:11.5px;">({{ person.role|capitalize }})</span>
           </label>
           <a href="{{ url_for('calls.call_room', user_id=person.id) }}" class="btn small secondary" style="margin-left:8px;">Call</a>

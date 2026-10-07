@@ -27,6 +27,7 @@ from flask_login import login_required, current_user
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from extensions import db
+from timeutil import to_cat
 from models import (
     Engagement, User, WhistleblowerService, WhistleblowerCase, WhistleblowerCaseNote,
     WB_CHANNELS, WB_CATEGORIES, WB_CATEGORY_LABELS, WB_SEVERITIES, WB_STATUSES, WB_REPORTING_FREQUENCIES,
@@ -459,7 +460,7 @@ def build_report_docx(engagement, service, summary, include_subjects=False):
             table.rows[0].cells[i].text = h
         for c in summary["received"]:
             cells = table.add_row().cells
-            values = [c.reference, wp._fmt_date(c.received_at.date()), c.category_label, c.severity, c.status]
+            values = [c.reference, wp._fmt_date(to_cat(c.received_at).date()), c.category_label, c.severity, c.status]
             if include_subjects:
                 values.append(c.subject or "")
             for i, v in enumerate(values):

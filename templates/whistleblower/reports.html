@@ -34,7 +34,7 @@
   <h4>Case register</h4>
   <table>
     <thead><tr><th>Reference</th><th>Received</th><th>Category</th><th>Severity</th><th>Status</th>{% if include_subjects %}<th>Subject</th>{% endif %}</tr></thead>
-    <tbody>{% for c in summary.received %}<tr><td>{{ c.reference }}</td><td>{{ c.received_at.strftime('%d %b %Y') }}</td><td>{{ c.category_label }}</td><td>{{ c.severity }}</td><td>{{ c.status }}</td>{% if include_subjects %}<td>{{ c.subject or '' }}</td>{% endif %}</tr>{% endfor %}</tbody>
+    <tbody>{% for c in summary.received %}<tr><td>{{ c.reference }}</td><td>{{ (c.received_at|cat).strftime('%d %b %Y') }}</td><td>{{ c.category_label }}</td><td>{{ c.severity }}</td><td>{{ c.status }}</td>{% if include_subjects %}<td>{{ c.subject or '' }}</td>{% endif %}</tr>{% endfor %}</tbody>
   </table>
   {% else %}
   <p class="muted">No reports received in this period.</p>

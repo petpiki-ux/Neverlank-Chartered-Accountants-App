@@ -45,7 +45,7 @@
     and AIDS Levy % are never pre-filled - enter the figures confirmed for this tax year.
   </p>
   {% if estimate.updated_at %}
-  <p class="muted" style="font-size:11px;">Last updated {{ estimate.updated_at.strftime('%d %b %Y %H:%M') }}{% if estimate.updated_by %} by {{ estimate.updated_by.name }}{% endif %}.</p>
+  <p class="muted" style="font-size:11px;">Last updated {{ (estimate.updated_at|cat).strftime('%d %b %Y %H:%M') }}{% if estimate.updated_by %} by {{ estimate.updated_by.name }}{% endif %}.</p>
   {% endif %}
   <form method="post" action="{{ url_for('qpd.update_estimate', client_id=client.id, tax_year=tax_year) }}">
     <div class="form-row">

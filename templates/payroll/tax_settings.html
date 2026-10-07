@@ -59,7 +59,7 @@
   </form>
   {% if settings.updated_at %}
   <p class="muted" style="margin-top:10px;font-size:12px;">
-    Last updated {{ settings.updated_at.strftime('%d %b %Y') }}{% if settings.updated_by %} by {{ settings.updated_by.name }}{% endif %}.
+    Last updated {{ (settings.updated_at|cat).strftime('%d %b %Y') }}{% if settings.updated_by %} by {{ settings.updated_by.name }}{% endif %}.
   </p>
   {% endif %}
 </div>

@@ -38,9 +38,9 @@
       <tr{% if not d.is_current_version %} class="muted"{% endif %}>
         <td>v{{ d.version }}{% if d.is_current_version %} <span class="badge status-Completed">Current</span>{% else %} <span class="badge">Superseded</span>{% endif %}</td>
         <td>{{ d.filing_index.display_label if d.filing_index else (d.reference or '—') }}</td>
-        <td style="font-size:11.5px;">{{ d.uploaded_by.name if d.uploaded_by else '—' }}<br>{{ d.uploaded_at.strftime('%d %b %Y %H:%M') if d.uploaded_at else '—' }}</td>
+        <td style="font-size:11.5px;">{{ d.uploaded_by.name if d.uploaded_by else '—' }}<br>{{ (d.uploaded_at|cat).strftime('%d %b %Y %H:%M') if d.uploaded_at else '—' }}</td>
         <td style="font-size:11.5px;">
-          {% if d.is_reviewed %}{{ d.reviewed_by.name }}<br>{{ d.reviewed_at.strftime('%d %b %Y') }}
+          {% if d.is_reviewed %}{{ d.reviewed_by.name }}<br>{{ (d.reviewed_at|cat).strftime('%d %b %Y') }}
           {% elif d.is_current_version and current_user.role in ('supervisor', 'partner', 'admin') %}
             {% if d.completed_by_id != current_user.id %}
             <form method="post" action="{{ url_for('engagements.review_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
@@ -53,7 +53,7 @@
           {% endif %}
         </td>
         <td style="font-size:11.5px;">
-          {% if d.is_partner_signed %}{{ d.partner_signed_by.name }}<br>{{ d.partner_signed_at.strftime('%d %b %Y') }}
+          {% if d.is_partner_signed %}{{ d.partner_signed_by.name }}<br>{{ (d.partner_signed_at|cat).strftime('%d %b %Y') }}
           {% elif d.is_current_version and current_user.role in ('partner', 'admin') %}
             {% if d.completed_by_id != current_user.id %}
             <form method="post" action="{{ url_for('engagements.partner_sign_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
@@ -479,7 +479,7 @@
     <h3 class="mt-0">{% if engagement.type == 'Investigative Engagement' %}5{% else %}6{% endif %}. Engagement letter</h3>
     <p class="muted" style="font-size:12px;">Send a formal contract outlining the audit scope, timeline, responsibilities, and fee structure, then secure client sign-off.</p>
     {% if client_acceptance and client_acceptance.engagement_letter_document %}
-    <p style="font-size:13px;">Signed copy on file: <a href="{{ url_for('engagements.download_document', doc_id=client_acceptance.engagement_letter_document_id) }}">{{ client_acceptance.engagement_letter_document.original_filename }}</a>{% if client_acceptance.engagement_letter_signed_at %} - signed {{ client_acceptance.engagement_letter_signed_at.strftime('%d %b %Y') }}{% endif %}.</p>
+    <p style="font-size:13px;">Signed copy on file: <a href="{{ url_for('engagements.download_document', doc_id=client_acceptance.engagement_letter_document_id) }}">{{ client_acceptance.engagement_letter_document.original_filename }}</a>{% if client_acceptance.engagement_letter_signed_at %} - signed {{ (client_acceptance.engagement_letter_signed_at|cat).strftime('%d %b %Y') }}{% endif %}.</p>
     {% else %}
     <div class="empty-state">No signed engagement letter on file yet.</div>
     {% endif %}
@@ -508,7 +508,7 @@
           <tr>
             <td><strong>{{ source }}</strong></td>
             <td class="muted">
-              {% if status and status.last_refreshed_at %}{{ status.last_refreshed_at.strftime('%d %b %Y %H:%M') }}{% else %}Never refreshed{% endif %}
+              {% if status and status.last_refreshed_at %}{{ (status.last_refreshed_at|cat).strftime('%d %b %Y %H:%M') }}{% else %}Never refreshed{% endif %}
               {% if status and status.last_error %}<br><span style="color:#b02a2a;">Last attempt failed: {{ status.last_error[:160] }}</span>{% endif %}
             </td>
             <td>{{ status.entry_count if status else 0 }}</td>
@@ -554,7 +554,7 @@
           <td>
             <input type="text" name="notes" value="{{ s.notes or '' }}" placeholder="Match details / reference" style="width:150px;margin-bottom:0;">
             {% if s.auto_screened_at %}
-            <div class="muted" style="font-size:10.5px;margin-top:3px;">Auto-screened {{ s.auto_screened_at.strftime('%d %b %Y') }}{% if s.auto_screened_by %} by {{ s.auto_screened_by.name }}{% endif %} - hover a result for its notes.</div>
+            <div class="muted" style="font-size:10.5px;margin-top:3px;">Auto-screened {{ (s.auto_screened_at|cat).strftime('%d %b %Y') }}{% if s.auto_screened_by %} by {{ s.auto_screened_by.name }}{% endif %} - hover a result for its notes.</div>
             {% endif %}
           </td>
           <td><span class="badge {% if s.overall_status == 'Confirmed Hit' %}risk-High{% elif s.overall_status == 'Potential Match' %}risk-Medium{% elif s.overall_status == 'Clear' %}risk-Low{% endif %}">{{ s.overall_status }}</span></td>
@@ -661,7 +661,7 @@
             <td>
               {% if issue.review %}
               <span class="badge {% if issue.review.status == 'Consider' %}risk-Medium{% else %}risk-Low{% endif %}">{{ issue.review.status }}</span>
-              <div class="muted" style="font-size:11px;">by {{ issue.review.reviewed_by.name if issue.review.reviewed_by else '—' }} on {{ issue.review.reviewed_at.strftime('%d %b %Y') if issue.review.reviewed_at else '—' }}{% if issue.review.note %} — {{ issue.review.note }}{% endif %}</div>
+              <div class="muted" style="font-size:11px;">by {{ issue.review.reviewed_by.name if issue.review.reviewed_by else '—' }} on {{ (issue.review.reviewed_at|cat).strftime('%d %b %Y') if issue.review.reviewed_at else '—' }}{% if issue.review.note %} — {{ issue.review.note }}{% endif %}</div>
               {% else %}
               <span class="muted" style="font-size:11.5px;">Not yet reviewed</span>
               {% endif %}
@@ -701,10 +701,10 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ client_acceptance.completed_by.name if client_acceptance.completed_by else '—' }} on {{ client_acceptance.completed_at.strftime('%d %b %Y') if client_acceptance.completed_at else '—' }}.
-      {% if client_acceptance.is_reviewed %}Reviewed by {{ client_acceptance.reviewed_by.name }} on {{ client_acceptance.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if client_acceptance.is_authorized_to_continue %}Continuation authorised by {{ client_acceptance.partner_authorized_continue_by.name }} on {{ client_acceptance.partner_authorized_continue_at.strftime('%d %b %Y') }}{% if client_acceptance.partner_authorized_continue_notes %} - {{ client_acceptance.partner_authorized_continue_notes }}{% endif %}.{% endif %}
-      {% if client_acceptance.is_partner_signed %}Partner sign-off by {{ client_acceptance.partner_signed_by.name }} on {{ client_acceptance.partner_signed_at.strftime('%d %b %Y') }} - decision: <strong>{{ client_acceptance.decision }}</strong>.{% endif %}
+      Prepared by {{ client_acceptance.completed_by.name if client_acceptance.completed_by else '—' }} on {{ (client_acceptance.completed_at|cat).strftime('%d %b %Y') if client_acceptance.completed_at else '—' }}.
+      {% if client_acceptance.is_reviewed %}Reviewed by {{ client_acceptance.reviewed_by.name }} on {{ (client_acceptance.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if client_acceptance.is_authorized_to_continue %}Continuation authorised by {{ client_acceptance.partner_authorized_continue_by.name }} on {{ (client_acceptance.partner_authorized_continue_at|cat).strftime('%d %b %Y') }}{% if client_acceptance.partner_authorized_continue_notes %} - {{ client_acceptance.partner_authorized_continue_notes }}{% endif %}.{% endif %}
+      {% if client_acceptance.is_partner_signed %}Partner sign-off by {{ client_acceptance.partner_signed_by.name }} on {{ (client_acceptance.partner_signed_at|cat).strftime('%d %b %Y') }} - decision: <strong>{{ client_acceptance.decision }}</strong>.{% endif %}
     </p>
     {% if not client_acceptance.items_complete %}
     <p class="muted" style="font-size:11.5px;color:#b02a2a;">All six items above (including the signed engagement letter) need to be filled in before a Partner can sign off the decision.</p>
@@ -762,7 +762,7 @@
       <div class="form-row" style="margin-bottom:4px;">
         <div><span class="badge">{{ latest_public_research.scope_label }}</span></div>
         <div class="muted" style="font-size:11.5px;">
-          Last run {{ latest_public_research.requested_at.strftime('%d %b %Y %H:%M') if latest_public_research.requested_at else '—' }}
+          Last run {{ (latest_public_research.requested_at|cat).strftime('%d %b %Y %H:%M') if latest_public_research.requested_at else '—' }}
           {% if latest_public_research.requested_by %}by {{ latest_public_research.requested_by.name }}{% endif %}
         </div>
       </div>
@@ -892,9 +892,9 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ entity_understanding.completed_by.name if entity_understanding.completed_by else '—' }} on {{ entity_understanding.completed_at.strftime('%d %b %Y') if entity_understanding.completed_at else '—' }}.
-      {% if entity_understanding.is_reviewed %}Reviewed by {{ entity_understanding.reviewed_by.name }} on {{ entity_understanding.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if entity_understanding.is_partner_signed %}Partner sign-off by {{ entity_understanding.partner_signed_by.name }} on {{ entity_understanding.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ entity_understanding.completed_by.name if entity_understanding.completed_by else '—' }} on {{ (entity_understanding.completed_at|cat).strftime('%d %b %Y') if entity_understanding.completed_at else '—' }}.
+      {% if entity_understanding.is_reviewed %}Reviewed by {{ entity_understanding.reviewed_by.name }} on {{ (entity_understanding.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if entity_understanding.is_partner_signed %}Partner sign-off by {{ entity_understanding.partner_signed_by.name }} on {{ (entity_understanding.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if entity_understanding.is_reviewed %}
@@ -1072,9 +1072,9 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ analytical_review.completed_by.name if analytical_review.completed_by else '—' }} on {{ analytical_review.completed_at.strftime('%d %b %Y') if analytical_review.completed_at else '—' }}.
-      {% if analytical_review.is_reviewed %}Reviewed by {{ analytical_review.reviewed_by.name }} on {{ analytical_review.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if analytical_review.is_partner_signed %}Partner sign-off by {{ analytical_review.partner_signed_by.name }} on {{ analytical_review.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ analytical_review.completed_by.name if analytical_review.completed_by else '—' }} on {{ (analytical_review.completed_at|cat).strftime('%d %b %Y') if analytical_review.completed_at else '—' }}.
+      {% if analytical_review.is_reviewed %}Reviewed by {{ analytical_review.reviewed_by.name }} on {{ (analytical_review.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if analytical_review.is_partner_signed %}Partner sign-off by {{ analytical_review.partner_signed_by.name }} on {{ (analytical_review.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if analytical_review.is_reviewed %}
@@ -1175,9 +1175,9 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ risk_assessment.completed_by.name if risk_assessment.completed_by else '—' }} on {{ risk_assessment.completed_at.strftime('%d %b %Y') if risk_assessment.completed_at else '—' }}.
-      {% if risk_assessment.is_reviewed %}Reviewed by {{ risk_assessment.reviewed_by.name }} on {{ risk_assessment.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if risk_assessment.is_partner_signed %}Partner sign-off by {{ risk_assessment.partner_signed_by.name }} on {{ risk_assessment.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ risk_assessment.completed_by.name if risk_assessment.completed_by else '—' }} on {{ (risk_assessment.completed_at|cat).strftime('%d %b %Y') if risk_assessment.completed_at else '—' }}.
+      {% if risk_assessment.is_reviewed %}Reviewed by {{ risk_assessment.reviewed_by.name }} on {{ (risk_assessment.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if risk_assessment.is_partner_signed %}Partner sign-off by {{ risk_assessment.partner_signed_by.name }} on {{ (risk_assessment.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if risk_assessment.is_reviewed %}
@@ -1287,9 +1287,9 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ materiality.updated_by.name if materiality.updated_by else '—' }} on {{ materiality.updated_at.strftime('%d %b %Y') if materiality.updated_at else '—' }}.
-      {% if materiality.is_reviewed %}Reviewed by {{ materiality.reviewed_by.name }} on {{ materiality.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if materiality.is_partner_signed %}Partner sign-off by {{ materiality.partner_signed_by.name }} on {{ materiality.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ materiality.updated_by.name if materiality.updated_by else '—' }} on {{ (materiality.updated_at|cat).strftime('%d %b %Y') if materiality.updated_at else '—' }}.
+      {% if materiality.is_reviewed %}Reviewed by {{ materiality.reviewed_by.name }} on {{ (materiality.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if materiality.is_partner_signed %}Partner sign-off by {{ materiality.partner_signed_by.name }} on {{ (materiality.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if materiality.is_reviewed %}
@@ -1521,9 +1521,9 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ audit_strategy.completed_by.name if audit_strategy.completed_by else '—' }} on {{ audit_strategy.completed_at.strftime('%d %b %Y') if audit_strategy.completed_at else '—' }}.
-      {% if audit_strategy.is_reviewed %}Reviewed by {{ audit_strategy.reviewed_by.name }} on {{ audit_strategy.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if audit_strategy.is_partner_signed %}Partner sign-off by {{ audit_strategy.partner_signed_by.name }} on {{ audit_strategy.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ audit_strategy.completed_by.name if audit_strategy.completed_by else '—' }} on {{ (audit_strategy.completed_at|cat).strftime('%d %b %Y') if audit_strategy.completed_at else '—' }}.
+      {% if audit_strategy.is_reviewed %}Reviewed by {{ audit_strategy.reviewed_by.name }} on {{ (audit_strategy.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if audit_strategy.is_partner_signed %}Partner sign-off by {{ audit_strategy.partner_signed_by.name }} on {{ (audit_strategy.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if audit_strategy.is_reviewed %}
@@ -1617,9 +1617,9 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ secretarial_plan.completed_by.name if secretarial_plan.completed_by else '—' }} on {{ secretarial_plan.completed_at.strftime('%d %b %Y') if secretarial_plan.completed_at else '—' }}.
-      {% if secretarial_plan.is_reviewed %}Reviewed by {{ secretarial_plan.reviewed_by.name }} on {{ secretarial_plan.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if secretarial_plan.is_partner_signed %}Partner sign-off by {{ secretarial_plan.partner_signed_by.name }} on {{ secretarial_plan.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ secretarial_plan.completed_by.name if secretarial_plan.completed_by else '—' }} on {{ (secretarial_plan.completed_at|cat).strftime('%d %b %Y') if secretarial_plan.completed_at else '—' }}.
+      {% if secretarial_plan.is_reviewed %}Reviewed by {{ secretarial_plan.reviewed_by.name }} on {{ (secretarial_plan.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if secretarial_plan.is_partner_signed %}Partner sign-off by {{ secretarial_plan.partner_signed_by.name }} on {{ (secretarial_plan.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if secretarial_plan.is_reviewed %}
@@ -1665,7 +1665,7 @@
     <div class="empty-state">
       This engagement has been marked as having no trial balance.
       <p class="muted" style="font-size:12.5px;">{{ trial_balance.not_applicable_reason }}</p>
-      <p class="muted" style="font-size:11px;">Marked by {{ trial_balance.marked_na_by.name if trial_balance.marked_na_by else '—' }} on {{ trial_balance.marked_na_at.strftime('%d %b %Y') if trial_balance.marked_na_at else '—' }}.</p>
+      <p class="muted" style="font-size:11px;">Marked by {{ trial_balance.marked_na_by.name if trial_balance.marked_na_by else '—' }} on {{ (trial_balance.marked_na_at|cat).strftime('%d %b %Y') if trial_balance.marked_na_at else '—' }}.</p>
     </div>
     <form method="post" action="{{ url_for('engagements.unmark_trial_balance_not_applicable', tb_id=trial_balance.id) }}" class="inline" style="margin-top:10px;"><button type="submit" class="btn small secondary">This engagement does have a trial balance after all</button></form>
   </div>
@@ -1682,7 +1682,7 @@
       <div><a href="{{ url_for('static', filename='downloads/Neverlank_TB_Import_Template.xlsx') }}" class="btn secondary">Download template</a></div>
     </div>
     {% if trial_balance %}
-    <p class="muted" style="font-size:11.5px;">{% if trial_balance.source == 'upload' %}Last imported from '{{ trial_balance.original_filename }}'{% else %}Entered manually{% endif %}{% if trial_balance.completed_by %} by {{ trial_balance.completed_by.name }} on {{ trial_balance.completed_at.strftime('%d %b %Y') }}{% endif %}. Importing again replaces the accounts below with the new file's rows (any category you'd already set is kept for matching accounts).</p>
+    <p class="muted" style="font-size:11.5px;">{% if trial_balance.source == 'upload' %}Last imported from '{{ trial_balance.original_filename }}'{% else %}Entered manually{% endif %}{% if trial_balance.completed_by %} by {{ trial_balance.completed_by.name }} on {{ (trial_balance.completed_at|cat).strftime('%d %b %Y') }}{% endif %}. Importing again replaces the accounts below with the new file's rows (any category you'd already set is kept for matching accounts).</p>
     {% endif %}
   </div>
 
@@ -1900,9 +1900,9 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ trial_balance.completed_by.name if trial_balance.completed_by else '—' }} on {{ trial_balance.completed_at.strftime('%d %b %Y') if trial_balance.completed_at else '—' }}.
-      {% if trial_balance.is_reviewed %}Reviewed by {{ trial_balance.reviewed_by.name }} on {{ trial_balance.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if trial_balance.is_partner_signed %}Partner sign-off by {{ trial_balance.partner_signed_by.name }} on {{ trial_balance.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ trial_balance.completed_by.name if trial_balance.completed_by else '—' }} on {{ (trial_balance.completed_at|cat).strftime('%d %b %Y') if trial_balance.completed_at else '—' }}.
+      {% if trial_balance.is_reviewed %}Reviewed by {{ trial_balance.reviewed_by.name }} on {{ (trial_balance.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if trial_balance.is_partner_signed %}Partner sign-off by {{ trial_balance.partner_signed_by.name }} on {{ (trial_balance.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if trial_balance.is_reviewed %}
@@ -1956,9 +1956,9 @@
         {% endif %}
         <form method="post" action="{{ url_for('engagements.update_checklist_item', item_id=item.id) }}" class="checklist-row">
           <span class="item-text">{{ item.item_text }}
-            {% if item.completed_by %}<div class="muted" style="font-size:11px;">Prepared by {{ item.completed_by.name }} on {{ item.completed_at.strftime('%d %b %Y') }}</div>{% endif %}
-            {% if item.is_reviewed %}<div class="muted" style="font-size:11px;">Reviewed by {{ item.reviewed_by.name }} on {{ item.reviewed_at.strftime('%d %b %Y') }} <span class="badge status-Completed">Reviewed</span></div>{% endif %}
-            {% if item.is_partner_signed %}<div class="muted" style="font-size:11px;">Partner sign-off by {{ item.partner_signed_by.name }} on {{ item.partner_signed_at.strftime('%d %b %Y') }} <span class="badge status-Completed">Partner signed</span></div>{% endif %}
+            {% if item.completed_by %}<div class="muted" style="font-size:11px;">Prepared by {{ item.completed_by.name }} on {{ (item.completed_at|cat).strftime('%d %b %Y') }}</div>{% endif %}
+            {% if item.is_reviewed %}<div class="muted" style="font-size:11px;">Reviewed by {{ item.reviewed_by.name }} on {{ (item.reviewed_at|cat).strftime('%d %b %Y') }} <span class="badge status-Completed">Reviewed</span></div>{% endif %}
+            {% if item.is_partner_signed %}<div class="muted" style="font-size:11px;">Partner sign-off by {{ item.partner_signed_by.name }} on {{ (item.partner_signed_at|cat).strftime('%d %b %Y') }} <span class="badge status-Completed">Partner signed</span></div>{% endif %}
           </span>
           <input type="text" name="notes" value="{{ item.notes or '' }}" placeholder="Notes" style="width:180px;margin-bottom:0;">
           <select name="status" onchange="this.form.submit()">
@@ -2052,7 +2052,7 @@
           <td class="muted">{{ d.substantive_area.area if d.substantive_area else '—' }}</td>
           <td>v{{ d.version }}</td>
           <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
-          <td>{{ d.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
+          <td>{{ (d.uploaded_at|cat).strftime('%d %b %Y %H:%M') }}</td>
           <td>
             <a href="{{ url_for('engagements.download_document', doc_id=d.id) }}" class="btn small secondary">Download</a>
             {% if user_has_permission(current_user, 'delete_documents') %}
@@ -2142,7 +2142,7 @@
           </td>
           <td>
             {% if t.is_reviewed %}
-              <div class="muted" style="font-size:11px;">Reviewed by {{ t.reviewed_by.name }} on {{ t.reviewed_at.strftime('%d %b %Y') }}</div>
+              <div class="muted" style="font-size:11px;">Reviewed by {{ t.reviewed_by.name }} on {{ (t.reviewed_at|cat).strftime('%d %b %Y') }}</div>
               {% if current_user.role in ('supervisor', 'partner', 'admin') %}
               <form method="post" action="{{ url_for('engagements.unreview_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove</button></form>
               {% endif %}
@@ -2156,7 +2156,7 @@
           </td>
           <td>
             {% if t.is_partner_signed %}
-              <div class="muted" style="font-size:11px;">Signed by {{ t.partner_signed_by.name }} on {{ t.partner_signed_at.strftime('%d %b %Y') }}</div>
+              <div class="muted" style="font-size:11px;">Signed by {{ t.partner_signed_by.name }} on {{ (t.partner_signed_at|cat).strftime('%d %b %Y') }}</div>
               {% if current_user.role in ('partner', 'admin') %}
               <form method="post" action="{{ url_for('engagements.partner_unsign_task', task_id=t.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove</button></form>
               {% endif %}
@@ -2284,9 +2284,9 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ income_tax_computation.completed_by.name if income_tax_computation.completed_by else '—' }} on {{ income_tax_computation.completed_at.strftime('%d %b %Y') if income_tax_computation.completed_at else '—' }}.
-      {% if income_tax_computation.is_reviewed %}Reviewed by {{ income_tax_computation.reviewed_by.name }} on {{ income_tax_computation.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if income_tax_computation.is_partner_signed %}Partner sign-off by {{ income_tax_computation.partner_signed_by.name }} on {{ income_tax_computation.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ income_tax_computation.completed_by.name if income_tax_computation.completed_by else '—' }} on {{ (income_tax_computation.completed_at|cat).strftime('%d %b %Y') if income_tax_computation.completed_at else '—' }}.
+      {% if income_tax_computation.is_reviewed %}Reviewed by {{ income_tax_computation.reviewed_by.name }} on {{ (income_tax_computation.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if income_tax_computation.is_partner_signed %}Partner sign-off by {{ income_tax_computation.partner_signed_by.name }} on {{ (income_tax_computation.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if income_tax_computation.is_reviewed %}
@@ -2407,9 +2407,9 @@
   <div class="card">
     <h3 class="mt-0">Sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ deferred_tax_computation.completed_by.name if deferred_tax_computation.completed_by else '—' }} on {{ deferred_tax_computation.completed_at.strftime('%d %b %Y') if deferred_tax_computation.completed_at else '—' }}.
-      {% if deferred_tax_computation.is_reviewed %}Reviewed by {{ deferred_tax_computation.reviewed_by.name }} on {{ deferred_tax_computation.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if deferred_tax_computation.is_partner_signed %}Partner sign-off by {{ deferred_tax_computation.partner_signed_by.name }} on {{ deferred_tax_computation.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ deferred_tax_computation.completed_by.name if deferred_tax_computation.completed_by else '—' }} on {{ (deferred_tax_computation.completed_at|cat).strftime('%d %b %Y') if deferred_tax_computation.completed_at else '—' }}.
+      {% if deferred_tax_computation.is_reviewed %}Reviewed by {{ deferred_tax_computation.reviewed_by.name }} on {{ (deferred_tax_computation.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if deferred_tax_computation.is_partner_signed %}Partner sign-off by {{ deferred_tax_computation.partner_signed_by.name }} on {{ (deferred_tax_computation.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if deferred_tax_computation.is_reviewed %}
@@ -2477,9 +2477,9 @@
     </form>
     {% if tax_entity_profile and tax_entity_profile.id %}
     <p class="muted" style="font-size:12.5px;margin-top:10px;">
-      Prepared by {{ tax_entity_profile.completed_by.name if tax_entity_profile.completed_by else '—' }} on {{ tax_entity_profile.completed_at.strftime('%d %b %Y') if tax_entity_profile.completed_at else '—' }}.
-      {% if tax_entity_profile.is_reviewed %}Reviewed by {{ tax_entity_profile.reviewed_by.name }} on {{ tax_entity_profile.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if tax_entity_profile.is_partner_signed %}Partner sign-off by {{ tax_entity_profile.partner_signed_by.name }} on {{ tax_entity_profile.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ tax_entity_profile.completed_by.name if tax_entity_profile.completed_by else '—' }} on {{ (tax_entity_profile.completed_at|cat).strftime('%d %b %Y') if tax_entity_profile.completed_at else '—' }}.
+      {% if tax_entity_profile.is_reviewed %}Reviewed by {{ tax_entity_profile.reviewed_by.name }} on {{ (tax_entity_profile.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if tax_entity_profile.is_partner_signed %}Partner sign-off by {{ tax_entity_profile.partner_signed_by.name }} on {{ (tax_entity_profile.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if tax_entity_profile.is_reviewed %}
@@ -2621,9 +2621,9 @@
     </form>
     {% if tax_analytical_review and tax_analytical_review.id %}
     <p class="muted" style="font-size:12.5px;margin-top:10px;">
-      Prepared by {{ tax_analytical_review.completed_by.name if tax_analytical_review.completed_by else '—' }} on {{ tax_analytical_review.completed_at.strftime('%d %b %Y') if tax_analytical_review.completed_at else '—' }}.
-      {% if tax_analytical_review.is_reviewed %}Reviewed by {{ tax_analytical_review.reviewed_by.name }} on {{ tax_analytical_review.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if tax_analytical_review.is_partner_signed %}Partner sign-off by {{ tax_analytical_review.partner_signed_by.name }} on {{ tax_analytical_review.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ tax_analytical_review.completed_by.name if tax_analytical_review.completed_by else '—' }} on {{ (tax_analytical_review.completed_at|cat).strftime('%d %b %Y') if tax_analytical_review.completed_at else '—' }}.
+      {% if tax_analytical_review.is_reviewed %}Reviewed by {{ tax_analytical_review.reviewed_by.name }} on {{ (tax_analytical_review.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if tax_analytical_review.is_partner_signed %}Partner sign-off by {{ tax_analytical_review.partner_signed_by.name }} on {{ (tax_analytical_review.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if tax_analytical_review.is_reviewed %}
@@ -2797,7 +2797,7 @@
           <td>{{ b.row_count }}</td>
           <td>{{ b.skipped_row_count or 0 }}</td>
           <td>{{ b.imported_by.name if b.imported_by else '—' }}</td>
-          <td>{{ b.imported_at.strftime('%d %b %Y') if b.imported_at else '—' }}</td>
+          <td>{{ (b.imported_at|cat).strftime('%d %b %Y') if b.imported_at else '—' }}</td>
           <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.delete_vat_import_batch', batch_id=b.id) }}" class="inline" onsubmit="return confirm('Delete this import batch and every invoice it created?');"><button type="submit" class="btn small danger">Delete batch</button></form>{% endif %}</td>
         </tr>
         {% endfor %}
@@ -2893,7 +2893,7 @@
           <td>{{ b.row_count }}</td>
           <td>{{ b.skipped_row_count or 0 }}</td>
           <td>{{ b.imported_by.name if b.imported_by else '—' }}</td>
-          <td>{{ b.imported_at.strftime('%d %b %Y') if b.imported_at else '—' }}</td>
+          <td>{{ (b.imported_at|cat).strftime('%d %b %Y') if b.imported_at else '—' }}</td>
           <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.delete_vat_import_batch', batch_id=b.id) }}" class="inline" onsubmit="return confirm('Delete this import batch and every invoice it created?');"><button type="submit" class="btn small danger">Delete batch</button></form>{% endif %}</td>
         </tr>
         {% endfor %}
@@ -3058,7 +3058,7 @@
     {% if tax_research_log %}
     {% for e in tax_research_log %}
     <details style="margin-bottom:6px;">
-      <summary>{{ e.topic }} - {{ e.prepared_by.name if e.prepared_by else '—' }} ({{ e.prepared_at.strftime('%d %b %Y') }})</summary>
+      <summary>{{ e.topic }} - {{ e.prepared_by.name if e.prepared_by else '—' }} ({{ (e.prepared_at|cat).strftime('%d %b %Y') }})</summary>
       <p style="font-size:12.5px;"><strong>Question:</strong> {{ e.question or '—' }}</p>
       <p style="font-size:12.5px;"><strong>Research notes:</strong> {{ e.research_notes or '—' }}</p>
       <p style="font-size:12.5px;"><strong>Conclusion:</strong> {{ e.conclusion or '—' }}</p>
@@ -3221,7 +3221,7 @@
       </form>
       {% if narrative and narrative.id %}
       <p class="muted" style="font-size:11.5px;margin-top:6px;">
-        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ narrative.completed_at.strftime('%d %b %Y') if narrative.completed_at else '—' }}.
+        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ (narrative.completed_at|cat).strftime('%d %b %Y') if narrative.completed_at else '—' }}.
         {% if narrative.is_reviewed %}Reviewed by {{ narrative.reviewed_by.name }}.{% endif %}
         {% if narrative.is_partner_signed %}Partner sign-off by {{ narrative.partner_signed_by.name }}.{% endif %}
       </p>
@@ -3354,7 +3354,7 @@
         <div><button type="submit" class="btn small secondary">Add line</button></div>
       </form>
       <p class="muted" style="font-size:11.5px;margin-top:8px;">
-        {% if je.completed_by %}Posted by {{ je.completed_by.name }} on {{ je.completed_at.strftime('%d %b %Y') }}.{% else %}Not yet posted.{% endif %}
+        {% if je.completed_by %}Posted by {{ je.completed_by.name }} on {{ (je.completed_at|cat).strftime('%d %b %Y') }}.{% else %}Not yet posted.{% endif %}
         {% if je.is_reviewed %}Reviewed by {{ je.reviewed_by.name }}.{% endif %}
         {% if je.is_partner_signed %}Partner sign-off by {{ je.partner_signed_by.name }}.{% endif %}
       </p>
@@ -3438,7 +3438,7 @@
         <div><button type="submit" class="btn small secondary">Add item</button></div>
       </form>
       <p class="muted" style="font-size:11.5px;margin-top:8px;">
-        Prepared by {{ br.completed_by.name if br.completed_by else '—' }} on {{ br.completed_at.strftime('%d %b %Y') if br.completed_at else '—' }}.
+        Prepared by {{ br.completed_by.name if br.completed_by else '—' }} on {{ (br.completed_at|cat).strftime('%d %b %Y') if br.completed_at else '—' }}.
         {% if br.is_reviewed %}Reviewed by {{ br.reviewed_by.name }}.{% endif %}
         {% if br.is_partner_signed %}Partner sign-off by {{ br.partner_signed_by.name }}.{% endif %}
       </p>
@@ -3708,7 +3708,7 @@
         <div><button type="submit" class="btn small secondary">Add line</button></div>
       </form>
       <p class="muted" style="font-size:11.5px;margin-top:8px;">
-        Prepared by {{ b.completed_by.name if b.completed_by else '—' }} on {{ b.completed_at.strftime('%d %b %Y') if b.completed_at else '—' }}.
+        Prepared by {{ b.completed_by.name if b.completed_by else '—' }} on {{ (b.completed_at|cat).strftime('%d %b %Y') if b.completed_at else '—' }}.
         {% if b.is_reviewed %}Reviewed by {{ b.reviewed_by.name }}.{% endif %}
         {% if b.is_partner_signed %}Partner sign-off by {{ b.partner_signed_by.name }}.{% endif %}
       </p>
@@ -3821,7 +3821,7 @@
       </form>
       {% if narrative and narrative.id %}
       <p class="muted" style="font-size:11.5px;margin-top:6px;">
-        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ narrative.completed_at.strftime('%d %b %Y') if narrative.completed_at else '—' }}.
+        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ (narrative.completed_at|cat).strftime('%d %b %Y') if narrative.completed_at else '—' }}.
         {% if narrative.is_reviewed %}Reviewed by {{ narrative.reviewed_by.name }}.{% endif %}
         {% if narrative.is_partner_signed %}Partner sign-off by {{ narrative.partner_signed_by.name }}.{% endif %}
       </p>
@@ -3917,9 +3917,9 @@
   <div class="card">
     <h3 class="mt-0">Finalisation sign-off</h3>
     <p class="muted" style="font-size:12.5px;">
-      Prepared by {{ finalisation_checklist.completed_by.name if finalisation_checklist.completed_by else '—' }} on {{ finalisation_checklist.completed_at.strftime('%d %b %Y') if finalisation_checklist.completed_at else '—' }}.
-      {% if finalisation_checklist.is_reviewed %}Reviewed by {{ finalisation_checklist.reviewed_by.name }} on {{ finalisation_checklist.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if finalisation_checklist.is_partner_signed %}Partner sign-off by {{ finalisation_checklist.partner_signed_by.name }} on {{ finalisation_checklist.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ finalisation_checklist.completed_by.name if finalisation_checklist.completed_by else '—' }} on {{ (finalisation_checklist.completed_at|cat).strftime('%d %b %Y') if finalisation_checklist.completed_at else '—' }}.
+      {% if finalisation_checklist.is_reviewed %}Reviewed by {{ finalisation_checklist.reviewed_by.name }} on {{ (finalisation_checklist.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if finalisation_checklist.is_partner_signed %}Partner sign-off by {{ finalisation_checklist.partner_signed_by.name }} on {{ (finalisation_checklist.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if finalisation_checklist.is_reviewed %}
@@ -3975,7 +3975,7 @@
       <button type="submit" class="btn small secondary">Use directors on file</button>
     </form>
     {% if directors_statement and directors_statement.updated_at %}
-    <p class="muted" style="font-size:11px;margin-top:8px;">Last updated by {{ directors_statement.updated_by.name if directors_statement.updated_by else '—' }} on {{ directors_statement.updated_at.strftime('%d %b %Y') }}.</p>
+    <p class="muted" style="font-size:11px;margin-top:8px;">Last updated by {{ directors_statement.updated_by.name if directors_statement.updated_by else '—' }} on {{ (directors_statement.updated_at|cat).strftime('%d %b %Y') }}.</p>
     {% endif %}
   </div>
 
@@ -4021,9 +4021,9 @@
 
     {% if audit_opinion %}
     <p class="muted" style="font-size:12.5px;margin-top:10px;">
-      Drafted by {{ audit_opinion.completed_by.name if audit_opinion.completed_by else '—' }} on {{ audit_opinion.completed_at.strftime('%d %b %Y') if audit_opinion.completed_at else '—' }}.
-      {% if audit_opinion.is_reviewed %}Reviewed by {{ audit_opinion.reviewed_by.name }} on {{ audit_opinion.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if audit_opinion.is_partner_signed %}Partner sign-off by {{ audit_opinion.partner_signed_by.name }} on {{ audit_opinion.partner_signed_at.strftime('%d %b %Y') }} - report issued.{% endif %}
+      Drafted by {{ audit_opinion.completed_by.name if audit_opinion.completed_by else '—' }} on {{ (audit_opinion.completed_at|cat).strftime('%d %b %Y') if audit_opinion.completed_at else '—' }}.
+      {% if audit_opinion.is_reviewed %}Reviewed by {{ audit_opinion.reviewed_by.name }} on {{ (audit_opinion.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if audit_opinion.is_partner_signed %}Partner sign-off by {{ audit_opinion.partner_signed_by.name }} on {{ (audit_opinion.partner_signed_at|cat).strftime('%d %b %Y') }} - report issued.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if audit_opinion.is_reviewed %}
@@ -4102,9 +4102,9 @@
       </form>
       {% if narrative and narrative.id %}
       <p class="muted" style="font-size:12.5px;margin-top:10px;">
-        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ narrative.completed_at.strftime('%d %b %Y') if narrative.completed_at else '—' }}.
-        {% if narrative.is_reviewed %}Reviewed by {{ narrative.reviewed_by.name }} on {{ narrative.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-        {% if narrative.is_partner_signed %}Partner sign-off by {{ narrative.partner_signed_by.name }} on {{ narrative.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ (narrative.completed_at|cat).strftime('%d %b %Y') if narrative.completed_at else '—' }}.
+        {% if narrative.is_reviewed %}Reviewed by {{ narrative.reviewed_by.name }} on {{ (narrative.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+        {% if narrative.is_partner_signed %}Partner sign-off by {{ narrative.partner_signed_by.name }} on {{ (narrative.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
       </p>
       {% if current_user.role in ('supervisor', 'partner', 'admin') %}
         {% if narrative.is_reviewed %}
@@ -4148,7 +4148,7 @@
     {% if not trial_balance or not trial_balance.lines %}
     <div class="empty-state">No trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">enter or import it on the Trial Balance tab</a> first.</div>
     {% else %}
-    <p class="muted" style="font-size:11.5px;">{{ trial_balance.lines|length }} account(s){% if trial_balance.completed_by %}, last updated by {{ trial_balance.completed_by.name }} on {{ trial_balance.completed_at.strftime('%d %b %Y') }}{% endif %}. {{ trial_balance.unmapped_count }} unmapped.</p>
+    <p class="muted" style="font-size:11.5px;">{{ trial_balance.lines|length }} account(s){% if trial_balance.completed_by %}, last updated by {{ trial_balance.completed_by.name }} on {{ (trial_balance.completed_at|cat).strftime('%d %b %Y') }}{% endif %}. {{ trial_balance.unmapped_count }} unmapped.</p>
     {% endif %}
   </div>
 
@@ -4226,9 +4226,9 @@
       </form>
 
       <p class="muted" style="font-size:12px;margin-top:10px;">
-        Prepared by {{ adj.completed_by.name if adj.completed_by else '—' }} on {{ adj.completed_at.strftime('%d %b %Y') if adj.completed_at else '—' }}.
-        {% if adj.is_reviewed %}Reviewed by {{ adj.reviewed_by.name }} on {{ adj.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-        {% if adj.is_partner_signed %}Partner sign-off by {{ adj.partner_signed_by.name }} on {{ adj.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+        Prepared by {{ adj.completed_by.name if adj.completed_by else '—' }} on {{ (adj.completed_at|cat).strftime('%d %b %Y') if adj.completed_at else '—' }}.
+        {% if adj.is_reviewed %}Reviewed by {{ adj.reviewed_by.name }} on {{ (adj.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+        {% if adj.is_partner_signed %}Partner sign-off by {{ adj.partner_signed_by.name }} on {{ (adj.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
       </p>
       {% if current_user.role in ('supervisor', 'partner', 'admin') %}
         {% if adj.is_reviewed %}
@@ -4552,9 +4552,9 @@
     </form>
     {% if financial_statements %}
     <p class="muted" style="font-size:12.5px;margin-top:10px;">
-      Prepared by {{ financial_statements.completed_by.name if financial_statements.completed_by else '—' }} on {{ financial_statements.completed_at.strftime('%d %b %Y') if financial_statements.completed_at else '—' }}.
-      {% if financial_statements.is_reviewed %}Reviewed by {{ financial_statements.reviewed_by.name }} on {{ financial_statements.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if financial_statements.is_partner_signed %}Partner sign-off by {{ financial_statements.partner_signed_by.name }} on {{ financial_statements.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ financial_statements.completed_by.name if financial_statements.completed_by else '—' }} on {{ (financial_statements.completed_at|cat).strftime('%d %b %Y') if financial_statements.completed_at else '—' }}.
+      {% if financial_statements.is_reviewed %}Reviewed by {{ financial_statements.reviewed_by.name }} on {{ (financial_statements.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if financial_statements.is_partner_signed %}Partner sign-off by {{ financial_statements.partner_signed_by.name }} on {{ (financial_statements.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if financial_statements.is_reviewed %}
@@ -4898,7 +4898,7 @@
             <td class="muted">{{ d.filing_index.display_label if d.filing_index else '—' }}</td>
             <td>v{{ d.version }}</td>
             <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
-            <td>{{ d.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
+            <td>{{ (d.uploaded_at|cat).strftime('%d %b %Y %H:%M') }}</td>
             <td>
               <a href="{{ url_for('engagements.download_document', doc_id=d.id) }}" class="btn small secondary">Download</a>
               {% if user_has_permission(current_user, 'delete_documents') %}
@@ -4929,9 +4929,9 @@
     </form>
 
     <p class="muted" style="font-size:12px;margin-top:10px;">
-      Prepared by {{ area.completed_by.name if area.completed_by else '—' }} on {{ area.completed_at.strftime('%d %b %Y') if area.completed_at else '—' }}.
-      {% if area.is_reviewed %}Reviewed by {{ area.reviewed_by.name }} on {{ area.reviewed_at.strftime('%d %b %Y') }}.{% endif %}
-      {% if area.is_partner_signed %}Partner sign-off by {{ area.partner_signed_by.name }} on {{ area.partner_signed_at.strftime('%d %b %Y') }}.{% endif %}
+      Prepared by {{ area.completed_by.name if area.completed_by else '—' }} on {{ (area.completed_at|cat).strftime('%d %b %Y') if area.completed_at else '—' }}.
+      {% if area.is_reviewed %}Reviewed by {{ area.reviewed_by.name }} on {{ (area.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if area.is_partner_signed %}Partner sign-off by {{ area.partner_signed_by.name }} on {{ (area.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
     </p>
     {% if current_user.role in ('supervisor', 'partner', 'admin') %}
       {% if area.is_reviewed %}

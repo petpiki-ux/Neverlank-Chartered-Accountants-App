@@ -13,11 +13,11 @@
   </form>
   <p class="muted"><a href="{{ url_for('whistleblower_public.submit', token=token) }}">Make a new report instead</a></p>
   {% else %}
-  <p><strong>{{ case.reference }}</strong> &middot; received {{ case.received_at.strftime('%d %b %Y') }}</p>
+  <p><strong>{{ case.reference }}</strong> &middot; received {{ (case.received_at|cat).strftime('%d %b %Y') }}</p>
   <p>Status: <strong>{{ 'Closed' if case.is_closed else case.status }}</strong></p>
   <h3>Messages</h3>
   {% if messages %}
-    {% for m in messages %}<div class="msg {{ 'staff' if m.kind=='to_reporter' else 'you' }}"><div class="muted">{{ 'Investigator' if m.kind=='to_reporter' else 'You' }} &middot; {{ m.created_at.strftime('%d %b %Y %H:%M') }}</div>{{ m.body }}</div>{% endfor %}
+    {% for m in messages %}<div class="msg {{ 'staff' if m.kind=='to_reporter' else 'you' }}"><div class="muted">{{ 'Investigator' if m.kind=='to_reporter' else 'You' }} &middot; {{ (m.created_at|cat).strftime('%d %b %Y %H:%M') }}</div>{{ m.body }}</div>{% endfor %}
   {% else %}<p class="muted">No messages yet.</p>{% endif %}
   {% if sent %}<div class="ok">Your message has been added.</div>{% endif %}
   {% if not case.is_closed %}

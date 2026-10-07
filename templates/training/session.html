@@ -45,7 +45,7 @@
         <td><select form="att{{ a.id }}" name="status">{% for st in attendance_statuses %}<option {% if a.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></td>
         <td><input form="att{{ a.id }}" type="number" step="0.01" min="0" name="fee_paid" value="{{ a.fee_paid if a.fee_paid is not none else '' }}" style="width:6em;"></td>
         <td><input form="att{{ a.id }}" type="number" step="0.25" min="0" name="cpd_hours_awarded" value="{{ a.cpd_hours_awarded if a.cpd_hours_awarded is not none else '' }}" style="width:5em;"></td>
-        <td>{% if a.certificate_number %}{{ a.certificate_number }}<br><span class="muted" style="font-size:11px;">{{ a.certificate_issued_at.strftime('%d %b %Y') if a.certificate_issued_at }}</span>
+        <td>{% if a.certificate_number %}{{ a.certificate_number }}<br><span class="muted" style="font-size:11px;">{{ (a.certificate_issued_at|cat).strftime('%d %b %Y') if a.certificate_issued_at }}</span>
           {% elif a.status == 'Attended' %}<form method="post" action="{{ url_for('training.issue_certificate', attendee_id=a.id) }}" class="inline"><button type="submit" class="btn small secondary">Issue</button></form>
           {% else %}<span class="muted">—</span>{% endif %}</td>
         <td><button form="att{{ a.id }}" type="submit" class="btn small gold">Save</button>
@@ -80,7 +80,7 @@
       <tr>
         <td>{{ m.title }}</td>
         <td><a href="{{ url_for('engagements.download_document', doc_id=m.document_id) }}">{{ m.document.original_filename }}</a></td>
-        <td>{{ m.uploaded_at.strftime('%d %b %Y') }}</td>
+        <td>{{ (m.uploaded_at|cat).strftime('%d %b %Y') }}</td>
         <td class="text-right"><form method="post" action="{{ url_for('training.delete_material', material_id=m.id) }}" class="inline" onsubmit="return confirm('Detach this material from the session?')"><button type="submit" class="btn small danger">Detach</button></form></td>
       </tr>
       {% endfor %}

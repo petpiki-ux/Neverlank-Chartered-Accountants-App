@@ -100,12 +100,12 @@
     </div>
     <div>
       <label for="paid_on">Date paid (only used when status is Paid)</label>
-      <input type="date" id="paid_on" name="paid_on" value="{{ invoice.paid_at.strftime('%Y-%m-%d') if invoice.paid_at else '' }}" max="{{ today_iso }}">
+      <input type="date" id="paid_on" name="paid_on" value="{{ (invoice.paid_at|cat).strftime('%Y-%m-%d') if invoice.paid_at else '' }}" max="{{ today_iso }}">
     </div>
     <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Update</button></div>
   </form>
-  {% if invoice.paid_at %}<p class="muted" style="font-size:12px;">Marked paid on {{ invoice.paid_at.strftime('%d %b %Y') }}.</p>{% endif %}
-  <p class="muted" style="font-size:11.5px;">Created by {{ invoice.created_by.name if invoice.created_by else '—' }} on {{ invoice.created_at.strftime('%d %b %Y') if invoice.created_at else '—' }}.</p>
+  {% if invoice.paid_at %}<p class="muted" style="font-size:12px;">Marked paid on {{ (invoice.paid_at|cat).strftime('%d %b %Y') }}.</p>{% endif %}
+  <p class="muted" style="font-size:11.5px;">Created by {{ invoice.created_by.name if invoice.created_by else '—' }} on {{ (invoice.created_at|cat).strftime('%d %b %Y') if invoice.created_at else '—' }}.</p>
   <form method="post" action="{{ url_for('invoicing.delete_invoice', invoice_id=invoice.id) }}" onsubmit="return confirm('Delete this invoice? This cannot be undone.');" class="inline">
     <button type="submit" class="btn small danger">Delete invoice</button>
   </form>

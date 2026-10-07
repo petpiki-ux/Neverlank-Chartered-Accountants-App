@@ -26,6 +26,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 from models import Invoice, Expense, INVOICE_CURRENCIES
+from timeutil import to_cat
 
 DSO_WINDOW_DAYS = 90
 AGEING_BUCKETS = ["Not yet due", "1-30 days overdue", "31-60 days overdue", "61-90 days overdue", "Over 90 days overdue"]
@@ -102,7 +103,7 @@ def _invoice_rows(currency):
         gross = net * (1 + (inv.vat_pct or 0) / 100.0)
         paid = None
         if inv.status == "Paid":
-            paid = inv.paid_at.date() if inv.paid_at else inv.issue_date
+            paid = to_cat(inv.paid_at).date() if inv.paid_at else inv.issue_date
         eng = inv.engagement
         rows.append({
             "id": inv.id, "number": inv.invoice_number, "client_id": inv.client_id,

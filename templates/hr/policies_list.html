@@ -63,7 +63,7 @@
     </p>
     <p class="muted" style="font-size:12.5px;margin:4px 0;">
       {{ policy.description }}
-      {% if policy.description %}&middot; {% endif %}updated {{ policy.updated_at.strftime('%d %b %Y') if policy.updated_at else '—' }}{% if policy.updated_by %} by {{ policy.updated_by.name }}{% endif %}
+      {% if policy.description %}&middot; {% endif %}updated {{ (policy.updated_at|cat).strftime('%d %b %Y') if policy.updated_at else '—' }}{% if policy.updated_by %} by {{ policy.updated_by.name }}{% endif %}
     </p>
 
     {% if can_research %}

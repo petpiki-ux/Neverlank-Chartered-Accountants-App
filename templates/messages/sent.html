@@ -30,7 +30,7 @@
             {{ message.recipients|map(attribute='user.name')|join(', ') }}
           {% endif %}
         </td>
-        <td>{{ message.created_at.strftime('%d %b %Y %H:%M') if message.created_at else '—' }}</td>
+        <td>{{ (message.created_at|cat).strftime('%d %b %Y %H:%M') if message.created_at else '—' }}</td>
         <td><a href="{{ url_for('messages.view_message', message_id=message.id) }}" class="btn small secondary">Open</a></td>
       </tr>
       {% endfor %}

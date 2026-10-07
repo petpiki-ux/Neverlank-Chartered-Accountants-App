@@ -8,6 +8,10 @@ from sqlalchemy.engine import Engine
 
 from config import Config, INSTANCE_DIR
 from extensions import db, login_manager, socketio
+from timeutil import activate_cat, to_cat, now_cat, today_cat
+
+# Everything the app shows or calls "today" is Harare time (CAT, UTC+2) - see timeutil.py.
+activate_cat()
 from models import User, DocumentTemplate, Permission, FilingIndexSection, StatutoryDeadline, QPDInstalmentRate, StandardChartOfAccounts
 
 
@@ -625,6 +629,11 @@ def create_app():
         each day - see recurring.daily_check."""
         from recurring import daily_check
         daily_check(app)
+
+    # Stored timestamps are UTC; `{{ x.created_at|cat }}` shows them as CAT.
+    app.jinja_env.filters["cat"] = to_cat
+    app.jinja_env.globals["now_cat"] = now_cat
+    app.jinja_env.globals["today_cat"] = today_cat
 
     @app.context_processor
     def inject_globals():

@@ -10,6 +10,7 @@ from werkzeug.utils import secure_filename
 import openpyxl
 
 from extensions import db
+from timeutil import to_cat
 from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation, TimeSheet, TimeEntry,
@@ -182,7 +183,7 @@ def dashboard():
     for label, lo, hi in age_bucket_defs:
         matching = [
             q for q in open_queries
-            if lo <= (today - q.raised_at.date()).days and (hi is None or (today - q.raised_at.date()).days <= hi)
+            if lo <= (today - to_cat(q.raised_at).date()).days and (hi is None or (today - to_cat(q.raised_at).date()).days <= hi)
         ]
         query_aging.append({"label": label, "count": len(matching)})
     oldest_queries = sorted(open_queries, key=lambda q: q.raised_at)[:10]

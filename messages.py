@@ -19,6 +19,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from extensions import db
+from timeutil import to_cat
 from models import User, Message, MessageRecipient, MessageAttachment
 
 messages_bp = Blueprint("messages", __name__, url_prefix="/messages")
@@ -61,7 +62,7 @@ def _strip_prefixes(subject):
 
 
 def _quoted_original(original, label):
-    when = original.created_at.strftime("%d %b %Y %H:%M") if original.created_at else "—"
+    when = to_cat(original.created_at).strftime("%d %b %Y %H:%M") if original.created_at else "—"
     who = original.sender.name if original.sender else "—"
     return (
         f"\n\n---------- {label} message ----------\n"

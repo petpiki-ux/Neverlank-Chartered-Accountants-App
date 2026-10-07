@@ -119,8 +119,8 @@
     <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Update</button></div>
   </form>
   {% endif %}
-  {% if quotation.accepted_at %}<p class="muted" style="font-size:12px;">Accepted on {{ quotation.accepted_at.strftime('%d %b %Y') }}.</p>{% endif %}
-  <p class="muted" style="font-size:11.5px;">Created by {{ quotation.created_by.name if quotation.created_by else '—' }} on {{ quotation.created_at.strftime('%d %b %Y') if quotation.created_at else '—' }}.</p>
+  {% if quotation.accepted_at %}<p class="muted" style="font-size:12px;">Accepted on {{ (quotation.accepted_at|cat).strftime('%d %b %Y') }}.</p>{% endif %}
+  <p class="muted" style="font-size:11.5px;">Created by {{ quotation.created_by.name if quotation.created_by else '—' }} on {{ (quotation.created_at|cat).strftime('%d %b %Y') if quotation.created_at else '—' }}.</p>
   {% if not locked %}
   <form method="post" action="{{ url_for('quotations.delete_quotation', quotation_id=quotation.id) }}" onsubmit="return confirm('Delete this quotation? This cannot be undone.');" class="inline">
     <button type="submit" class="btn small danger">Delete quotation</button>

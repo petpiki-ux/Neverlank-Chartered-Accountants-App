@@ -36,8 +36,8 @@
       {% for c in my_checkins %}
       <tr>
         <td>{{ c.work_date.strftime('%a %d %b') }}</td>
-        <td>{{ c.check_in_at.strftime('%H:%M') }}</td>
-        <td>{{ c.check_out_at.strftime('%H:%M') if c.check_out_at else '—' }}</td>
+        <td>{{ (c.check_in_at|cat).strftime('%H:%M') }}</td>
+        <td>{{ (c.check_out_at|cat).strftime('%H:%M') if c.check_out_at else '—' }}</td>
         <td>{{ c.elapsed_hours if c.elapsed_hours is not none else '—' }}</td>
         <td class="muted" style="font-size:12px;">
           {% if c.is_open %}Still checked in{% elif c.time_entry_id %}Added to timesheet{% elif c.check_out_at %}Not added - timesheet already approved{% endif %}
@@ -90,7 +90,7 @@
         <td>{{ u.original_filename }}</td>
         <td class="muted">{{ u.period_label or '—' }}</td>
         {% if current_user.role in ('supervisor', 'partner', 'admin') %}<td>{{ u.user.name }}</td>{% endif %}
-        <td class="muted">{{ u.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
+        <td class="muted">{{ (u.uploaded_at|cat).strftime('%d %b %Y %H:%M') }}</td>
         <td class="text-right">
           <a href="{{ url_for('hr.download_timesheet_upload', upload_id=u.id) }}" class="btn small secondary">Download</a>
           <form method="post" action="{{ url_for('hr.delete_timesheet_upload', upload_id=u.id) }}" class="inline" onsubmit="return confirm('Delete this upload?')"><button type="submit" class="btn small danger">Delete</button></form>

@@ -50,8 +50,8 @@
     </nav>
     <div class="user-menu">
       {% if open_check_in %}
-      <form method="post" action="{{ url_for('hr.check_out') }}" class="inline" title="Checked in at {{ open_check_in.check_in_at.strftime('%H:%M') }}">
-        <button type="submit" class="btn small danger">Check Out ({{ open_check_in.check_in_at.strftime('%H:%M') }})</button>
+      <form method="post" action="{{ url_for('hr.check_out') }}" class="inline" title="Checked in at {{ (open_check_in.check_in_at|cat).strftime('%H:%M') }}">
+        <button type="submit" class="btn small danger">Check Out ({{ (open_check_in.check_in_at|cat).strftime('%H:%M') }})</button>
       </form>
       {% else %}
       <form method="post" action="{{ url_for('hr.check_in') }}" class="inline">

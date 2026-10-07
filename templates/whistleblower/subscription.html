@@ -45,7 +45,7 @@
   </div>
   <label for="notes">Notes</label>
   <textarea id="notes" name="notes" rows="2">{{ service.notes or '' }}</textarea>
-  {% if service.updated_at %}<p class="muted" style="font-size:11px;">Last saved {{ service.updated_at.strftime('%d %b %Y %H:%M') }}{% if service.updated_by %} by {{ service.updated_by.name }}{% endif %}.</p>{% endif %}
+  {% if service.updated_at %}<p class="muted" style="font-size:11px;">Last saved {{ (service.updated_at|cat).strftime('%d %b %Y %H:%M') }}{% if service.updated_by %} by {{ service.updated_by.name }}{% endif %}.</p>{% endif %}
   <button type="submit" class="btn gold">Save</button>
 </form>
 {% endblock %}

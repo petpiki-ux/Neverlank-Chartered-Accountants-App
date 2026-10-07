@@ -110,7 +110,7 @@
 </div>
 
 <div class="card">
-  <p class="muted" style="font-size:11.5px;">Created by {{ schedule.created_by.name if schedule.created_by else '—' }} on {{ schedule.created_at.strftime('%d %b %Y') if schedule.created_at else '—' }}.</p>
+  <p class="muted" style="font-size:11.5px;">Created by {{ schedule.created_by.name if schedule.created_by else '—' }} on {{ (schedule.created_at|cat).strftime('%d %b %Y') if schedule.created_at else '—' }}.</p>
   <form method="post" action="{{ url_for('recurring.delete_schedule', schedule_id=schedule.id) }}" onsubmit="return confirm('Delete this recurring schedule? Invoices it already raised are kept.');" class="inline">
     <button type="submit" class="btn small danger">Delete schedule</button>
   </form>

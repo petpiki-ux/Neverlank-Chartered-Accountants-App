@@ -10,9 +10,9 @@
 <div class="card">
   <div class="form-row">
     <div><strong>Reference:</strong> {{ case.reference }}</div>
-    <div><strong>Received:</strong> {{ case.received_at.strftime('%d %b %Y %H:%M') if case.received_at else '—' }}</div>
+    <div><strong>Received:</strong> {{ (case.received_at|cat).strftime('%d %b %Y %H:%M') if case.received_at else '—' }}</div>
     <div><strong>Channel:</strong> {{ case.channel or '—' }} ({{ 'submitted by the reporter' if case.source == 'portal' else 'logged by ' ~ (case.created_by.name if case.created_by else 'staff') }})</div>
-    {% if case.closed_at %}<div><strong>Closed:</strong> {{ case.closed_at.strftime('%d %b %Y') }} ({{ case.days_to_close }} day(s))</div>{% endif %}
+    {% if case.closed_at %}<div><strong>Closed:</strong> {{ (case.closed_at|cat).strftime('%d %b %Y') }} ({{ case.days_to_close }} day(s))</div>{% endif %}
   </div>
   {% if case.subject %}<h3>{{ case.subject }}</h3>{% endif %}
   <div style="white-space:pre-wrap;background:#fafafa;border:1px solid #e5e5e5;padding:10px;border-radius:4px;">{{ case.description }}</div>
@@ -38,7 +38,7 @@
   <div style="border-left:4px solid {% if n.kind=='from_reporter' %}#c0392b{% elif n.kind=='to_reporter' %}#2e7d32{% else %}#999{% endif %};padding:4px 10px;margin:8px 0;">
     <div class="muted" style="font-size:11px;">
       {% if n.kind=='from_reporter' %}<strong>Reporter (anonymous)</strong>{% elif n.kind=='to_reporter' %}<strong>Sent to reporter</strong> by {{ n.created_by.name if n.created_by else 'staff' }}{% else %}Internal note by {{ n.created_by.name if n.created_by else 'staff' }}{% endif %}
-      &middot; {{ n.created_at.strftime('%d %b %Y %H:%M') }}
+      &middot; {{ (n.created_at|cat).strftime('%d %b %Y %H:%M') }}
     </div>
     <div style="white-space:pre-wrap;">{{ n.body }}</div>
   </div>

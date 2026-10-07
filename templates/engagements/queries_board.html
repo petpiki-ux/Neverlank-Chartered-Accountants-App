@@ -32,7 +32,7 @@
         <td><a href="{{ url_for('engagements.view_engagement', engagement_id=q.engagement_id, tab=q.section) }}">{{ q.engagement.client.name }} - {{ q.engagement.title }}</a></td>
         <td>{{ q.section_label }}{% if q.area_name %} &middot; {{ q.area_name }}{% endif %}</td>
         <td>{{ q.raised_by.name if q.raised_by else '—' }}</td>
-        <td>{{ q.raised_at.strftime('%d %b %Y') if q.raised_at else '—' }}</td>
+        <td>{{ (q.raised_at|cat).strftime('%d %b %Y') if q.raised_at else '—' }}</td>
         <td><span class="badge {% if q.is_resolved %}status-Completed{% else %}status-Review{% endif %}">{{ q.status }}</span></td>
         <td>
           {% if current_user.role in ('supervisor', 'partner', 'admin') %}

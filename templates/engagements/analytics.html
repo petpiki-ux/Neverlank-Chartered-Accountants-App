@@ -132,7 +132,7 @@
         <tr>
           <td>{{ q.subject }}</td>
           <td><a href="{{ url_for('engagements.view_engagement', engagement_id=q.engagement_id, tab=q.section) }}">{{ q.engagement.title }}</a></td>
-          <td>{{ q.raised_at.strftime('%d %b %Y') }}</td>
+          <td>{{ (q.raised_at|cat).strftime('%d %b %Y') }}</td>
         </tr>
         {% endfor %}
       </tbody>

@@ -11,7 +11,7 @@
   {% for r in item.reviews %}
   <div class="muted" style="font-size:10.5px;margin:1px 0;">
     <span class="badge status-Completed" style="font-size:9.5px;">Reviewed</span>
-    {{ r.reviewer.name if r.reviewer else '—' }} on {{ r.reviewed_at.strftime('%d %b %Y') if r.reviewed_at else '—' }}{% if r.notes %} - {{ r.notes }}{% endif %}
+    {{ r.reviewer.name if r.reviewer else '—' }} on {{ (r.reviewed_at|cat).strftime('%d %b %Y') if r.reviewed_at else '—' }}{% if r.notes %} - {{ r.notes }}{% endif %}
     {% if r.reviewer_id == current_user.id or current_user.role in ('partner', 'admin') %}
     <form method="post" action="{{ url_for('engagements.delete_workpaper_review', review_id=r.id) }}" class="inline"><button type="submit" class="btn small secondary" style="font-size:9.5px;padding:0 4px;" title="Remove this review">&times;</button></form>
     {% endif %}

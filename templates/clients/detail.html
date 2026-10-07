@@ -105,7 +105,7 @@
         <td class="muted">
           {% if doc.permanent_file_entry %}{{ doc.permanent_file_entry.reference_code }}{% else %}—{% endif %}
         </td>
-        <td class="muted">{{ doc.uploaded_at.strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
+        <td class="muted">{{ (doc.uploaded_at|cat).strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
         <td>
           {% if doc.ai_status == 'done' %}
           <span class="badge risk-Low">Read - {{ doc.extracted_people|length }} suggested</span>
@@ -191,7 +191,7 @@
         </td>
         <td>v{{ doc.version }}</td>
         <td>{{ doc.uploaded_by.name if doc.uploaded_by else '—' }}</td>
-        <td>{{ doc.uploaded_at.strftime('%d %b %Y %H:%M') }}</td>
+        <td>{{ (doc.uploaded_at|cat).strftime('%d %b %Y %H:%M') }}</td>
         <td>
           <a href="{{ url_for('permanent_file.download_permanent_file_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
           {% if user_has_permission(current_user, 'delete_documents') %}
@@ -244,7 +244,7 @@
         <td class="muted">{{ doc.tax_head or '—' }}</td>
         <td class="muted">{{ doc.period_label or '—' }}</td>
         <td class="muted">{{ doc.reference or '—' }}</td>
-        <td class="muted">{{ doc.uploaded_at.strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
+        <td class="muted">{{ (doc.uploaded_at|cat).strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
         <td class="text-right">
           <a href="{{ url_for('filing_archive.download_filing_archive_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
           {% if can_delete_filing_archive %}
@@ -464,7 +464,7 @@
       <div class="form-row" style="margin-bottom:4px;">
         <div><span class="badge">{{ run.scope_label }}</span></div>
         <div class="muted" style="font-size:11.5px;">
-          {{ run.requested_at.strftime('%d %b %Y %H:%M') if run.requested_at else '—' }}
+          {{ (run.requested_at|cat).strftime('%d %b %Y %H:%M') if run.requested_at else '—' }}
           {% if run.requested_by %}by {{ run.requested_by.name }}{% endif %}
         </div>
       </div>

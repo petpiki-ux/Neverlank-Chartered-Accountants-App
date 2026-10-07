@@ -6,9 +6,9 @@
     <h1>{{ message.subject }}</h1>
     <div class="subtitle">
       From
-      {% if message.sender %}<span title="{{ 'Online now' if message.sender.is_online else ('Last seen ' + message.sender.last_seen_at.strftime('%d %b %H:%M') if message.sender.last_seen_at else 'Never logged in') }}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ '#2ecc71' if message.sender.is_online else '#bbb' }};margin-right:4px;"></span>{% endif %}
+      {% if message.sender %}<span title="{{ 'Online now' if message.sender.is_online else ('Last seen ' + (message.sender.last_seen_at|cat).strftime('%d %b %H:%M') if message.sender.last_seen_at else 'Never logged in') }}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ '#2ecc71' if message.sender.is_online else '#bbb' }};margin-right:4px;"></span>{% endif %}
       {{ message.sender.name if message.sender else '—' }}
-      &middot; {{ message.created_at.strftime('%d %b %Y %H:%M') if message.created_at else '—' }}
+      &middot; {{ (message.created_at|cat).strftime('%d %b %Y %H:%M') if message.created_at else '—' }}
     </div>
   </div>
   <div>
@@ -68,14 +68,14 @@
         <td>{{ r.user.name if r.user else '—' }}</td>
         <td>
           {% if r.user %}
-          <span title="{{ 'Online now' if r.user.is_online else ('Last seen ' + r.user.last_seen_at.strftime('%d %b %H:%M') if r.user.last_seen_at else 'Never logged in') }}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ '#2ecc71' if r.user.is_online else '#bbb' }};"></span>
+          <span title="{{ 'Online now' if r.user.is_online else ('Last seen ' + (r.user.last_seen_at|cat).strftime('%d %b %H:%M') if r.user.last_seen_at else 'Never logged in') }}" style="display:inline-block;width:8px;height:8px;border-radius:50%;background:{{ '#2ecc71' if r.user.is_online else '#bbb' }};"></span>
           {% else %}—{% endif %}
         </td>
         <td>
           {% if r.is_recalled %}
-          <span class="badge overdue">Recalled {{ r.recalled_at.strftime('%d %b %Y %H:%M') }}</span>
+          <span class="badge overdue">Recalled {{ (r.recalled_at|cat).strftime('%d %b %Y %H:%M') }}</span>
           {% elif r.is_read %}
-          <span class="badge status-Completed">&#10003;&#10003; Read {{ r.read_at.strftime('%d %b %Y %H:%M') }}</span>
+          <span class="badge status-Completed">&#10003;&#10003; Read {{ (r.read_at|cat).strftime('%d %b %Y %H:%M') }}</span>
           {% else %}
           <span class="badge status-Review">&#10003; Delivered - not yet read</span>
           {% endif %}

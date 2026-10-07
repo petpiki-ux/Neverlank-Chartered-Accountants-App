@@ -21,14 +21,14 @@
       </div>
       <p style="margin:4px 0;">{{ q.message }}</p>
       <p class="muted" style="font-size:11.5px;">
-        Raised by {{ q.raised_by.name if q.raised_by else '—' }} on {{ q.raised_at.strftime('%d %b %Y %H:%M') if q.raised_at else '—' }}
-        {% if q.is_resolved %} &middot; Resolved by {{ q.resolved_by.name if q.resolved_by else '—' }} on {{ q.resolved_at.strftime('%d %b %Y') if q.resolved_at else '—' }}{% if q.resolved_via_partner_override %} <span class="badge">Partner override - no written reply</span>{% if q.partner_override_notes %} - {{ q.partner_override_notes }}{% endif %}{% endif %}{% endif %}
+        Raised by {{ q.raised_by.name if q.raised_by else '—' }} on {{ (q.raised_at|cat).strftime('%d %b %Y %H:%M') if q.raised_at else '—' }}
+        {% if q.is_resolved %} &middot; Resolved by {{ q.resolved_by.name if q.resolved_by else '—' }} on {{ (q.resolved_at|cat).strftime('%d %b %Y') if q.resolved_at else '—' }}{% if q.resolved_via_partner_override %} <span class="badge">Partner override - no written reply</span>{% if q.partner_override_notes %} - {{ q.partner_override_notes }}{% endif %}{% endif %}{% endif %}
       </p>
 
       {% if q.replies %}
       <div style="margin:6px 0 6px 14px;border-left:2px solid #eee;padding-left:10px;">
         {% for r in q.replies %}
-        <p style="font-size:12.5px;margin:4px 0;"><strong>{{ r.author.name if r.author else '—' }}:</strong> {{ r.message }} <span class="muted" style="font-size:11px;">({{ r.created_at.strftime('%d %b %Y %H:%M') if r.created_at else '—' }})</span></p>
+        <p style="font-size:12.5px;margin:4px 0;"><strong>{{ r.author.name if r.author else '—' }}:</strong> {{ r.message }} <span class="muted" style="font-size:11px;">({{ (r.created_at|cat).strftime('%d %b %Y %H:%M') if r.created_at else '—' }})</span></p>
         {% endfor %}
       </div>
       {% endif %}

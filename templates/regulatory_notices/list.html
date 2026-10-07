@@ -56,7 +56,7 @@
           {% if notice.notes %}<div class="muted" style="font-size:12px;">{{ notice.notes }}</div>{% endif %}
         </td>
         <td class="muted">{{ notice.notice_date.strftime('%d %b %Y') if notice.notice_date else '—' }}</td>
-        <td class="muted">{{ notice.uploaded_at.strftime('%d %b %Y') if notice.uploaded_at else '—' }}{% if notice.uploaded_by %} by {{ notice.uploaded_by.name }}{% endif %}</td>
+        <td class="muted">{{ (notice.uploaded_at|cat).strftime('%d %b %Y') if notice.uploaded_at else '—' }}{% if notice.uploaded_by %} by {{ notice.uploaded_by.name }}{% endif %}</td>
         <td>
           {% if notice.extraction_status == 'extracted' %}
           <span class="badge risk-Low">Searchable ({{ notice.page_count }} pg)</span>
