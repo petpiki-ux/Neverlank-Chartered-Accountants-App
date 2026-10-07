@@ -551,6 +551,7 @@ def create_app():
     from invoicing import invoicing_bp
     from quotations import quotations_bp
     from recurring import recurring_bp
+    from finance import analytics_bp, expenses_bp
     from regulatory_notices import regulatory_notices_bp
     from company_documents import company_documents_bp
     from payroll import payroll_bp
@@ -577,6 +578,8 @@ def create_app():
     app.register_blueprint(invoicing_bp)
     app.register_blueprint(quotations_bp)
     app.register_blueprint(recurring_bp)
+    app.register_blueprint(analytics_bp)
+    app.register_blueprint(expenses_bp)
     app.register_blueprint(regulatory_notices_bp)
     app.register_blueprint(company_documents_bp)
     app.register_blueprint(payroll_bp)

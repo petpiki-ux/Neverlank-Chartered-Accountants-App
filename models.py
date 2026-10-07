@@ -440,6 +440,10 @@ PERMISSIONS = [
      "Add, edit, deactivate or delete entries in the firm's Standard Chart of Accounts (Neverlank Standard) - the "
      "numbered account list used to speed up mapping a client's trial balance accounts to an IAS 1 category.",
      ("partner", "admin")),
+    ("view_firm_finances", "View Firm Finances & Analytics",
+     "Open the Revenue & Expenses Analytics page (debtors days, ageing, revenue, expenses, profit) and the firm's "
+     "Expense register. These show the firm's overall income and costs, so this defaults to Partner/Admin only.",
+     ("partner", "admin")),
     ("research_firm_library", "Research the Firm Library",
      "Use \"Ask the Firm Library\" to query the Policies & Procedures library with AI and see the AI-generated "
      "summary/key points on each document. Viewing and downloading policies is unaffected by this setting and "
@@ -8801,6 +8805,50 @@ class RecurringInvoiceLine(db.Model):
     @property
     def line_total(self):
         return (self.quantity or 0) * (self.unit_price or 0)
+
+
+# ---------------------------------------------------------------------------
+# Firm expenses (the firm's OWN running costs - rent, salaries, software,
+# etc. - as opposed to GLAccount/JournalEntry, which hold a CLIENT's books).
+# Feeds the Revenue & Expenses Analytics page (analytics.py). Kept simple on
+# purpose: one row per bill/payment, in one currency. Enter the cost to the
+# firm EXCLUDING any VAT the firm can claim back, so that profit compares
+# like with like against invoice revenue (which is also measured excl. VAT).
+# ---------------------------------------------------------------------------
+
+EXPENSE_CATEGORIES = [
+    "Salaries & wages", "Rent & premises", "Utilities", "Telecoms & internet",
+    "Software & subscriptions", "Professional fees", "Insurance",
+    "Travel & transport", "Marketing", "Training & CPD",
+    "Professional bodies & licences", "Office & stationery", "Repairs & maintenance",
+    "Bank charges", "Taxes & levies", "Other",
+]
+EXPENSE_STATUSES = ["Unpaid", "Paid"]
+
+
+class Expense(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    expense_date = db.Column(db.Date, nullable=False, default=date.today)  # bill / cost date
+    supplier = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.String(300))
+    category = db.Column(db.String(60), nullable=False, default="Other")
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    status = db.Column(db.String(10), nullable=False, default="Paid")
+    due_date = db.Column(db.Date)   # when an unpaid bill must be settled
+    paid_date = db.Column(db.Date)
+    reference = db.Column(db.String(100))
+    # optional: a cost incurred for one client / engagement (e.g. a filing
+    # fee), so per-engagement profitability can be added later
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"))
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("expenses", lazy=True))
+    engagement = db.relationship("Engagement", backref=db.backref("expenses", lazy=True))
+    created_by = db.relationship("User")
 
 
 # ---------------------------------------------------------------------------

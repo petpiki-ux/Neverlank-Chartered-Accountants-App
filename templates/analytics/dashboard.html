@@ -1,0 +1,251 @@
+{% extends "base.html" %}
+{% block title %}Revenue &amp; Expenses Analytics - {{ firm_name }}{% endblock %}
+{% macro delta(val, up_good=True) -%}
+  {%- if val is not none -%}
+    {%- set cls = 'flat' if (val|abs) < 1 else ('good' if (val > 0) == up_good else 'bad') -%}
+    <span class="delta {{ cls }}">{{ '&#9650;'|safe if val >= 1 else ('&#9660;'|safe if val <= -1 else '&#9644;'|safe) }} {{ change(val) }}</span> <span class="an-note">vs previous period</span>
+  {%- else -%}<span class="an-note">no previous period to compare</span>{%- endif -%}
+{%- endmacro %}
+{% macro card(id, title, sub, table_hint=True) %}
+<div class="viz-card" id="chart-{{ id }}">
+  <div class="viz-head">
+    <div><h3>{{ title }}</h3>{% if sub %}<div class="viz-sub">{{ sub }}</div>{% endif %}</div>
+    <button type="button" class="viz-toggle" title="Show the numbers behind this chart">Table</button>
+  </div>
+  <div class="viz-legend-host"></div>
+  <div class="viz-plot"></div>
+  <div class="viz-table-host" hidden></div>
+</div>
+{% endmacro %}
+
+{% block content %}
+{% set cur = r.currency %}
+<div class="page-header">
+  <div>
+    <h1>Revenue &amp; Expenses Analytics</h1>
+    <div class="subtitle">{{ r.label }} &middot; all figures in {{ cur }} (USD and ZWG are never added together)</div>
+  </div>
+  <div>
+    <a href="{{ url_for('expenses.list_expenses') }}" class="btn secondary">Expense register</a>
+    <a href="{{ url_for('expenses.new_expense') }}" class="btn gold">+ Add expense</a>
+  </div>
+</div>
+
+<form method="get" class="an-filters">
+  <div>
+    <label>Currency</label>
+    <span class="seg">
+      {% for c in currencies %}<a href="{{ url_for('analytics.dashboard', currency=c, period=r.preset if r.preset != 'custom' else None, **({'from': r.start.isoformat(), 'to': r.end.isoformat()} if r.preset == 'custom' else {})) }}" class="{{ 'on' if c == cur }}">{{ c }}</a>{% endfor %}
+    </span>
+  </div>
+  <input type="hidden" name="currency" value="{{ cur }}">
+  <div>
+    <label for="period">Period</label>
+    <select id="period" name="period" onchange="this.form.submit()">
+      {% for key, name in presets %}<option value="{{ key }}" {% if r.preset == key %}selected{% endif %}>{{ name }}</option>{% endfor %}
+      {% if r.preset == 'custom' %}<option value="custom" selected>Custom range</option>{% endif %}
+    </select>
+  </div>
+  <div><label for="from">Or from</label><input type="date" id="from" name="from" value="{{ r.start.isoformat() if r.preset == 'custom' else '' }}"></div>
+  <div><label for="to">to</label><input type="date" id="to" name="to" value="{{ r.end.isoformat() if r.preset == 'custom' else '' }}"></div>
+  <div><button class="btn small" type="submit">Apply</button></div>
+</form>
+
+{% if not r.has_invoices and not r.has_expenses %}
+<div class="flash info">There are no issued {{ cur }} invoices or recorded {{ cur }} expenses yet, so there is nothing to analyse. Invoices count once they are marked <strong>Sent</strong>; costs come from the <a href="{{ url_for('expenses.list_expenses') }}">Expense register</a>.</div>
+{% endif %}
+
+{# ---------- headline numbers ---------- #}
+{% set terms = k.avg_terms %}
+<div class="kpi-grid top">
+  <div class="kpi hero">
+    <div class="kpi-label">Debtors days (DSO) as at {{ r.end.strftime('%d %b %Y') }}
+      {% if k.dso is not none and terms is not none %}
+        {% if k.dso <= terms + 5 %}<span class="pill good">&#10003; on terms</span>
+        {% elif k.dso <= terms + 20 %}<span class="pill warn">&#9888; slipping</span>
+        {% else %}<span class="pill bad">&#9888; slow</span>{% endif %}
+      {% endif %}
+    </div>
+    <div class="kpi-value">{{ num(k.dso, 0) }}<span style="font-size:18px;font-weight:500;color:#52514e;"> days</span></div>
+    <div class="kpi-sub">
+      {% if k.dso is none %}No invoices issued in the last {{ payload.dso_window }} days to measure against.
+      {% else %}It would take about {{ num(k.dso, 0) }} days of billing to collect everything clients owe.
+        {% if terms is not none %} Your invoices allow about {{ num(terms, 0) }} days to pay.{% endif %}
+        {% if k.dso_prev is not none %} Previous period: {{ num(k.dso_prev, 0) }} days.{% endif %}
+      {% endif %}
+    </div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Owed by clients</div>
+    <div class="kpi-value">{{ money(k.owed, cur) }}</div>
+    <div class="kpi-sub">{{ k.owed_count }} unpaid invoice{{ '' if k.owed_count == 1 else 's' }}, incl. VAT.
+      {% if k.overdue %}<strong>{{ money(k.overdue, cur) }}</strong> ({{ num(k.overdue_pct, 0) }}%) is overdue.{% endif %}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Revenue invoiced (excl. VAT)</div>
+    <div class="kpi-value">{{ money(k.revenue, cur) }}</div>
+    <div class="kpi-sub">{{ delta(k.revenue_change) }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Cash collected (excl. VAT)</div>
+    <div class="kpi-value">{{ money(k.collected, cur) }}</div>
+    <div class="kpi-sub">{{ delta(k.collected_change) }}</div>
+  </div>
+  <div class="kpi">
+    <div class="kpi-label">Expenses</div>
+    <div class="kpi-value">{{ money(k.expenses, cur) }}</div>
+    <div class="kpi-sub">{{ delta(k.expenses_change, up_good=False) }}</div>
+  </div>
+</div>
+<div class="kpi-grid">
+  <div class="kpi">
+    <div class="kpi-label">Net result (revenue &minus; expenses)</div>
+    <div class="kpi-value" style="{{ 'color:#b3261e;' if k.profit < 0 }}">{{ money(k.profit, cur) }}</div>
+    <div class="kpi-sub">{% if k.margin is not none %}Margin {{ num(k.margin, 0) }}% of revenue.{% else %}No revenue in this period.{% endif %}</div>
+  </div>
+  <div class="kpi"><div class="kpi-label">Average days clients take to pay</div>
+    <div class="kpi-value">{{ num(k.avg_days_to_pay, 0) }}<span style="font-size:14px;color:#52514e;"> days</span></div>
+    <div class="kpi-sub">Invoices paid in this period{% if terms is not none %}; terms allow about {{ num(terms, 0) }} days{% endif %}.</div></div>
+  <div class="kpi"><div class="kpi-label">Share of billing already collected</div>
+    <div class="kpi-value">{{ num(k.collection_rate, 0) }}<span style="font-size:14px;color:#52514e;">%</span></div>
+    <div class="kpi-sub">Of invoices raised in this period (incl. VAT).</div></div>
+  <div class="kpi"><div class="kpi-label">Creditor days (how fast you pay suppliers)</div>
+    <div class="kpi-value">{{ num(k.creditor_days, 0) }}<span style="font-size:14px;color:#52514e;"> days</span></div>
+    <div class="kpi-sub">{{ money(k.creditors, cur) }} of bills currently unpaid.</div></div>
+  <div class="kpi"><div class="kpi-label">Reliance on your 5 biggest clients</div>
+    <div class="kpi-value">{{ num(k.top5_share, 0) }}<span style="font-size:14px;color:#52514e;">%</span></div>
+    <div class="kpi-sub">Share of this period's revenue.</div></div>
+</div>
+
+{# ---------- debtors ---------- #}
+<h2 class="an-section">Debtors <small>Who owes the firm money, and how late it is</small></h2>
+<div class="viz-grid">
+  {{ card('dso', 'Debtors days trend', 'Measured at each month-end. Lower is better.') }}
+  {{ card('ageing', 'Debtors ageing', 'What clients owe now, by how long past the due date (incl. VAT).') }}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Overdue invoices</h3>
+  {% if r.overdue_list %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Invoice</th><th>Client</th><th>Was due</th><th class="num">Days overdue</th><th class="num">Amount ({{ cur }})</th></tr></thead>
+    <tbody>
+    {% for o in r.overdue_list[:15] %}
+      <tr>
+        <td>{% if o.can_open %}<a href="{{ url_for('invoicing.view_invoice', invoice_id=o.id) }}">{{ o.number }}</a>{% else %}{{ o.number }}{% endif %}</td>
+        <td>{{ o.client }}</td><td>{{ o.due.strftime('%d %b %Y') }}</td>
+        <td class="num">{{ o.days_overdue }}</td><td class="num">{{ '{:,.2f}'.format(o.amount) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if r.overdue_list|length > 15 %}<p class="an-note">Showing the 15 most overdue of {{ r.overdue_list|length }}. <a href="{{ url_for('invoicing.list_invoices', status='Sent') }}">See all sent invoices</a>.</p>{% endif %}
+  {% else %}<p class="muted">No overdue {{ cur }} invoices. Everything issued is either paid or not yet due.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">How each client pays</h3>
+  {% if r.clients %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Client</th><th class="num">Invoiced this period (excl. VAT)</th><th class="num">Owes now</th><th class="num">Overdue</th><th class="num">Oldest overdue (days)</th><th class="num">Usually pays in (days)</th></tr></thead>
+    <tbody>
+    {% for c in r.clients[:25] %}
+      <tr>
+        <td><a href="{{ url_for('clients.view_client', client_id=c.client_id) }}">{{ c.client }}</a></td>
+        <td class="num">{{ '{:,.2f}'.format(c.invoiced) }}</td>
+        <td class="num">{{ '{:,.2f}'.format(c.outstanding) }}</td>
+        <td class="num" style="{{ 'color:#b3261e;font-weight:600;' if c.overdue }}">{{ '{:,.2f}'.format(c.overdue) if c.overdue else '-' }}</td>
+        <td class="num">{{ c.oldest_overdue if c.oldest_overdue else '-' }}</td>
+        <td class="num">{{ num(c.avg_days_to_pay, 0) }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="an-note">"Usually pays in" is the average over every invoice that client has paid. Sorted with the most overdue first.</p>
+  {% else %}<p class="muted">No {{ cur }} invoices have been issued yet.</p>{% endif %}
+</div>
+
+{# ---------- revenue ---------- #}
+<h2 class="an-section">Revenue <small>What was billed, what was collected, and where it comes from</small></h2>
+<div class="viz-grid">
+  {{ card('revenue', 'Invoiced vs collected, by month', 'Excluding VAT. Collected = month the invoice was marked Paid.') }}
+  {{ card('yoy', 'Revenue vs the same month last year', 'Invoiced, excluding VAT.') }}
+  {{ card('service', 'Revenue by service', 'Grouped by the type of engagement the invoice belongs to.') }}
+  {{ card('clients', 'Revenue by client', 'Top clients this period.') }}
+</div>
+
+{# ---------- expenses & profit ---------- #}
+<h2 class="an-section">Expenses &amp; profit <small>From the <a href="{{ url_for('expenses.list_expenses') }}">Expense register</a></small></h2>
+{% if not r.has_expenses %}
+<div class="flash info">No {{ cur }} expenses have been recorded yet. <a href="{{ url_for('expenses.new_expense') }}">Add the firm's first expense</a> and the charts below will fill in.</div>
+{% endif %}
+<div class="viz-grid">
+  {{ card('profit', 'Revenue vs expenses, by month', 'Revenue is invoiced excl. VAT; expenses by bill date.') }}
+  {{ card('net', 'Net result, by month', 'Revenue minus expenses. Red bars are months that lost money.') }}
+  {{ card('category', 'Expenses by category', 'Where the money went this period.') }}
+</div>
+<div class="card">
+  <h3 style="margin-top:0;">Unpaid bills</h3>
+  {% if r.unpaid_list %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Supplier</th><th>Category</th><th>Bill date</th><th>Due</th><th class="num">Days overdue</th><th class="num">Amount ({{ cur }})</th><th></th></tr></thead>
+    <tbody>
+    {% for e in r.unpaid_list[:15] %}
+      <tr>
+        <td>{{ e.supplier }}</td><td>{{ e.category }}</td><td>{{ e.date.strftime('%d %b %Y') }}</td><td>{{ e.due.strftime('%d %b %Y') }}</td>
+        <td class="num">{{ e.days_overdue if e.days_overdue > 0 else '-' }}</td><td class="num">{{ '{:,.2f}'.format(e.amount) }}</td>
+        <td><a href="{{ url_for('expenses.edit_expense', expense_id=e.id) }}">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">No unpaid {{ cur }} bills.</p>{% endif %}
+</div>
+
+<details class="card" style="margin-top:18px;">
+  <summary style="cursor:pointer;font-weight:600;">How these numbers are worked out</summary>
+  <dl class="an-defs">
+    <dt>Which invoices count</dt><dd>Invoices marked <em>Sent</em> or <em>Paid</em>. Drafts and Cancelled invoices are ignored. Each currency is analysed on its own.</dd>
+    <dt>Revenue</dt><dd>Invoice value excluding VAT, by invoice date. Expenses should likewise be entered excluding any VAT the firm can claim back, so profit compares like with like.</dd>
+    <dt>Cash collected</dt><dd>Invoice value excluding VAT, in the month the invoice was marked Paid (the "date paid" you chose). Mark invoices Paid with the right date for this to be accurate.</dd>
+    <dt>Debtors days (DSO)</dt><dd>What clients owe (incl. VAT) at a date, divided by the last {{ payload.dso_window }} days of invoicing (incl. VAT), multiplied by {{ payload.dso_window }}. It is roughly how many days of sales are sitting unpaid.</dd>
+    <dt>Ageing</dt><dd>Unpaid invoices grouped by how many days they are past their due date.</dd>
+    <dt>Creditor days</dt><dd>The same calculation on the firm's own unpaid bills.</dd>
+    <dt>Comparison arrows</dt><dd>Compare with the period of the same length immediately before the one selected.</dd>
+  </dl>
+</details>
+
+<script type="application/json" id="an-data">{{ payload|tojson }}</script>
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+(function () {
+  var D = JSON.parse(document.getElementById('an-data').textContent), cur = D.currency;
+  var labels = D.months.map(function (m) { return m.label; });
+  var BLUE = '#2a78d6', AQUA = '#1baf7a', ORANGE = '#eb6834', GREY = '#a9a7a0';
+  var AGE = ['#86b6ef', '#5598e7', '#2a78d6', '#1c5cab', '#104281'];
+  function go(id, spec) { var el = document.getElementById('chart-' + id); if (el && window.NLCharts) NLCharts.render(el, spec); }
+  var base = { currency: cur, unit: 'money' };
+  function s(name, color, values, extra) { var o = { name: name, color: color, values: values }; for (var k in (extra || {})) o[k] = extra[k]; return o; }
+  function mk(o) { for (var k in base) if (!(k in o)) o[k] = base[k]; return o; }
+
+  go('dso', mk({ type: 'line', title: 'Debtors days trend', unit: 'days', labels: labels,
+    series: [s('Debtors days', BLUE, D.series.dso)], emptyText: 'No invoices issued yet, so debtors days cannot be measured.' }));
+  go('ageing', mk({ type: 'hbars', title: 'Debtors ageing', itemHeader: 'How late', valueHeader: 'Owed (' + cur + ')',
+    items: D.ageing.map(function (b, i) { return { label: b.label, value: b.value, count: b.count, color: AGE[i] }; }).filter(function () { return D.ageing.some(function (x) { return x.value > 0; }); }),
+    emptyText: 'Nobody owes the firm anything right now.' }));
+  go('revenue', mk({ type: 'columns', title: 'Invoiced vs collected', labels: labels,
+    series: [s('Invoiced', BLUE, D.series.revenue), s('Collected', AQUA, D.series.collected)] }));
+  go('yoy', mk({ type: 'line', title: 'Revenue vs last year', labels: labels,
+    series: [s('Last year', GREY, D.series.prior_year, { noMarker: true }), s('This year', BLUE, D.series.revenue)] }));
+  function ranked(list, color) { return list.map(function (x) { return { label: x.label, value: x.value, share: x.share, color: color, muted: x.label === 'Other' }; }); }
+  go('service', mk({ type: 'hbars', title: 'Revenue by service', color: BLUE, itemHeader: 'Service', valueHeader: 'Revenue (' + cur + ')', items: ranked(D.by_service, BLUE) }));
+  go('clients', mk({ type: 'hbars', title: 'Revenue by client', color: BLUE, itemHeader: 'Client', valueHeader: 'Revenue (' + cur + ')', items: ranked(D.by_client, BLUE) }));
+  go('profit', mk({ type: 'columns', title: 'Revenue vs expenses', labels: labels,
+    series: [s('Revenue', BLUE, D.series.revenue), s('Expenses', ORANGE, D.series.expenses)] }));
+  go('net', mk({ type: 'columns', title: 'Net result', labels: labels, diverging: true,
+    series: [s('Net result', BLUE, D.series.profit)] }));
+  go('category', mk({ type: 'hbars', title: 'Expenses by category', color: ORANGE, itemHeader: 'Category', valueHeader: 'Spent (' + cur + ')',
+    items: ranked(D.by_category, ORANGE), emptyText: 'No expenses recorded for this period.' }));
+})();
+</script>
+{% endblock %}

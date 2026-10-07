@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if expense else 'Add' }} expense - {{ firm_name }}{% endblock %}
+{% block content %}
+{% macro val(name, default='') %}{{ form.get(name) if form and form.get(name) is not none else (expense[name] if expense and expense[name] is not none else default) }}{% endmacro %}
+<div class="page-header">
+  <div><h1>{{ 'Edit expense' if expense else 'Add an expense' }}</h1>
+  <div class="subtitle">Enter the cost to the firm <strong>excluding</strong> any VAT you can claim back, so profit compares like with like with invoice revenue.</div></div>
+  <div><a href="{{ url_for('expenses.list_expenses') }}" class="btn secondary">Back to register</a></div>
+</div>
+<div class="card">
+  <form method="post">
+    <div class="form-row">
+      <div class="form-group"><label for="expense_date">Bill / cost date</label>
+        <input type="date" id="expense_date" name="expense_date" required value="{{ form.get('expense_date') or (expense.expense_date.isoformat() if expense else today) }}"></div>
+      <div class="form-group"><label for="supplier">Paid to (supplier)</label>
+        <input type="text" id="supplier" name="supplier" required maxlength="200" value="{{ val('supplier') }}" placeholder="e.g. Michael House Landlord"></div>
+      <div class="form-group"><label for="category">Category</label>
+        <select id="category" name="category">{% set cat = form.get('category') or (expense.category if expense else '') %}{% for c in categories %}<option {% if cat==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label for="amount">Amount</label>
+        <input type="number" step="0.01" min="0" id="amount" name="amount" required value="{{ val('amount') }}"></div>
+      <div class="form-group"><label for="currency">Currency</label>
+        <select id="currency" name="currency">{% set cu = form.get('currency') or (expense.currency if expense else 'USD') %}{% for c in currencies %}<option {% if cu==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+      <div class="form-group"><label for="status">Status</label>
+        <select id="status" name="status">{% set st = form.get('status') or (expense.status if expense else 'Paid') %}{% for s in statuses %}<option {% if st==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label for="paid_date">Date paid (if paid)</label>
+        <input type="date" id="paid_date" name="paid_date" value="{{ form.get('paid_date') or (expense.paid_date.isoformat() if expense and expense.paid_date else '') }}"></div>
+      <div class="form-group"><label for="due_date">Due date (if unpaid)</label>
+        <input type="date" id="due_date" name="due_date" value="{{ form.get('due_date') or (expense.due_date.isoformat() if expense and expense.due_date else '') }}"></div>
+      <div class="form-group"><label for="reference">Reference / invoice no.</label>
+        <input type="text" id="reference" name="reference" maxlength="100" value="{{ val('reference') }}"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label for="description">What was it for?</label>
+        <input type="text" id="description" name="description" maxlength="300" value="{{ val('description') }}"></div>
+      <div class="form-group"><label for="client_id">Incurred for a client (optional)</label>
+        <select id="client_id" name="client_id"><option value="">-</option>{% set cid = (form.get('client_id') or (expense.client_id|string if expense and expense.client_id else '')) %}{% for c in clients %}<option value="{{ c.id }}" {% if cid==c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-group"><label for="notes">Notes</label><textarea id="notes" name="notes" rows="2">{{ val('notes') }}</textarea></div>
+    <button class="btn gold" type="submit">Save expense</button>
+    {% if not expense %}<button class="btn secondary" type="submit" name="add_another" value="1">Save &amp; add another</button>{% endif %}
+  </form>
+</div>
+{% endblock %}

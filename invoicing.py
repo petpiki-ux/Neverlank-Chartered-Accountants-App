@@ -166,7 +166,7 @@ def view_invoice(invoice_id):
     invoice = Invoice.query.get_or_404(invoice_id)
     _ensure_invoice_access(invoice)
     from models import RECURRING_FREQUENCIES
-    return render_template("invoicing/detail.html", invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES))
+    return render_template("invoicing/detail.html", invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES), today_iso=date.today().isoformat())
 
 
 @invoicing_bp.route("/<int:invoice_id>/print")
@@ -243,7 +243,16 @@ def update_invoice_status(invoice_id):
         flash("Unrecognised status.", "danger")
         return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
     invoice.status = status
-    invoice.paid_at = (invoice.paid_at or datetime.utcnow()) if status == "Paid" else None
+    if status == "Paid":
+        # the date the client actually paid (defaults to today) - Analytics
+        # uses it for "cash collected" and how long clients take to pay
+        try:
+            chosen = datetime.strptime(request.form.get("paid_on", ""), "%Y-%m-%d")
+        except ValueError:
+            chosen = None
+        invoice.paid_at = chosen or invoice.paid_at or datetime.utcnow()
+    else:
+        invoice.paid_at = None
     db.session.commit()
     flash(f"Invoice marked as {status}.", "success")
     return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))

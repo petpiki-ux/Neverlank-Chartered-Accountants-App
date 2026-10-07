@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Expense register - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Expense register</h1>
+    <div class="subtitle">The firm's own running costs &middot; {{ expenses|length }} record(s){% for c, v in totals.items() %} &middot; {{ money(v, c, 2) }}{% endfor %}</div>
+  </div>
+  <div>
+    <a href="{{ url_for('analytics.dashboard') }}" class="btn secondary">Analytics</a>
+    <a href="{{ url_for('expenses.new_expense') }}" class="btn gold">+ Add expense</a>
+  </div>
+</div>
+<div class="card">
+  <form method="get" class="an-filters" style="margin-bottom:0;">
+    <div><label>Month</label><input type="month" name="month" value="{{ f_month }}"></div>
+    <div><label>Category</label><select name="category"><option value="">All</option>{% for c in categories %}<option {% if f_category==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div><label>Currency</label><select name="currency"><option value="">All</option>{% for c in currencies %}<option {% if f_currency==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div><label>Status</label><select name="status"><option value="">All</option>{% for s in statuses %}<option {% if f_status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+    <div><button class="btn small" type="submit">Filter</button> <a class="btn small secondary" href="{{ url_for('expenses.list_expenses') }}">Clear</a></div>
+  </form>
+</div>
+<div class="card">
+  {% if expenses %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Date</th><th>Paid to</th><th>Category</th><th>Details</th><th>Status</th><th class="num">Amount</th><th></th></tr></thead>
+    <tbody>
+    {% for e in expenses %}
+      <tr>
+        <td>{{ e.expense_date.strftime('%d %b %Y') }}</td>
+        <td>{{ e.supplier }}{% if e.reference %}<div class="muted" style="font-size:11.5px;">Ref {{ e.reference }}</div>{% endif %}</td>
+        <td>{{ e.category }}</td>
+        <td>{{ e.description or '' }}{% if e.client %}<div class="muted" style="font-size:11.5px;">For {{ e.client.name }}</div>{% endif %}</td>
+        <td>
+          {% if e.status == 'Paid' %}<span class="badge status-Paid">Paid</span>
+          {% else %}<span class="badge {{ 'overdue' if e.due_date and e.due_date < today else 'status-Sent' }}">Unpaid{% if e.due_date %} &middot; due {{ e.due_date.strftime('%d %b') }}{% endif %}</span>{% endif %}
+        </td>
+        <td class="num">{{ e.currency }} {{ '{:,.2f}'.format(e.amount) }}</td>
+        <td style="white-space:nowrap;">
+          {% if e.status == 'Unpaid' %}<form method="post" action="{{ url_for('expenses.mark_paid', expense_id=e.id) }}" style="display:inline;"><button class="btn small" type="submit">Mark paid</button></form>{% endif %}
+          <a class="btn small secondary" href="{{ url_for('expenses.edit_expense', expense_id=e.id) }}">Edit</a>
+          <form method="post" action="{{ url_for('expenses.delete_expense', expense_id=e.id) }}" style="display:inline;" onsubmit="return confirm('Delete this expense?');"><button class="btn small danger" type="submit">Delete</button></form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">No expenses match. <a href="{{ url_for('expenses.new_expense') }}">Add the first one</a>.</p>{% endif %}
+</div>
+{% endblock %}
