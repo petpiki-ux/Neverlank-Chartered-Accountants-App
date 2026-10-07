@@ -8,6 +8,7 @@
       <a href="{{ url_for('clients.view_client', client_id=invoice.client.id) }}">{{ invoice.client.name }}</a>
       {% if invoice.engagement %} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=invoice.engagement.id) }}">{{ invoice.engagement.title }}</a>{% endif %}
       &middot; <span class="badge status-{{ invoice.status }}">{{ invoice.status }}</span>
+      {% if invoice.recurring_invoice %}&middot; &#8635; <a href="{{ url_for('recurring.view_schedule', schedule_id=invoice.recurring_invoice.id) }}">{{ invoice.recurring_invoice.frequency }} recurring</a>{% endif %}
       {% if invoice.quotation %}&middot; From quotation <a href="{{ url_for('quotations.view_quotation', quotation_id=invoice.quotation.id) }}"><strong>{{ invoice.quotation.quote_number }}</strong></a>{% endif %}
       {% if invoice.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}
     </div>
@@ -71,6 +72,20 @@
 <div class="card">
   <h3 class="mt-0">Notes</h3>
   <div style="white-space:pre-wrap;">{{ invoice.notes }}</div>
+</div>
+{% endif %}
+
+{% if not invoice.recurring_invoice_id %}
+<div class="card">
+  <h3 class="mt-0">Repeat this invoice</h3>
+  <form method="post" action="{{ url_for('recurring.from_invoice', invoice_id=invoice.id) }}" class="form-row" style="align-items:flex-end;">
+    <div>
+      <label for="rep_frequency">Raise it again every</label>
+      <select id="rep_frequency" name="frequency">{% for f in frequencies %}<option value="{{ f }}">{{ f }}</option>{% endfor %}</select>
+    </div>
+    <div><button type="submit" class="btn secondary" style="margin-bottom:14px;" onclick="return confirm('Create a recurring schedule from this invoice? Future invoices are raised as Drafts for your review.');">Make recurring</button></div>
+  </form>
+  <p class="muted" style="font-size:12px;margin-top:0;">Copies this invoice's client, currency, VAT % and lines into a schedule; the next one is raised a period after {{ invoice.issue_date.strftime('%d %b %Y') if invoice.issue_date else 'this one' }}, as a Draft.</p>
 </div>
 {% endif %}
 

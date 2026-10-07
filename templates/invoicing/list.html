@@ -6,8 +6,19 @@
     <h1>Invoices</h1>
     <div class="subtitle">{{ invoices|length }} invoice(s)</div>
   </div>
-  <a href="{{ url_for('invoicing.new_invoice') }}" class="btn gold">+ New Invoice</a>
+  <div>
+    <a href="{{ url_for('recurring.list_schedules') }}" class="btn secondary">Recurring invoices</a>
+    <a href="{{ url_for('invoicing.new_invoice') }}" class="btn gold">+ New Invoice</a>
+  </div>
 </div>
+
+{% if review_count %}
+<div class="flash warning" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+  <span><strong>{{ review_count }} recurring invoice{{ '' if review_count == 1 else 's' }} raised as Draft</strong> and waiting for your review. Check the details, then mark each one Sent.</span>
+  <a href="{{ url_for('invoicing.list_invoices', status='Draft', recurring='1') }}" class="btn small gold">Review now</a>
+</div>
+{% endif %}
+{% if recurring_only %}<p class="muted" style="font-size:12px;">Showing only invoices raised by recurring schedules. <a href="{{ url_for('invoicing.list_invoices') }}">Show all invoices</a></p>{% endif %}
 
 <div class="card">
   <form method="get" class="form-row" style="align-items:flex-end;margin-bottom:0;">
@@ -35,7 +46,7 @@
     <tbody>
       {% for inv in invoices %}
       <tr{% if inv.is_overdue %} class="danger"{% endif %}>
-        <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a></td>
+        <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a>{% if inv.recurring_invoice_id %} <span class="badge status-Sent" title="Raised by a recurring schedule">&#8635; {{ inv.recurring_invoice.frequency }}</span>{% endif %}</td>
         <td>{{ inv.client.name }}</td>
         <td>{{ inv.engagement.title if inv.engagement else '—' }}</td>
         <td>{{ inv.issue_date.strftime('%d %b %Y') if inv.issue_date else '—' }}</td>

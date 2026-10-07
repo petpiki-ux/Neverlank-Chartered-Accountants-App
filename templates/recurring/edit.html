@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}Edit {{ schedule.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Edit schedule</h1></div>
+<div class="card" style="max-width:700px;">
+  <form method="post">
+    <label for="name">Schedule name</label>
+    <input type="text" id="name" name="name" value="{{ schedule.name }}">
+    <div class="form-row">
+      <div>
+        <label for="frequency">Repeats</label>
+        {% if started %}<input type="text" value="{{ schedule.frequency }}" disabled>{% else %}
+        <select id="frequency" name="frequency">{% for f in frequencies %}<option value="{{ f }}" {% if schedule.frequency==f %}selected{% endif %}>{{ f }}</option>{% endfor %}</select>{% endif %}
+      </div>
+      <div>
+        <label for="start_date">First invoice date</label>
+        {% if started %}<input type="text" value="{{ schedule.start_date.strftime('%d %b %Y') }}" disabled>{% else %}
+        <input type="date" id="start_date" name="start_date" value="{{ schedule.start_date.isoformat() }}">{% endif %}
+      </div>
+      <div><label for="end_date">Stop after (date)</label><input type="date" id="end_date" name="end_date" value="{{ schedule.end_date.isoformat() if schedule.end_date else '' }}"></div>
+      <div><label for="max_count">or after this many invoices</label><input type="number" min="1" id="max_count" name="max_count" value="{{ schedule.max_count or '' }}"></div>
+    </div>
+    {% if started %}<p class="muted" style="font-size:12px;">The frequency and first date are fixed once invoices have been raised, so billing dates stay consistent. To change the cadence, stop this schedule (set an end date) and create a new one.</p>{% endif %}
+    <div class="form-row">
+      <div>
+        <label for="currency">Currency</label>
+        <select id="currency" name="currency">{% for c in currencies %}<option value="{{ c }}" {% if schedule.currency==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+      </div>
+      <div><label for="vat_pct">VAT %</label><input type="number" step="0.1" min="0" id="vat_pct" name="vat_pct" value="{{ schedule.vat_pct }}"></div>
+      <div><label for="payment_terms_days">Payment due (days)</label><input type="number" min="0" id="payment_terms_days" name="payment_terms_days" value="{{ schedule.payment_terms_days }}"></div>
+    </div>
+    <label for="bill_to">Bill to</label>
+    <textarea id="bill_to" name="bill_to" rows="3">{{ schedule.bill_to or '' }}</textarea>
+    <label for="notes">Notes on every invoice</label>
+    <textarea id="notes" name="notes" rows="3">{{ schedule.notes or '' }}</textarea>
+    <p class="muted" style="font-size:12px;">Changes apply to invoices raised from now on; invoices already raised are not altered.</p>
+    <button type="submit" class="btn gold">Save changes</button>
+    <a href="{{ url_for('recurring.view_schedule', schedule_id=schedule.id) }}" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}

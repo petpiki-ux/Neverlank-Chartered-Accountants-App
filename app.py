@@ -373,6 +373,9 @@ def _add_missing_columns():
         "coa_mapping": [("coa_account_number", "VARCHAR(20)")],
         "trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
         "qpd_trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
+        # recurring_invoice_id / recurrence_index - see models.RecurringInvoice:
+        # set on invoices raised by a recurring schedule.
+        "invoice": [("recurring_invoice_id", "INTEGER"), ("recurrence_index", "INTEGER")],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
@@ -381,6 +384,11 @@ def _add_missing_columns():
                 if col_name not in existing:
                     conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"))
                     conn.commit()
+        # A schedule can never bill the same occurrence twice (an existing
+        # database can't get a table constraint added after the fact, but it
+        # can get this equivalent unique index; NULLs - ordinary invoices - don't clash).
+        conn.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS uq_invoice_recurrence_idx ON invoice (recurring_invoice_id, recurrence_index)"))
+        conn.commit()
 
 
 def _fix_forensic_template_type():
@@ -542,6 +550,7 @@ def create_app():
     from acceptance import acceptance_bp
     from invoicing import invoicing_bp
     from quotations import quotations_bp
+    from recurring import recurring_bp
     from regulatory_notices import regulatory_notices_bp
     from company_documents import company_documents_bp
     from payroll import payroll_bp
@@ -567,6 +576,7 @@ def create_app():
     app.register_blueprint(acceptance_bp)
     app.register_blueprint(invoicing_bp)
     app.register_blueprint(quotations_bp)
+    app.register_blueprint(recurring_bp)
     app.register_blueprint(regulatory_notices_bp)
     app.register_blueprint(company_documents_bp)
     app.register_blueprint(payroll_bp)
@@ -605,6 +615,14 @@ def create_app():
                 current_user.last_seen_at = now
                 db.session.commit()
 
+    @app.before_request
+    def _raise_due_recurring_invoices():
+        """No background scheduler on this hosting, so due recurring-invoice
+        occurrences are raised (as Drafts) the first time anyone uses the app
+        each day - see recurring.daily_check."""
+        from recurring import daily_check
+        daily_check(app)
+
     @app.context_processor
     def inject_globals():
         from models import user_has_permission, MessageRecipient, EngagementTask, PersonalTask, CheckInRecord
@@ -615,7 +633,11 @@ def create_app():
         )
         open_tasks = 0
         open_check_in = None
+        recurring_review_count = 0
         if current_user.is_authenticated:
+            from models import Invoice
+            # draft invoices raised by recurring schedules, waiting for review
+            recurring_review_count = Invoice.query.filter(Invoice.status == "Draft", Invoice.recurring_invoice_id.isnot(None)).count()
             open_tasks = (
                 EngagementTask.query.filter_by(assigned_to_id=current_user.id).filter(EngagementTask.status != "Done").count()
                 + PersonalTask.query.filter_by(assigned_to_id=current_user.id).filter(PersonalTask.status != "Done").count()
@@ -630,6 +652,7 @@ def create_app():
             "unread_message_count": unread,
             "my_open_task_count": open_tasks,
             "open_check_in": open_check_in,
+            "recurring_review_count": recurring_review_count,
         }
 
     with app.app_context():

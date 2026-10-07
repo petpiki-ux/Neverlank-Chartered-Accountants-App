@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Recurring Invoices - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Recurring Invoices</h1>
+    <div class="subtitle">Monthly, quarterly, half-yearly and yearly billing &middot; each invoice is raised as a Draft for you to review and send</div>
+  </div>
+  <div>
+    <a href="{{ url_for('invoicing.list_invoices') }}" class="btn secondary">All invoices</a>
+    <a href="{{ url_for('recurring.new_schedule') }}" class="btn gold">+ New Recurring Schedule</a>
+  </div>
+</div>
+
+<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+  <span class="muted" style="font-size:12.5px;">The app checks for due invoices when it starts and the first time anyone uses it each day. You can also check now.</span>
+  <form method="post" action="{{ url_for('recurring.run_due') }}" class="inline"><button type="submit" class="btn small secondary">Generate due invoices now</button></form>
+</div>
+
+<div class="card">
+  {% if rows %}
+  <table>
+    <thead><tr><th>Schedule</th><th>Client</th><th>Repeats</th><th class="text-right">Each invoice</th><th>Next invoice</th><th>Raised</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for s, nxt in rows %}
+      <tr>
+        <td><a href="{{ url_for('recurring.view_schedule', schedule_id=s.id) }}">{{ s.name }}</a></td>
+        <td>{{ s.client.name }}</td>
+        <td>{{ s.frequency }}</td>
+        <td class="text-right">{{ s.currency }} {{ '{:,.2f}'.format(s.total) }}</td>
+        <td>{% if nxt %}{{ nxt.strftime('%d %b %Y') }}{% if nxt <= today %} <span class="badge overdue">Due</span>{% endif %}{% else %}—{% endif %}</td>
+        <td>{{ s.generated_count }}{% if s.max_count %} / {{ s.max_count }}{% endif %}</td>
+        <td><span class="badge status-{{ 'Sent' if s.status == 'Active' else ('Draft' if s.status == 'Paused' else 'Paid') }}">{{ s.status }}</span></td>
+        <td class="text-right"><a href="{{ url_for('recurring.view_schedule', schedule_id=s.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No recurring schedules yet. <a href="{{ url_for('recurring.new_schedule') }}">Create one</a>, or open any invoice and choose <strong>Make recurring</strong>.</div>
+  {% endif %}
+</div>
+{% endblock %}

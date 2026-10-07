@@ -66,7 +66,10 @@ FIRM_LETTERHEAD = {
 def list_invoices():
     status_filter = request.args.get("status", "")
     client_filter = request.args.get("client_id", "")
+    recurring_only = request.args.get("recurring") == "1"
     query = Invoice.query
+    if recurring_only:
+        query = query.filter(Invoice.recurring_invoice_id.isnot(None))
     if status_filter:
         query = query.filter_by(status=status_filter)
     if client_filter:
@@ -80,9 +83,15 @@ def list_invoices():
         if not inv.engagement_id or user_can_access_engagement(current_user, inv.engagement)
     ]
     clients = Client.query.order_by(Client.name).all()
+    # recurring-invoice drafts the current user can see, waiting for review
+    review_count = sum(
+        1 for inv in Invoice.query.filter(Invoice.status == "Draft", Invoice.recurring_invoice_id.isnot(None)).all()
+        if not inv.engagement_id or user_can_access_engagement(current_user, inv.engagement)
+    )
     return render_template(
         "invoicing/list.html", invoices=visible, clients=clients,
         statuses=INVOICE_STATUSES, status_filter=status_filter, client_filter=client_filter,
+        recurring_only=recurring_only, review_count=review_count,
     )
 
 
@@ -156,7 +165,8 @@ def new_invoice():
 def view_invoice(invoice_id):
     invoice = Invoice.query.get_or_404(invoice_id)
     _ensure_invoice_access(invoice)
-    return render_template("invoicing/detail.html", invoice=invoice, statuses=INVOICE_STATUSES)
+    from models import RECURRING_FREQUENCIES
+    return render_template("invoicing/detail.html", invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES))
 
 
 @invoicing_bp.route("/<int:invoice_id>/print")

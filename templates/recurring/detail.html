@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}{{ schedule.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ schedule.name }}</h1>
+    <div class="subtitle">
+      <a href="{{ url_for('clients.view_client', client_id=schedule.client.id) }}">{{ schedule.client.name }}</a>
+      {% if schedule.engagement %} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=schedule.engagement.id) }}">{{ schedule.engagement.title }}</a>{% endif %}
+      &middot; {{ schedule.frequency }}
+      &middot; <span class="badge status-{{ 'Sent' if schedule.status == 'Active' else ('Draft' if schedule.status == 'Paused' else 'Paid') }}">{{ schedule.status }}</span>
+    </div>
+  </div>
+  <div>
+    <a href="{{ url_for('recurring.edit_schedule', schedule_id=schedule.id) }}" class="btn secondary">Edit</a>
+    {% if schedule.status == 'Active' %}
+    <form method="post" action="{{ url_for('recurring.pause', schedule_id=schedule.id) }}" class="inline"><button type="submit" class="btn secondary">Pause</button></form>
+    {% elif schedule.status == 'Paused' %}
+    <form method="post" action="{{ url_for('recurring.resume', schedule_id=schedule.id) }}" class="inline"><button type="submit" class="btn gold">Resume</button></form>
+    {% endif %}
+  </div>
+</div>
+
+{% if schedule.status == 'Active' and not schedule.lines %}
+<div class="flash warning">This schedule has no line items yet, so no invoices can be raised. Add the lines below.</div>
+{% endif %}
+{% if schedule.status == 'Completed' %}
+<div class="flash info">This schedule has finished ({{ schedule.generated_count }} invoice(s) raised). Extend the end date or invoice limit under Edit to continue it.</div>
+{% endif %}
+
+<div class="form-row" style="flex-wrap:wrap;">
+  <div class="card" style="flex:1;min-width:200px;padding:12px;border-top:3px solid var(--gold);">
+    <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;">Each invoice</div>
+    <div style="font-size:22px;font-weight:700;">{{ schedule.currency }} {{ '{:,.2f}'.format(schedule.total) }}</div>
+    <div class="muted" style="font-size:12px;">incl. VAT {{ schedule.vat_pct }}% &middot; due {{ schedule.payment_terms_days }} days after the invoice date</div>
+  </div>
+  <div class="card" style="flex:1;min-width:200px;padding:12px;border-top:3px solid var(--gold);">
+    <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;">Next invoice</div>
+    <div style="font-size:22px;font-weight:700;">{% if nxt %}{{ nxt.strftime('%d %b %Y') }}{% else %}—{% endif %}</div>
+    <div class="muted" style="font-size:12px;">{% if upcoming %}then {% for d in upcoming[1:] %}{{ d.strftime('%d %b %Y') }}{% if not loop.last %}, {% endif %}{% else %}&nbsp;{% endfor %}{% endif %}</div>
+  </div>
+  <div class="card" style="flex:1;min-width:200px;padding:12px;border-top:3px solid var(--gold);">
+    <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;">Raised so far</div>
+    <div style="font-size:22px;font-weight:700;">{{ schedule.generated_count }}{% if schedule.max_count %} <span class="muted" style="font-size:14px;">of {{ schedule.max_count }}</span>{% endif %}</div>
+    <div class="muted" style="font-size:12px;">starts {{ schedule.start_date.strftime('%d %b %Y') }}{% if schedule.end_date %} &middot; ends {{ schedule.end_date.strftime('%d %b %Y') }}{% endif %}</div>
+  </div>
+</div>
+
+{% if schedule.status == 'Active' and schedule.lines and nxt %}
+<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+  <span class="muted" style="font-size:12.5px;">The next invoice is raised automatically on {{ nxt.strftime('%d %b %Y') }} as a Draft. Need it now?</span>
+  <form method="post" action="{{ url_for('recurring.generate_now', schedule_id=schedule.id) }}" class="inline"><button type="submit" class="btn small secondary" onclick="return confirm('Raise the next invoice now as a Draft, dated {{ nxt.strftime('%d %b %Y') }}?');">Raise next invoice now</button></form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Invoice lines</h3>
+  {% if schedule.lines %}
+  <table>
+    <thead><tr><th>Description</th><th class="text-right">Qty</th><th class="text-right">Unit price</th><th class="text-right">Line total</th><th></th></tr></thead>
+    <tbody>
+      {% for line in schedule.lines %}
+      <tr>
+        <form method="post" action="{{ url_for('recurring.update_line', line_id=line.id) }}" class="inline">
+        <td><input type="text" name="description" value="{{ line.description }}" style="margin-bottom:0;"></td>
+        <td><input type="number" step="0.01" name="quantity" value="{{ line.quantity }}" style="width:80px;margin-bottom:0;text-align:right;"></td>
+        <td><input type="number" step="0.01" name="unit_price" value="{{ line.unit_price }}" style="width:110px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right">{{ '{:,.2f}'.format(line.line_total) }}</td>
+        <td>
+          <button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" formaction="{{ url_for('recurring.delete_line', line_id=line.id) }}" class="btn small danger" onclick="return confirm('Delete this line?')">Delete</button>
+        </td>
+        </form>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:12px;">Subtotal {{ schedule.currency }} {{ '{:,.2f}'.format(schedule.subtotal) }} + VAT {{ '{:,.2f}'.format(schedule.vat_amount) }} = <strong>{{ '{:,.2f}'.format(schedule.total) }}</strong>. Changes apply to invoices raised from now on.</p>
+  {% else %}
+  <div class="empty-state">No line items yet - add one below.</div>
+  {% endif %}
+  <form method="post" action="{{ url_for('recurring.add_line', schedule_id=schedule.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div style="grid-column: span 2;"><label for="description">Description *</label><input type="text" id="description" name="description" placeholder="e.g. Monthly accounting & bookkeeping fee" required></div>
+    <div><label for="quantity">Qty</label><input type="number" step="0.01" id="quantity" name="quantity" value="1"></div>
+    <div><label for="unit_price">Unit price</label><input type="number" step="0.01" id="unit_price" name="unit_price" value="0.00"></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add line</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Invoices raised by this schedule</h3>
+  {% if schedule.invoices %}
+  <table>
+    <thead><tr><th>Invoice #</th><th>Invoice date</th><th>Due</th><th class="text-right">Total</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for inv in schedule.invoices %}
+      <tr>
+        <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a></td>
+        <td>{{ inv.issue_date.strftime('%d %b %Y') if inv.issue_date else '—' }}</td>
+        <td>{{ inv.due_date.strftime('%d %b %Y') if inv.due_date else '—' }}</td>
+        <td class="text-right">{{ inv.currency }} {{ '{:,.2f}'.format(inv.total) }}</td>
+        <td><span class="badge status-{{ inv.status }}">{{ inv.status }}</span>{% if inv.status == 'Draft' %} <span class="muted" style="font-size:11.5px;">needs review</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">Nothing raised yet.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <p class="muted" style="font-size:11.5px;">Created by {{ schedule.created_by.name if schedule.created_by else '—' }} on {{ schedule.created_at.strftime('%d %b %Y') if schedule.created_at else '—' }}.</p>
+  <form method="post" action="{{ url_for('recurring.delete_schedule', schedule_id=schedule.id) }}" onsubmit="return confirm('Delete this recurring schedule? Invoices it already raised are kept.');" class="inline">
+    <button type="submit" class="btn small danger">Delete schedule</button>
+  </form>
+</div>
+{% endblock %}
