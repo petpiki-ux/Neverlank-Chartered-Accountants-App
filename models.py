@@ -8628,7 +8628,45 @@ class Invoice(db.Model):
 
     @property
     def is_overdue(self):
-        return bool(self.due_date and self.due_date < date.today() and self.status not in ("Paid", "Cancelled"))
+        return bool(self.due_date and self.due_date < date.today() and self.status not in ("Paid", "Cancelled")
+                    and self.balance > 0.005)
+
+    # ---- payments / receipts (see Receipt below) ----
+    @property
+    def active_receipts(self):
+        return [r for r in self.receipts if not r.is_void]
+
+    @property
+    def amount_paid(self):
+        """Money received against this invoice, from its (non-voided) receipts."""
+        return round(sum(r.amount or 0 for r in self.active_receipts), 2)
+
+    @property
+    def legacy_paid(self):
+        """Marked Paid before receipting existed: no receipt of any kind was
+        ever issued, so the invoice is simply treated as settled in full."""
+        return self.status == "Paid" and not self.receipts
+
+    @property
+    def receiptable_balance(self):
+        """What a new receipt may still be issued for (total less receipts)."""
+        return max(round((self.total or 0) - self.amount_paid, 2), 0.0)
+
+    @property
+    def balance(self):
+        """Still owed by the client. Zero for an invoice settled before receipts existed."""
+        if self.legacy_paid:
+            return 0.0
+        return self.receiptable_balance
+
+    @property
+    def payment_state(self):
+        """'Paid', 'Part-paid' or '' (nothing received)."""
+        if self.status == "Paid":
+            return "Paid"
+        if self.amount_paid > 0.005:
+            return "Part-paid"
+        return ""
 
     def __repr__(self):
         return f"<Invoice {self.invoice_number}>"
@@ -8647,6 +8685,65 @@ class InvoiceLineItem(db.Model):
 
     def __repr__(self):
         return f"<InvoiceLineItem {self.description!r}>"
+
+
+# ---------- Receipts (a payment received against an Invoice) ----------
+
+PAYMENT_METHODS = ["Cash", "Bank transfer", "EcoCash", "Card", "Cheque", "Other"]
+
+
+class Receipt(db.Model):
+    """Proof that a client paid (all or part of) an invoice: one receipt per
+    payment, numbered RCT-YYYY-NNNN. An invoice can have several (instalments);
+    it becomes Paid once its receipts add up to the invoice total. A receipt is
+    never deleted - if one was issued in error it is voided (kept on file,
+    with who/when/why, and ignored in every total), so the numbering has no
+    gaps and there is an audit trail."""
+    id = db.Column(db.Integer, primary_key=True)
+    receipt_number = db.Column(db.String(30), unique=True, nullable=False)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    currency = db.Column(db.String(10), nullable=False, default="USD")  # always the invoice's currency
+    paid_on = db.Column(db.Date, nullable=False, default=date.today)  # the day the money was received
+    method = db.Column(db.String(30), default="Bank transfer")
+
+    issued_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    issued_at = db.Column(db.DateTime, default=datetime.utcnow)
+    voided_at = db.Column(db.DateTime)
+    voided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    void_reason = db.Column(db.Text)
+
+    invoice = db.relationship("Invoice", backref=db.backref(
+        "receipts", lazy=True, cascade="all, delete-orphan", order_by="Receipt.paid_on, Receipt.id"))
+    issued_by = db.relationship("User", foreign_keys=[issued_by_id])
+    voided_by = db.relationship("User", foreign_keys=[voided_by_id])
+
+    @property
+    def is_void(self):
+        return self.voided_at is not None
+
+    @property
+    def client(self):
+        return self.invoice.client
+
+    @property
+    def bill_to(self):
+        return self.invoice.bill_to
+
+    @property
+    def paid_to_date(self):
+        """Received on this invoice up to and including this receipt (earlier
+        receipts, and same-day ones issued before it)."""
+        return round(sum(
+            r.amount or 0 for r in self.invoice.active_receipts
+            if (r.paid_on, r.id) <= (self.paid_on, self.id)), 2)
+
+    @property
+    def balance_after(self):
+        return max(round((self.invoice.total or 0) - self.paid_to_date, 2), 0.0)
+
+    def __repr__(self):
+        return f"<Receipt {self.receipt_number} {self.amount}>"
 
 
 # ---------- Quotations (convert to Invoices) ----------

@@ -1,0 +1,45 @@
+{% extends "invoicing/print_base.html" %}
+{% set doc_number = receipt.receipt_number %}
+{% block doc_title %}Receipt{% endblock %}
+{% block back_link %}<a class="secondary" href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}">Back to invoice</a>
+  {% if current_user.role in ('partner', 'admin') and not receipt.is_void %}
+  <form method="post" action="{{ url_for('receipts.void_receipt', receipt_id=receipt.id) }}" style="display:inline;" onsubmit="var r = prompt('Why is this receipt being voided?'); if (!r) { return false; } this.reason.value = r; return true;">
+    <input type="hidden" name="reason" value="">
+    <button type="submit" style="background:#c0392b;">Void receipt</button>
+  </form>
+  {% endif %}{% endblock %}
+{% block doc_label %}Receipt{% endblock %}
+{% block doc_sub %}{% if receipt.is_void %}VOID{% elif receipt.balance_after <= 0.005 %}Paid in full{% else %}Part payment{% endif %}{% endblock %}
+{% block stamp %}{% if receipt.is_void %}<div class="stamp cancelled">Void</div>{% else %}<div class="stamp paid">{{ 'Paid in full' if receipt.balance_after <= 0.005 else 'Received' }}</div>{% endif %}{% endblock %}
+{% block meta %}
+  <div><div class="k">Receipt no.</div><div class="v">{{ receipt.receipt_number }}</div></div>
+  <div><div class="k">Date received</div><div class="v">{{ receipt.paid_on.strftime('%d %b %Y') }}</div></div>
+  <div><div class="k">Paid by</div><div class="v">{{ receipt.method or '—' }}</div></div>
+  <div><div class="k">Currency</div><div class="v">{{ receipt.currency }}</div></div>
+{% endblock %}
+{% block party_label %}Received from{% endblock %}
+{% block party_re %}
+  <div class="re"><b>In payment of invoice:</b> {{ invoice.invoice_number }}{% if invoice.engagement %}  &middot;  <b>Re:</b> {{ invoice.engagement.title }}{% endif %}</div>
+{% endblock %}
+{% block items_section %}
+      <div class="words"><div class="k">Amount received</div>
+        <div class="v">{{ receipt.currency }} {{ '{:,.2f}'.format(receipt.amount) }}</div>
+        <div style="font-size:12px;color:#3b4652;margin-top:2px;">{{ words }}</div></div>
+
+      <div class="totals-wrap">
+        <div class="totals">
+          <div class="row"><span>Invoice total</span><span>{{ receipt.currency }} {{ '{:,.2f}'.format(invoice.total) }}</span></div>
+          <div class="row"><span>Received before this payment</span><span>{{ receipt.currency }} {{ '{:,.2f}'.format(receipt.paid_to_date - receipt.amount) }}</span></div>
+          <div class="row"><span>This payment</span><span>{{ receipt.currency }} {{ '{:,.2f}'.format(receipt.amount) }}</span></div>
+          <div class="row grand"><span>Balance owing</span><span>{{ receipt.currency }} {{ '{:,.2f}'.format(receipt.balance_after) }}</span></div>
+        </div>
+      </div>
+{% endblock %}
+{% block extras %}
+  {% if receipt.is_void %}
+  <div class="block"><h4>This receipt has been voided</h4><div class="txt">Voided {{ (receipt.voided_at|cat).strftime('%d %b %Y') }}{% if receipt.voided_by %} by {{ receipt.voided_by.name }}{% endif %}.{% if receipt.void_reason %} Reason: {{ receipt.void_reason }}{% endif %} It is not valid as proof of payment.</div></div>
+  {% endif %}
+  <div class="accept"><div class="sig">Received by{% if receipt.issued_by %}: {{ receipt.issued_by.name }}{% endif %}<br>For {{ firm.name }}</div><div></div></div>
+{% endblock %}
+{% block bank_block %}{% endblock %}
+{% block thanks %}Thank you for your payment.{% endblock %}

@@ -168,7 +168,7 @@
 {# ---------- revenue ---------- #}
 <h2 class="an-section">Revenue <small>What was billed, what was collected, and where it comes from</small></h2>
 <div class="viz-grid">
-  {{ card('revenue', 'Invoiced vs collected, by month', 'Excluding VAT. Collected = month the invoice was marked Paid.') }}
+  {{ card('revenue', 'Invoiced vs collected, by month', 'Excluding VAT. Collected = payments received that month (from receipts).') }}
   {{ card('yoy', 'Revenue vs the same month last year', 'Invoiced, excluding VAT.') }}
   {{ card('service', 'Revenue by service', 'Grouped by the type of engagement the invoice belongs to.') }}
   {{ card('clients', 'Revenue by client', 'Top clients this period.') }}
@@ -207,8 +207,8 @@
   <dl class="an-defs">
     <dt>Which invoices count</dt><dd>Invoices marked <em>Sent</em> or <em>Paid</em>. Drafts and Cancelled invoices are ignored. Each currency is analysed on its own.</dd>
     <dt>Revenue</dt><dd>Invoice value excluding VAT, by invoice date. Expenses should likewise be entered excluding any VAT the firm can claim back, so profit compares like with like.</dd>
-    <dt>Cash collected</dt><dd>Invoice value excluding VAT, in the month the invoice was marked Paid (the "date paid" you chose). Mark invoices Paid with the right date for this to be accurate.</dd>
-    <dt>Debtors days (DSO)</dt><dd>What clients owe (incl. VAT) at a date, divided by the last {{ payload.dso_window }} days of invoicing (incl. VAT), multiplied by {{ payload.dso_window }}. It is roughly how many days of sales are sitting unpaid.</dd>
+    <dt>Cash collected</dt><dd>Money actually received, excluding VAT, in the month shown on each receipt ("date received"). Instalments count as each one arrives. Record payments on the invoice so the receipt carries the right date.</dd>
+    <dt>Debtors days (DSO)</dt><dd>What clients still owe (incl. VAT, after payments received) at a date, divided by the last {{ payload.dso_window }} days of invoicing (incl. VAT), multiplied by {{ payload.dso_window }}. It is roughly how many days of sales are sitting unpaid.</dd>
     <dt>Ageing</dt><dd>Unpaid invoices grouped by how many days they are past their due date.</dd>
     <dt>Creditor days</dt><dd>The same calculation on the firm's own unpaid bills.</dd>
     <dt>Comparison arrows</dt><dd>Compare with the period of the same length immediately before the one selected.</dd>

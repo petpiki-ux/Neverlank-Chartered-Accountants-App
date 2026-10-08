@@ -32,6 +32,7 @@
       <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
       <a href="{{ url_for('quotations.list_quotations') }}">Quotations</a>
       <a href="{{ url_for('invoicing.list_invoices') }}">Invoices{% if recurring_review_count %} <span class="badge overdue" title="Recurring invoices raised as Drafts, waiting for your review">{{ recurring_review_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('receipts.list_receipts') }}">Receipts</a>
       {% if user_has_permission(current_user, 'view_firm_finances') %}
       <a href="{{ url_for('analytics.dashboard') }}">Analytics</a>
       {% endif %}

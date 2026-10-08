@@ -166,7 +166,8 @@ def view_invoice(invoice_id):
     invoice = Invoice.query.get_or_404(invoice_id)
     _ensure_invoice_access(invoice)
     from models import RECURRING_FREQUENCIES
-    return render_template("invoicing/detail.html", invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES), today_iso=date.today().isoformat())
+    from models import PAYMENT_METHODS
+    return render_template("invoicing/detail.html", invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES), today_iso=date.today().isoformat(), methods=PAYMENT_METHODS)
 
 
 @invoicing_bp.route("/<int:invoice_id>/print")
@@ -242,17 +243,32 @@ def update_invoice_status(invoice_id):
     if status not in INVOICE_STATUSES:
         flash("Unrecognised status.", "danger")
         return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
-    invoice.status = status
     if status == "Paid":
-        # the date the client actually paid (defaults to today) - Analytics
-        # uses it for "cash collected" and how long clients take to pay
+        # "Paid" is no longer typed in by hand: it is what happens when the
+        # money is received. Marking it Paid here records the payment of
+        # whatever is still owing, and issues the receipt for it.
+        from receipts import add_receipt
+        if invoice.status == "Paid" and (invoice.balance <= 0.005):
+            flash("This invoice is already paid.", "info")
+            return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
         try:
-            chosen = datetime.strptime(request.form.get("paid_on", ""), "%Y-%m-%d")
+            chosen = datetime.strptime(request.form.get("paid_on", ""), "%Y-%m-%d").date()
         except ValueError:
-            chosen = None
-        invoice.paid_at = chosen or invoice.paid_at or datetime.utcnow()
-    else:
-        invoice.paid_at = None
+            chosen = date.today()
+        if invoice.status == "Draft":
+            invoice.status = "Sent"
+        receipt, error = add_receipt(
+            invoice, invoice.receiptable_balance, chosen, request.form.get("method") or "Other", current_user)
+        if error:
+            flash(error, "danger")
+            return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
+        flash(f"Payment recorded and receipt {receipt.receipt_number} issued.", "success")
+        return redirect(url_for("receipts.view_receipt", receipt_id=receipt.id))
+    if invoice.amount_paid > 0.005:
+        flash("This invoice has receipts issued against it. Void the receipt(s) first if the payment was recorded in error.", "danger")
+        return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
+    invoice.status = status
+    invoice.paid_at = None
     db.session.commit()
     flash(f"Invoice marked as {status}.", "success")
     return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
@@ -292,6 +308,9 @@ def delete_invoice(invoice_id):
     _ensure_invoice_access(invoice)
     if invoice.status != "Draft" and current_user.role not in ("partner", "admin"):
         flash("Only a Partner or Admin can delete an invoice that's already been sent.", "danger")
+        return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
+    if invoice.active_receipts:
+        flash("This invoice has receipts issued against it, so it cannot be deleted. Void the receipt(s) first if the payment was recorded in error.", "danger")
         return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
     quotation = invoice.quotation
     if quotation is not None:

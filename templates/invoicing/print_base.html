@@ -13,6 +13,10 @@
     .toolbar { max-width: 210mm; margin: 14px auto 0; display: flex; justify-content: flex-end; gap: 8px; padding: 0 4px; }
     .toolbar button, .toolbar a { background: var(--navy); color: #fff; border: 0; border-radius: 6px; padding: 9px 16px; font-size: 13px; cursor: pointer; text-decoration: none; font-family: inherit; }
     .toolbar a.secondary { background: #fff; color: var(--navy); border: 1px solid #c9d2dc; }
+    .flashbar { max-width: 210mm; margin: 10px auto 0; }
+    .flashbar .fb { background: #e8f5ee; border: 1px solid #1e8a4c; color: #14532d; border-radius: 6px; padding: 9px 14px; font-size: 13px; margin-bottom: 6px; }
+    .flashbar .fb.danger { background: #fdecea; border-color: #c0392b; color: #7f1d1d; }
+    .flashbar .fb.info { background: #eef3fa; border-color: #6b7684; color: #1f2933; }
     .sheet { width: 210mm; min-height: 297mm; margin: 12px auto 30px; background: #fff; box-shadow: 0 6px 30px rgba(15,41,66,.22); display: flex; flex-direction: column; position: relative; overflow: hidden; }
 
     /* ---- letterhead band ---- */
@@ -63,6 +67,9 @@
     .block h4 { margin: 0 0 6px; font-size: 10.5px; text-transform: uppercase; letter-spacing: .14em; color: var(--gold); font-weight: 800; }
     .block .txt { white-space: pre-line; font-size: 12px; color: #3b4652; }
     .accept { margin-top: 26px; display: grid; grid-template-columns: 1fr 1fr; gap: 28px; }
+    .words { margin: 0 0 16px; padding: 12px 16px; border: 1px dashed var(--gold); border-radius: 8px; background: #fffdf8; }
+    .words .k { font-size: 9.5px; text-transform: uppercase; letter-spacing: .14em; color: var(--gold); font-weight: 800; }
+    .words .v { margin-top: 3px; font-size: 14px; color: var(--navy); font-weight: 600; }
     .accept .sig { border-top: 1.5px solid var(--navy); padding-top: 6px; font-size: 11px; color: var(--muted); margin-top: 38px; }
 
     /* ---- stamp ---- */
@@ -78,7 +85,7 @@
     @page { size: A4; margin: 0; }
     @media print {
       body { background: #fff; }
-      .toolbar { display: none; }
+      .toolbar, .flashbar { display: none; }
       .sheet { margin: 0; box-shadow: none; width: 100%; min-height: 297mm; }
     }
   </style>
@@ -88,6 +95,10 @@
     {% block back_link %}{% endblock %}
     <button onclick="window.print()">Print / Save as PDF</button>
   </div>
+
+  {% with messages = get_flashed_messages(with_categories=true) %}{% if messages %}
+  <div class="flashbar">{% for category, message in messages %}<div class="fb {{ category }}">{{ message }}</div>{% endfor %}</div>
+  {% endif %}{% endwith %}
 
   <div class="sheet">
     <div class="band">
@@ -125,6 +136,7 @@
 
       {% block intro %}{% endblock %}
 
+      {% block items_section %}
       <table class="items">
         <thead><tr><th>Description</th><th class="r">Qty</th><th class="r">Unit price</th><th class="r">Amount ({{ doc.currency }})</th></tr></thead>
         <tbody>
@@ -146,11 +158,12 @@
           <div class="row grand"><span>{% block total_label %}Total{% endblock %}</span><span>{{ doc.currency }} {{ '{:,.2f}'.format(doc.total) }}</span></div>
         </div>
       </div>
+      {% endblock %}
 
       {% block extras %}{% endblock %}
-      {% if firm.bank_details %}
+      {% block bank_block %}{% if firm.bank_details %}
       <div class="block"><h4>Payment details</h4><div class="txt">{{ firm.bank_details }}</div></div>
-      {% endif %}
+      {% endif %}{% endblock %}
     </div>
 
     <div class="foot">
