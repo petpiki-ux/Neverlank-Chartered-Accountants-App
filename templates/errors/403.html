@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Not allowed - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>You can't do that here</h1></div>
+<div class="card" style="max-width:640px;border-left:3px solid var(--danger, #c0392b);">
+  <p style="margin-top:0;"><strong>Forbidden (403)</strong></p>
+  <p>{{ reason }}</p>
+  <p class="muted" style="font-size:12.5px;margin-bottom:0;">
+    If you believe this is a mistake, tell your Partner or an Admin which page you were on.
+  </p>
+</div>
+<p><a href="javascript:history.back()" class="btn secondary">&larr; Go back</a>
+  <a href="{{ url_for('engagements.dashboard') }}" class="btn secondary">Dashboard</a></p>
+{% endblock %}

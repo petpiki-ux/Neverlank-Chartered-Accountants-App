@@ -21,6 +21,10 @@
     <div><strong>Company number:</strong> {{ client.company_number or '—' }}</div>
     <div><strong>Address:</strong> {{ client.address or '—' }}</div>
   </div>
+  <div class="form-row">
+    <div><strong>TIN:</strong> {{ client.tin_number or '—' }}</div>
+    <div><strong>VAT number:</strong> {{ client.vat_number or 'Not VAT registered / not recorded' }}</div>
+  </div>
   {% if client.notes %}<p class="muted">{{ client.notes }}</p>{% endif %}
 </div>
 

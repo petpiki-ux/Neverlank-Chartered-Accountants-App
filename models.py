@@ -1691,6 +1691,13 @@ class Client(db.Model):
     # company_number before saving, so the same company can't accidentally
     # be onboarded twice under two different client records.
     company_number = db.Column(db.String(80))
+    # ZIMRA identifiers, captured at onboarding. Both optional (an individual
+    # or a small client may have no VAT registration - a blank VAT number
+    # simply means "not VAT registered"), and each is checked for duplicates
+    # across clients in clients.py the same way company_number is. Shown on
+    # the client page and on the Bill-to block of printed quotations/invoices.
+    tin_number = db.Column(db.String(40))   # Taxpayer Identification Number (BP number)
+    vat_number = db.Column(db.String(40))   # VAT registration number
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     # The client's own logo (as opposed to the firm's, which is baked into

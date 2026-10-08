@@ -2441,6 +2441,8 @@
 {% elif tab == 'tax' %}
 {% if not engagement.has_tax_module %}
   <div class="card"><div class="empty-state">No Tax service is turned on for this engagement - turn one on from <a href="{{ url_for('engagements.edit_engagement', engagement_id=engagement.id) }}">Edit Engagement</a> first.</div></div>
+{% elif not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here (this includes uploading VAT schedules and other Tax / Accounting work).</div></div>
 {% else %}
 
   <div class="card">
@@ -3261,6 +3263,8 @@
 {% elif tab == 'accounting' %}
 {% if not engagement.has_accounting_module %}
   <div class="card"><div class="empty-state">No Accounting service is turned on for this engagement - turn one on from <a href="{{ url_for('engagements.edit_engagement', engagement_id=engagement.id) }}">Edit Engagement</a> first.</div></div>
+{% elif not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here (this includes uploading VAT schedules and other Tax / Accounting work).</div></div>
 {% else %}
 
   <div class="card">

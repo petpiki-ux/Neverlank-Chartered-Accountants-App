@@ -22,7 +22,7 @@
 <div class="card">
   <form method="get" style="margin-bottom:0;">
     <input type="hidden" name="view" value="clients">
-    <input type="text" name="q" placeholder="Search clients by name or company number..." value="{{ q }}" style="margin-bottom:0;max-width:320px;display:inline-block;">
+    <input type="text" name="q" placeholder="Search clients by name, company number, TIN or VAT number..." value="{{ q }}" style="margin-bottom:0;max-width:320px;display:inline-block;">
     <button type="submit" class="btn secondary">Search</button>
   </form>
 </div>
@@ -36,7 +36,7 @@
       <tr>
         <td>
           <a href="{{ url_for('clients.view_client', client_id=c.id) }}">{{ c.name }}</a>
-          {% if c.company_number %}<div class="muted" style="font-size:11px;">{{ c.company_number }}</div>{% endif %}
+          {% if c.company_number or c.tin_number or c.vat_number %}<div class="muted" style="font-size:11px;">{{ [c.company_number, ('TIN ' ~ c.tin_number) if c.tin_number, ('VAT ' ~ c.vat_number) if c.vat_number]|select|join(' · ') }}</div>{% endif %}
         </td>
         <td>{{ c.contact_person or '—' }}{% if c.email %} &middot; {{ c.email }}{% endif %}</td>
         <td>{{ c.industry or '—' }}</td>

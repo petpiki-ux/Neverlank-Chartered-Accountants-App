@@ -106,9 +106,16 @@ def _ensure_engagement_access(engagement, require_accepted=True):
     - can render at all) and every route inside acceptance.py (so the gate
     can actually be worked on) pass require_accepted=False."""
     if not user_can_access_engagement(current_user, engagement):
-        abort(403)
+        abort(403, description=(
+            "You are not on this engagement's team, so you cannot open or change anything inside it. "
+            "Ask the engagement's Partner or Manager (or an Admin) to add you to the team."
+        ))
     if require_accepted and current_user.role != "admin" and not engagement_acceptance_cleared(engagement):
-        abort(403)
+        abort(403, description=(
+            "This engagement is still waiting for Client Acceptance & Continuance sign-off, so work "
+            "(including uploading VAT schedules) is locked until the Partner signs off an Accepted decision "
+            "on the engagement's Client Acceptance tab."
+        ))
 
 
 def _visible_to_current_user(engagement_list):
@@ -300,7 +307,10 @@ def directory():
     client_query = Client.query
     if q:
         client_query = client_query.filter(
-            db.or_(Client.name.ilike(f"%{q}%"), Client.company_number.ilike(f"%{q}%"))
+            db.or_(
+                Client.name.ilike(f"%{q}%"), Client.company_number.ilike(f"%{q}%"),
+                Client.tin_number.ilike(f"%{q}%"), Client.vat_number.ilike(f"%{q}%"),
+            )
         )
     all_clients = client_query.order_by(Client.name).all()
 

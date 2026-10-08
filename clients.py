@@ -1,4 +1,5 @@
 import os
+import re
 import uuid
 
 from datetime import date
@@ -38,6 +39,47 @@ def _find_duplicate_by_company_number(company_number, exclude_client_id=None):
     return query.first()
 
 
+TAX_ID_FIELDS = {"tin_number": "TIN", "vat_number": "VAT number"}
+
+
+def _clean_tax_id(value):
+    """Tidy what was typed: trim and collapse stray spaces. Case and any
+    dashes are left as typed (what the person sees is what they entered)."""
+    return " ".join((value or "").split())[:40]
+
+
+def _tax_id_key(value):
+    """The form of an identifier used only to compare two of them: spaces,
+    dashes and slashes ignored, case ignored - so "2000-123 456" and
+    "2000123456" count as the same TIN."""
+    return re.sub(r"[\s\-/]", "", value or "").upper()
+
+
+def _find_duplicate_by_tax_id(field, value, exclude_client_id=None):
+    """Another client already holding this TIN / VAT number, or None. Blank
+    values never collide (not every client is VAT registered)."""
+    key = _tax_id_key(value)
+    if not key:
+        return None
+    for other in Client.query.filter(getattr(Client, field).isnot(None)).all():
+        if other.id != exclude_client_id and _tax_id_key(getattr(other, field)) == key:
+            return other
+    return None
+
+
+def _check_duplicate_ids(company_number, tin, vat, exclude_client_id=None):
+    """First clash among company number, TIN and VAT number as
+    (human label, value, other client), or None."""
+    dup = _find_duplicate_by_company_number(company_number, exclude_client_id)
+    if dup:
+        return "company number", company_number, dup
+    for field, value in (("tin_number", tin), ("vat_number", vat)):
+        dup = _find_duplicate_by_tax_id(field, value, exclude_client_id)
+        if dup:
+            return TAX_ID_FIELDS[field], value, dup
+    return None
+
+
 def _resolve_industry(form):
     """The industry field is a <select> of INDUSTRY_OPTIONS with "Other"
     revealing a free-text companion field - resolve whichever was actually
@@ -59,7 +101,10 @@ def list_clients():
     query = Client.query
     if q:
         query = query.filter(
-            db.or_(Client.name.ilike(f"%{q}%"), Client.company_number.ilike(f"%{q}%"))
+            db.or_(
+                Client.name.ilike(f"%{q}%"), Client.company_number.ilike(f"%{q}%"),
+                Client.tin_number.ilike(f"%{q}%"), Client.vat_number.ilike(f"%{q}%"),
+            )
         )
     all_clients = query.order_by(Client.name).all()
     return render_template("clients/list.html", clients=all_clients, q=q)
@@ -71,16 +116,19 @@ def new_client():
     if request.method == "POST":
         form_values = dict(request.form)
         company_number = request.form.get("company_number", "").strip()
-        duplicate = _find_duplicate_by_company_number(company_number)
-        if duplicate:
+        tin_number = _clean_tax_id(request.form.get("tin_number"))
+        vat_number = _clean_tax_id(request.form.get("vat_number"))
+        clash = _check_duplicate_ids(company_number, tin_number, vat_number)
+        if clash:
+            label, value, duplicate = clash
             flash(
-                f"A client with company number \"{company_number}\" already exists: "
+                f"A client with {label} \"{value}\" already exists: "
                 f"{duplicate.name}. Open that client instead, or double-check the number.",
                 "danger",
             )
             return render_template(
                 "clients/form.html", client=None, industry_options=INDUSTRY_OPTIONS,
-                form_values=form_values, duplicate_client=duplicate,
+                form_values=form_values, duplicate_client=duplicate, duplicate_label=label,
             )
         client = Client(
             name=request.form.get("name", "").strip(),
@@ -90,6 +138,8 @@ def new_client():
             address=request.form.get("address", "").strip(),
             industry=_resolve_industry(request.form),
             company_number=company_number,
+            tin_number=tin_number or None,
+            vat_number=vat_number or None,
             notes=request.form.get("notes", "").strip(),
         )
         db.session.add(client)
@@ -152,16 +202,19 @@ def edit_client(client_id):
     client = Client.query.get_or_404(client_id)
     if request.method == "POST":
         company_number = request.form.get("company_number", "").strip()
-        duplicate = _find_duplicate_by_company_number(company_number, exclude_client_id=client.id)
-        if duplicate:
+        tin_number = _clean_tax_id(request.form.get("tin_number"))
+        vat_number = _clean_tax_id(request.form.get("vat_number"))
+        clash = _check_duplicate_ids(company_number, tin_number, vat_number, exclude_client_id=client.id)
+        if clash:
+            label, value, duplicate = clash
             flash(
-                f"A client with company number \"{company_number}\" already exists: "
+                f"A client with {label} \"{value}\" already exists: "
                 f"{duplicate.name}. Open that client instead, or double-check the number.",
                 "danger",
             )
             return render_template(
                 "clients/form.html", client=client, industry_options=INDUSTRY_OPTIONS,
-                duplicate_client=duplicate,
+                form_values=dict(request.form), duplicate_client=duplicate, duplicate_label=label,
             )
         client.name = request.form.get("name", "").strip()
         client.contact_person = request.form.get("contact_person", "").strip()
@@ -171,6 +224,8 @@ def edit_client(client_id):
         old_industry = client.industry
         client.industry = _resolve_industry(request.form)
         client.company_number = company_number
+        client.tin_number = tin_number or None
+        client.vat_number = vat_number or None
         client.notes = request.form.get("notes", "").strip()
         db.session.flush()
 

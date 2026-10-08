@@ -117,6 +117,9 @@
       <div class="party">
         <div class="k">{% block party_label %}Bill to{% endblock %}</div>
         <div class="who">{{ doc.bill_to or doc.client.name }}</div>
+        {% if doc.client.tin_number or doc.client.vat_number %}
+        <div class="who-ids" style="font-size:11.5px;color:#555;margin-top:3px;">{% if doc.client.tin_number %}TIN: {{ doc.client.tin_number }}{% endif %}{% if doc.client.tin_number and doc.client.vat_number %} &nbsp;&middot;&nbsp; {% endif %}{% if doc.client.vat_number %}VAT No: {{ doc.client.vat_number }}{% endif %}</div>
+        {% endif %}
         {% block party_re %}{% endblock %}
       </div>
 

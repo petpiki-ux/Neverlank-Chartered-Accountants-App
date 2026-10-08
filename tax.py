@@ -1063,7 +1063,10 @@ def _require_vat_schedule_permission():
     "manage_vat_schedules" permission (Supervisor, Partner and Admin by
     default; an admin can change this per role or person)."""
     if not user_has_permission(current_user, "manage_vat_schedules"):
-        abort(403)
+        abort(403, description=(
+            "Your account is not allowed to upload or change VAT schedules. This is limited to Supervisors, "
+            "Partners and Admins by default - an Admin can grant it to you under Team > Permissions or your Access Rights."
+        ))
 
 
 def _render_vat_mapping_screen(engagement, direction, doc_type, staged_name, original_name, headers, rows, mapping, problem=None, currency=VAT_DEFAULT_CURRENCY):

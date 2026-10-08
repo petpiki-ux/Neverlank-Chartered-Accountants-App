@@ -1,7 +1,7 @@
 import os
 import click
 from datetime import datetime
-from flask import Flask, redirect, url_for
+from flask import Flask, redirect, url_for, render_template
 from flask_login import current_user
 from sqlalchemy import event, text
 from sqlalchemy.engine import Engine
@@ -70,7 +70,7 @@ def _add_missing_columns():
             ("is_current_version", "BOOLEAN DEFAULT 1"),
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
-        "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)")],
+        "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)")],
         # last_seen_at - see models.User.is_online and this file's
         # _update_last_seen - drives the Messages "who's in the app" online
         # indicator.
@@ -598,6 +598,19 @@ def create_app():
     app.register_blueprint(standard_coa_bp)
     app.register_blueprint(wb_bp)
     app.register_blueprint(wb_public_bp)
+
+    @app.errorhandler(403)
+    def forbidden(error):
+        """A plain "Forbidden" gave no clue why. Show the specific reason the
+        route supplied (not on the team, acceptance not cleared, missing
+        permission) and a way back."""
+        reason = getattr(error, "description", None)
+        if not reason or reason.startswith("You don't have the permission"):
+            reason = ("Your account does not have permission to do this. If you think it should, ask an "
+                      "Admin or Partner to check your access rights.")
+        if not current_user.is_authenticated:
+            return reason, 403
+        return render_template("errors/403.html", reason=reason), 403
     app.register_blueprint(training_bp)
 
     @app.route("/")
