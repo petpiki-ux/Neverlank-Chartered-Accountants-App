@@ -21,7 +21,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from extensions import db
-from models import DocumentTemplate, ENGAGEMENT_TYPES, user_has_permission
+from models import DocumentTemplate, ENGAGEMENT_TYPES, canonical_engagement_type, user_has_permission
 from config import Config
 
 doc_templates_bp = Blueprint("doc_templates", __name__, url_prefix="/document-templates")
@@ -85,7 +85,7 @@ def download_template(template_id):
 @editor_required
 def new_template():
     if request.method == "POST":
-        eng_type = request.form.get("type", "Audit")
+        eng_type = canonical_engagement_type(request.form.get("type", "Audit"))
         title = request.form.get("title", "").strip()
         description = request.form.get("description", "").strip()
         ref_code = request.form.get("ref_code", "").strip()
@@ -133,7 +133,7 @@ def new_template():
 def edit_template(template_id):
     tpl = DocumentTemplate.query.get_or_404(template_id)
     if request.method == "POST":
-        eng_type = request.form.get("type", tpl.type)
+        eng_type = canonical_engagement_type(request.form.get("type", tpl.type))
         title = request.form.get("title", "").strip()
         if eng_type not in TEMPLATE_TYPES:
             flash("Please choose a valid template type.", "danger")

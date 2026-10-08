@@ -30,6 +30,51 @@ def _set_sqlite_pragmas(dbapi_connection, connection_record):
         cursor.close()
 
 
+def _merge_tax_engagement_types():
+    """One-time (idempotent) merge of the two old tax engagement types - "Tax
+    Compliance" and "Tax Advisory & Health Check" - into the single umbrella
+    type "Tax Advisory". Moves every place the old names are stored:
+    engagements, checklist templates, and the Document Templates library
+    (including the files on disk, which live in a folder named after the type;
+    a file whose name already exists in the destination keeps both, the
+    incoming one getting a numeric suffix), plus the bundled TX-* tax
+    templates that used to sit under Consulting. Safe to run on every
+    startup."""
+    import shutil
+    from models import Engagement, ChecklistTemplate, LEGACY_TAX_ENGAGEMENT_TYPES, TAX_ADVISORY_TYPE
+    changed = False
+    for model in (Engagement, ChecklistTemplate):
+        for row in model.query.filter(model.type.in_(LEGACY_TAX_ENGAGEMENT_TYPES)).all():
+            row.type = TAX_ADVISORY_TYPE
+            changed = True
+    dest_dir = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, TAX_ADVISORY_TYPE)
+    # The firm's bundled tax templates (TX-01..TX-05: engagement letter, CGT
+    # workpaper, ...) used to be filed under "Consulting" for want of a tax
+    # group in the library - they belong with Tax Advisory now.
+    to_move = DocumentTemplate.query.filter(DocumentTemplate.type.in_(LEGACY_TAX_ENGAGEMENT_TYPES)).all()
+    to_move += [
+        t for t in DocumentTemplate.query.filter_by(type="Consulting").all()
+        if (t.ref_code or "").startswith("TX-") and (t.filename or "").startswith("TX-")
+    ]
+    for tpl in to_move:
+        src = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, tpl.type, tpl.filename)
+        if os.path.exists(src):
+            os.makedirs(dest_dir, exist_ok=True)
+            name, dot, ext = tpl.filename.rpartition(".")
+            if not dot:
+                name, ext = tpl.filename, ""
+            candidate, n = tpl.filename, 1
+            while os.path.exists(os.path.join(dest_dir, candidate)):
+                n += 1
+                candidate = f"{name}_{n}.{ext}" if ext else f"{name}_{n}"
+            shutil.move(src, os.path.join(dest_dir, candidate))
+            tpl.filename = candidate
+        tpl.type = TAX_ADVISORY_TYPE
+        changed = True
+    if changed:
+        db.session.commit()
+
+
 def _backfill_task_categories():
     """One-time (idempotent) fill for tasks that pre-date task categories:
     an engagement task takes the category implied by its engagement's type, a
@@ -683,6 +728,7 @@ def create_app():
     with app.app_context():
         db.create_all()
         _add_missing_columns()
+        _merge_tax_engagement_types()
         _backfill_task_categories()
         # First-run convenience: seed an admin login + starter checklist
         # templates automatically so a freshly-installed copy works with zero

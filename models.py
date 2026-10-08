@@ -8,10 +8,21 @@ from extensions import db
 
 ENGAGEMENT_TYPES = [
     "Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement",
-    "Business Intelligence and IT Engagements", "Tax Compliance", "Tax Advisory & Health Check",
+    "Business Intelligence and IT Engagements", "Tax Advisory",
     "Accounting & Bookkeeping",
     "Neverlank Anonymous Whistle-blower Services", "Neverlank Training Services",
 ]
+
+# "Tax Advisory" is the single umbrella engagement type for ALL of the firm's
+# tax work - compliance (returns & filings), advisory (planning & structuring),
+# health checks and representation. It used to be two separate types ("Tax
+# Compliance" and "Tax Advisory & Health Check"); those two names are kept
+# here only so old rows can be recognised and moved across on startup (see
+# app._merge_tax_engagement_types) and so nothing breaks if one is met before
+# that has run. Which tax services are actually being delivered on a given
+# engagement is chosen with the "Tax services" ticks (TAX_SERVICES).
+TAX_ADVISORY_TYPE = "Tax Advisory"
+LEGACY_TAX_ENGAGEMENT_TYPES = ("Tax Compliance", "Tax Advisory & Health Check")
 
 # The two stand-alone service lines (not audit-style engagements): each gets
 # its own trimmed workspace instead of the audit tab set - see
@@ -105,7 +116,7 @@ SECRETARIAL_ACTIVITIES = [
 ]
 SECRETARIAL_ACTIVITY_LABELS = dict(SECRETARIAL_ACTIVITIES)
 
-# Selectable "Services" for the Tax Advisory & Tax Compliance module
+# Selectable "Services" for the Tax Advisory module (compliance, advisory, health check, representation)
 # (Engagement.tax_services, a comma-separated list of the keys below) -
 # what the firm has actually been engaged to do on the tax side. Unlike
 # SECRETARIAL_ACTIVITIES above (only meaningful on a Secretarial
@@ -209,8 +220,9 @@ ENGAGEMENT_TYPE_TASK_CATEGORY = {
     "Audit": "Audit",
     "Assurance": "Audit",
     "Investigative Engagement": "Forensic Audit",
-    "Tax Compliance": "Tax Services",
-    "Tax Advisory & Health Check": "Tax Services",
+    "Tax Advisory": "Tax Services",
+    "Tax Compliance": "Tax Services",  # legacy name, see LEGACY_TAX_ENGAGEMENT_TYPES
+    "Tax Advisory & Health Check": "Tax Services",  # legacy name
     "Consulting": "Consulting",
     "Business Intelligence and IT Engagements": "Consulting",
     "Accounting & Bookkeeping": "Accounting",
@@ -218,6 +230,14 @@ ENGAGEMENT_TYPE_TASK_CATEGORY = {
     "Neverlank Anonymous Whistle-blower Services": "Neverlank Anonymous Tipoff Services",
     "Neverlank Training Services": "Training",
 }
+
+
+def canonical_engagement_type(value):
+    """The current name for an engagement type: the two retired tax names
+    ("Tax Compliance", "Tax Advisory & Health Check") become "Tax Advisory";
+    anything else is returned unchanged. Used wherever a type arrives from a
+    form so an old bookmark or stale page can't recreate a retired type."""
+    return TAX_ADVISORY_TYPE if value in LEGACY_TAX_ENGAGEMENT_TYPES else value
 
 
 def resolve_task_category(requested, engagement=None, fallback="Other"):
@@ -286,7 +306,7 @@ QUERY_SECTIONS = [
     ("income_tax", "Income Tax Computation"),
     ("deferred_tax", "Deferred Tax Computation"),
     ("finalisation", "Finalisation (Trial Balance / Financial Statements)"),
-    ("tax", "Tax Advisory & Compliance"),
+    ("tax", "Tax Advisory"),
     ("accounting", "Financial, Cost & Management Accounting"),
 ]
 QUERY_SECTION_KEYS = {key for key, _ in QUERY_SECTIONS}
@@ -458,7 +478,7 @@ PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
 # user_has_permission below: staff actually staffed on a Tax engagement
 # need the Payroll module's PAYE tax bands/settings for that work, so they
 # get it automatically even where their role wouldn't otherwise grant it.
-TAX_ENGAGEMENT_TYPES = ("Tax Compliance", "Tax Advisory & Health Check")
+TAX_ENGAGEMENT_TYPES = (TAX_ADVISORY_TYPE,) + LEGACY_TAX_ENGAGEMENT_TYPES
 
 
 def user_has_permission(user, key):
@@ -473,7 +493,7 @@ def user_has_permission(user, key):
        team member's own profile) - an explicit, named decision about this
        one person, so it wins over everything else.
     2. For "manage_payroll" specifically, whether the user is staffed on an
-       active Tax Compliance / Tax Advisory & Health Check engagement (see
+       active Tax Advisory engagement (see
        TAX_ENGAGEMENT_TYPES above) - PAYE review work on a Tax engagement
        needs the Payroll module's PAYE tax settings, granted automatically
        rather than requiring every such person to get an explicit override.
@@ -499,7 +519,7 @@ def user_has_permission(user, key):
 
 def _user_has_active_tax_engagement(user):
     """True if `user` is a team member (Engagement.team_members) on at
-    least one Tax Compliance / Tax Advisory & Health Check engagement that
+    least one Tax Advisory engagement that
     isn't yet Completed - see the "manage_payroll" carve-out above."""
     return any(
         e.type in TAX_ENGAGEMENT_TYPES and e.status != "Completed"
@@ -1916,7 +1936,7 @@ class Engagement(db.Model):
         either a dedicated Tax engagement type, or any Tax service
         explicitly turned on for another engagement type (e.g. tax
         compliance work bundled into an Audit engagement)."""
-        return self.type in ("Tax Compliance", "Tax Advisory & Health Check") or bool(self.tax_service_list)
+        return self.type in TAX_ENGAGEMENT_TYPES or bool(self.tax_service_list)
 
     @property
     def has_tax_advisory(self):
@@ -1926,7 +1946,7 @@ class Engagement(db.Model):
         service is actually on, never just because some other Tax service
         is."""
         services = self.tax_service_list
-        return "advisory" in services or "representation" in services or self.type == "Tax Advisory & Health Check"
+        return "advisory" in services or "representation" in services or self.type in TAX_ENGAGEMENT_TYPES
 
     @property
     def accounting_service_list(self):

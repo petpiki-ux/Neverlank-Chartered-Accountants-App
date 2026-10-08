@@ -33,7 +33,7 @@ from models import (
     AUDIT_AREA_REFERENCES, FORENSIC_AREA_REFERENCES, BUSINESS_IT_AREA_REFERENCES, SECRETARIAL_AREA_REFERENCES,
     EngagementQuery, QueryReply,
     WorkpaperReview, REVIEWABLE_TYPES, REVIEWABLE_TYPE_SUBSTANTIVE_ITEM, REVIEWABLE_TYPE_CHECKLIST_ITEM,
-    ENGAGEMENT_TYPES, ENGAGEMENT_STATUSES, TASK_STATUSES, TASK_CATEGORIES, resolve_task_category, effective_task_priority, CHECKLIST_STATUSES, RISK_STATUSES,
+    ENGAGEMENT_TYPES, canonical_engagement_type, ENGAGEMENT_STATUSES, TASK_STATUSES, TASK_CATEGORIES, resolve_task_category, effective_task_priority, CHECKLIST_STATUSES, RISK_STATUSES,
     SECRETARIAL_SUBDIVISIONS, SECRETARIAL_ACTIVITIES, SECRETARIAL_ACTIVITY_LABELS, REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES,
     RISK_LIKELIHOOD_QUESTIONS, RISK_IMPACT_QUESTIONS,
     FORENSIC_RISK_LIKELIHOOD_QUESTIONS, FORENSIC_RISK_IMPACT_QUESTIONS, SCOPE_SUGGESTIONS,
@@ -353,7 +353,7 @@ def new_engagement():
                                     subdivisions=SECRETARIAL_SUBDIVISIONS, secretarial_activity_options=SECRETARIAL_ACTIVITIES,
                                     tax_service_options=TAX_SERVICES, accounting_service_options=ACCOUNTING_SERVICES)
 
-        engagement_type = request.form.get("type", "Audit")
+        engagement_type = canonical_engagement_type(request.form.get("type", "Audit"))
         selected_activities = request.form.getlist("secretarial_activities")
         selected_tax_services = request.form.getlist("tax_services")
         selected_accounting_services = request.form.getlist("accounting_services")
@@ -424,7 +424,7 @@ def edit_engagement(engagement_id):
     if request.method == "POST":
         engagement.client_id = int(request.form.get("client_id"))
         engagement.title = request.form.get("title", "").strip()
-        engagement.type = request.form.get("type", "Audit")
+        engagement.type = canonical_engagement_type(request.form.get("type", "Audit"))
         engagement.subdivision = (request.form.get("subdivision", "").strip() or None) if engagement.type == "Secretarial" else None
         engagement.secretarial_activities = (",".join(request.form.getlist("secretarial_activities")) or None) if engagement.type == "Secretarial" else None
         engagement.tax_services = ",".join(request.form.getlist("tax_services")) or None
@@ -2601,7 +2601,7 @@ def new_template():
     if request.method == "POST":
         template = ChecklistTemplate(
             name=request.form.get("name", "").strip(),
-            type=request.form.get("type", "Audit"),
+            type=canonical_engagement_type(request.form.get("type", "Audit")),
             description=request.form.get("description", "").strip(),
         )
         db.session.add(template)

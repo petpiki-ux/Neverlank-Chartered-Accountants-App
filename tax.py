@@ -1,6 +1,6 @@
-"""Tax Advisory & Tax Compliance module - the "Tax" tab shown on any
-engagement with Engagement.has_tax_module True (a dedicated Tax Compliance
-/ Tax Advisory & Health Check engagement, or any other engagement type
+"""Tax Advisory module - the "Tax" tab shown on any
+engagement with Engagement.has_tax_module True (a Tax Advisory engagement -
+the single umbrella type for all tax work - or any other engagement type
 with a Tax service turned on - see models.TAX_SERVICES).
 
 Everything that already had a natural home elsewhere in this app is

@@ -246,7 +246,7 @@ TEMPLATES = [
 # produce a working paper that has a direct home in that index, so the
 # reference shown in the app should be the one staff will actually file the
 # finished document under, not the old pre-Filing-Index catalogue code.
-# The forensic (FR-*), Assurance (AS-*/AUP-*), Consulting (CE-*) and Tax
+# The forensic (FR-*), Assurance (AS-*/AUP-*), Consulting (CE-*) and Tax Advisory
 # (TX-*) templates are left as-is: the filing policy is explicitly scoped to
 # statutory audits, so those engagement types have no N-code equivalent.
 #
@@ -304,15 +304,15 @@ DOCUMENT_LIBRARY = [
      "Deliverable report template: findings, recommendations, next steps."),
     ("Consulting", "CE-03 Client Sign-off Acceptance Form.docx", "CE-03", "Client Sign-off / Acceptance Form",
      "Client acceptance form for a consulting deliverable."),
-    ("Consulting", "TX-01 Engagement Letter.docx", "TX-01", "Engagement Letter (Tax / CGT Advisory)",
+    ("Tax Advisory", "TX-01 Engagement Letter.docx", "TX-01", "Engagement Letter (Tax / CGT Advisory)",
      "Engagement letter for tax advisory and CGT engagements."),
-    ("Consulting", "TX-02 Fact Finding Information Request Schedule.docx", "TX-02", "Fact-Finding / Information Request Schedule",
+    ("Tax Advisory", "TX-02 Fact Finding Information Request Schedule.docx", "TX-02", "Fact-Finding / Information Request Schedule",
      "Checklist of documents to request from the client for a CGT computation."),
-    ("Consulting", "TX-03 CGT Computation Workpaper.xlsx", "TX-03", "CGT Computation Workpaper (Excel)",
+    ("Tax Advisory", "TX-03 CGT Computation Workpaper.xlsx", "TX-03", "CGT Computation Workpaper (Excel)",
      "Live Capital Gains Tax computation with working formulas."),
-    ("Consulting", "TX-04 Technical Position Memo.docx", "TX-04", "Technical Position Memo",
+    ("Tax Advisory", "TX-04 Technical Position Memo.docx", "TX-04", "Technical Position Memo",
      "Document the technical analysis and position adopted for a tax matter."),
-    ("Consulting", "TX-05 Client Outcome Letter.docx", "TX-05", "Client Outcome Letter",
+    ("Tax Advisory", "TX-05 Client Outcome Letter.docx", "TX-05", "Client Outcome Letter",
      "Letter communicating the tax outcome and obligations to the client."),
 ]
 

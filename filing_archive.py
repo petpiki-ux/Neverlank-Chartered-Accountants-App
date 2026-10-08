@@ -1,7 +1,7 @@
 """Tax & Accounting Filing Archive - a client's Tax Clearance certificates,
 filed Returns, and supporting Schedules (see models.
 TaxAccountingFilingDocument / FILING_ARCHIVE_SECTIONS), filed once per
-Client rather than tied to whichever Tax Compliance/Accounting &
+Client rather than tied to whichever Tax Advisory/Accounting &
 Bookkeeping engagement happened to be open at the time - same reasoning as
 the Permanent File (permanent_file.py), which this deliberately mirrors: a
 simple file + tag + notes record, reusing the same upload folder and
