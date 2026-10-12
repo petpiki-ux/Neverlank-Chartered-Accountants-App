@@ -2572,6 +2572,13 @@ class EngagementTask(db.Model):
     partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     partner_signed_at = db.Column(db.DateTime)
 
+    # Billing: the invoice line this finished task was billed on (NULL = not
+    # billed yet; the link clears itself if that line or its invoice is
+    # deleted), and a "not billable" flag for completed work that should never
+    # be invoiced (internal, covered by a fixed fee already billed, ...).
+    invoice_line_id = db.Column(db.Integer, db.ForeignKey("invoice_line_item.id"))
+    billing_waived = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
+
     assigned_to = db.relationship("User", foreign_keys=[assigned_to_id])
     completed_by = db.relationship("User", foreign_keys=[completed_by_id])
     reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
@@ -2582,12 +2589,37 @@ class EngagementTask(db.Model):
         return bool(self.due_date and self.due_date < date.today() and self.status != "Done")
 
     @property
+    def invoice(self):
+        """The invoice this task has been billed on, if any."""
+        return self.invoice_line.invoice if self.invoice_line_id and self.invoice_line else None
+
+    @property
+    def is_ready_to_bill(self):
+        """Finished, not yet invoiced and not marked not-billable."""
+        return self.status == "Done" and self.invoice_line_id is None and not self.billing_waived
+
+    @property
     def is_reviewed(self):
         return self.reviewed_by_id is not None
 
     @property
     def is_partner_signed(self):
         return self.partner_signed_by_id is not None
+
+
+# Task categories that are the firm's own housekeeping rather than client work:
+# their finished tasks are left out of "Ready to bill" unless asked for.
+NON_BILLABLE_TASK_CATEGORIES = ("Admin Work", "Personal", "Other")
+
+
+def ready_to_bill_tasks(engagement, include_internal=False):
+    """Finished client work on `engagement` that has not been invoiced (and
+    has not been marked not-billable), oldest completion first."""
+    tasks = [
+        t for t in engagement.tasks
+        if t.is_ready_to_bill and (include_internal or (t.category or "") not in NON_BILLABLE_TASK_CATEGORIES)
+    ]
+    return sorted(tasks, key=lambda t: (t.completed_at or datetime.min, t.id))
 
 
 class PersonalTask(db.Model):
@@ -8678,6 +8710,11 @@ class InvoiceLineItem(db.Model):
     description = db.Column(db.String(300), nullable=False)
     quantity = db.Column(db.Float, default=1.0)
     unit_price = db.Column(db.Float, default=0.0)
+
+    # The completed engagement tasks this line bills for (see
+    # EngagementTask.invoice_line_id). Deleting the line - or its invoice -
+    # sets them back to "not billed" rather than deleting them.
+    tasks = db.relationship("EngagementTask", backref="invoice_line", lazy=True)
 
     @property
     def line_total(self):

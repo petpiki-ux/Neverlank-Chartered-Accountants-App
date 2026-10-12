@@ -37,7 +37,7 @@
       {% for line in invoice.lines %}
       <tr>
         <form method="post" action="{{ url_for('invoicing.update_invoice_line', line_id=line.id) }}" class="inline">
-        <td><input type="text" name="description" value="{{ line.description }}" style="margin-bottom:0;"></td>
+        <td><input type="text" name="description" value="{{ line.description }}" style="margin-bottom:0;">{% if line.tasks %}<div class="muted" style="font-size:11px;margin-top:3px;">Bills {{ line.tasks|length }} completed task{{ '' if line.tasks|length == 1 else 's' }}: {{ line.tasks|map(attribute='title')|join('; ') }}</div>{% endif %}</td>
         <td><input type="number" step="0.01" name="quantity" value="{{ line.quantity }}" style="width:80px;margin-bottom:0;text-align:right;"></td>
         <td><input type="number" step="0.01" name="unit_price" value="{{ line.unit_price }}" style="width:110px;margin-bottom:0;text-align:right;"></td>
         <td class="text-right">{{ '%.2f'|format(line.line_total) }}</td>
@@ -61,6 +61,44 @@
     <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add line</button></div>
   </form>
 </div>
+
+{% if invoice.engagement and invoice.status in ('Draft', 'Sent') %}
+<div class="card" id="billable-work">
+  <h3 class="mt-0">Completed work ready to bill</h3>
+  {% if ready_tasks %}
+  <p class="muted" style="font-size:12.5px;">Finished tasks on <strong>{{ invoice.engagement.title }}</strong> that have not been invoiced. Tick what to bill and enter the fee; each task can only be billed once.
+    {% if show_internal %}<a href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}#billable-work">Hide internal categories</a>{% else %}<a href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id, internal=1) }}#billable-work">Also show internal categories</a>{% endif %}</p>
+  <form method="post" action="{{ url_for('invoicing.add_task_lines', invoice_id=invoice.id) }}">
+    <table>
+      <thead><tr><th></th><th>Task</th><th>Completed</th><th class="text-right">Fee ({{ invoice.currency }})</th><th></th></tr></thead>
+      <tbody>
+        {% for t in ready_tasks %}
+        <tr>
+          <td><input type="checkbox" name="task_id" value="{{ t.id }}" style="width:auto;" checked></td>
+          <td>{{ t.title }}{% if t.category %}<div><span class="badge" style="font-size:10px;">{{ t.category }}</span></div>{% endif %}</td>
+          <td>{{ (t.completed_at|cat).strftime('%d %b %Y') if t.completed_at else '—' }}{% if t.completed_by %}<div class="muted" style="font-size:11px;">{{ t.completed_by.name }}</div>{% endif %}</td>
+          <td class="text-right"><input type="number" step="0.01" min="0" name="fee_{{ t.id }}" placeholder="0.00" style="width:110px;margin-bottom:0;text-align:right;"></td>
+          <td class="text-right"><button type="submit" class="btn small secondary" formaction="{{ url_for('invoicing.toggle_task_billable', task_id=t.id) }}" formnovalidate title="Take this task off the list - it will not be invoiced">Not billable</button></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <input type="hidden" name="next" value="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}#billable-work">
+    <div style="margin-top:10px;">
+      <label style="font-weight:normal;"><input type="radio" name="mode" value="separate" checked style="width:auto;" onchange="document.getElementById('combo').style.display='none'"> One invoice line per task (uses the fee on each row)</label>
+      <label style="font-weight:normal;"><input type="radio" name="mode" value="combined" style="width:auto;" onchange="document.getElementById('combo').style.display='block'"> One combined line for all ticked tasks</label>
+    </div>
+    <div id="combo" class="form-row" style="display:none;margin-top:6px;">
+      <div style="grid-column: span 2;"><label for="combined_description">Line description</label><input type="text" id="combined_description" name="combined_description" value="Professional services - {{ invoice.engagement.title }}"></div>
+      <div><label for="combined_fee">Fee ({{ invoice.currency }})</label><input type="number" step="0.01" min="0" id="combined_fee" name="combined_fee" placeholder="0.00"></div>
+    </div>
+    <button type="submit" class="btn gold" style="margin-top:8px;">Add ticked tasks to this invoice</button>
+  </form>
+  {% else %}
+  <p class="muted" style="font-size:12.5px;margin:0;">No finished tasks waiting to be billed on this engagement. {% if not show_internal %}<a href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id, internal=1) }}#billable-work">Show internal categories</a>{% endif %}</p>
+  {% endif %}
+</div>
+{% endif %}
 
 <div class="card" style="max-width:360px;margin-left:auto;">
   <div class="form-row"><div>Subtotal</div><div class="text-right">{{ invoice.currency }} {{ '%.2f'|format(invoice.subtotal) }}</div></div>

@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}Ready to bill - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Ready to bill</h1>
+    <div class="subtitle">{{ total }} completed task(s) not yet invoiced, across {{ groups|length }} engagement(s)</div>
+  </div>
+  <div><a href="{{ url_for('invoicing.list_invoices') }}" class="btn secondary">Invoices</a></div>
+</div>
+
+<div class="card">
+  <p class="muted" style="font-size:12.5px;margin:0;">
+    Finished client work that has not been put on an invoice yet. Open or raise an invoice for the engagement and use
+    <strong>Completed work ready to bill</strong> to turn the tasks into invoice lines. Work that should never be charged
+    (already covered by a fixed fee, internal) can be marked <em>Not billable</em> to take it off this list.
+    {% if show_internal %}<a href="{{ url_for('invoicing.ready_to_bill') }}">Hide internal categories (Admin Work, Personal, Other)</a>
+    {% else %}<a href="{{ url_for('invoicing.ready_to_bill', internal=1) }}">Also show internal categories (Admin Work, Personal, Other)</a>{% endif %}
+  </p>
+</div>
+
+{% for g in groups %}
+{% set e = g.engagement %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+    <div>
+      <h3 class="mt-0" style="margin-bottom:2px;"><a href="{{ url_for('clients.view_client', client_id=e.client_id) }}">{{ e.client.name }}</a>
+        &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=e.id, tab='tasks') }}">{{ e.title }}</a></h3>
+      <div class="muted" style="font-size:12px;">{{ g.tasks|length }} completed task(s) waiting</div>
+    </div>
+    <div>
+      {% if g.draft %}
+      <a href="{{ url_for('invoicing.view_invoice', invoice_id=g.draft.id) }}#billable-work" class="btn gold">Add to draft {{ g.draft.invoice_number }}</a>
+      {% else %}
+      <a href="{{ url_for('invoicing.new_invoice', client_id=e.client_id, engagement_id=e.id) }}" class="btn gold">Raise invoice</a>
+      {% endif %}
+    </div>
+  </div>
+  <table style="margin-top:8px;">
+    <thead><tr><th>Task</th><th>Category</th><th>Done by</th><th>Completed</th><th></th></tr></thead>
+    <tbody>
+      {% for t in g.tasks %}
+      <tr>
+        <td>{{ t.title }}</td>
+        <td>{{ t.category or '—' }}</td>
+        <td>{{ (t.completed_by.name if t.completed_by else (t.assigned_to.name if t.assigned_to else '—')) }}</td>
+        <td>{{ (t.completed_at|cat).strftime('%d %b %Y') if t.completed_at else '—' }}</td>
+        <td class="text-right">
+          <form method="post" action="{{ url_for('invoicing.toggle_task_billable', task_id=t.id) }}" class="inline">
+            <input type="hidden" name="next" value="{{ request.full_path.rstrip('?') }}">
+            <button type="submit" class="btn small secondary" title="Take this off the list - it will not be invoiced">Not billable</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">Nothing waiting - every completed task has been invoiced or marked not billable.</div></div>
+{% endfor %}
+{% endblock %}

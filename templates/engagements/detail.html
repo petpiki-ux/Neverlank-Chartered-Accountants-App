@@ -2117,6 +2117,13 @@
     </form>
   </div>
 
+  {% if ready_to_bill_count %}
+  <div class="flash warning" style="display:flex;justify-content:space-between;align-items:center;gap:12px;">
+    <span><strong>{{ ready_to_bill_count }} completed task{{ '' if ready_to_bill_count == 1 else 's' }}</strong> on this engagement {{ 'has' if ready_to_bill_count == 1 else 'have' }} not been invoiced yet.</span>
+    <a href="{{ url_for('invoicing.ready_to_bill') }}" class="btn small gold">Ready to bill</a>
+  </div>
+  {% endif %}
+
   <div class="card">
     {% if engagement.tasks %}
     <table>
@@ -2124,7 +2131,7 @@
       <tbody>
       {% for t in engagement_tasks_sorted %}
         <tr>
-          <td>{{ t.title }}{% if t.category %}<div><span class="badge{% if t.category == 'Tax Services' %} overdue{% endif %}" style="font-size:10px;">{{ t.category }}</span></div>{% endif %}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
+          <td>{{ t.title }}{% if t.category %}<div><span class="badge{% if t.category == 'Tax Services' %} overdue{% endif %}" style="font-size:10px;">{{ t.category }}</span></div>{% endif %}{% if t.invoice_line_id %}<div><a href="{{ url_for('invoicing.view_invoice', invoice_id=t.invoice.id) }}" class="badge status-Paid" style="font-size:10px;" title="Billed on this invoice">Invoiced {{ t.invoice.invoice_number }}</a></div>{% elif t.billing_waived %}<div><span class="badge" style="font-size:10px;" title="Marked not billable">Not billable</span></div>{% elif t.status == 'Done' and (t.category or '') not in ('Admin Work', 'Personal', 'Other') %}<div><span class="badge status-Sent" style="font-size:10px;">Ready to bill</span></div>{% endif %}{% if t.description %}<div class="muted" style="font-size:11.5px;">{{ t.description }}</div>{% endif %}</td>
           <td>{{ t.assigned_to.name if t.assigned_to else '—' }}</td>
           <td>{{ t.due_date.strftime('%d %b %Y') if t.due_date else '—' }} {% if t.is_overdue %}<span class="badge overdue">Overdue</span>{% endif %}</td>
           <td>{{ t.priority }}</td>

@@ -7,6 +7,7 @@
     <div class="subtitle">{{ invoices|length }} invoice(s)</div>
   </div>
   <div>
+    <a href="{{ url_for('invoicing.ready_to_bill') }}" class="btn secondary" title="Finished work not yet invoiced">Ready to bill{% if ready_count %} <span class="badge overdue">{{ ready_count }}</span>{% endif %}</a>
     <a href="{{ url_for('recurring.list_schedules') }}" class="btn secondary">Recurring invoices</a>
     <a href="{{ url_for('invoicing.new_invoice') }}" class="btn gold">+ New Invoice</a>
   </div>

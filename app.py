@@ -158,6 +158,9 @@ def _add_missing_columns():
             # category - see models.TASK_CATEGORIES; backfilled from the
             # engagement type by _backfill_task_categories on startup.
             ("category", "VARCHAR(60)"),
+            # billing - see models.EngagementTask.invoice_line_id / billing_waived
+            ("invoice_line_id", "INTEGER"),
+            ("billing_waived", "BOOLEAN DEFAULT 0"),
         ] + partner_signoff_cols,
         "personal_task": [("category", "VARCHAR(60)")],
         # doc_type/related_reference/customs_duty - see models.VAT_DOC_TYPES:

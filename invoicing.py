@@ -15,9 +15,10 @@ from flask_login import login_required, current_user
 
 from extensions import db
 from models import (
-    Client, Engagement, Invoice, InvoiceLineItem,
+    Client, Engagement, Invoice, InvoiceLineItem, EngagementTask, ready_to_bill_tasks,
     INVOICE_STATUSES, INVOICE_CURRENCIES, user_can_access_engagement,
 )
+from timeutil import to_cat
 
 invoicing_bp = Blueprint("invoicing", __name__, url_prefix="/invoices")
 
@@ -88,8 +89,9 @@ def list_invoices():
         1 for inv in Invoice.query.filter(Invoice.status == "Draft", Invoice.recurring_invoice_id.isnot(None)).all()
         if not inv.engagement_id or user_can_access_engagement(current_user, inv.engagement)
     )
+    ready_count = sum(len(ready_to_bill_tasks(e)) for e in _visible_engagements_for_invoicing())
     return render_template(
-        "invoicing/list.html", invoices=visible, clients=clients,
+        "invoicing/list.html", invoices=visible, clients=clients, ready_count=ready_count,
         statuses=INVOICE_STATUSES, status_filter=status_filter, client_filter=client_filter,
         recurring_only=recurring_only, review_count=review_count,
     )
@@ -167,7 +169,10 @@ def view_invoice(invoice_id):
     _ensure_invoice_access(invoice)
     from models import RECURRING_FREQUENCIES
     from models import PAYMENT_METHODS
-    return render_template("invoicing/detail.html", invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES), today_iso=date.today().isoformat(), methods=PAYMENT_METHODS)
+    show_internal = request.args.get("internal") == "1"
+    ready_tasks = (ready_to_bill_tasks(invoice.engagement, include_internal=show_internal)
+                   if invoice.engagement and invoice.status in ("Draft", "Sent") else [])
+    return render_template("invoicing/detail.html", invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES), today_iso=date.today().isoformat(), methods=PAYMENT_METHODS, ready_tasks=ready_tasks, show_internal=show_internal)
 
 
 @invoicing_bp.route("/<int:invoice_id>/print")
@@ -272,6 +277,110 @@ def update_invoice_status(invoice_id):
     db.session.commit()
     flash(f"Invoice marked as {status}.", "success")
     return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
+
+
+# ---------- Billing finished work (engagement tasks -> invoice lines) ----------
+
+def _parse_fee(value):
+    """A fee typed in the form: a number >= 0, or None if missing/invalid."""
+    try:
+        fee = round(float(str(value).replace(",", "").strip()), 2)
+    except (TypeError, ValueError):
+        return None
+    return fee if fee >= 0 else None
+
+
+def _task_line_description(task):
+    done = to_cat(task.completed_at).date() if task.completed_at else None
+    return f"{task.title} (completed {done.strftime('%d %b %Y')})" if done else task.title
+
+
+@invoicing_bp.route("/<int:invoice_id>/tasks/add", methods=["POST"])
+@login_required
+def add_task_lines(invoice_id):
+    """Turn ticked, finished engagement tasks into invoice lines - one line
+    per task (each with its own fee) or one combined line. A task can only
+    ever be billed once: it is linked to the line it produced."""
+    invoice = Invoice.query.get_or_404(invoice_id)
+    _ensure_invoice_access(invoice)
+    back = redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id) + "#billable-work")
+    if not invoice.engagement_id:
+        flash("Link this invoice to an engagement first - completed tasks are billed per engagement.", "danger")
+        return back
+    if invoice.status not in ("Draft", "Sent"):
+        flash("Lines can only be added to a Draft or Sent invoice.", "danger")
+        return back
+    ids = [int(i) for i in request.form.getlist("task_id") if i.isdigit()]
+    tasks = EngagementTask.query.filter(EngagementTask.id.in_(ids)).all() if ids else []
+    tasks = [t for t in tasks if t.engagement_id == invoice.engagement_id and t.is_ready_to_bill]
+    if not tasks:
+        flash("Tick at least one completed task to bill (tasks already invoiced or marked not billable are not available).", "danger")
+        return back
+    tasks.sort(key=lambda t: (t.completed_at or datetime.min, t.id))
+
+    if request.form.get("mode") == "combined":
+        description = request.form.get("combined_description", "").strip()
+        fee = _parse_fee(request.form.get("combined_fee"))
+        if not description or fee is None:
+            flash("For one combined line, enter a description and the fee (0 or more).", "danger")
+            return back
+        line = InvoiceLineItem(invoice_id=invoice.id, description=description, quantity=1.0, unit_price=fee)
+        db.session.add(line)
+        db.session.flush()
+        for t in tasks:
+            t.invoice_line_id = line.id
+        db.session.commit()
+        flash(f"Added one line covering {len(tasks)} completed task(s).", "success")
+        return back
+
+    fees = {t.id: _parse_fee(request.form.get(f"fee_{t.id}")) for t in tasks}
+    missing = [t.title for t in tasks if fees[t.id] is None]
+    if missing:
+        flash("Enter a fee for every ticked task (0 if it is covered by another line): " + "; ".join(missing), "danger")
+        return back
+    for t in tasks:
+        line = InvoiceLineItem(invoice_id=invoice.id, description=_task_line_description(t), quantity=1.0, unit_price=fees[t.id])
+        db.session.add(line)
+        db.session.flush()
+        t.invoice_line_id = line.id
+    db.session.commit()
+    flash(f"Added {len(tasks)} line(s) from completed tasks.", "success")
+    return back
+
+
+@invoicing_bp.route("/tasks/<int:task_id>/billing", methods=["POST"])
+@login_required
+def toggle_task_billable(task_id):
+    """Mark a finished task "not billable" (it drops off Ready to bill) or
+    put it back."""
+    task = EngagementTask.query.get_or_404(task_id)
+    if not user_can_access_engagement(current_user, task.engagement):
+        abort(403)
+    if task.invoice_line_id:
+        flash("That task has already been invoiced.", "info")
+    else:
+        task.billing_waived = not task.billing_waived
+        db.session.commit()
+        flash(f"\"{task.title}\" marked {'not billable' if task.billing_waived else 'billable again'}.", "success")
+    nxt = request.form.get("next", "")
+    return redirect(nxt if nxt.startswith("/") and not nxt.startswith("//") else url_for("invoicing.ready_to_bill"))
+
+
+@invoicing_bp.route("/ready-to-bill")
+@login_required
+def ready_to_bill():
+    """Finished work not yet invoiced, by engagement, for the engagements the
+    current user may see."""
+    show_internal = request.args.get("internal") == "1"
+    groups = []
+    for e in _visible_engagements_for_invoicing():
+        tasks = ready_to_bill_tasks(e, include_internal=show_internal)
+        if tasks:
+            draft = Invoice.query.filter_by(engagement_id=e.id, status="Draft").order_by(Invoice.id.desc()).first()
+            groups.append({"engagement": e, "tasks": tasks, "draft": draft})
+    groups.sort(key=lambda g: min((t.completed_at or datetime.max) for t in g["tasks"]))
+    return render_template("invoicing/ready_to_bill.html", groups=groups, show_internal=show_internal,
+                           total=sum(len(g["tasks"]) for g in groups))
 
 
 @invoicing_bp.route("/<int:invoice_id>/edit", methods=["GET", "POST"])
