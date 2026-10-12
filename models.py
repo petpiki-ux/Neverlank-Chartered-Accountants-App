@@ -425,6 +425,9 @@ PERMISSIONS = [
     ("manage_vat_schedules", "Upload & Map VAT Schedules",
      "On an engagement's Tax tab: upload an Output VAT or Input VAT schedule (sales, exports, credit notes, purchases, Bills of Entry) from Excel/CSV, map its columns, confirm the import, and delete an imported batch. Limited to supervisors and above by default (and still only on engagements the person is staffed on, unless Admin); typing in a single VAT document by hand is unaffected.",
      ("supervisor", "partner", "admin")),
+    ("reopen_vat_periods", "Reopen a Completed VAT Month",
+     "On an engagement's Tax tab: reopen a VAT month that has been marked 'Computation done' so documents dated in it can be added, deleted or imported again. Anyone on the engagement can mark a month as done; only supervisors and above can reopen it by default (a reason is recorded).",
+     ("supervisor", "partner", "admin")),
     ("manage_whistleblower", "Manage Whistle-blower Service cases",
      "See and work the confidential reports received through Neverlank's Anonymous Whistle-blower Services - log cases, investigate, update status, reply to reporters and produce client reports. Reports can be highly sensitive, so this is limited to supervisors and above by default (and still only on engagements the person is staffed on, unless Admin).",
      ("supervisor", "partner", "admin")),
@@ -5749,6 +5752,89 @@ class VATInvoice(db.Model):
 
     def __repr__(self):
         return f"<VATInvoice {self.direction} {self.invoice_number or ''} {self.vat_amount} engagement={self.engagement_id}>"
+
+
+class VATPeriod(db.Model):
+    """One VAT month of an engagement's VAT register (e.g. September 2026) that
+    the team has finished computing. A row exists only once a month has been
+    marked "Computation done"; a month with no row is "In progress".
+
+    A month that is done is LOCKED: no VAT document dated in it can be added,
+    deleted, re-tagged or imported until someone with the reopen permission
+    (Supervisor, Partner or Admin by default) reopens it. Reopening keeps the
+    row (is_done False) with who/when/why, so the history of a month that was
+    reopened is not lost; marking it done again overwrites the completion
+    details, while `times_reopened` keeps the running count.
+
+    The month a document belongs to is the month of its own invoice_date;
+    documents with no date cannot be placed in a month and are listed apart."""
+    __tablename__ = "vat_period"
+    __table_args__ = (db.UniqueConstraint("engagement_id", "year", "month", name="uq_vat_period"),)
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    is_done = db.Column(db.Boolean, nullable=False, default=True)
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reopened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reopened_at = db.Column(db.DateTime)
+    reopen_reason = db.Column(db.String(300))
+    times_reopened = db.Column(db.Integer, nullable=False, default=0)
+
+    engagement = db.relationship("Engagement", backref=db.backref("vat_periods", lazy=True, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reopened_by = db.relationship("User", foreign_keys=[reopened_by_id])
+
+    @property
+    def key(self):
+        return vat_period_key(self.year, self.month)
+
+    @property
+    def label(self):
+        return vat_period_label(self.year, self.month)
+
+    def __repr__(self):
+        return f"<VATPeriod {self.key} done={self.is_done} engagement={self.engagement_id}>"
+
+
+def vat_period_key(year, month):
+    """'2026-09' - the form used in URLs and as the lookup key."""
+    return f"{int(year):04d}-{int(month):02d}"
+
+
+def vat_period_label(year, month):
+    return date(int(year), int(month), 1).strftime("%B %Y")
+
+
+def parse_vat_period_key(text):
+    """(year, month) for '2026-09', else None."""
+    try:
+        y, m = str(text).split("-")
+        y, m = int(y), int(m)
+        date(y, m, 1)
+        return y, m
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def vat_period_of(day):
+    """(year, month) a document dated `day` belongs to, or None if undated."""
+    return (day.year, day.month) if day else None
+
+
+def locked_vat_months(engagement_id):
+    """{(year, month)} of this engagement's months marked 'Computation done'."""
+    rows = VATPeriod.query.filter_by(engagement_id=engagement_id, is_done=True).all()
+    return {(r.year, r.month) for r in rows}
+
+
+def vat_locked_months_among(engagement_id, days):
+    """Sorted list of the locked (year, month) pairs that any of `days` falls in."""
+    locked = locked_vat_months(engagement_id)
+    if not locked:
+        return []
+    return sorted({vat_period_of(d) for d in days if d and vat_period_of(d) in locked})
 
 
 TAX_INFO_REQUEST_STATUSES = ["Outstanding", "Received", "Not Applicable"]

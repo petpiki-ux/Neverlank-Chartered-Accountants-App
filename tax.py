@@ -51,6 +51,7 @@ from models import (
     VAT_CURRENCIES, VAT_DEFAULT_CURRENCY, normalize_vat_currency,
     VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_INVOICE_SOURCES,
     VATImportBatch, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, resolve_vat_kind, vat_kind_code,
+    VATPeriod, vat_period_key, vat_period_label, vat_period_of, parse_vat_period_key, vat_locked_months_among,
     LegislativeUpdate, LegislativeUpdateClientLink,
     LEGISLATIVE_UPDATE_TYPES, LEGISLATIVE_UPDATE_TYPE_LABELS, LEGISLATIVE_UPDATE_AREAS,
     CASE_AUTHORITY_STATUSES, CASE_AUTHORITY_LABELS,
@@ -148,8 +149,25 @@ def legislative_update_editor_required(f):
     return wrapped
 
 
-def _tax_redirect(engagement_id):
+def _tax_redirect(engagement_id, vat_period=None):
+    """Back to the Tax tab; `vat_period` ('2026-09' or 'undated') reopens the
+    VAT month the person was working in rather than the month list."""
+    if vat_period:
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax", vat_period=vat_period))
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax"))
+
+
+def _vat_doc_period_arg(day):
+    """The ?vat_period= value for a document dated `day`."""
+    return vat_period_key(*vat_period_of(day)) if day else "undated"
+
+
+def _locked_message(months, what):
+    """Plain-language refusal for touching a VAT month marked 'Computation done'."""
+    names = ", ".join(vat_period_label(y, m) for y, m in months)
+    many = len(months) > 1
+    return (f"{names} {'are' if many else 'is'} marked 'Computation done' and locked, so {what}. "
+            f"A Supervisor, Partner or Admin can reopen {'them' if many else 'it'} from the VAT months list on the Tax tab.")
 
 
 def _parse_date(value):
@@ -754,6 +772,11 @@ def add_vat_invoice(engagement_id):
         # Figures are captured as printed on the credit note and subtracted in
         # the totals - so never let a minus sign double-count.
         taxable_amount, vat_amount = abs(taxable_amount), abs(vat_amount or 0.0)
+    invoice_date = _parse_date(request.form.get("invoice_date"))
+    locked = vat_locked_months_among(engagement_id, [invoice_date])
+    if locked:
+        flash(_locked_message(locked, "a document dated in it cannot be added"), "danger")
+        return _tax_redirect(engagement_id, _vat_doc_period_arg(invoice_date))
     invoice = VATInvoice(
         engagement_id=engagement_id,
         direction=direction,
@@ -761,7 +784,7 @@ def add_vat_invoice(engagement_id):
         currency=normalize_vat_currency(request.form.get("currency"), VAT_DEFAULT_CURRENCY),
         related_reference=request.form.get("related_reference", "").strip() or None,
         customs_duty=_parse_float(request.form.get("customs_duty")) if doc_type == "Bill of Entry" else None,
-        invoice_date=_parse_date(request.form.get("invoice_date")),
+        invoice_date=invoice_date,
         invoice_number=request.form.get("invoice_number", "").strip() or None,
         counterparty_name=request.form.get("counterparty_name", "").strip() or None,
         description=request.form.get("description", "").strip() or None,
@@ -775,7 +798,7 @@ def add_vat_invoice(engagement_id):
     db.session.add(invoice)
     db.session.commit()
     flash(f"{VAT_KIND_LABELS.get(invoice.kind) or VAT_INVOICE_DIRECTION_LABELS.get(direction, direction)} captured.", "success")
-    return _tax_redirect(engagement_id)
+    return _tax_redirect(engagement_id, _vat_doc_period_arg(invoice_date))
 
 
 @tax_bp.route("/vat/invoices/<int:invoice_id>/delete", methods=["POST"])
@@ -784,9 +807,14 @@ def delete_vat_invoice(invoice_id):
     invoice = VATInvoice.query.get_or_404(invoice_id)
     _ensure_engagement_access(invoice.engagement)
     engagement_id = invoice.engagement_id
+    period_arg = _vat_doc_period_arg(invoice.invoice_date)
+    locked = vat_locked_months_among(engagement_id, [invoice.invoice_date])
+    if locked:
+        flash(_locked_message(locked, "this document cannot be deleted"), "danger")
+        return _tax_redirect(engagement_id, period_arg)
     db.session.delete(invoice)
     db.session.commit()
-    return _tax_redirect(engagement_id)
+    return _tax_redirect(engagement_id, period_arg)
 
 
 # The fields a VAT Output/Input Tax schedule import can populate, and the
@@ -1192,6 +1220,18 @@ def confirm_vat_schedule_import(engagement_id):
             "Check that Taxable amount is the column holding the amount excluding VAT, then confirm again."
         )
 
+    # A schedule can't put documents into a month that is already marked
+    # 'Computation done'. Checked BEFORE anything is saved, and the staged file
+    # is kept so the preparer can reopen the month (or fix the file) and retry.
+    if mapping.get("invoice_date"):
+        row_dates = [_parse_vat_schedule_date(r.get(mapping["invoice_date"])) for r in readable]
+        locked = vat_locked_months_among(engagement_id, row_dates)
+        if locked:
+            return _back_to_mapping(
+                "Nothing was imported. " + _locked_message(locked, "this schedule cannot be imported because it has documents dated in "
+                                                                  + ("those months" if len(locked) > 1 else "that month"))
+                + " Reopen the month (or remove those rows from the file and upload it again), then confirm.")
+
     # Move the staged file into a permanent, engagement-scoped name for the
     # audit trail rather than leaving it under its transient staging name -
     # the same "keep the original filed document" approach as every other
@@ -1278,12 +1318,17 @@ def set_vat_invoice_currency(invoice_id):
     before currencies were recorded, which are treated as USD)."""
     invoice = VATInvoice.query.get_or_404(invoice_id)
     _ensure_engagement_access(invoice.engagement)
+    period_arg = _vat_doc_period_arg(invoice.invoice_date)
+    locked = vat_locked_months_among(invoice.engagement_id, [invoice.invoice_date])
+    if locked:
+        flash(_locked_message(locked, "this document's currency cannot be changed"), "danger")
+        return _tax_redirect(invoice.engagement_id, period_arg)
     currency = normalize_vat_currency(request.form.get("currency"))
     if currency:
         invoice.currency = currency
         db.session.commit()
         flash(f"Document moved to the {currency} VAT working paper.", "success")
-    return _tax_redirect(invoice.engagement_id)
+    return _tax_redirect(invoice.engagement_id, period_arg)
 
 
 @tax_bp.route("/vat/import-batches/<int:batch_id>/currency", methods=["POST"])
@@ -1294,6 +1339,11 @@ def set_vat_import_batch_currency(batch_id):
     _require_vat_schedule_permission()
     batch = VATImportBatch.query.get_or_404(batch_id)
     _ensure_engagement_access(batch.engagement)
+    locked = vat_locked_months_among(batch.engagement_id, [i.invoice_date for i in batch.invoices])
+    if locked:
+        flash(_locked_message(locked, "this schedule's currency cannot be changed (it has documents dated in "
+                                      + ("those months" if len(locked) > 1 else "that month") + ")"), "danger")
+        return _tax_redirect(batch.engagement_id)
     currency = normalize_vat_currency(request.form.get("currency"))
     if currency:
         batch.currency = currency
@@ -1335,6 +1385,11 @@ def delete_vat_import_batch(batch_id):
     batch = VATImportBatch.query.get_or_404(batch_id)
     _ensure_engagement_access(batch.engagement)
     engagement_id = batch.engagement_id
+    locked = vat_locked_months_among(engagement_id, [i.invoice_date for i in batch.invoices])
+    if locked:
+        flash(_locked_message(locked, "this import cannot be deleted (it has documents dated in "
+                                      + ("those months" if len(locked) > 1 else "that month") + ")"), "danger")
+        return _tax_redirect(engagement_id)
     if batch.stored_filename:
         stored_path = os.path.join(_vat_imports_dir(), batch.stored_filename)
         if os.path.exists(stored_path):
@@ -1346,6 +1401,76 @@ def delete_vat_import_batch(batch_id):
     db.session.commit()
     flash("Import batch and its invoices removed.", "success")
     return _tax_redirect(engagement_id)
+
+
+# ---------- Monthly VAT computations ----------
+# A VAT month is "In progress" until someone marks its computation as done; a
+# done month is locked (see VATPeriod in models.py and _locked_message above).
+
+@tax_bp.route("/<int:engagement_id>/vat/periods/<period_key>/done", methods=["POST"])
+@login_required
+def mark_vat_period_done(engagement_id, period_key):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    parsed = parse_vat_period_key(period_key)
+    if not parsed:
+        abort(404)
+    year, month = parsed
+    docs = [i for i in VATInvoice.query.filter_by(engagement_id=engagement_id).all() if vat_period_of(i.invoice_date) == parsed]
+    label = vat_period_label(year, month)
+    if not docs:
+        flash(f"There are no VAT documents dated in {label}, so there is nothing to mark as done.", "danger")
+        return _tax_redirect(engagement_id)
+    row = VATPeriod.query.filter_by(engagement_id=engagement_id, year=year, month=month).first()
+    if row is not None and row.is_done:
+        flash(f"The {label} computation is already marked as done.", "info")
+        return _tax_redirect(engagement_id, period_key)
+    if row is None:
+        row = VATPeriod(engagement_id=engagement_id, year=year, month=month)
+        db.session.add(row)
+    row.is_done = True
+    row.completed_by_id = current_user.id
+    row.completed_at = datetime.utcnow()
+    db.session.commit()
+    undated = VATInvoice.query.filter_by(engagement_id=engagement_id, invoice_date=None).count()
+    note = (f" Note: {undated} document(s) have no date and are not part of any month - give them a date first if they belong here."
+            if undated else "")
+    flash(f"{label} VAT computation marked as done and locked. Documents dated in {label} can no longer be added, "
+          f"deleted or imported until it is reopened.{note}", "success")
+    return _tax_redirect(engagement_id, period_key)
+
+
+@tax_bp.route("/<int:engagement_id>/vat/periods/<period_key>/reopen", methods=["POST"])
+@login_required
+def reopen_vat_period(engagement_id, period_key):
+    engagement = _get_tax_engagement(engagement_id)
+    if not user_has_permission(current_user, "reopen_vat_periods"):
+        abort(403, description=(
+            "Your account is not allowed to reopen a completed VAT month. This is limited to Supervisors, Partners "
+            "and Admins by default - an Admin can grant it to you under Team > Permissions or your Access Rights."))
+    parsed = parse_vat_period_key(period_key)
+    if not parsed:
+        abort(404)
+    year, month = parsed
+    label = vat_period_label(year, month)
+    row = VATPeriod.query.filter_by(engagement_id=engagement_id, year=year, month=month).first()
+    if row is None or not row.is_done:
+        flash(f"The {label} computation is not marked as done, so there is nothing to reopen.", "info")
+        return _tax_redirect(engagement_id, period_key)
+    reason = request.form.get("reason", "").strip()
+    if not reason:
+        flash(f"Please give a reason for reopening {label} (it is kept on file).", "danger")
+        return _tax_redirect(engagement_id, period_key)
+    row.is_done = False
+    row.reopened_by_id = current_user.id
+    row.reopened_at = datetime.utcnow()
+    row.reopen_reason = reason[:300]
+    row.times_reopened = (row.times_reopened or 0) + 1
+    db.session.commit()
+    flash(f"{label} reopened - it is back to 'In progress' and documents dated in it can be changed again. "
+          "Mark it as done again once the computation is final.", "info")
+    return _tax_redirect(engagement_id, period_key)
 
 
 # ---------- Dynamic Information Request List (Module 5) ----------

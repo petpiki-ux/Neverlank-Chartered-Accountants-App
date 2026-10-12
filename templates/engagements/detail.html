@@ -2788,11 +2788,47 @@
 
   <!-- ---------- VAT Invoice Register & Input/Output Tax Working Paper ---------- -->
   <div class="card">
-    <h3 class="mt-0">VAT Invoice Register &amp; Input/Output Tax</h3>
+    <h3 class="mt-0">Monthly VAT Computations <span class="muted" style="font-size:12px;font-weight:400;">VAT register &amp; Input/Output Tax</span></h3>
     <p class="muted" style="font-size:11.5px;">Nothing here is a fabricated/hardcoded VAT rate - every invoice uses a rate you (or a colleague) entered on the <a href="{{ url_for('tax.list_vat_rates') }}">firm-wide VAT Rates</a> page (including any rate lower than Standard), or the invoice's own stated VAT amount typed in directly.</p>
 
-    {% if vat_by_currency %}
-    <p class="muted" style="font-size:11.5px;">ZIMRA requires VAT to be accounted for and paid in the currency of trade, so each currency below is its own VAT working paper and net position - ZWG and USD are never added together or set off against each other.</p>
+{# ---- No month opened: the list of VAT months (documents stay hidden) ---- #}
+    {% if not vat_selected_period %}
+    <p class="muted" style="font-size:12px;">Each VAT month is computed on its own. Open a month to see its Output Tax / Input Tax computation and the documents behind it. When the computation is final, mark the month as <strong>Computation done</strong> - it is then locked until a Supervisor, Partner or Admin reopens it.</p>
+    {% if vat_periods %}
+    <table style="margin-bottom:12px;">
+      <thead><tr><th>VAT month</th><th>Status</th><th class="text-right">Documents</th><th>Net VAT <span class="muted" style="font-size:11px;">(per currency of trade)</span></th><th></th></tr></thead>
+      <tbody>
+        {% for p in vat_periods %}
+        <tr>
+          <td><strong>{{ p.label }}</strong></td>
+          <td>
+            {% if p.is_done %}
+            <span class="badge" style="background:#2e7d32;color:#fff;">Computation done</span>
+            <div class="muted" style="font-size:11px;">{{ p.row.completed_by.name if p.row.completed_by else '—' }}{% if p.row.completed_at %}, {{ (p.row.completed_at|cat).strftime('%d %b %Y %H:%M') }}{% endif %}</div>
+            {% else %}
+            <span class="badge" style="background:#b8923a;color:#fff;">In progress</span>
+            {% if p.row and p.row.reopened_at %}<div class="muted" style="font-size:11px;">Reopened {{ (p.row.reopened_at|cat).strftime('%d %b %Y') }}{% if p.row.reopened_by %} by {{ p.row.reopened_by.name }}{% endif %}</div>{% endif %}
+            {% endif %}
+          </td>
+          <td class="text-right">{{ p.count }}</td>
+          <td>
+            {% for cur, sm in p.by_currency.items() %}
+            <div>{{ cur }} {{ '%.2f'|format(sm.net_position|abs) }} <span class="muted" style="font-size:11px;">{% if sm.net_position > 0 %}payable{% elif sm.net_position < 0 %}refundable{% else %}nil{% endif %}</span></div>
+            {% else %}<span class="muted">—</span>{% endfor %}
+          </td>
+          <td><a class="btn small secondary" href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax', vat_period=p.key) }}">Open</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No VAT documents captured yet.</div>
+    {% endif %}
+    {% if vat_undated_docs %}
+    <p style="font-size:12.5px;"><strong>{{ vat_undated_docs|length }} document(s) have no date</strong> and so belong to no VAT month.
+      <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax', vat_period='undated') }}">Open them</a> to review.</p>
+    {% endif %}
+
     {% if vat_import_batches %}
     <p style="font-size:12.5px;margin-bottom:4px;"><strong>Imported schedules</strong></p>
     <table style="margin-bottom:12px;">
@@ -2814,7 +2850,46 @@
     </table>
     {% endif %}
 
-    {% for cur, sm in vat_by_currency.items() %}
+    {# ---- A month is open: its computation, status and documents ---- #}
+    {% else %}
+    <p style="margin:0 0 8px 0;"><a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax') }}">&larr; All VAT months</a></p>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div>
+        <h4 style="margin:0;">{{ vat_selected_period.label }}
+          {% if vat_selected_period.undated %}
+          {% elif vat_selected_period.is_done %}<span class="badge" style="background:#2e7d32;color:#fff;">Computation done</span>
+          {% else %}<span class="badge" style="background:#b8923a;color:#fff;">In progress</span>{% endif %}
+        </h4>
+        {% if vat_selected_period.is_done %}
+        <div class="muted" style="font-size:12px;">Marked done by {{ vat_selected_period.row.completed_by.name if vat_selected_period.row.completed_by else '—' }}{% if vat_selected_period.row.completed_at %} on {{ (vat_selected_period.row.completed_at|cat).strftime('%d %b %Y at %H:%M') }}{% endif %}. This month is locked: documents dated in it cannot be added, deleted or imported until it is reopened.</div>
+        {% elif vat_selected_period.undated %}
+        <div class="muted" style="font-size:12px;">These documents have no date, so they are in no VAT month and no month's computation includes them.</div>
+        {% else %}
+        <div class="muted" style="font-size:12px;">Still being computed - documents dated in {{ vat_selected_period.label }} can be added, deleted or imported.{% if vat_selected_period.row and vat_selected_period.row.reopened_at %} Reopened {{ (vat_selected_period.row.reopened_at|cat).strftime('%d %b %Y') }}{% if vat_selected_period.row.reopened_by %} by {{ vat_selected_period.row.reopened_by.name }}{% endif %}{% if vat_selected_period.row.reopen_reason %}: {{ vat_selected_period.row.reopen_reason }}{% endif %}.{% endif %}</div>
+        {% endif %}
+      </div>
+      {% if not vat_selected_period.undated %}
+      <div>
+        {% if vat_selected_period.is_done %}
+          {% if user_has_permission(current_user, 'reopen_vat_periods') %}
+          <form method="post" action="{{ url_for('tax.reopen_vat_period', engagement_id=engagement.id, period_key=vat_selected_period.key) }}" class="inline" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <input type="text" name="reason" placeholder="Reason for reopening *" required maxlength="300" style="min-width:200px;">
+            <button type="submit" class="btn small secondary">Reopen {{ vat_selected_period.label }}</button>
+          </form>
+          {% else %}
+          <span class="muted" style="font-size:11.5px;">Only a Supervisor, Partner or Admin can reopen a completed month.</span>
+          {% endif %}
+        {% else %}
+          <form method="post" action="{{ url_for('tax.mark_vat_period_done', engagement_id=engagement.id, period_key=vat_selected_period.key) }}" class="inline" onsubmit="return confirm('Mark the {{ vat_selected_period.label }} VAT computation as done? Documents dated in this month will be locked until it is reopened.');">
+            <button type="submit" class="btn small gold">Mark computation as done</button>
+          </form>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    <p class="muted" style="font-size:11.5px;">ZIMRA requires VAT to be accounted for and paid in the currency of trade, so each currency below is its own VAT working paper and net position - ZWG and USD are never added together or set off against each other.</p>
+        {% for cur, sm in vat_by_currency.items() %}
     <div class="card" style="margin:12px 0;padding:12px;border-left:4px solid #b8923a;">
     <h4 style="margin:0 0 8px 0;">{{ cur }} VAT - {% if cur == 'ZWG' %}Zimbabwe Gold (ZiG){% else %}US dollars{% endif %}</h4>
     <div class="form-row" style="flex-wrap:wrap;margin-bottom:10px;">
@@ -2858,6 +2933,8 @@
     </table>
 
 
+    <details {% if not vat_selected_period.is_done %}open{% endif %} style="margin-top:8px;">
+    <summary style="cursor:pointer;font-size:12.5px;font-weight:600;">{{ cur }} documents behind this computation{% if vat_selected_period.is_done %} (locked){% endif %}</summary>
     {% for code, label, kdir, ktype in vat_document_kinds %}
     {% set items = vat_invoices_by_currency_kind[cur].get(code, []) %}
     {% if items %}
@@ -2877,40 +2954,18 @@
           <td>{{ '%.2f'|format(inv.vat_amount) }}</td>
           <td>{{ '%.2f'|format(inv.total_amount) }}</td>
           <td class="muted" style="font-size:11px;">{{ inv.source }}</td>
-          <td><form method="post" action="{{ url_for('tax.set_vat_invoice_currency', invoice_id=inv.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change currency of trade">{% for c2 in vat_currencies %}<option value="{{ c2 }}" {% if (inv.currency or vat_default_currency) == c2 %}selected{% endif %}>{{ c2 }}</option>{% endfor %}</select></form></td>
-          <td><form method="post" action="{{ url_for('tax.delete_vat_invoice', invoice_id=inv.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form></td>
+          <td>{% if vat_selected_period.is_done %}{{ inv.currency or vat_default_currency }}{% else %}<form method="post" action="{{ url_for('tax.set_vat_invoice_currency', invoice_id=inv.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change currency of trade">{% for c2 in vat_currencies %}<option value="{{ c2 }}" {% if (inv.currency or vat_default_currency) == c2 %}selected{% endif %}>{{ c2 }}</option>{% endfor %}</select></form>{% endif %}</td>
+          <td>{% if vat_selected_period.is_done %}<span class="muted" style="font-size:11px;">Locked</span>{% else %}<form method="post" action="{{ url_for('tax.delete_vat_invoice', invoice_id=inv.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>{% endif %}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
     {% endif %}
     {% endfor %}
+    </details>
 
     </div>
     {% endfor %}
-    {% else %}
-    {% if vat_import_batches %}
-    <p style="font-size:12.5px;margin-bottom:4px;"><strong>Imported schedules</strong></p>
-    <table style="margin-bottom:12px;">
-      <thead><tr><th>Schedule type</th><th>Currency</th><th>File</th><th>Rows</th><th>Skipped</th><th>Imported by</th><th>Date</th><th></th></tr></thead>
-      <tbody>
-        {% for b in vat_import_batches %}
-        <tr>
-          <td>{{ b.kind_label }}</td>
-          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.set_vat_import_batch_currency', batch_id=b.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change the currency of this whole schedule">{% for cur in vat_currencies %}<option value="{{ cur }}" {% if (b.currency or vat_default_currency) == cur %}selected{% endif %}>{{ cur }}</option>{% endfor %}</select></form>{% else %}{{ b.currency or vat_default_currency }}{% endif %}</td>
-          <td>{{ b.original_filename or '—' }}</td>
-          <td>{{ b.row_count }}</td>
-          <td>{{ b.skipped_row_count or 0 }}</td>
-          <td>{{ b.imported_by.name if b.imported_by else '—' }}</td>
-          <td>{{ (b.imported_at|cat).strftime('%d %b %Y') if b.imported_at else '—' }}</td>
-          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.delete_vat_import_batch', batch_id=b.id) }}" class="inline" onsubmit="return confirm('Delete this import batch and every invoice it created?');"><button type="submit" class="btn small danger">Delete batch</button></form>{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-
-    <div class="empty-state">No VAT documents captured yet.</div>
     {% endif %}
 
     <form method="post" action="{{ url_for('tax.add_vat_invoice', engagement_id=engagement.id) }}" class="form-row" style="flex-wrap:wrap;margin-bottom:14px;">
@@ -2944,6 +2999,7 @@
       <div><label for="vat_amount">or VAT amount directly <span class="muted" style="font-size:10.5px;">(Bill of Entry: import VAT paid; export sales are always 0)</span></label><input type="number" step="0.01" id="vat_amount" name="vat_amount"></div>
       <div><button type="submit" class="btn small gold">Add to VAT register</button></div>
     </form>
+    <p class="muted" style="font-size:11.5px;margin-top:-6px;">A document is placed in the VAT month of its date. If that month is marked <em>Computation done</em> it is locked and the document will be refused until the month is reopened.</p>
 
     {% if user_has_permission(current_user, 'manage_vat_schedules') %}
     <p style="font-size:12.5px;margin-bottom:4px;"><strong>Import an already-prepared Output/Input Tax schedule</strong></p>

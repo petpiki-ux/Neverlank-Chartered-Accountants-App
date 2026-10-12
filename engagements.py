@@ -63,7 +63,7 @@ from models import (
     TAX_POSITION_CLASSIFICATIONS, TAX_POSITION_APPROVAL_STATUSES,
     PenaltyInterestRate, PenaltyInterestCalculation, PENALTY_INTEREST_RATE_TYPES,
     VATRate, VAT_RATE_TYPES,
-    VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, vat_working_paper_summary, vat_working_paper_by_currency, VAT_CURRENCIES, VAT_DEFAULT_CURRENCY,
+    VATInvoice, VATPeriod, vat_period_key, vat_period_label, parse_vat_period_key, vat_period_of, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, vat_working_paper_summary, vat_working_paper_by_currency, VAT_CURRENCIES, VAT_DEFAULT_CURRENCY,
     VATImportBatch,
     TaxInformationRequest, TAX_INFO_REQUEST_STATUSES,
     TaxReturnRecord, TAX_RETURN_STATUSES,
@@ -872,11 +872,48 @@ def view_engagement(engagement_id):
     from models import ready_to_bill_tasks
     ready_to_bill_count = len(ready_to_bill_tasks(engagement))
     vat_invoices_by_kind = {code: [i for i in vat_invoices if i.kind == code] for code, *_ in VAT_DOCUMENT_KINDS}
+
+    # Monthly VAT computations: the register opens as a list of VAT months
+    # (by each document's own date) with their status and net VAT; a month's
+    # working paper and documents are only shown once it is opened
+    # (?vat_period=2026-09, or 'undated' for documents with no date).
+    vat_periods = []
+    vat_undated_docs = [i for i in vat_invoices if not i.invoice_date]
+    vat_selected_key = None
+    vat_selected_period = None
+    vat_selected_docs = []
+    if engagement.has_tax_module:
+        period_rows = {(r.year, r.month): r for r in VATPeriod.query.filter_by(engagement_id=engagement_id).all()}
+        docs_by_month = {}
+        for inv in vat_invoices:
+            ym = vat_period_of(inv.invoice_date)
+            if ym:
+                docs_by_month.setdefault(ym, []).append(inv)
+        for ym in sorted(set(docs_by_month) | set(period_rows), reverse=True):
+            docs = docs_by_month.get(ym, [])
+            row = period_rows.get(ym)
+            vat_periods.append({
+                "key": vat_period_key(*ym), "label": vat_period_label(*ym), "year": ym[0], "month": ym[1],
+                "count": len(docs), "by_currency": vat_working_paper_by_currency(docs),
+                "row": row, "is_done": bool(row and row.is_done),
+            })
+        requested = request.args.get("vat_period", "").strip()
+        if requested == "undated" and vat_undated_docs:
+            vat_selected_key, vat_selected_docs = "undated", vat_undated_docs
+            vat_selected_period = {"key": "undated", "label": "Documents with no date", "count": len(vat_undated_docs),
+                                   "row": None, "is_done": False, "undated": True}
+        else:
+            parsed = parse_vat_period_key(requested) if requested else None
+            match = next((p for p in vat_periods if parsed and (p["year"], p["month"]) == parsed), None)
+            if match:
+                vat_selected_key, vat_selected_period = match["key"], match
+                vat_selected_docs = docs_by_month.get(parsed, [])
     # ZIMRA wants VAT accounted for and paid in the currency of trade, so the
-    # working paper and the register are produced separately per currency.
-    vat_by_currency = vat_working_paper_by_currency(vat_invoices)
+    # working paper and the register are produced separately per currency -
+    # here only for the month that has been opened.
+    vat_by_currency = vat_working_paper_by_currency(vat_selected_docs)
     vat_invoices_by_currency_kind = {
-        cur: {code: [i for i in vat_invoices if (i.currency or VAT_DEFAULT_CURRENCY) == cur and i.kind == code] for code, *_ in VAT_DOCUMENT_KINDS}
+        cur: {code: [i for i in vat_selected_docs if (i.currency or VAT_DEFAULT_CURRENCY) == cur and i.kind == code] for code, *_ in VAT_DOCUMENT_KINDS}
         for cur in vat_by_currency
     }
 
@@ -1069,6 +1106,9 @@ def view_engagement(engagement_id):
         vat_invoices_by_kind=vat_invoices_by_kind,
         engagement_tasks_sorted=engagement_tasks_sorted, ready_to_bill_count=ready_to_bill_count,
         vat_by_currency=vat_by_currency,
+        vat_periods=vat_periods, vat_undated_docs=vat_undated_docs,
+        vat_selected_key=vat_selected_key, vat_selected_period=vat_selected_period,
+        vat_selected_docs=vat_selected_docs,
         vat_invoices_by_currency_kind=vat_invoices_by_currency_kind,
         vat_currencies=VAT_CURRENCIES,
         vat_default_currency=VAT_DEFAULT_CURRENCY,
