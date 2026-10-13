@@ -191,6 +191,57 @@ FORENSIC_PROGRAM = [
 ]
 
 # (name, type, description, procedure list)
+SECRETARIAL_PROGRAM = [
+    # Client acceptance & onboarding
+    ("1. Acceptance & Onboarding", "Complete KYC and identify the ultimate beneficial owners of the client (natural persons holding 20% or more of shares or voting rights)."),
+    ("1. Acceptance & Onboarding", "Complete the Secretarial Client Acceptance Checklist (conflicts, risk profile, capacity) and obtain the Engagement Partner's accept/decline decision."),
+    ("1. Acceptance & Onboarding", "Issue the engagement letter setting out the secretarial services, fees and responsibilities, and obtain the client's countersignature."),
+    ("1. Acceptance & Onboarding", "Obtain a Registrar of Companies search and confirm the company's name, registration number, status and registered office."),
+    ("1. Acceptance & Onboarding", "Obtain the Certificate of Incorporation, Memorandum and Articles of Association, and the latest annual return."),
+    ("1. Acceptance & Onboarding", "Record the engagement's Secretarial activities (incorporation, directorship, share capital, meetings, constitutional changes, statutory records, re-registration) so the right workstreams apply."),
+    # Constitution and governance
+    ("2. Constitutional Documents & Governance", "Review the Memorandum and Articles for authorised share classes, board powers, borrowing limits (Sec 196) and pre-emption rights."),
+    ("2. Constitutional Documents & Governance", "Confirm the board meets the minimum director requirements for the company type (Sec 195; public companies Sec 206)."),
+    ("2. Constitutional Documents & Governance", "Confirm the company secretary is appointed and the appointment is lodged with the Registrar."),
+    ("2. Constitutional Documents & Governance", "Confirm directors' interests, conflicts and loans to directors or officers are disclosed and approved (Secs 211 and 216)."),
+    # Statutory registers
+    ("3. Statutory Registers", "Update and reconcile the Register of Members (Sec 157) to executed share transfers and allotments."),
+    ("3. Statutory Registers", "Update the Register of Directors and Secretaries (Sec 215) and the Register of Directors' Interests (Sec 211)."),
+    ("3. Statutory Registers", "Update the Register of Beneficial Ownership (Sec 72) and confirm no nominee holding exceeds the 20% cap."),
+    ("3. Statutory Registers", "Update the Register of Mortgages, Debentures and Charges (Sec 162) and reconcile it to outstanding facilities."),
+    ("3. Statutory Registers", "Confirm all registers and the minute books are kept at the registered office and available for inspection."),
+    # Meetings
+    ("4. Board & General Meetings", "Prepare and circulate the annual governance calendar to the board."),
+    ("4. Board & General Meetings", "Issue the Notice of AGM at least 21 days before the meeting (Sec 170) with proxy forms and the financial statements."),
+    ("4. Board & General Meetings", "Dispatch board packs 7-10 days before each scheduled meeting."),
+    ("4. Board & General Meetings", "Attend meetings, record proceedings and issue draft minutes within 5 working days (Sec 176)."),
+    ("4. Board & General Meetings", "Obtain signatures on approved minutes and resolutions and file them in the minute books; update the action tracker."),
+    # Filings
+    ("5. Annual & Event-driven Filings", "Lodge the Annual Return (Form CR11) with the Registrar within 42 days of the AGM (Sec 165)."),
+    ("5. Annual & Event-driven Filings", "File Form CR6 within 14 days of any change in directors or secretaries (Sec 215)."),
+    ("5. Annual & Event-driven Filings", "File Form CR5 within 14 days of any change of registered office (Sec 160)."),
+    ("5. Annual & Event-driven Filings", "Lodge the Company Summary return required under the COBE Act - reconfirm the prescribed form and deadline with the Registrar."),
+    ("5. Annual & Event-driven Filings", "File stamped certificates and Registrar acknowledgments for every filing on the client file."),
+    # Share capital and corporate actions
+    ("6. Share Capital & Corporate Actions", "File returns of allotment after board approval of any share issue (Secs 93 and 95)."),
+    ("6. Share Capital & Corporate Actions", "Process share transfers and update the Register of Members (Sec 149)."),
+    ("6. Share Capital & Corporate Actions", "Before any distribution, buyback or financial assistance, obtain the board's Solvency and Liquidity Test certificate (Secs 102 and 104)."),
+    ("6. Share Capital & Corporate Actions", "Draft and file special resolutions for constitutional amendments or name changes (Secs 16 and 25)."),
+    ("6. Share Capital & Corporate Actions", "Register mortgages and debentures with the Registrar within 30 days of creation (Sec 163)."),
+    # Re-registration
+    ("7. Company Re-registration (if applicable)", "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current deadline, fee and document list with the Registrar."),
+    ("7. Company Re-registration (if applicable)", "Clear any outstanding annual returns - the Registrar asks for proof they are up to date."),
+    ("7. Company Re-registration (if applicable)", "Collect scans of the Certificate of Incorporation, Memorandum and Articles, CR5, CR6 and the latest annual return."),
+    ("7. Company Re-registration (if applicable)", "Confirm and update director, secretary, shareholder and beneficial owner details."),
+    ("7. Company Re-registration (if applicable)", "Prepare the board resolution, the members' special resolution (including any Memorandum and Articles amendments) and the signed authority or affidavit."),
+    ("7. Company Re-registration (if applicable)", "Submit the application on the Registrar's online portal with the documents and fee, and track it to approval."),
+    ("7. Company Re-registration (if applicable)", "File the new registration certificate and update registers, the governance calendar and the client file."),
+    # Close-out
+    ("8. Review & Close-out", "Supervisor review of all filings, registers and minutes for the period."),
+    ("8. Review & Close-out", "Prepare the compliance status report for the board: filings made, upcoming deadlines and open matters."),
+    ("8. Review & Close-out", "Engagement Partner sign-off and file archiving; diarise next year's deadlines."),
+]
+
 TEMPLATES = [
     (
         "Standard Statutory Audit Program",
@@ -210,6 +261,14 @@ TEMPLATES = [
         "Detailed audit program following ISA structure: acceptance, risk assessment, "
         "controls, fraud, substantive testing by area, going concern and completion.",
         FULL_AUDIT_PROGRAM,
+    ),
+    (
+        "Secretarial Engagement Checklist (COBE Act)",
+        "Secretarial",
+        "Corporate secretarial checklist under the Companies and Other Business Entities Act [Chapter 24:31]: "
+        "onboarding, constitution, statutory registers, meetings, filings, share capital and corporate actions, "
+        "company re-registration and close-out. Delete the sections that do not apply to the client.",
+        SECRETARIAL_PROGRAM,
     ),
     (
         "Consulting Engagement (General)",
@@ -972,6 +1031,25 @@ def seed_leave_types():
             notes=notes,
         ))
     db.session.commit()
+
+
+def seed_secretarial_checklist_template():
+    """Add the Secretarial checklist template to an existing install that has
+    none yet. Only runs when there is NO checklist template of type
+    Secretarial at all, so a firm that edits, renames or replaces it is not
+    given another copy. Safe to call on every startup."""
+    if ChecklistTemplate.query.filter_by(type="Secretarial").first():
+        return False
+    for name, eng_type, description, items in TEMPLATES:
+        if eng_type != "Secretarial":
+            continue
+        template = ChecklistTemplate(name=name, type=eng_type, description=description)
+        db.session.add(template)
+        db.session.flush()
+        for i, (section, text) in enumerate(items):
+            db.session.add(ChecklistTemplateItem(template_id=template.id, section=section, item_text=text, order=i))
+    db.session.commit()
+    return True
 
 
 def run_seed():

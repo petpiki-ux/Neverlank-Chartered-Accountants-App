@@ -113,6 +113,7 @@ SECRETARIAL_ACTIVITIES = [
     ("meetings", "Board & General Meeting Secretarial Support"),
     ("constitutional", "Constitutional Amendments & Corporate Restructuring"),
     ("statutory_records", "Statutory Record Management & Good Standing"),
+    ("re_registration", "Company Re-registration (COBE Act)"),
 ]
 SECRETARIAL_ACTIVITY_LABELS = dict(SECRETARIAL_ACTIVITIES)
 
@@ -1128,7 +1129,14 @@ SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
     ("Board Operations, Meetings & Documentation", "Are minute books kept up-to-date for all board meetings, committee meetings, and AGMs/EGMs, capturing key commercial decisions, risk evaluations, and conflict disclosures?", ("meetings",)),
     ("Statutory Filings & Registry Compliance", "Is the company compliant with filing its Annual Return (Section 165) within the statutory timeframe following its financial year-end?", ("incorporation", "statutory_records")),
     ("Statutory Filings & Registry Compliance", "Have changes in directors/secretaries, registered office address, or share capital updates been lodged with the Registrar within the required statutory notification periods?", ("statutory_records", "directorship")),
-    ("Statutory Filings & Registry Compliance", "Has the entity completed its mandatory administrative re-registration process under the COBE Act framework?", ("incorporation", "statutory_records")),
+    ("Statutory Filings & Registry Compliance", "Has the entity completed its mandatory administrative re-registration process under the COBE Act framework?", ("incorporation", "statutory_records", "re_registration")),
+    ("Company Re-registration", "Has the company already been re-registered on the Registrar's online system, and are the new certificate and registration details held on the client file?", ("re_registration",)),
+    ("Company Re-registration", "If not yet re-registered, what is the Registrar's current re-registration deadline and fee (both have been extended and revised before), and has the board been told that a company not re-registered by the deadline risks being treated as non-operational and struck off the register?", ("re_registration",)),
+    ("Company Re-registration", "Are all annual returns filed up to date? The Registrar asks for proof of this with the application, so any outstanding returns must be cleared first.", ("re_registration", "statutory_records")),
+    ("Company Re-registration", "Are the existing registration documents available as clear scans - Certificate of Incorporation, Memorandum and Articles of Association, the registered-office and directors forms (CR5, CR6) and the latest annual return?", ("re_registration",)),
+    ("Company Re-registration", "Are the details of every director, secretary and shareholder (full names, ID or passport numbers, dates of birth, addresses and contact details) current and consistent with the statutory registers and the Register of Beneficial Ownership (Section 72)?", ("re_registration", "statutory_records")),
+    ("Company Re-registration", "Do the Memorandum and Articles need to be amended to conform with the COBE Act, and will the members approve those amendments by special resolution as part of the re-registration?", ("re_registration", "constitutional")),
+    ("Company Re-registration", "Who is authorised to sign the board resolution, the members' resolution and any authority or affidavit the Registrar requires, and are they available to sign?", ("re_registration",)),
 ]
 
 
@@ -1567,6 +1575,25 @@ SECRETARIAL_SUBSTANTIVE_AREAS = [
     "Corporate Actions",
 ]
 
+# A sixth workstream that only appears on a Secretarial engagement that has
+# the "Company Re-registration" activity ticked (or already has the area).
+SECRETARIAL_RE_REGISTRATION_AREA = "Company Re-registration"
+
+
+def secretarial_substantive_areas(engagement):
+    """The Execution Plan workstreams for a Secretarial engagement: the five
+    standard ones, plus Company Re-registration when that service is ticked on
+    the engagement (kept visible if its area already exists, so unticking the
+    service later never hides work already done)."""
+    areas = list(SECRETARIAL_SUBSTANTIVE_AREAS)
+    wants = "re_registration" in engagement.secretarial_activity_list
+    if not wants and engagement.id is not None:
+        wants = SubstantiveProcedureArea.query.filter_by(
+            engagement_id=engagement.id, area=SECRETARIAL_RE_REGISTRATION_AREA).first() is not None
+    if wants:
+        areas.append(SECRETARIAL_RE_REGISTRATION_AREA)
+    return areas
+
 SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES = {
     "Onboarding & Diagnostics": [
         "Perform initial search with the Registrar of Companies.",
@@ -1595,6 +1622,17 @@ SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES = {
         "Reconcile the Register of Charges and Mortgages (Sec 162) against outstanding corporate debt facilities.",
         "File the up-to-date statutory register file and the annual UBO verification declaration.",
     ],
+    "Company Re-registration": [
+        "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current re-registration deadline, fee and document list with the Registrar (these have been extended and revised before).",
+        "Run a Registrar search to confirm the company's registration number and status, and clear any outstanding annual returns before applying.",
+        "Collect the existing registration documents: Certificate of Incorporation, Memorandum and Articles of Association, CR5, CR6 and the latest annual return.",
+        "Confirm and update the details of every director, secretary and shareholder (names, ID numbers, dates of birth, addresses, contact details) and reconcile them to the statutory registers and the Register of Beneficial Ownership (Sec 72).",
+        "Review the Memorandum and Articles against the COBE Act and prepare any amendments needed for approval by special resolution.",
+        "Prepare the board resolution and the members' special resolution approving re-registration, and the signed authority or affidavit the Registrar requires.",
+        "Submit the re-registration application on the Registrar's online portal, upload the supporting documents and pay the prescribed fee.",
+        "Track the application with the Registrar and respond to any query or rejection until it is approved.",
+        "File the new registration certificate, the Registrar's acknowledgment and the updated company documents on the client file, and update the statutory registers and governance calendar.",
+    ],
     "Corporate Actions": [
         "Coordinate board evaluation and drafting of the statutory Solvency and Liquidity Test Certificate (Sec 102) prior to executing distributions or share buybacks (Sec 104).",
         "Draft special resolutions for constitutional amendments (Sec 16 & 25) or company name changes.",
@@ -1609,6 +1647,7 @@ SECRETARIAL_AREA_REFERENCES = {
     "Annual Returns & Filings Log": "W3",
     "Statutory Register Audit": "W4",
     "Corporate Actions": "W5",
+    "Company Re-registration": "W6",
 }
 
 # Trigger/Event, Lead Responsible and Target Output/Deliverable metadata for
@@ -1643,6 +1682,15 @@ SECRETARIAL_EXECUTION_TASK_DETAILS = {
     "Draft special resolutions for constitutional amendments (Sec 16 & 25) or company name changes.": ("Ad-hoc - constitutional amendment", "Corporate Secretary", "Filed Special Resolutions"),
     "File mortgage/debenture registration forms with the Registrar within 30 days of creation (Sec 163).": ("Debt/charge creation", "Legal/Secretariat", "Stamped Certificate of Mortgage/Charge"),
     "File the executed solvency certificates, filed special resolutions and registered security extracts.": ("Ad-hoc", "Legal/Secretariat", "Executed Solvency Certificates, Filed Special Resolutions & Registered Security Extracts"),
+    "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current re-registration deadline, fee and document list with the Registrar (these have been extended and revised before).": ("Engagement start", "Senior Secretariat", "Re-registration status note & confirmed deadline/fee"),
+    "Run a Registrar search to confirm the company's registration number and status, and clear any outstanding annual returns before applying.": ("Engagement start", "Compliance Officer", "Registrar search report & up-to-date annual returns"),
+    "Collect the existing registration documents: Certificate of Incorporation, Memorandum and Articles of Association, CR5, CR6 and the latest annual return.": ("Engagement start", "Assistant Secretary", "Scanned registration document set"),
+    "Confirm and update the details of every director, secretary and shareholder (names, ID numbers, dates of birth, addresses, contact details) and reconcile them to the statutory registers and the Register of Beneficial Ownership (Sec 72).": ("Before application", "Compliance Officer", "Verified director/shareholder/beneficial owner schedule"),
+    "Review the Memorandum and Articles against the COBE Act and prepare any amendments needed for approval by special resolution.": ("Before application", "Legal/Secretariat", "Amended Memorandum & Articles (draft)"),
+    "Prepare the board resolution and the members' special resolution approving re-registration, and the signed authority or affidavit the Registrar requires.": ("Before application", "Corporate Secretary", "Signed board resolution, special resolution & authority/affidavit"),
+    "Submit the re-registration application on the Registrar's online portal, upload the supporting documents and pay the prescribed fee.": ("Documents signed and complete", "Compliance Officer", "Submitted application & fee receipt"),
+    "Track the application with the Registrar and respond to any query or rejection until it is approved.": ("After submission", "Compliance Officer", "Registrar approval"),
+    "File the new registration certificate, the Registrar's acknowledgment and the updated company documents on the client file, and update the statutory registers and governance calendar.": ("On receipt from Registrar", "Compliance Officer", "New registration certificate & updated company file"),
 }
 
 

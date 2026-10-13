@@ -764,6 +764,10 @@ def create_app():
         # current key.
         from seed import seed_permissions
         seed_permissions()
+        # Secretarial checklist template: added once to an existing install
+        # that has no Secretarial template yet (see its own docstring).
+        from seed import seed_secretarial_checklist_template
+        seed_secretarial_checklist_template()
         # Filing Index (FilingIndexSection): another new-feature table that
         # an existing install won't have any rows in yet - seed it the same
         # way as Document Templates above, but as its own independent check

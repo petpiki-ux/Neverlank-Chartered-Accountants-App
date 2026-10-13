@@ -45,7 +45,7 @@ from models import (
     AUDIT_AREAS, BASELINE_SUBSTANTIVE_PROCEDURES, HIGH_RISK_EXTRA_PROCEDURES, INDUSTRY_EXTRA_PROCEDURES,
     FORENSIC_SUBSTANTIVE_AREAS, FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES,
     BUSINESS_IT_SUBSTANTIVE_AREAS, BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES, BUSINESS_IT_PROCEDURE_KIND,
-    SECRETARIAL_SUBSTANTIVE_AREAS, SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES, SECRETARIAL_EXECUTION_TASK_DETAILS,
+    SECRETARIAL_SUBSTANTIVE_AREAS, secretarial_substantive_areas, SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES, SECRETARIAL_EXECUTION_TASK_DETAILS,
     QUERY_SECTIONS, QUERY_SECTION_KEYS,
     user_has_permission, user_can_access_engagement, engagement_acceptance_cleared,
     Tickmark, WORKPAPER_SECTIONS, workpaper_reference, filing_reference, effectively_reviewed,
@@ -446,6 +446,12 @@ def edit_engagement(engagement_id):
         engagement.team_members = User.query.filter(User.id.in_(team_ids)).all() if team_ids else []
 
         db.session.commit()
+        # Ticking Company Re-registration on a Secretarial engagement whose
+        # Execution Plan is already under way adds that workstream's tasks
+        # (additive only - nothing existing is touched).
+        if engagement.type == "Secretarial" and "re_registration" in engagement.secretarial_activity_list:
+            if sync_substantive_procedures_if_started(engagement.id):
+                db.session.commit()
         flash("Engagement updated.", "success")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id))
 
@@ -702,7 +708,7 @@ def view_engagement(engagement_id):
         substantive_area_names = BUSINESS_IT_SUBSTANTIVE_AREAS
         substantive_area_refs = BUSINESS_IT_AREA_REFERENCES
     elif is_secretarial:
-        substantive_area_names = SECRETARIAL_SUBSTANTIVE_AREAS
+        substantive_area_names = secretarial_substantive_areas(engagement)
         substantive_area_refs = SECRETARIAL_AREA_REFERENCES
     else:
         substantive_area_names = AUDIT_AREAS
@@ -4358,7 +4364,7 @@ def _substantive_areas_for(engagement):
     if engagement.type == "Business Intelligence and IT Engagements":
         return BUSINESS_IT_SUBSTANTIVE_AREAS
     if engagement.type == "Secretarial":
-        return SECRETARIAL_SUBSTANTIVE_AREAS
+        return secretarial_substantive_areas(engagement)
     return AUDIT_AREAS
 
 
@@ -4400,7 +4406,7 @@ def sync_substantive_procedures(engagement):
         high_risk = False
         industry_map = {}
     elif is_secretarial:
-        areas = SECRETARIAL_SUBSTANTIVE_AREAS
+        areas = secretarial_substantive_areas(engagement)
         baseline = SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES
         high_risk = False
         industry_map = {}
@@ -4487,7 +4493,7 @@ def generate_substantive_procedures(engagement_id):
             flash("No new suggested procedures to add - the full baseline procedure list is already there below.", "info")
     elif engagement.type == "Secretarial":
         if added_count:
-            flash(f"Generated {added_count} Execution Plan task(s) across the five secretarial workstreams.", "success")
+            flash(f"Generated {added_count} Execution Plan task(s) across the {len(secretarial_substantive_areas(engagement))} secretarial workstreams.", "success")
         else:
             flash("No new Execution Plan tasks to add - the full baseline task list is already there below.", "info")
     else:
@@ -5773,7 +5779,7 @@ def _substantive_programme_context(engagement):
     elif is_business_it:
         area_order, area_refs = BUSINESS_IT_SUBSTANTIVE_AREAS, BUSINESS_IT_AREA_REFERENCES
     elif is_secretarial:
-        area_order, area_refs = SECRETARIAL_SUBSTANTIVE_AREAS, SECRETARIAL_AREA_REFERENCES
+        area_order, area_refs = secretarial_substantive_areas(engagement), SECRETARIAL_AREA_REFERENCES
     else:
         area_order, area_refs = AUDIT_AREAS, AUDIT_AREA_REFERENCES
     areas_by_name = {
