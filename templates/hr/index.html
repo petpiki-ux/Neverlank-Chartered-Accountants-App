@@ -24,6 +24,12 @@
     <h3 class="mt-0">Planner</h3>
     <p class="muted" style="font-size:13px;">A firm-wide audit timetable (spot clashing deadlines at a glance) and a staffing grid showing who's booked on what each week.</p>
   </a>
+  {% if user_has_permission(current_user, 'view_attendance') %}
+  <a href="{{ url_for('attendance.index') }}" class="card" style="text-decoration:none;color:inherit;">
+    <h3 class="mt-0">Attendance</h3>
+    <p class="muted" style="font-size:13px;">Management view of Check In / Check Out: who is in right now, when everyone arrived and left, hours worked, who has not checked in or forgot to check out - with a downloadable log.</p>
+  </a>
+  {% endif %}
   {% if user_has_permission(current_user, 'manage_payroll') %}
   <a href="{{ url_for('payroll.dashboard') }}" class="card" style="text-decoration:none;color:inherit;">
     <h3 class="mt-0">Payroll</h3>

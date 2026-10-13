@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Attendance - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Attendance</h1>
+    <div class="subtitle">When people check in and check out. Times are Harare time (CAT).</div>
+  </div>
+  <div>
+    <a href="{{ url_for('attendance.export_csv', date_from=date_from.isoformat(), date_to=date_to.isoformat(), user_id=user_id or '') }}" class="btn secondary">Download log (CSV)</a>
+    <a href="{{ url_for('hr.index') }}" class="btn secondary">HR &amp; Admin</a>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+    <h3 class="mt-0" style="margin-bottom:0;">{{ 'Today' if day == today else weekday }}, {{ day.strftime('%d %b %Y') }}</h3>
+    <form method="get" style="display:flex;gap:6px;align-items:center;">
+      <input type="hidden" name="date_from" value="{{ date_from.isoformat() }}"><input type="hidden" name="date_to" value="{{ date_to.isoformat() }}">
+      {% if user_id %}<input type="hidden" name="user_id" value="{{ user_id }}">{% endif %}
+      <a class="btn small secondary" href="{{ url_for('attendance.index', day=(day - timedelta_one).isoformat(), date_from=date_from.isoformat(), date_to=date_to.isoformat()) }}">&larr;</a>
+      <input type="date" name="day" value="{{ day.isoformat() }}" onchange="this.form.submit()">
+      <a class="btn small secondary" href="{{ url_for('attendance.index', day=(day + timedelta_one).isoformat(), date_from=date_from.isoformat(), date_to=date_to.isoformat()) }}">&rarr;</a>
+      {% if day != today %}<a class="btn small gold" href="{{ url_for('attendance.index', date_from=date_from.isoformat(), date_to=date_to.isoformat()) }}">Today</a>{% endif %}
+    </form>
+  </div>
+
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0;">
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px 16px;min-width:140px;"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;">{{ 'In now' if day == today else 'Not checked out' }}</div><div style="font-size:24px;font-weight:700;color:#2e7d32;">{{ counts['in'] }}</div></div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px 16px;min-width:140px;"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;">Checked out</div><div style="font-size:24px;font-weight:700;">{{ counts['out'] }}</div></div>
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px 16px;min-width:140px;"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;">Not checked in</div><div style="font-size:24px;font-weight:700;{% if counts.absent %}color:#c0392b;{% endif %}">{{ counts.absent }}</div></div>
+    {% if counts.stale %}<div style="border:1px solid #e0a800;border-radius:8px;padding:10px 16px;min-width:140px;background:#fff8e1;"><div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;">Forgot to check out</div><div style="font-size:24px;font-weight:700;color:#b8860b;">{{ counts.stale }}</div></div>{% endif %}
+  </div>
+
+  <table>
+    <thead><tr><th>Name</th><th>Status</th><th>Checked in</th><th>Checked out</th><th style="text-align:right;">Hours</th></tr></thead>
+    <tbody>
+      {% for r in board %}
+      <tr>
+        <td>{{ r.user.name }} <span class="muted" style="font-size:11px;">{{ r.user.role|capitalize }}</span>
+          {% if r.stale %}<div style="font-size:11.5px;color:#b8860b;">Still checked in since {{ (r.stale.check_in_at|cat).strftime('%a %d %b, %H:%M') }} - did not check out</div>{% endif %}</td>
+        <td>
+          {% if r.status == 'in' %}<span class="badge" style="background:#e8f5ee;color:#14532d;">{{ 'In' if day == today else 'No check-out' }}</span>
+          {% elif r.status == 'out' %}<span class="badge" style="background:#eef1f5;color:#44505c;">Out</span>
+          {% else %}<span class="badge overdue">Not checked in</span>{% endif %}
+        </td>
+        <td>{% for s in r.sessions %}<div>{{ (s.check_in_at|cat).strftime('%H:%M') }}</div>{% else %}<span class="muted">—</span>{% endfor %}</td>
+        <td>{% for s in r.sessions %}<div>{% if s.check_out_at %}{{ (s.check_out_at|cat).strftime('%H:%M') }}{% else %}<span class="muted">{{ 'still in' if day == today else 'not recorded' }}</span>{% endif %}</div>{% else %}<span class="muted">—</span>{% endfor %}</td>
+        <td style="text-align:right;">{% if r.sessions %}{{ fmt_hours(r.hours) }}{% if r.status == 'in' and day == today %} <span class="muted" style="font-size:11px;">so far</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:8px;">
+    <h3 class="mt-0" style="margin-bottom:0;">Period summary</h3>
+    <form method="get" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+      <input type="hidden" name="day" value="{{ day.isoformat() }}">
+      <div><label>Person</label>
+        <select name="user_id"><option value="">Everyone</option>
+          {% for p in people %}<option value="{{ p.id }}" {% if user_id == p.id %}selected{% endif %}>{{ p.name }}</option>{% endfor %}
+        </select></div>
+      <div><label>From</label><input type="date" name="date_from" value="{{ date_from.isoformat() }}"></div>
+      <div><label>To</label><input type="date" name="date_to" value="{{ date_to.isoformat() }}"></div>
+      <button type="submit" class="btn small gold">Update</button>
+    </form>
+  </div>
+  <table style="margin-top:10px;">
+    <thead><tr><th>Name</th><th style="text-align:right;">Days present</th><th style="text-align:right;">Hours</th><th style="text-align:right;">Avg hours / day</th><th>Usually in</th><th>Usually out</th><th>No check-out</th></tr></thead>
+    <tbody>
+      {% for s in summary %}
+      <tr>
+        <td>{{ s.user.name }}</td>
+        <td style="text-align:right;">{{ s.days }}</td>
+        <td style="text-align:right;">{{ fmt_hours(s.hours) if s.days else '—' }}</td>
+        <td style="text-align:right;">{{ fmt_hours(s.avg_hours) if s.days else '—' }}</td>
+        <td>{{ s.avg_in or '—' }}</td>
+        <td>{{ s.avg_out or '—' }}</td>
+        <td>{% if s.open %}<span class="badge overdue">{{ s.open }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">Hours count completed check-in / check-out pairs only. "Usually in/out" is the average of each day's first check-in and last check-out.</p>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Log &middot; {{ date_from.strftime('%d %b %Y') }} to {{ date_to.strftime('%d %b %Y') }}</h3>
+  {% if records %}
+  <table>
+    <thead><tr><th>Date</th><th>Name</th><th>Check in</th><th>Check out</th><th style="text-align:right;">Hours</th></tr></thead>
+    <tbody>
+      {% for r in records %}
+      <tr>
+        <td>{{ r.work_date.strftime('%a %d %b %Y') }}</td>
+        <td>{{ r.user.name if r.user else '—' }}</td>
+        <td>{{ (r.check_in_at|cat).strftime('%H:%M') }}</td>
+        <td>{% if r.check_out_at %}{{ (r.check_out_at|cat).strftime('%H:%M') }}{% else %}<span class="badge overdue">no check-out</span>{% endif %}</td>
+        <td style="text-align:right;">{{ fmt_hours(hours_of(r)) if r.check_out_at else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No check-ins in this period.</div>
+  {% endif %}
+</div>
+{% endblock %}

@@ -605,6 +605,7 @@ def create_app():
     from recurring import recurring_bp
     from receipts import receipts_bp
     from statements import statements_bp
+    from attendance import attendance_bp
     from zimra import zimra_bp
     from finance import analytics_bp, expenses_bp
     from regulatory_notices import regulatory_notices_bp
@@ -635,6 +636,7 @@ def create_app():
     app.register_blueprint(recurring_bp)
     app.register_blueprint(receipts_bp)
     app.register_blueprint(statements_bp)
+    app.register_blueprint(attendance_bp)
     app.register_blueprint(zimra_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(expenses_bp)
