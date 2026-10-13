@@ -167,6 +167,12 @@ def new_client():
     return render_template("clients/form.html", client=None, industry_options=INDUSTRY_OPTIONS)
 
 
+def _invoice_visible(invoice):
+    """An invoice linked to an engagement is hidden from anyone not on that engagement."""
+    from models import user_can_access_engagement
+    return not invoice.engagement_id or user_can_access_engagement(current_user, invoice.engagement)
+
+
 def _visible_zimra_cases(cases):
     """The client's ZIMRA cases the current user may see (open first, newest first)."""
     from models import user_can_access_engagement
@@ -219,6 +225,7 @@ def view_client(client_id):
         can_delete_filing_archive=user_has_permission(current_user, "delete_documents"),
         legislative_updates_for_tagging=LegislativeUpdate.query.order_by(LegislativeUpdate.created_at.desc()).all(),
         zimra_cases=_visible_zimra_cases(client.zimra_cases),
+        visible_invoices=[i for i in client.invoices if _invoice_visible(i)],
     )
 
 

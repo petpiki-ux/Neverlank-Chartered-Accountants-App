@@ -338,3 +338,9 @@ select[multiple] { min-height: 110px; }
 .an-defs dt { font-weight:600; margin-top:8px; } .an-defs dd { margin:0 0 0 0; }
 .tbl-scroll { overflow-x:auto; }
 @media print { .topbar, .an-filters, .viz-toggle { display:none !important; } .viz-card, .kpi { break-inside:avoid; } }
+
+/* Finance section: Quotations, Invoices, Receipts, Statements and Analytics share one nav tab */
+.finance-tabs { display: flex; gap: 4px; flex-wrap: wrap; margin: 0 0 18px; border-bottom: 2px solid var(--border, #e3e8ee); }
+.finance-tabs a { padding: 9px 18px; font-size: 14px; font-weight: 600; color: var(--navy, #0f2942); border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; margin-bottom: -2px; text-decoration: none; }
+.finance-tabs a:hover { background: #f1f4f8; text-decoration: none; }
+.finance-tabs a.on { background: #fff; border-color: var(--border, #e3e8ee); border-bottom: 2px solid #fff; color: var(--gold, #b8934a); }

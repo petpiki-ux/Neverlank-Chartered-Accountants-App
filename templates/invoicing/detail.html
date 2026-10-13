@@ -15,6 +15,7 @@
   </div>
   <div>
     <a href="{{ url_for('invoicing.print_invoice', invoice_id=invoice.id) }}" class="btn secondary" target="_blank">Print / Save as PDF</a>
+    <a href="{{ url_for('statements.client_statement', client_id=invoice.client_id) }}" class="btn secondary">Client statement</a>
     <a href="{{ url_for('invoicing.edit_invoice', invoice_id=invoice.id) }}" class="btn secondary">Edit details</a>
   </div>
 </div>

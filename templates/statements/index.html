@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+{% block title %}Statements - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Statements</h1>
+    <div class="subtitle">Who owes what, in which currency, and how old it is. Open any client's statement of account to print or save as PDF.</div>
+  </div>
+  <div>
+    <a href="{{ url_for('invoicing.list_invoices') }}" class="btn secondary">Invoices</a>
+    <a href="{{ url_for('receipts.list_receipts') }}" class="btn secondary">Receipts</a>
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Produce a statement</h3>
+  <form method="get" action="{{ url_for('statements.pick') }}" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+    <div><label>Client</label>
+      <select name="client_id" required>
+        <option value="">Choose a client...</option>
+        {% for c in clients %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+      </select></div>
+    <div><label>From</label><input type="date" name="date_from" value="{{ date_from.isoformat() }}"></div>
+    <div><label>To</label><input type="date" name="date_to" value="{{ date_to.isoformat() }}"></div>
+    <button type="submit" class="btn gold">Open statement</button>
+  </form>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+    <h3 class="mt-0" style="margin-bottom:0;">Amounts owing at {{ as_of.strftime('%d %b %Y') }}</h3>
+    <form method="get" style="display:flex;gap:6px;align-items:center;">
+      <label style="margin:0;">As at</label><input type="date" name="as_at" value="{{ as_of.isoformat() }}">
+      <button type="submit" class="btn small secondary">Update</button>
+    </form>
+  </div>
+
+  {% if totals %}
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin:12px 0;">
+    {% for currency, t in totals.items() %}
+    <div style="border:1px solid var(--border);border-radius:8px;padding:10px 16px;min-width:200px;">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;">Owing in {{ currency }}</div>
+      <div style="font-size:22px;font-weight:700;">{{ '{:,.2f}'.format(t.total) }}</div>
+      <div class="muted" style="font-size:12px;">{{ t.clients }} client{{ '' if t.clients == 1 else 's' }}{% if t.overdue > 0.005 %} &middot; <span style="color:#c0392b;">{{ '{:,.2f}'.format(t.overdue) }} overdue</span>{% endif %}</div>
+    </div>
+    {% endfor %}
+  </div>
+  <table>
+    <thead><tr><th>Client</th><th>Currency</th>{% for key, label in buckets %}<th style="text-align:right;">{{ label }}</th>{% endfor %}<th style="text-align:right;">Total owing</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><a href="{{ url_for('clients.view_client', client_id=r.client.id) }}">{{ r.client.name }}</a></td>
+        <td>{{ r.currency }}</td>
+        {% for key, label in buckets %}<td style="text-align:right;{% if key != 'current' and r.buckets[key] > 0.005 %}color:#c0392b;{% endif %}">{{ '{:,.2f}'.format(r.buckets[key]) if r.buckets[key] else '—' }}</td>{% endfor %}
+        <td style="text-align:right;"><strong>{{ '{:,.2f}'.format(r.total) }}</strong></td>
+        <td><a class="btn small secondary" href="{{ url_for('statements.client_statement', client_id=r.client.id, date_to=as_of.isoformat()) }}">Statement</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">Nothing is owing at this date.</div>
+  {% endif %}
+  {% if restricted %}
+  <p class="muted" style="font-size:12px;margin-bottom:0;">{{ restricted }} client{{ '' if restricted == 1 else 's' }} left out: they have invoices on engagements you are not on, so a complete balance cannot be shown to you.</p>
+  {% endif %}
+</div>
+{% endblock %}

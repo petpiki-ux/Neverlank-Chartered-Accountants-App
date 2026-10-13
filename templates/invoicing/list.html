@@ -38,6 +38,7 @@
       </select>
     </div>
   </form>
+  {% if client_filter %}<div style="margin-top:8px;"><a href="{{ url_for('statements.client_statement', client_id=client_filter) }}" class="btn small gold">Statement for this client</a></div>{% endif %}
 </div>
 
 <div class="card">

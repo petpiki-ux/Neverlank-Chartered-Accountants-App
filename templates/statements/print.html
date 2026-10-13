@@ -1,0 +1,66 @@
+{% extends "invoicing/print_base.html" %}
+{% block doc_title %}Statement of Account{% endblock %}
+{% block back_link %}
+  <form method="get" style="display:flex;gap:6px;align-items:center;background:#fff;border:1px solid #c9d2dc;border-radius:6px;padding:4px 8px;font-size:12px;color:#0f2942;">
+    From <input type="date" name="date_from" value="{{ date_from.isoformat() }}" style="font-size:12px;">
+    to <input type="date" name="date_to" value="{{ date_to.isoformat() }}" style="font-size:12px;">
+    <button type="submit" style="padding:5px 10px;">Update</button>
+  </form>
+  <a class="secondary" href="{{ url_for('clients.view_client', client_id=client.id) }}">Back to client</a>
+  <a class="secondary" href="{{ url_for('statements.index') }}">All statements</a>
+{% endblock %}
+{% block doc_label %}Statement{% endblock %}
+{% block doc_sub %}{{ date_from.strftime('%d %b %Y') }} to {{ date_to.strftime('%d %b %Y') }}{% endblock %}
+{% block meta %}
+  <div><div class="k">Statement no.</div><div class="v">{{ doc_number }}</div></div>
+  <div><div class="k">Statement date</div><div class="v">{{ today.strftime('%d %b %Y') }}</div></div>
+  <div><div class="k">Period</div><div class="v" style="font-size:12px;">{{ date_from.strftime('%d %b %Y') }} - {{ date_to.strftime('%d %b %Y') }}</div></div>
+  <div><div class="k">Currency</div><div class="v">{{ currencies }}</div></div>
+{% endblock %}
+{% block party_label %}Statement of account for{% endblock %}
+{% block items_section %}
+{% if not sections %}
+  <div class="words"><div class="k">Nothing to show</div><div class="v" style="font-weight:400;">No invoices have been issued to this client yet, so there is no account activity to report.</div></div>
+{% endif %}
+{% for currency, s in sections.items() %}
+  <h4 style="margin:{{ '0' if loop.first else '26px' }} 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--gold);font-weight:800;">Account in {{ currency }}</h4>
+  <table class="items">
+    <thead><tr><th style="width:96px;">Date</th><th>Details</th><th>Ref</th><th class="r">Charges</th><th class="r">Payments</th><th class="r">Balance</th></tr></thead>
+    <tbody>
+      <tr style="font-weight:600;"><td></td><td>Balance brought forward</td><td></td><td class="r"></td><td class="r"></td><td class="r">{{ '{:,.2f}'.format(s.opening) }}</td></tr>
+      {% for r in s.rows %}
+      <tr>
+        <td style="white-space:nowrap;">{{ r.date.strftime('%d %b %Y') }}</td>
+        <td>{{ r.description }}</td>
+        <td style="white-space:nowrap;">{{ r.ref }}</td>
+        <td class="r">{{ '{:,.2f}'.format(r.debit) if r.debit else '' }}</td>
+        <td class="r">{{ '{:,.2f}'.format(r.credit) if r.credit else '' }}</td>
+        <td class="r">{{ '{:,.2f}'.format(r.balance) }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="color:var(--muted);text-align:center;">No invoices or payments in this period.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <div class="totals-wrap">
+    <div class="totals">
+      <div class="row"><span>Balance brought forward</span><span>{{ currency }} {{ '{:,.2f}'.format(s.opening) }}</span></div>
+      <div class="row"><span>Charges in period</span><span>{{ currency }} {{ '{:,.2f}'.format(s.debits) }}</span></div>
+      <div class="row"><span>Payments in period</span><span>({{ currency }} {{ '{:,.2f}'.format(s.credits) }})</span></div>
+      <div class="row grand"><span>{{ 'Balance due' if s.closing > 0.005 else ('In credit' if s.closing < -0.005 else 'Balance') }}</span><span>{{ currency }} {{ '{:,.2f}'.format(s.closing|abs if s.closing < -0.005 else s.closing) }}</span></div>
+    </div>
+  </div>
+  <table class="items" style="margin-top:14px;">
+    <thead><tr><th colspan="6" style="background:var(--tint);color:var(--navy);">Ageing of the amount owing at {{ date_to.strftime('%d %b %Y') }} ({{ currency }})</th></tr>
+      <tr>{% for key, label in buckets %}<th class="r" style="background:#e9eef4;color:var(--navy);">{{ label }}</th>{% endfor %}<th class="r" style="background:#e9eef4;color:var(--navy);">Total</th></tr></thead>
+    <tbody><tr>{% for key, label in buckets %}<td class="r">{{ '{:,.2f}'.format(s.ageing.buckets[key]) }}</td>{% endfor %}<td class="r"><strong>{{ '{:,.2f}'.format(s.ageing.total) }}</strong></td></tr></tbody>
+  </table>
+  {% if s.ageing.overdue > 0.005 %}
+  <p style="margin:8px 0 0;font-size:12px;color:#7f1d1d;"><strong>{{ currency }} {{ '{:,.2f}'.format(s.ageing.overdue) }} is past its due date.</strong> Please arrange payment.</p>
+  {% endif %}
+{% endfor %}
+{% endblock %}
+{% block extras %}
+  <p style="margin:18px 0 0;font-size:11.5px;color:var(--muted);">Please quote the invoice number with every payment. If anything on this statement differs from your records, contact us so we can reconcile it.</p>
+{% endblock %}
+{% block thanks %}Thank you for your business.{% endblock %}
