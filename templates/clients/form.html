@@ -7,6 +7,12 @@
   <h1>{% if client %}Edit {{ client.name }}{% else %}New Client{% endif %}</h1>
 </div>
 
+{% if duplicate_hidden %}
+<div class="card" style="max-width:640px;border-left:3px solid var(--danger, #c0392b);">
+  <strong>This {{ duplicate_label or 'company number' }} is already in use.</strong>
+  <p class="muted" style="font-size:12.5px;margin:6px 0 0;">The client already exists but you are not working on it. Ask a Partner to add you to its engagement team rather than creating it again.</p>
+</div>
+{% endif %}
 {% if duplicate_client %}
 <div class="card" style="max-width:640px;border-left:3px solid var(--danger, #c0392b);">
   <strong>This {{ duplicate_label or 'company number' }} is already in use.</strong>

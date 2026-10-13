@@ -14,6 +14,8 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required, current_user
 
 from extensions import db
+from models import visible_clients
+from client_scope import guard_blueprint, restrict_to_visible_clients
 from models import (
     Client, User, PayrollTaxSettings, PayrollTaxBand, PayrollEmployee,
     PayrollPeriod, Payslip, PayslipItem, TimeSheet,
@@ -85,6 +87,15 @@ def _timesheet_summary_for(employee, period):
     }
 
 
+# Staff and Supervisors only reach payroll data of clients they work on.
+guard_blueprint(payroll_bp, {
+    "employee_id": lambda v: getattr(PayrollEmployee.query.get(v), "client_id", None),
+    "period_id": lambda v: getattr(PayrollPeriod.query.get(v), "client_id", None),
+    "payslip_id": lambda v: getattr(getattr(Payslip.query.get(v), "period", None), "client_id", None),
+    "item_id": lambda v: getattr(getattr(getattr(PayslipItem.query.get(v), "payslip", None), "period", None), "client_id", None),
+})
+
+
 # --------------------------------------------------------------- Dashboard
 
 @payroll_bp.route("/")
@@ -97,18 +108,18 @@ def dashboard():
         .limit(8).all()
     )
     client_periods = (
-        PayrollPeriod.query.filter_by(scope="client")
+        restrict_to_visible_clients(PayrollPeriod.query.filter_by(scope="client"), PayrollPeriod.client_id)
         .order_by(PayrollPeriod.period_start.desc().nullslast(), PayrollPeriod.id.desc())
         .limit(8).all()
     )
     internal_employee_count = PayrollEmployee.query.filter_by(scope="internal", is_active=True).count()
-    client_employee_count = PayrollEmployee.query.filter_by(scope="client", is_active=True).count()
-    clients_with_payroll = (
+    client_employee_count = restrict_to_visible_clients(
+        PayrollEmployee.query.filter_by(scope="client", is_active=True), PayrollEmployee.client_id).count()
+    clients_with_payroll = restrict_to_visible_clients(
         db.session.query(Client)
         .join(PayrollEmployee, PayrollEmployee.client_id == Client.id)
-        .filter(PayrollEmployee.scope == "client")
-        .distinct().order_by(Client.name).all()
-    )
+        .filter(PayrollEmployee.scope == "client"), Client.id,
+    ).distinct().order_by(Client.name).all()
     settings = _get_tax_settings()
     # Per-frequency, not just "does ANY band exist" - see PayrollTaxBand's
     # docstring: ZIMRA publishes a genuinely different table per pay
@@ -206,10 +217,12 @@ def list_employees():
     scope = request.args.get("scope", "internal")
     client_id = request.args.get("client_id", type=int)
     query = PayrollEmployee.query.filter_by(scope=scope)
+    if scope == "client":
+        query = restrict_to_visible_clients(query, PayrollEmployee.client_id)
     if scope == "client" and client_id:
         query = query.filter_by(client_id=client_id)
     employees = query.order_by(PayrollEmployee.is_active.desc(), PayrollEmployee.full_name).all()
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     selected_client = Client.query.get(client_id) if client_id else None
     return render_template(
         "payroll/employees.html", employees=employees, scope=scope,
@@ -222,7 +235,7 @@ def list_employees():
 def new_employee():
     _ensure_payroll_access()
     scope = request.args.get("scope", request.form.get("scope", "internal"))
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     staff_users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
 
     if request.method == "POST":
@@ -280,7 +293,7 @@ def new_employee():
 def edit_employee(employee_id):
     _ensure_payroll_access()
     employee = PayrollEmployee.query.get_or_404(employee_id)
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     staff_users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
 
     if request.method == "POST":
@@ -338,10 +351,12 @@ def list_periods():
     scope = request.args.get("scope", "internal")
     client_id = request.args.get("client_id", type=int)
     query = PayrollPeriod.query.filter_by(scope=scope)
+    if scope == "client":
+        query = restrict_to_visible_clients(query, PayrollPeriod.client_id)
     if scope == "client" and client_id:
         query = query.filter_by(client_id=client_id)
     periods = query.order_by(PayrollPeriod.period_start.desc().nullslast(), PayrollPeriod.id.desc()).all()
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     selected_client = Client.query.get(client_id) if client_id else None
     return render_template(
         "payroll/periods.html", periods=periods, scope=scope, clients=clients, selected_client=selected_client,
@@ -353,7 +368,7 @@ def list_periods():
 def new_period():
     _ensure_payroll_access()
     scope = request.args.get("scope", request.form.get("scope", "internal"))
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
 
     if request.method == "POST":
         scope = request.form.get("scope", "internal")

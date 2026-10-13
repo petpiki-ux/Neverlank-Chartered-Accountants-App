@@ -115,7 +115,7 @@ def _add_missing_columns():
             ("is_current_version", "BOOLEAN DEFAULT 1"),
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
-        "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)")],
+        "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER")],
         # last_seen_at - see models.User.is_online and this file's
         # _update_last_seen - drives the Messages "who's in the app" online
         # indicator.
@@ -686,6 +686,34 @@ def create_app():
             if not current_user.last_seen_at or (now - current_user.last_seen_at).total_seconds() > 60:
                 current_user.last_seen_at = now
                 db.session.commit()
+
+    @app.before_request
+    def _enforce_client_scope():
+        """Staff and Supervisors may only open the clients they work on (see
+        models.client_scope_ids). Every route that names a client - in its URL,
+        its posted form or its query string (client_id) - is checked here, once,
+        rather than in each route; routes that reach a client through a
+        document id (invoice, receipt, company document ...) check it in their
+        own access helper."""
+        from flask import request, abort
+        from models import client_scope_ids, CLIENT_RESTRICTED_ROLES
+        if not current_user.is_authenticated or current_user.role not in CLIENT_RESTRICTED_ROLES:
+            return
+        raw = (request.view_args or {}).get("client_id")
+        if raw is None:
+            raw = request.values.get("client_id")
+        if raw in (None, ""):
+            return
+        try:
+            client_id = int(raw)
+        except (TypeError, ValueError):
+            return
+        scope = client_scope_ids(current_user)
+        if scope is not None and client_id not in scope:
+            abort(403, description=(
+                "You are not working on this client, so you cannot open it. Clients are limited to the people on "
+                "their engagements. Ask the engagement's Partner or Manager (or an Admin) to add you to the team."
+            ))
 
     @app.before_request
     def _raise_due_recurring_invoices():

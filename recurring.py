@@ -19,6 +19,7 @@ from flask_login import login_required, current_user
 from sqlalchemy.exc import IntegrityError
 
 from extensions import db
+from models import visible_clients, user_can_access_client
 from invoicing import _next_invoice_number, _visible_engagements_for_invoicing
 from models import (
     Client, Engagement, Invoice, InvoiceLineItem, RecurringInvoice, RecurringInvoiceLine,
@@ -173,6 +174,8 @@ def daily_check(app):
 # ------------------------------------------------------------------ helpers
 
 def _ensure_access(schedule):
+    if not user_can_access_client(current_user, schedule.client_id):
+        abort(403, description="You are not working on this schedule's client, so you cannot open it.")
     if schedule.engagement_id and not user_can_access_engagement(current_user, schedule.engagement):
         abort(403)
 
@@ -215,7 +218,8 @@ def _first_index_on_or_after(schedule, day):
 @login_required
 def list_schedules():
     schedules = RecurringInvoice.query.order_by(RecurringInvoice.status, RecurringInvoice.id.desc()).all()
-    visible = [s for s in schedules if not s.engagement_id or user_can_access_engagement(current_user, s.engagement)]
+    visible = [s for s in schedules if user_can_access_client(current_user, s.client_id)
+               and (not s.engagement_id or user_can_access_engagement(current_user, s.engagement))]
     rows = [(s, next_run_date(s) if s.status == "Active" else None) for s in visible]
     rows.sort(key=lambda r: (r[0].status != "Active", r[1] is None, r[1] or date.max))
     return render_template("recurring/list.html", rows=rows, today=date.today())
@@ -224,7 +228,7 @@ def list_schedules():
 @recurring_bp.route("/new", methods=["GET", "POST"])
 @login_required
 def new_schedule():
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     engagements = _visible_engagements_for_invoicing()
     ctx = dict(clients=clients, engagements=engagements, currencies=INVOICE_CURRENCIES,
                frequencies=list(RECURRING_FREQUENCIES), today=date.today().isoformat())

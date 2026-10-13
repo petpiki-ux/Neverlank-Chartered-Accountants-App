@@ -41,12 +41,18 @@ from models import (
     user_has_permission,
 )
 from config import Config
+from client_scope import guard_blueprint
 import sanctions_data
 import entity_extraction
 import entity_research
 from permanent_file import file_upload_to_permanent_file
 
 company_documents_bp = Blueprint("company_documents", __name__, url_prefix="/clients")
+
+guard_blueprint(company_documents_bp, {
+    "doc_id": lambda v: getattr(CompanyDocument.query.get(v), "client_id", None),
+    "person_id": lambda v: getattr(ClientKeyPerson.query.get(v), "client_id", None),
+})
 
 ALLOWED_COMPANY_DOC_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg"}

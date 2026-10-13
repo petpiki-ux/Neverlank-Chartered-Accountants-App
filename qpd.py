@@ -21,6 +21,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from extensions import db
+from models import visible_clients
 from models import (
     Client, QPDEstimate, QPDTrialBalanceLine, QPDAdjustmentLine, QPDMonthlyTurnover,
     QPDInstalmentRate, QPDInstalmentRecord, FxRate, FxAverageRate, FX_AVERAGE_PERIODS, INCOME_TAX_ITEM_TYPES, INCOME_TAX_ITEM_TYPE_LABELS,
@@ -987,7 +988,7 @@ qpd_dashboard_bp = Blueprint("qpd_dashboard", __name__, url_prefix="/qpd")
 @login_required
 def dashboard():
     tax_year = request.args.get("tax_year", type=int) or date.today().year
-    qualifying_clients = [c for c in Client.query.order_by(Client.name).all() if c.qualifies_for_qpd]
+    qualifying_clients = [c for c in visible_clients(current_user) if c.qualifies_for_qpd]
     rows = []
     for client in qualifying_clients:
         estimate = QPDEstimate.query.filter_by(client_id=client.id, tax_year=tax_year).first()

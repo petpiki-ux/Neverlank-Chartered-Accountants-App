@@ -28,9 +28,12 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from extensions import db
+from client_scope import guard_blueprint
 from models import Client, PermanentFileDocument, PermanentFileReferenceCounter, FilingIndexSection, user_has_permission
 
 permanent_file_bp = Blueprint("permanent_file", __name__, url_prefix="/clients")
+
+guard_blueprint(permanent_file_bp, {"doc_id": lambda v: getattr(PermanentFileDocument.query.get(v), "client_id", None)})
 
 
 def _allowed_file(filename):

@@ -14,6 +14,7 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required, current_user
 
 from extensions import db
+from models import visible_clients, user_can_access_client
 from models import (
     Client, Engagement, Invoice, InvoiceLineItem, EngagementTask, ready_to_bill_tasks,
     INVOICE_STATUSES, INVOICE_CURRENCIES, user_can_access_engagement,
@@ -23,7 +24,17 @@ from timeutil import to_cat
 invoicing_bp = Blueprint("invoicing", __name__, url_prefix="/invoices")
 
 
+def _invoice_visible(invoice):
+    """Visible to the current user: they work on the invoice's client, and (if it
+    is linked to an engagement) they are on that engagement's team."""
+    if not user_can_access_client(current_user, invoice.client_id):
+        return False
+    return not invoice.engagement_id or user_can_access_engagement(current_user, invoice.engagement)
+
+
 def _ensure_invoice_access(invoice):
+    if not user_can_access_client(current_user, invoice.client_id):
+        abort(403, description="You are not working on this invoice's client, so you cannot open it.")
     if invoice.engagement_id and not user_can_access_engagement(current_user, invoice.engagement):
         abort(403)
 
@@ -79,15 +90,12 @@ def list_invoices():
     # Same confidentiality rule as everywhere else: an invoice linked to an
     # engagement is hidden from anyone not on that engagement (Admin sees
     # everything). An invoice with no engagement link is visible to all.
-    visible = [
-        inv for inv in all_invoices
-        if not inv.engagement_id or user_can_access_engagement(current_user, inv.engagement)
-    ]
-    clients = Client.query.order_by(Client.name).all()
+    visible = [inv for inv in all_invoices if _invoice_visible(inv)]
+    clients = visible_clients(current_user)
     # recurring-invoice drafts the current user can see, waiting for review
     review_count = sum(
         1 for inv in Invoice.query.filter(Invoice.status == "Draft", Invoice.recurring_invoice_id.isnot(None)).all()
-        if not inv.engagement_id or user_can_access_engagement(current_user, inv.engagement)
+        if _invoice_visible(inv)
     )
     ready_count = sum(len(ready_to_bill_tasks(e)) for e in _visible_engagements_for_invoicing())
     return render_template(
@@ -109,7 +117,7 @@ def _visible_engagements_for_invoicing():
 @invoicing_bp.route("/new", methods=["GET", "POST"])
 @login_required
 def new_invoice():
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     engagements = _visible_engagements_for_invoicing()
 
     if request.method == "POST":
@@ -388,7 +396,7 @@ def ready_to_bill():
 def edit_invoice(invoice_id):
     invoice = Invoice.query.get_or_404(invoice_id)
     _ensure_invoice_access(invoice)
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
 
     if request.method == "POST":
         try:

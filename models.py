@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, date
 from werkzeug.security import generate_password_hash, check_password_hash
+from flask import has_request_context, request
 from flask_login import UserMixin
 
 from extensions import db
@@ -1771,6 +1772,10 @@ class Client(db.Model):
     vat_number = db.Column(db.String(40))   # VAT registration number
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Who onboarded the client - they keep access to it even before any
+    # engagement exists (see client_scope_ids). Blank on clients created before
+    # this was recorded.
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     # The client's own logo (as opposed to the firm's, which is baked into
     # every generated document's letterhead - see workpapers._LOGO_PATH) -
     # used only on the Financial Statements cover page. Stored on disk under
@@ -2037,6 +2042,52 @@ class Engagement(db.Model):
 
     def __repr__(self):
         return f"<Engagement {self.title}>"
+
+
+# ---------- Client access (which clients a person may see) ----------
+# Staff and Supervisors only see the clients they actually work on: a client
+# where they are the Partner, the Manager or a team member on at least one of
+# its engagements, or that they onboarded themselves. Partners and Admins see
+# every client. The same rule is applied everywhere client data appears (client
+# list and pages, search, invoices, quotations, receipts, ZIMRA cases, QPD,
+# payroll, documents and the client dropdowns) - see app._enforce_client_scope
+# and the helpers below.
+CLIENT_RESTRICTED_ROLES = ("staff", "supervisor")
+
+
+def client_scope_ids(user):
+    """None if `user` may see every client; otherwise the set of client ids
+    they work on (cached for the length of one web request)."""
+    if user is None or getattr(user, "role", None) not in CLIENT_RESTRICTED_ROLES:
+        return None
+    cache = request.environ.setdefault("neverlank.client_scope", {}) if has_request_context() else None
+    if cache is not None and user.id in cache:
+        return cache[user.id]
+    on_team = db.session.query(engagement_team.c.engagement_id).filter(engagement_team.c.user_id == user.id)
+    ids = {cid for (cid,) in db.session.query(Engagement.client_id).filter(
+        db.or_(Engagement.partner_id == user.id, Engagement.manager_id == user.id, Engagement.id.in_(on_team))).all()}
+    ids |= {cid for (cid,) in db.session.query(Client.id).filter(Client.created_by_id == user.id).all()}
+    if cache is not None:
+        cache[user.id] = ids
+    return ids
+
+
+def user_can_access_client(user, client):
+    """Whether `user` may see this client (a Client or a client id)."""
+    scope = client_scope_ids(user)
+    if scope is None:
+        return True
+    client_id = client.id if hasattr(client, "id") else client
+    return client_id in scope
+
+
+def visible_clients(user):
+    """Every client `user` may see, by name - use for lists and dropdowns."""
+    query = Client.query
+    scope = client_scope_ids(user)
+    if scope is not None:
+        query = query.filter(Client.id.in_(scope)) if scope else query.filter(db.false())
+    return query.order_by(Client.name).all()
 
 
 def user_can_access_engagement(user, engagement):

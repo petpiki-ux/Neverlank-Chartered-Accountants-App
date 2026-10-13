@@ -10,6 +10,7 @@ from werkzeug.utils import secure_filename
 import openpyxl
 
 from extensions import db
+from models import visible_clients, client_scope_ids
 from timeutil import to_cat
 from models import (
     Engagement, Client, User, ChecklistTemplate, EngagementChecklistItem,
@@ -253,7 +254,7 @@ def dashboard():
         all_engagements=all_engagements,
         counts_by_status=counts_by_status,
         counts_by_type=counts_by_type,
-        total_clients=Client.query.count(),
+        total_clients=len(visible_clients(current_user)),
         total_engagements=len(all_engagements),
         eqi_rows=eqi_rows, firm_avg_reviewed_pct=firm_avg_reviewed_pct,
         query_aging=query_aging, open_query_count=len(open_queries), oldest_queries=oldest_queries,
@@ -305,6 +306,9 @@ def directory():
 
     q = request.args.get("q", "").strip()
     client_query = Client.query
+    scope = client_scope_ids(current_user)
+    if scope is not None:
+        client_query = client_query.filter(Client.id.in_(scope)) if scope else client_query.filter(db.false())
     if q:
         client_query = client_query.filter(
             db.or_(
@@ -340,7 +344,7 @@ def directory():
 @engagements_bp.route("/new", methods=["GET", "POST"])
 @login_required
 def new_engagement():
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
     templates = ChecklistTemplate.query.order_by(ChecklistTemplate.name).all()
 
@@ -418,7 +422,7 @@ def new_engagement():
 def edit_engagement(engagement_id):
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_engagement_access(engagement, require_accepted=False)
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
 
     if request.method == "POST":

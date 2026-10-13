@@ -10,6 +10,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     Client, INDUSTRY_OPTIONS, user_has_permission, user_can_access_engagement,
+    client_scope_ids, user_can_access_client,
     COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES, FilingIndexSection,
     TAX_HEADS, FILING_ARCHIVE_SECTIONS, LegislativeUpdate,
 )
@@ -37,6 +38,16 @@ def _find_duplicate_by_company_number(company_number, exclude_client_id=None):
     if exclude_client_id is not None:
         query = query.filter(Client.id != exclude_client_id)
     return query.first()
+
+
+def _duplicate_message(label, value, duplicate):
+    """Warning for a duplicate number. A client the person is not working on is
+    not named (that would reveal it) - they are told to ask a Partner instead."""
+    if user_can_access_client(current_user, duplicate):
+        return (f"A client with {label} \"{value}\" already exists: "
+                f"{duplicate.name}. Open that client instead, or double-check the number.")
+    return (f"A client with {label} \"{value}\" is already on the system. You are not working on that client - "
+            "ask a Partner to add you to its engagement team instead of creating it again.")
 
 
 TAX_ID_FIELDS = {"tin_number": "TIN", "vat_number": "VAT number"}
@@ -94,11 +105,13 @@ def _resolve_industry(form):
     return choice  # blank, or a legacy free-text value from before this field existed
 
 
-@clients_bp.route("/")
-@login_required
-def list_clients():
-    q = request.args.get("q", "").strip()
+def _search_visible_clients(q=""):
+    """Clients matching `q` (name, company number, TIN or VAT number) that the
+    current user is allowed to see, by name."""
     query = Client.query
+    scope = client_scope_ids(current_user)
+    if scope is not None:
+        query = query.filter(Client.id.in_(scope)) if scope else query.filter(db.false())
     if q:
         query = query.filter(
             db.or_(
@@ -106,7 +119,14 @@ def list_clients():
                 Client.tin_number.ilike(f"%{q}%"), Client.vat_number.ilike(f"%{q}%"),
             )
         )
-    all_clients = query.order_by(Client.name).all()
+    return query.order_by(Client.name).all()
+
+
+@clients_bp.route("/")
+@login_required
+def list_clients():
+    q = request.args.get("q", "").strip()
+    all_clients = _search_visible_clients(q)
     return render_template("clients/list.html", clients=all_clients, q=q)
 
 
@@ -121,14 +141,11 @@ def new_client():
         clash = _check_duplicate_ids(company_number, tin_number, vat_number)
         if clash:
             label, value, duplicate = clash
-            flash(
-                f"A client with {label} \"{value}\" already exists: "
-                f"{duplicate.name}. Open that client instead, or double-check the number.",
-                "danger",
-            )
+            flash(_duplicate_message(label, value, duplicate), "danger")
+            visible_duplicate = duplicate if user_can_access_client(current_user, duplicate) else None
             return render_template(
                 "clients/form.html", client=None, industry_options=INDUSTRY_OPTIONS,
-                form_values=form_values, duplicate_client=duplicate, duplicate_label=label,
+                form_values=form_values, duplicate_client=visible_duplicate, duplicate_label=label, duplicate_hidden=visible_duplicate is None,
             )
         client = Client(
             name=request.form.get("name", "").strip(),
@@ -141,6 +158,7 @@ def new_client():
             tin_number=tin_number or None,
             vat_number=vat_number or None,
             notes=request.form.get("notes", "").strip(),
+            created_by_id=current_user.id,
         )
         db.session.add(client)
         db.session.commit()
@@ -215,14 +233,11 @@ def edit_client(client_id):
         clash = _check_duplicate_ids(company_number, tin_number, vat_number, exclude_client_id=client.id)
         if clash:
             label, value, duplicate = clash
-            flash(
-                f"A client with {label} \"{value}\" already exists: "
-                f"{duplicate.name}. Open that client instead, or double-check the number.",
-                "danger",
-            )
+            flash(_duplicate_message(label, value, duplicate), "danger")
+            visible_duplicate = duplicate if user_can_access_client(current_user, duplicate) else None
             return render_template(
                 "clients/form.html", client=client, industry_options=INDUSTRY_OPTIONS,
-                form_values=dict(request.form), duplicate_client=duplicate, duplicate_label=label,
+                form_values=dict(request.form), duplicate_client=visible_duplicate, duplicate_label=label, duplicate_hidden=visible_duplicate is None,
             )
         client.name = request.form.get("name", "").strip()
         client.contact_person = request.form.get("contact_person", "").strip()

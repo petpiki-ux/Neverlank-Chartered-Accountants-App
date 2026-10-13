@@ -17,6 +17,7 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required, current_user
 
 from extensions import db
+from models import visible_clients, user_can_access_client
 from invoicing import FIRM_LETTERHEAD, next_sequence_number, _next_invoice_number, _visible_engagements_for_invoicing
 from models import (
     Client, Engagement, Invoice, InvoiceLineItem, Quotation, QuotationLineItem,
@@ -29,6 +30,8 @@ quotations_bp = Blueprint("quotations", __name__, url_prefix="/quotations")
 
 
 def _ensure_quotation_access(quotation):
+    if not user_can_access_client(current_user, quotation.client_id):
+        abort(403, description="You are not working on this quotation's client, so you cannot open it.")
     if quotation.engagement_id and not user_can_access_engagement(current_user, quotation.engagement):
         abort(403)
 
@@ -84,7 +87,8 @@ def list_quotations():
     if client_filter:
         query = query.filter_by(client_id=int(client_filter))
     everything = query.order_by(Quotation.issue_date.desc(), Quotation.id.desc()).all()
-    visible = [q for q in everything if not q.engagement_id or user_can_access_engagement(current_user, q.engagement)]
+    visible = [q for q in everything if user_can_access_client(current_user, q.client_id)
+               and (not q.engagement_id or user_can_access_engagement(current_user, q.engagement))]
 
     # summary cards: counts and money by currency (ZWG and USD never added together)
     def money(quotes):
@@ -103,7 +107,7 @@ def list_quotations():
     }
     if status_filter:
         visible = [q for q in visible if q.display_status == status_filter]
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     return render_template(
         "quotations/list.html", quotations=visible, clients=clients, statuses=QUOTATION_STATUSES,
         status_filter=status_filter, client_filter=client_filter, summary=summary,
@@ -115,7 +119,7 @@ def list_quotations():
 @quotations_bp.route("/new", methods=["GET", "POST"])
 @login_required
 def new_quotation():
-    clients = Client.query.order_by(Client.name).all()
+    clients = visible_clients(current_user)
     engagements = _visible_engagements_for_invoicing()
     ctx = dict(clients=clients, engagements=engagements, currencies=INVOICE_CURRENCIES,
                default_terms=QUOTATION_DEFAULT_TERMS)

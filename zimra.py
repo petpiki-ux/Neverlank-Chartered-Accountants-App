@@ -25,6 +25,7 @@ from werkzeug.utils import secure_filename
 
 from config import Config
 from extensions import db
+from models import visible_clients, user_can_access_client
 from models import (
     Client, Engagement, ZimraCase, ZimraCorrespondence, ZimraInstalment,
     ZIMRA_CASE_TYPES, ZIMRA_CASE_STATUSES, ZIMRA_CORRESPONDENCE_KINDS, ZIMRA_DIRECTIONS,
@@ -41,6 +42,8 @@ DUE_SOON_DAYS = 7
 # ------------------------------------------------------------------ helpers
 
 def _can_see(case):
+    if not user_can_access_client(current_user, case.client_id):
+        return False
     return not case.engagement_id or user_can_access_engagement(current_user, case.engagement)
 
 
@@ -215,7 +218,7 @@ def list_cases():
     }
     return render_template(
         "zimra/list.html", cases=cases, stats=stats, statuses=ZIMRA_CASE_STATUSES, case_types=ZIMRA_CASE_TYPES,
-        clients=Client.query.order_by(Client.name).all(), status_filter=status, client_filter=client_filter,
+        clients=visible_clients(current_user), status_filter=status, client_filter=client_filter,
         type_filter=type_filter, flag=flag, show_closed=show_closed, due_soon_days=DUE_SOON_DAYS,
     )
 
@@ -225,7 +228,7 @@ def list_cases():
 def new_case():
     client_id = request.values.get("client_id", "")
     if not client_id.isdigit():
-        return render_template("zimra/pick_client.html", clients=Client.query.order_by(Client.name).all())
+        return render_template("zimra/pick_client.html", clients=visible_clients(current_user))
     client = Client.query.get_or_404(int(client_id))
     case = ZimraCase(client_id=client.id, status="Open", currency="USD", opened_on=date.today())
     engagement_id = request.values.get("engagement_id", "")

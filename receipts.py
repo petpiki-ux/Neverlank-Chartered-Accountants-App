@@ -18,6 +18,7 @@ from flask_login import login_required, current_user
 from sqlalchemy.exc import IntegrityError
 
 from extensions import db
+from models import visible_clients, user_can_access_client
 from models import (
     Client, Invoice, Receipt, PAYMENT_METHODS, INVOICE_CURRENCIES, user_can_access_engagement,
 )
@@ -31,6 +32,8 @@ MONEY_TOLERANCE = 0.005
 # ------------------------------------------------------------------ helpers
 
 def _can_see(invoice):
+    if not user_can_access_client(current_user, invoice.client_id):
+        return False
     return not invoice.engagement_id or user_can_access_engagement(current_user, invoice.engagement)
 
 
@@ -182,7 +185,7 @@ def list_receipts():
             totals[r.currency] = totals.get(r.currency, 0.0) + (r.amount or 0)
     return render_template(
         "receipts/list.html", receipts=receipts, totals=totals,
-        clients=Client.query.order_by(Client.name).all(), methods=PAYMENT_METHODS,
+        clients=visible_clients(current_user), methods=PAYMENT_METHODS,
         client_filter=client_filter, method_filter=method_filter, month=month, show_void=show_void,
     )
 

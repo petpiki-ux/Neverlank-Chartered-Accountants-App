@@ -15,9 +15,12 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from extensions import db
+from client_scope import guard_blueprint
 from models import Client, TaxAccountingFilingDocument, FILING_ARCHIVE_SECTION_LABELS, user_has_permission
 
 filing_archive_bp = Blueprint("filing_archive", __name__, url_prefix="/clients")
+
+guard_blueprint(filing_archive_bp, {"doc_id": lambda v: getattr(TaxAccountingFilingDocument.query.get(v), "client_id", None)})
 
 
 def _allowed_file(filename):

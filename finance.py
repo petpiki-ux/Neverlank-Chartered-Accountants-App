@@ -9,6 +9,7 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required, current_user
 
 from extensions import db
+from models import visible_clients
 from models import (
     Client, Engagement, Expense, EXPENSE_CATEGORIES, EXPENSE_STATUSES, INVOICE_CURRENCIES,
     user_has_permission, user_can_access_engagement,
@@ -94,7 +95,7 @@ def dashboard():
 def _form_context():
     return dict(
         categories=EXPENSE_CATEGORIES, statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
-        clients=Client.query.order_by(Client.name).all(), today=date.today().isoformat(),
+        clients=visible_clients(current_user), today=date.today().isoformat(),
     )
 
 

@@ -36,6 +36,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from extensions import db
+from models import visible_clients
 from models import (
     Engagement, User, RiskItem, Client,
     TaxEntityProfile, TAX_ENTITY_CLASSIFICATIONS,
@@ -1801,7 +1802,7 @@ def _render_legislative_updates(**extra):
         updates=updates, tax_heads=TAX_HEADS,
         can_edit=user_has_permission(current_user, "manage_legislative_updates"),
         instrument_types=LEGISLATIVE_UPDATE_TYPES, type_labels=LEGISLATIVE_UPDATE_TYPE_LABELS,
-        areas=LEGISLATIVE_UPDATE_AREAS, clients=Client.query.order_by(Client.name).all(),
+        areas=LEGISLATIVE_UPDATE_AREAS, clients=visible_clients(current_user),
         case_authority_statuses=CASE_AUTHORITY_STATUSES, case_authority_labels=CASE_AUTHORITY_LABELS,
         ask_question=None, ask_status=None, ask_answer=None, ask_citations=None, ask_candidates=None,
         ask_from_cache=False, ask_cache_hit_count=None,
