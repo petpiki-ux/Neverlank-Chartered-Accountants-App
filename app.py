@@ -427,7 +427,8 @@ def _add_missing_columns():
         "qpd_trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
         # recurring_invoice_id / recurrence_index - see models.RecurringInvoice:
         # set on invoices raised by a recurring schedule.
-        "invoice": [("recurring_invoice_id", "INTEGER"), ("recurrence_index", "INTEGER")],
+        "invoice": [("recurring_invoice_id", "INTEGER"), ("recurrence_index", "INTEGER"), ("share_token", "VARCHAR(64)"),
+                    ("reminders_paused", "BOOLEAN DEFAULT 0")],
     }
     with db.engine.connect() as conn:
         for table, columns in additions.items():
@@ -606,6 +607,7 @@ def create_app():
     from receipts import receipts_bp
     from statements import statements_bp
     from attendance import attendance_bp
+    from invoice_send import invoice_send_bp, public_invoice_bp
     from zimra import zimra_bp
     from finance import analytics_bp, expenses_bp
     from regulatory_notices import regulatory_notices_bp
@@ -637,6 +639,8 @@ def create_app():
     app.register_blueprint(receipts_bp)
     app.register_blueprint(statements_bp)
     app.register_blueprint(attendance_bp)
+    app.register_blueprint(invoice_send_bp)
+    app.register_blueprint(public_invoice_bp)
     app.register_blueprint(zimra_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(expenses_bp)
@@ -744,8 +748,11 @@ def create_app():
         open_check_in = None
         recurring_review_count = 0
         zimra_overdue_count = 0
+        invoice_reminder_count = 0
         if current_user.is_authenticated:
             from models import Invoice
+            from invoice_send import due_reminder_count
+            invoice_reminder_count = due_reminder_count()
             from zimra import overdue_response_count
             zimra_overdue_count = overdue_response_count()
             # draft invoices raised by recurring schedules, waiting for review
@@ -766,6 +773,7 @@ def create_app():
             "open_check_in": open_check_in,
             "recurring_review_count": recurring_review_count,
             "zimra_overdue_count": zimra_overdue_count,
+            "invoice_reminder_count": invoice_reminder_count,
         }
 
     with app.app_context():

@@ -430,6 +430,9 @@ PERMISSIONS = [
     ("reopen_vat_periods", "Reopen a Completed VAT Month",
      "On an engagement's Tax tab: reopen a VAT month that has been marked 'Computation done' so documents dated in it can be added, deleted or imported again. Anyone on the engagement can mark a month as done; only supervisors and above can reopen it by default (a reason is recorded).",
      ("supervisor", "partner", "admin")),
+    ("send_invoices", "Send Invoices & Reminders to Clients",
+     "Email an invoice (with the PDF attached) or open a WhatsApp message with its link straight from the invoice page, and send overdue-payment reminders. Open to everyone who can see the invoice by default; remove it from a role to stop staff contacting clients themselves.",
+     tuple(USER_ROLES)),
     ("view_attendance", "View Attendance (Check In / Check Out)",
      "HR & Admin > Attendance: see who is in right now, when everyone checked in and out each day, hours worked, people who have not checked in or forgot to check out, and export the log. Management only by default.",
      ("partner", "admin")),
@@ -8989,6 +8992,13 @@ class Invoice(db.Model):
     recurring_invoice_id = db.Column(db.Integer, db.ForeignKey("recurring_invoice.id"))
     recurrence_index = db.Column(db.Integer)
 
+    # Unguessable token behind the invoice's public PDF link (used in WhatsApp
+    # messages); created the first time the invoice is shared.
+    share_token = db.Column(db.String(64), unique=True)
+    # Overdue-payment reminders switched off for this invoice (e.g. a payment
+    # arrangement has been agreed).
+    reminders_paused = db.Column(db.Boolean, default=False, nullable=False)
+
     __table_args__ = (db.UniqueConstraint("recurring_invoice_id", "recurrence_index", name="uq_invoice_recurrence"),)
 
     # client_id is required (NOT NULL), so deleting a Client must cascade to
@@ -9086,6 +9096,27 @@ class InvoiceLineItem(db.Model):
 # ---------- Receipts (a payment received against an Invoice) ----------
 
 PAYMENT_METHODS = ["Cash", "Bank transfer", "EcoCash", "Card", "Cheque", "Other"]
+
+
+class InvoiceSend(db.Model):
+    """One time an invoice (or an overdue reminder for it) was sent to the
+    client from the app - by email, or via a WhatsApp click-to-chat link.
+    `kind` is 'invoice' or 'reminder'. For WhatsApp, status 'opened' means the
+    sender was taken to WhatsApp with the message ready (the app cannot see
+    whether they then pressed Send)."""
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    kind = db.Column(db.String(12), default="invoice", nullable=False)
+    channel = db.Column(db.String(12), nullable=False)  # email | whatsapp | manual
+    recipient = db.Column(db.String(200))
+    subject = db.Column(db.String(300))
+    status = db.Column(db.String(12), default="sent", nullable=False)  # sent | failed | opened
+    error = db.Column(db.Text)
+    sent_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    invoice = db.relationship("Invoice", backref=db.backref("sends", lazy=True, cascade="all, delete-orphan", order_by="InvoiceSend.id.desc()"))
+    sent_by = db.relationship("User")
 
 
 class Receipt(db.Model):

@@ -8,7 +8,7 @@ that engagement's Partner/Manager/Team (or Admin) can see it - otherwise
 (no engagement link) any logged-in team member can see it, same as the
 Clients directory itself.
 """
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
 from flask_login import login_required, current_user
@@ -54,6 +54,9 @@ def next_sequence_number(column, prefix):
 
 def _next_invoice_number():
     return next_sequence_number(Invoice.invoice_number, f"INV-{date.today().year}-")
+
+
+DEFAULT_PAYMENT_TERMS_DAYS = 30  # new invoices fall due this many days after the issue date
 
 
 # Printed on every quotation and invoice letterhead. Fill in any of the
@@ -143,6 +146,9 @@ def new_invoice():
 
         issue_date = request.form.get("issue_date")
         due_date = request.form.get("due_date")
+        issued_on = datetime.strptime(issue_date, "%Y-%m-%d").date() if issue_date else date.today()
+        # No due date typed: payment terms are 30 days from the issue date.
+        due_on = datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else issued_on + timedelta(days=DEFAULT_PAYMENT_TERMS_DAYS)
 
         invoice = Invoice(
             invoice_number=_next_invoice_number(),
@@ -150,8 +156,8 @@ def new_invoice():
             engagement_id=int(engagement_id) if engagement_id else None,
             currency=request.form.get("currency", "USD"),
             vat_pct=max(0.0, vat_pct),
-            issue_date=datetime.strptime(issue_date, "%Y-%m-%d").date() if issue_date else date.today(),
-            due_date=datetime.strptime(due_date, "%Y-%m-%d").date() if due_date else None,
+            issue_date=issued_on,
+            due_date=due_on,
             bill_to=request.form.get("bill_to", "").strip() or client.name,
             notes=request.form.get("notes", "").strip(),
             created_by_id=current_user.id,
@@ -167,6 +173,8 @@ def new_invoice():
         "invoicing/form.html", clients=clients, engagements=engagements, currencies=INVOICE_CURRENCIES,
         preselect_client_id=preselect_client_id, preselect_engagement_id=preselect_engagement_id,
         today=date.today().isoformat(),
+        default_due=(date.today() + timedelta(days=DEFAULT_PAYMENT_TERMS_DAYS)).isoformat(),
+        terms_days=DEFAULT_PAYMENT_TERMS_DAYS,
     )
 
 
@@ -180,7 +188,8 @@ def view_invoice(invoice_id):
     show_internal = request.args.get("internal") == "1"
     ready_tasks = (ready_to_bill_tasks(invoice.engagement, include_internal=show_internal)
                    if invoice.engagement and invoice.status in ("Draft", "Sent") else [])
-    return render_template("invoicing/detail.html", invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES), today_iso=date.today().isoformat(), methods=PAYMENT_METHODS, ready_tasks=ready_tasks, show_internal=show_internal)
+    from invoice_send import send_context
+    return render_template("invoicing/detail.html", **send_context(invoice), invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES), today_iso=date.today().isoformat(), methods=PAYMENT_METHODS, ready_tasks=ready_tasks, show_internal=show_internal)
 
 
 @invoicing_bp.route("/<int:invoice_id>/print")

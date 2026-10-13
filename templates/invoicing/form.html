@@ -58,11 +58,12 @@
     <div class="form-row">
       <div>
         <label for="issue_date">Issue date</label>
-        <input type="date" id="issue_date" name="issue_date" value="{{ today }}">
+        <input type="date" id="issue_date" name="issue_date" value="{{ today }}" onchange="syncDueDate()">
       </div>
       <div>
         <label for="due_date">Due date</label>
-        <input type="date" id="due_date" name="due_date">
+        <input type="date" id="due_date" name="due_date" value="{{ default_due }}" oninput="this.dataset.touched='1'">
+        <div class="muted" style="font-size:11.5px;">{{ terms_days }} days after the issue date unless you change it.</div>
       </div>
     </div>
 
@@ -76,4 +77,16 @@
     <a href="{{ url_for('invoicing.list_invoices') }}" class="btn secondary">Cancel</a>
   </form>
 </div>
+<script>
+// Due date follows the issue date (+{{ terms_days or 30 }} days) until someone types their own.
+function syncDueDate() {
+  var due = document.getElementById('due_date');
+  var issue = document.getElementById('issue_date').value;
+  if (!issue || due.dataset.touched === '1') return;
+  var d = new Date(issue + 'T00:00:00');
+  if (isNaN(d)) return;
+  d.setDate(d.getDate() + {{ terms_days or 30 }});
+  due.value = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+}
+</script>
 {% endblock %}

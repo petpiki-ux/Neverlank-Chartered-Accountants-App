@@ -14,7 +14,9 @@
     </div>
   </div>
   <div>
-    <a href="{{ url_for('invoicing.print_invoice', invoice_id=invoice.id) }}" class="btn secondary" target="_blank">Print / Save as PDF</a>
+    {% if send_allowed %}<a href="#send" class="btn gold">Send to client</a>{% endif %}
+    <a href="{{ url_for('invoice_send.invoice_pdf', invoice_id=invoice.id) }}" class="btn secondary" target="_blank">PDF</a>
+    <a href="{{ url_for('invoicing.print_invoice', invoice_id=invoice.id) }}" class="btn secondary" target="_blank">Print</a>
     <a href="{{ url_for('statements.client_statement', client_id=invoice.client_id) }}" class="btn secondary">Client statement</a>
     <a href="{{ url_for('invoicing.edit_invoice', invoice_id=invoice.id) }}" class="btn secondary">Edit details</a>
   </div>
@@ -105,6 +107,78 @@
   <div class="form-row"><div>Subtotal</div><div class="text-right">{{ invoice.currency }} {{ '%.2f'|format(invoice.subtotal) }}</div></div>
   <div class="form-row"><div>VAT ({{ invoice.vat_pct }}%)</div><div class="text-right">{{ invoice.currency }} {{ '%.2f'|format(invoice.vat_amount) }}</div></div>
   <div class="form-row"><div><strong>Total</strong></div><div class="text-right"><strong>{{ invoice.currency }} {{ '%.2f'|format(invoice.total) }}</strong></div></div>
+</div>
+
+<div class="card" id="send">
+  <h3 class="mt-0">Send to client</h3>
+  {% if not send_allowed %}
+  <p class="muted" style="margin:0;">You do not have permission to send invoices. Ask an Admin if you need it.</p>
+  {% elif sendable_reason %}
+  <p class="muted" style="margin:0;">{{ sendable_reason }}</p>
+  {% else %}
+  {% if reminder %}
+  <div style="border-left:4px solid #c0392b;background:#fdecea;padding:8px 12px;margin-bottom:12px;font-size:13px;">
+    <strong>{{ reminder.overdue }} days overdue.</strong>
+    {% if reminder.paused %}Reminders are paused for this invoice.
+    {% elif reminder.due_now %}A reminder is due{% if reminder.last_day %} (last one {{ reminder.last_day.strftime('%d %b %Y') }}){% endif %} - <a href="{{ url_for('invoice_send.reminders') }}">send it from Reminders</a>.
+    {% else %}Last reminded {{ reminder.last_day.strftime('%d %b %Y') }}; next due {{ reminder.next_due.strftime('%d %b %Y') }}.{% endif %}
+  </div>
+  {% endif %}
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:22px;">
+    <form method="post" action="{{ url_for('invoice_send.send_email', invoice_id=invoice.id) }}">
+      <strong>Email (PDF attached automatically)</strong>
+      {% if not email_ready %}
+      <p class="muted" style="font-size:12px;margin:4px 0;">Email is not set up yet. An Admin needs to add <code>EMAIL_API_KEY</code> and <code>EMAIL_FROM</code> (and optionally <code>EMAIL_REPLY_TO</code>) under Render &gt; Environment, using a Resend or Brevo account.</p>
+      {% endif %}
+      <label for="send_to">To</label>
+      <input type="text" id="send_to" name="to" value="{{ send_to }}" placeholder="client@example.com (separate several with commas)" required>
+      <label for="send_cc">Cc (optional)</label>
+      <input type="text" id="send_cc" name="cc" placeholder="">
+      <label for="send_subject">Subject</label>
+      <input type="text" id="send_subject" name="subject" value="{{ send_subject }}">
+      <label for="send_message">Message</label>
+      <textarea id="send_message" name="message" rows="8">{{ send_message }}</textarea>
+      {% if invoice.status == 'Draft' %}<label style="display:flex;gap:6px;align-items:center;font-weight:400;"><input type="checkbox" name="mark_sent" value="1" checked style="width:auto;"> Mark the invoice as Sent once it goes out</label>{% endif %}
+      <button type="submit" class="btn gold" style="margin-top:8px;" {% if not email_ready %}disabled title="Email is not set up yet"{% endif %}>Send email</button>
+    </form>
+    <form method="post" action="{{ url_for('invoice_send.send_whatsapp', invoice_id=invoice.id) }}" target="_blank">
+      <strong>WhatsApp</strong>
+      <p class="muted" style="font-size:12px;margin:4px 0;">Opens WhatsApp with the message ready and a private link to the invoice PDF. You press Send in WhatsApp.</p>
+      <label for="send_phone">Client's WhatsApp number</label>
+      <input type="text" id="send_phone" name="phone" value="{{ send_phone }}" placeholder="077 123 4567 or +263 77 123 4567" required>
+      <label for="send_wa">Message (the link is added where {link} appears)</label>
+      <textarea id="send_wa" name="message" rows="8">{{ send_whatsapp }}</textarea>
+      {% if invoice.status == 'Draft' %}<label style="display:flex;gap:6px;align-items:center;font-weight:400;"><input type="checkbox" name="mark_sent" value="1" checked style="width:auto;"> Mark the invoice as Sent</label>{% endif %}
+      <button type="submit" class="btn gold" style="margin-top:8px;background:#1e8a4c;">Open WhatsApp</button>
+    </form>
+  </div>
+  {% endif %}
+
+  {% if invoice.sends %}
+  <h4 style="margin:18px 0 6px;">Sent history</h4>
+  <table>
+    <thead><tr><th>When</th><th>What</th><th>How</th><th>To</th><th>Result</th><th>By</th></tr></thead>
+    <tbody>
+      {% for s in invoice.sends %}
+      <tr>
+        <td>{{ (s.sent_at|cat).strftime('%d %b %Y %H:%M') }}</td>
+        <td>{{ 'Reminder' if s.kind == 'reminder' else 'Invoice' }}</td>
+        <td>{{ {'email': 'Email', 'whatsapp': 'WhatsApp', 'manual': 'Phone / other'}.get(s.channel, s.channel) }}</td>
+        <td>{{ s.recipient or '—' }}</td>
+        <td>{% if s.status == 'failed' %}<span class="badge overdue" title="{{ s.error }}">Failed</span> <span class="muted" style="font-size:11.5px;">{{ s.error }}</span>
+            {% elif s.status == 'opened' %}WhatsApp opened <span class="muted" style="font-size:11.5px;">(sent from the phone/app)</span>
+            {% else %}Sent{% endif %}</td>
+        <td>{{ s.sent_by.name if s.sent_by else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  {% if reminder and send_allowed %}
+  <form method="post" action="{{ url_for('invoice_send.reminder_pause', invoice_id=invoice.id) }}" style="margin-top:10px;">
+    <button type="submit" class="btn small secondary">{{ 'Resume' if invoice.reminders_paused else 'Pause' }} overdue reminders for this invoice</button>
+  </form>
+  {% endif %}
 </div>
 
 <div class="card" id="payments">

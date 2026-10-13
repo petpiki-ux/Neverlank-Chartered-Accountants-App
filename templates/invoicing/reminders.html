@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Overdue reminders - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Overdue reminders</h1>
+    <div class="subtitle">Invoices that are {{ after_days }} or more days past their due date and still unpaid. Once one is {{ after_days }} days overdue it is due a reminder every {{ every_days }} days until it is paid. Nothing is sent automatically - you send each reminder.</div>
+  </div>
+  <div>
+    {% if due_count and email_ready %}
+    {% set es = '' if with_email == 1 else 's' %}
+    <form method="post" action="{{ url_for('invoice_send.reminders_send_all') }}" style="display:inline;"
+          onsubmit="return confirm('Email a reminder, with the invoice PDF attached, to every client below who is due one and has an email address? ({{ with_email }} email{{ es }})');">
+      <button type="submit" class="btn gold">Email all due ({{ with_email }})</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if not email_ready %}
+<div class="card" style="border-left:4px solid #e0a800;">
+  <strong>Email is not set up yet.</strong> You can still send reminders on WhatsApp or record a phone call. To email them, an Admin adds <code>EMAIL_API_KEY</code> and <code>EMAIL_FROM</code> under Render &gt; Environment (Resend or Brevo).
+</div>
+{% endif %}
+
+<div class="card">
+  {% if rows %}
+  <table>
+    <thead><tr><th>Invoice</th><th>Client</th><th class="text-right">Outstanding</th><th>Overdue</th><th>Last reminder</th><th>Next</th><th></th></tr></thead>
+    <tbody>
+      {% for r in rows %}
+      {% set inv = r.invoice %}
+      <tr {% if not r.due_now %}style="opacity:.75;"{% endif %}>
+        <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a></td>
+        <td><a href="{{ url_for('clients.view_client', client_id=inv.client_id) }}">{{ inv.client.name }}</a>
+          <div class="muted" style="font-size:11.5px;">{{ inv.client.email or 'no email' }} &middot; {{ inv.client.phone or 'no phone' }}</div></td>
+        <td class="text-right">{{ inv.currency }} {{ '{:,.2f}'.format(inv.balance) }}</td>
+        <td><span style="color:#c0392b;font-weight:600;">{{ r.overdue }} days</span><div class="muted" style="font-size:11.5px;">due {{ inv.due_date.strftime('%d %b %Y') if inv.due_date else '—' }}</div></td>
+        <td>{% if r.last %}{{ r.last_day.strftime('%d %b %Y') }}<div class="muted" style="font-size:11.5px;">{{ {'email': 'Email', 'whatsapp': 'WhatsApp', 'manual': 'Phone / other'}.get(r.last.channel) }}</div>{% else %}<span class="muted">never</span>{% endif %}</td>
+        <td>{% if r.paused %}<span class="badge">Paused</span>{% elif r.due_now %}<span class="badge overdue">Due now</span>{% else %}{{ r.next_due.strftime('%d %b') }}{% endif %}</td>
+        <td style="white-space:nowrap;">
+          {% if not r.paused %}
+          <form method="post" action="{{ url_for('invoice_send.reminder_email', invoice_id=inv.id) }}" style="display:inline;">
+            <button type="submit" class="btn small gold" {% if not email_ready or not inv.client.email %}disabled title="{{ 'Email is not set up' if not email_ready else 'No email address on file' }}"{% endif %}>Email</button>
+          </form>
+          <form method="post" action="{{ url_for('invoice_send.reminder_whatsapp', invoice_id=inv.id) }}" target="_blank" style="display:inline;">
+            <button type="submit" class="btn small secondary" {% if not inv.client.phone %}disabled title="No phone number on file"{% endif %}>WhatsApp</button>
+          </form>
+          <form method="post" action="{{ url_for('invoice_send.reminder_mark', invoice_id=inv.id) }}" style="display:inline;" onsubmit="return confirm('Record that you have already reminded this client (for example by phone)?');">
+            <button type="submit" class="btn small secondary" title="Record a reminder given by phone or in person">Reminded</button>
+          </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('invoice_send.reminder_pause', invoice_id=inv.id) }}" style="display:inline;">
+            <button type="submit" class="btn small secondary" title="Stop reminders for this invoice (e.g. a payment plan was agreed)">{{ 'Resume' if r.paused else 'Pause' }}</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No invoices are {{ after_days }} or more days overdue.</div>
+  {% endif %}
+</div>
+{% endblock %}

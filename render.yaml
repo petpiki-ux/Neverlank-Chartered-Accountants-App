@@ -13,6 +13,20 @@ services:
         value: /var/data
       - key: PYTHON_VERSION
         value: 3.11.9
+      # Sending invoices and reminders by email (see emailer.py). Create a free
+      # Resend (or Brevo) account, verify neverlank.co.zw there, then enter these
+      # three values in Render > Environment.
+      - key: EMAIL_PROVIDER
+        value: resend
+      - key: EMAIL_API_KEY
+        sync: false
+      - key: EMAIL_FROM
+        sync: false
+      - key: EMAIL_REPLY_TO
+        sync: false
+      # The address clients use; used for the invoice links sent on WhatsApp.
+      - key: PUBLIC_BASE_URL
+        value: https://neverlank-audit-app.onrender.com
     disk:
       name: neverlank-data
       mountPath: /var/data
