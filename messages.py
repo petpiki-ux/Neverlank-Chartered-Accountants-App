@@ -79,7 +79,7 @@ def _can_view_message(message, recipient_row):
     a Reply/Forward so a recalled/inaccessible message can't be quoted."""
     if message.sender_id == current_user.id:
         return True
-    return recipient_row is not None and not recipient_row.is_recalled
+    return recipient_row is not None and not recipient_row.is_recalled and not recipient_row.is_deleted
 
 
 @messages_bp.route("/")
@@ -87,7 +87,8 @@ def _can_view_message(message, recipient_row):
 def inbox():
     recipient_rows = (
         MessageRecipient.query.join(Message)
-        .filter(MessageRecipient.user_id == current_user.id, MessageRecipient.recalled_at.is_(None))
+        .filter(MessageRecipient.user_id == current_user.id, MessageRecipient.recalled_at.is_(None),
+                MessageRecipient.deleted_at.is_(None))
         .order_by(Message.created_at.desc())
         .all()
     )
@@ -222,6 +223,8 @@ def view_message(message_id):
     # view it - unlike client/engagement data, this isn't shared firm-wide.
     if not recipient_row and not is_sender:
         abort(403)
+    if recipient_row and recipient_row.is_deleted and not is_sender:
+        abort(404)  # the recipient deleted it from their inbox
     if recipient_row and recipient_row.is_recalled:
         # Recalled before this recipient opened it - show a placeholder,
         # never the body, and don't mark it read.
@@ -230,6 +233,42 @@ def view_message(message_id):
         recipient_row.read_at = datetime.utcnow()
         db.session.commit()
     return render_template("messages/view.html", message=message, recipient_row=recipient_row, is_sender=is_sender)
+
+
+@messages_bp.route("/<int:message_id>/delete", methods=["POST"])
+@login_required
+def delete_message(message_id):
+    """Remove a message from the current user's inbox. Only hides it for them -
+    the sender's Sent copy and other recipients' copies are unaffected."""
+    row = MessageRecipient.query.filter_by(message_id=message_id, user_id=current_user.id).first_or_404()
+    if not row.deleted_at:
+        row.deleted_at = datetime.utcnow()
+        if not row.read_at and not row.recalled_at:
+            row.read_at = row.deleted_at  # a deleted message must not stay "unread"
+        db.session.commit()
+    flash("Message deleted from your inbox.", "success")
+    return redirect(url_for("messages.inbox"))
+
+
+@messages_bp.route("/clear-read", methods=["POST"])
+@login_required
+def clear_read():
+    """Delete every message in the current user's inbox that they have already
+    read. Unread messages are kept."""
+    now = datetime.utcnow()
+    rows = MessageRecipient.query.filter(
+        MessageRecipient.user_id == current_user.id,
+        MessageRecipient.read_at.isnot(None),
+        MessageRecipient.deleted_at.is_(None),
+    ).all()
+    for row in rows:
+        row.deleted_at = now
+    db.session.commit()
+    if rows:
+        flash(f"Cleared {len(rows)} read message(s). Unread messages were kept.", "success")
+    else:
+        flash("There are no read messages to clear.", "info")
+    return redirect(url_for("messages.inbox"))
 
 
 @messages_bp.route("/attachments/<int:attachment_id>/download")

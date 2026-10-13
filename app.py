@@ -120,7 +120,7 @@ def _add_missing_columns():
         # _update_last_seen - drives the Messages "who's in the app" online
         # indicator.
         "user": [("last_seen_at", "DATETIME")],
-        "message_recipient": [("recalled_at", "DATETIME")],
+        "message_recipient": [("recalled_at", "DATETIME"), ("deleted_at", "DATETIME")],
         "engagement": [
             ("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0"),
             ("reporting_framework", "VARCHAR(20) DEFAULT 'full_ifrs'"),
@@ -732,7 +732,7 @@ def create_app():
     def inject_globals():
         from models import user_has_permission, MessageRecipient, EngagementTask, PersonalTask, CheckInRecord
         unread = (
-            MessageRecipient.query.filter_by(user_id=current_user.id, read_at=None).count()
+            MessageRecipient.query.filter_by(user_id=current_user.id, read_at=None, recalled_at=None, deleted_at=None).count()
             if current_user.is_authenticated
             else 0
         )

@@ -7423,6 +7423,10 @@ class MessageRecipient(db.Model):
     # already had read_at set before the recall keeps full access, so
     # recalled_at and read_at are never both set on the same row.
     recalled_at = db.Column(db.DateTime)
+    # Set when the recipient deletes the message from their own inbox (or uses
+    # "Clear all read"). Only hides it for them - the sender's copy and every
+    # other recipient's copy are untouched.
+    deleted_at = db.Column(db.DateTime)
 
     user = db.relationship("User")
 
@@ -7435,6 +7439,10 @@ class MessageRecipient(db.Model):
     @property
     def is_recalled(self):
         return self.recalled_at is not None
+
+    @property
+    def is_deleted(self):
+        return self.deleted_at is not None
 
     def __repr__(self):
         return f"<MessageRecipient message={self.message_id} user={self.user_id}>"

@@ -19,6 +19,12 @@
     <a href="{{ url_for('calls.call_room', user_id=message.recipients[0].user_id) }}" class="btn gold">Call {{ message.recipients[0].user.name if message.recipients[0].user else '' }}</a>
     {% endif %}
     <a href="{{ url_for('messages.compose', in_reply_to=message.id, mode='forward') }}" class="btn secondary">Forward</a>
+    {% if recipient_row %}
+    <form method="post" action="{{ url_for('messages.delete_message', message_id=message.id) }}" style="display:inline;"
+          onsubmit="return confirm('Delete this message from your inbox?');">
+      <button type="submit" class="btn secondary">Delete</button>
+    </form>
+    {% endif %}
     <a href="{{ url_for('messages.inbox') }}" class="btn secondary">Back to Messages</a>
   </div>
 </div>
