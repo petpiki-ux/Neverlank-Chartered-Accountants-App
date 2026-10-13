@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}ZIMRA Audits &amp; Correspondence - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>ZIMRA Audits &amp; Correspondence</h1>
+    <div class="subtitle">Audits, queries, assessments, objections and payment plans, with the letters and deadlines for each</div>
+  </div>
+  <div><a href="{{ url_for('zimra.new_case', client_id=client_filter) if client_filter else url_for('zimra.new_case') }}" class="btn gold">+ New ZIMRA case</a></div>
+</div>
+
+<div class="form-row" style="flex-wrap:wrap;">
+  <a href="{{ url_for('zimra.list_cases') }}" class="card" style="flex:1;min-width:150px;padding:12px;text-decoration:none;color:inherit;">
+    <div class="muted" style="font-size:11px;">Open cases</div><div style="font-size:22px;font-weight:600;">{{ stats.open }}</div></a>
+  <a href="{{ url_for('zimra.list_cases', flag='overdue') }}" class="card" style="flex:1;min-width:150px;padding:12px;text-decoration:none;color:inherit;{% if stats.overdue %}border-left:4px solid #c0392b;{% endif %}">
+    <div class="muted" style="font-size:11px;">Overdue (reply or instalment)</div><div style="font-size:22px;font-weight:600;">{{ stats.overdue }}</div></a>
+  <a href="{{ url_for('zimra.list_cases', flag='due_soon') }}" class="card" style="flex:1;min-width:150px;padding:12px;text-decoration:none;color:inherit;">
+    <div class="muted" style="font-size:11px;">Reply due in {{ due_soon_days }} days</div><div style="font-size:22px;font-weight:600;">{{ stats.due_soon }}</div></a>
+</div>
+
+<div class="card">
+  <form method="get" class="form-row" style="align-items:flex-end;margin-bottom:0;">
+    <div><label for="client_id">Client</label>
+      <select id="client_id" name="client_id" onchange="this.form.submit()"><option value="">All</option>
+        {% for c in clients %}<option value="{{ c.id }}" {% if client_filter==c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+    <div><label for="type">Type</label>
+      <select id="type" name="type" onchange="this.form.submit()"><option value="">All</option>
+        {% for t in case_types %}<option value="{{ t }}" {% if type_filter==t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+    <div><label for="status">Status</label>
+      <select id="status" name="status" onchange="this.form.submit()"><option value="">All open</option>
+        {% for s in statuses %}<option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+    <div><label style="font-weight:normal;"><input type="checkbox" name="closed" value="1" style="width:auto;" {% if show_closed %}checked{% endif %} onchange="this.form.submit()"> Include closed</label></div>
+    {% if flag %}<input type="hidden" name="flag" value="{{ flag }}"><div><a href="{{ url_for('zimra.list_cases') }}" class="btn small secondary">Clear {{ 'overdue' if flag == 'overdue' else 'due soon' }} filter</a></div>{% endif %}
+  </form>
+</div>
+
+<div class="card">
+  {% if cases %}
+  <table>
+    <thead><tr><th>Case</th><th>Client</th><th>Type / tax head</th><th>Status</th><th>Next reply due</th><th class="text-right">Balance</th></tr></thead>
+    <tbody>
+      {% for c in cases %}
+      {% set nd = c.next_deadline %}
+      <tr>
+        <td><a href="{{ url_for('zimra.view_case', case_id=c.id) }}"><strong>{{ c.case_number }}</strong></a><div>{{ c.title }}</div>
+          {% if c.zimra_reference %}<div class="muted" style="font-size:11px;">ZIMRA ref {{ c.zimra_reference }}</div>{% endif %}</td>
+        <td><a href="{{ url_for('clients.view_client', client_id=c.client_id) }}">{{ c.client.name }}</a></td>
+        <td>{{ c.case_type or '—' }}{% if c.tax_head %}<div class="muted" style="font-size:11px;">{{ c.tax_head }}{% if c.period_label %} &middot; {{ c.period_label }}{% endif %}</div>{% endif %}</td>
+        <td>{{ c.status }}{% if c.plan_status %}<div class="muted" style="font-size:11px;">Plan: {{ c.plan_status }}</div>{% endif %}</td>
+        <td>
+          {% if nd %}
+            {{ nd.response_due.strftime('%d %b %Y') }}
+            {% if nd.is_overdue %}<span class="badge overdue">{{ -nd.days_left }} day(s) overdue</span>{% elif nd.days_left <= due_soon_days %}<span class="badge" style="background:#b8923a;color:#fff;">{{ nd.days_left }} day(s)</span>{% endif %}
+          {% else %}<span class="muted">—</span>{% endif %}
+          {% if c.overdue_instalments %}<div><span class="badge overdue">{{ c.overdue_instalments|length }} instalment(s) overdue</span></div>{% endif %}
+        </td>
+        <td class="text-right">{% if c.balance is not none %}{{ c.currency }} {{ '{:,.2f}'.format(c.balance) }}{% else %}—{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No ZIMRA cases{% if flag or status_filter or client_filter or type_filter %} match these filters{% else %} yet. Use <strong>+ New ZIMRA case</strong> when a client receives an audit notice, query or assessment{% endif %}.</div>
+  {% endif %}
+</div>
+{% endblock %}

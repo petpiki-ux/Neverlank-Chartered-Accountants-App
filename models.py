@@ -5990,6 +5990,169 @@ class TaxDispute(db.Model):
         return f"<TaxDispute {self.tax_head} stage={self.stage} engagement={self.engagement_id}>"
 
 
+# ---------- ZIMRA Audits & Correspondence ----------
+# A firm-wide register of every ZIMRA audit, query, assessment, objection and
+# payment-plan matter a client has, with the letters sent and received. A case
+# belongs to a Client and can optionally be linked to the engagement it is being
+# handled under (then it follows that engagement's confidentiality).
+
+ZIMRA_CASE_TYPES = [
+    "Desk audit", "Field audit (comprehensive)", "Issue-specific audit", "VAT audit / refund verification",
+    "PAYE / payroll audit", "Withholding tax review", "Query / information request", "Assessment",
+    "Objection", "Appeal", "Condonation / waiver of penalties", "Payment plan / TCC", "Other",
+]
+ZIMRA_CASE_STATUSES = ["Open", "Awaiting client", "Awaiting ZIMRA", "Objection lodged", "Appeal lodged", "Closed"]
+ZIMRA_CORRESPONDENCE_KINDS = [
+    "Notice of audit", "Information request", "Assessment / findings", "Objection", "Response / submission",
+    "Meeting / call note", "Payment plan", "Tax Clearance Certificate (TCC)", "Other",
+]
+ZIMRA_DIRECTIONS = ["Incoming from ZIMRA", "Outgoing to ZIMRA", "Internal note"]
+ZIMRA_PLAN_STATUSES = ["Proposed", "Agreed", "In default", "Completed"]
+ZIMRA_TCC_STATUSES = ["Not applied", "Applied", "Issued", "Declined", "Expired"]
+ZIMRA_CURRENCIES = ["USD", "ZWG"]
+
+
+class ZimraCase(db.Model):
+    """One ZIMRA audit / query / assessment / objection matter for a client."""
+    __tablename__ = "zimra_case"
+    id = db.Column(db.Integer, primary_key=True)
+    case_number = db.Column(db.String(30), unique=True, nullable=False)  # ZC-YYYY-NNNN
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    title = db.Column(db.String(200), nullable=False)
+    case_type = db.Column(db.String(60), default="Desk audit")
+    tax_head = db.Column(db.String(80))
+    period_from = db.Column(db.Date)
+    period_to = db.Column(db.Date)
+    zimra_reference = db.Column(db.String(100))
+    zimra_officer = db.Column(db.String(150))
+    opened_on = db.Column(db.Date)
+    status = db.Column(db.String(30), nullable=False, default="Open")
+    closed_on = db.Column(db.Date)
+    description = db.Column(db.Text)
+    currency = db.Column(db.String(3), default="USD")
+    amount_assessed = db.Column(db.Float)      # tax assessed by ZIMRA
+    penalties_interest = db.Column(db.Float)   # penalties and interest raised
+    amount_agreed = db.Column(db.Float)        # amount agreed / settled / finally payable
+    amount_paid = db.Column(db.Float)          # paid to date
+    outcome = db.Column(db.Text)
+    # payment plan and Tax Clearance Certificate
+    plan_status = db.Column(db.String(20))
+    plan_notes = db.Column(db.String(300))
+    tcc_status = db.Column(db.String(20))
+    tcc_number = db.Column(db.String(60))
+    tcc_expiry = db.Column(db.Date)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("zimra_cases", lazy=True))
+    engagement = db.relationship("Engagement", backref=db.backref("zimra_cases", lazy=True))
+    created_by = db.relationship("User")
+    correspondence = db.relationship("ZimraCorrespondence", backref="case", cascade="all, delete-orphan",
+                                     order_by="ZimraCorrespondence.corr_date.desc(), ZimraCorrespondence.id.desc()")
+    instalments = db.relationship("ZimraInstalment", backref="case", cascade="all, delete-orphan",
+                                  order_by="ZimraInstalment.due_date")
+
+    @property
+    def is_closed(self):
+        return self.status == "Closed"
+
+    @property
+    def open_deadlines(self):
+        """Incoming letters that still need a reply, soonest deadline first."""
+        items = [c for c in self.correspondence if c.awaiting_response]
+        return sorted(items, key=lambda c: c.response_due)
+
+    @property
+    def overdue_deadlines(self):
+        return [c for c in self.open_deadlines if c.is_overdue]
+
+    @property
+    def next_deadline(self):
+        items = self.open_deadlines
+        return items[0] if items else None
+
+    @property
+    def overdue_instalments(self):
+        return [i for i in self.instalments if i.is_overdue]
+
+    @property
+    def balance(self):
+        """Still to pay: agreed amount (or assessed + penalties if nothing is agreed) less paid."""
+        if self.amount_agreed is not None:
+            due = self.amount_agreed
+        elif self.amount_assessed is not None or self.penalties_interest is not None:
+            due = (self.amount_assessed or 0.0) + (self.penalties_interest or 0.0)
+        else:
+            return None
+        return round(due - (self.amount_paid or 0.0), 2)
+
+    @property
+    def period_label(self):
+        if self.period_from and self.period_to:
+            return f"{self.period_from.strftime('%b %Y')} - {self.period_to.strftime('%b %Y')}"
+        if self.period_from or self.period_to:
+            return (self.period_from or self.period_to).strftime('%b %Y')
+        return None
+
+    def __repr__(self):
+        return f"<ZimraCase {self.case_number} {self.status}>"
+
+
+class ZimraCorrespondence(db.Model):
+    """One letter, notice, response, meeting or call on a ZIMRA case. An
+    incoming item can carry a response deadline; it stays on the deadline
+    list until it is marked as responded to."""
+    __tablename__ = "zimra_correspondence"
+    id = db.Column(db.Integer, primary_key=True)
+    case_id = db.Column(db.Integer, db.ForeignKey("zimra_case.id"), nullable=False)
+    corr_date = db.Column(db.Date, nullable=False)
+    direction = db.Column(db.String(30), nullable=False, default="Incoming from ZIMRA")
+    kind = db.Column(db.String(50))
+    subject = db.Column(db.String(250), nullable=False)
+    reference = db.Column(db.String(100))
+    notes = db.Column(db.Text)
+    response_due = db.Column(db.Date)
+    responded_on = db.Column(db.Date)
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    uploaded_by = db.relationship("User")
+
+    @property
+    def awaiting_response(self):
+        return bool(self.response_due and not self.responded_on and not self.case.is_closed)
+
+    @property
+    def is_overdue(self):
+        return bool(self.awaiting_response and self.response_due < date.today())
+
+    @property
+    def days_left(self):
+        return (self.response_due - date.today()).days if self.response_due else None
+
+
+class ZimraInstalment(db.Model):
+    """One instalment of an agreed ZIMRA payment plan."""
+    __tablename__ = "zimra_instalment"
+    id = db.Column(db.Integer, primary_key=True)
+    case_id = db.Column(db.Integer, db.ForeignKey("zimra_case.id"), nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    paid_on = db.Column(db.Date)
+    paid_amount = db.Column(db.Float)
+
+    @property
+    def is_paid(self):
+        return self.paid_on is not None
+
+    @property
+    def is_overdue(self):
+        return bool(not self.paid_on and self.due_date < date.today() and not self.case.is_closed)
+
+
 # The kinds of instrument that can now be FILED (as an actual document,
 # rather than just logged as a text entry) against a LegislativeUpdate - see
 # the "filing" fields added to that model below. Existing rows logged before

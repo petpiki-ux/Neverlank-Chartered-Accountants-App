@@ -79,6 +79,9 @@ LEGISLATIVE_UPDATES_DATA_DIR = os.path.join(DATA_DIR, "legislative_updates_data"
 # moved into an engagement-scoped subfolder once the import is confirmed so
 # the original schedule stays available for the audit trail.
 VAT_IMPORTS_DATA_DIR = os.path.join(DATA_DIR, "vat_imports_data")
+# Writable folder for the letters, notices and responses filed against a ZIMRA
+# audit / correspondence case (see models.ZimraCorrespondence and zimra.py).
+ZIMRA_DATA_DIR = os.path.join(DATA_DIR, "zimra_data")
 
 
 class Config:
@@ -103,3 +106,4 @@ class Config:
     CLIENT_LOGOS_DATA_DIR = CLIENT_LOGOS_DATA_DIR
     LEGISLATIVE_UPDATES_DATA_DIR = LEGISLATIVE_UPDATES_DATA_DIR
     VAT_IMPORTS_DATA_DIR = VAT_IMPORTS_DATA_DIR
+    ZIMRA_DATA_DIR = ZIMRA_DATA_DIR

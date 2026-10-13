@@ -2786,6 +2786,32 @@
     </form>
   </div>
 
+  <!-- ---------- ZIMRA audits & correspondence (firm-wide module, linked here) ---------- -->
+  <div class="card">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+      <h3 class="mt-0" style="margin-bottom:0;">ZIMRA Audits &amp; Correspondence</h3>
+      <a href="{{ url_for('zimra.new_case', client_id=engagement.client_id, engagement_id=engagement.id) }}" class="btn small gold">+ New ZIMRA case</a>
+    </div>
+    {% if zimra_cases %}
+    <table style="margin-top:8px;">
+      <thead><tr><th>Case</th><th>Type</th><th>Status</th><th>Next reply due</th></tr></thead>
+      <tbody>
+        {% for z in zimra_cases %}
+        {% set nd = z.next_deadline %}
+        <tr>
+          <td><a href="{{ url_for('zimra.view_case', case_id=z.id) }}">{{ z.case_number }}</a> {{ z.title }}</td>
+          <td>{{ z.case_type or '—' }}{% if z.tax_head %}<div class="muted" style="font-size:11px;">{{ z.tax_head }}</div>{% endif %}</td>
+          <td>{{ z.status }}</td>
+          <td>{% if nd %}{{ nd.response_due.strftime('%d %b %Y') }}{% if nd.is_overdue %} <span class="badge overdue">overdue</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <p class="muted" style="margin-bottom:0;">No ZIMRA audits, queries or assessments linked to this engagement. Cases for the whole firm are under <a href="{{ url_for('zimra.list_cases') }}">ZIMRA Audits</a> in the sidebar.</p>
+    {% endif %}
+  </div>
+
   <!-- ---------- VAT Invoice Register & Input/Output Tax Working Paper ---------- -->
   <div class="card">
     <h3 class="mt-0">Monthly VAT Computations <span class="muted" style="font-size:12px;font-weight:400;">VAT register &amp; Input/Output Tax</span></h3>

@@ -604,6 +604,7 @@ def create_app():
     from quotations import quotations_bp
     from recurring import recurring_bp
     from receipts import receipts_bp
+    from zimra import zimra_bp
     from finance import analytics_bp, expenses_bp
     from regulatory_notices import regulatory_notices_bp
     from company_documents import company_documents_bp
@@ -632,6 +633,7 @@ def create_app():
     app.register_blueprint(quotations_bp)
     app.register_blueprint(recurring_bp)
     app.register_blueprint(receipts_bp)
+    app.register_blueprint(zimra_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(expenses_bp)
     app.register_blueprint(regulatory_notices_bp)
@@ -709,8 +711,11 @@ def create_app():
         open_tasks = 0
         open_check_in = None
         recurring_review_count = 0
+        zimra_overdue_count = 0
         if current_user.is_authenticated:
             from models import Invoice
+            from zimra import overdue_response_count
+            zimra_overdue_count = overdue_response_count()
             # draft invoices raised by recurring schedules, waiting for review
             recurring_review_count = Invoice.query.filter(Invoice.status == "Draft", Invoice.recurring_invoice_id.isnot(None)).count()
             open_tasks = (
@@ -728,6 +733,7 @@ def create_app():
             "my_open_task_count": open_tasks,
             "open_check_in": open_check_in,
             "recurring_review_count": recurring_review_count,
+            "zimra_overdue_count": zimra_overdue_count,
         }
 
     with app.app_context():

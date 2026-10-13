@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% set editing = case.id is not none %}
+{% block title %}{{ 'Edit ' ~ case.case_number if editing else 'New ZIMRA case' }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ 'Edit ' ~ case.case_number if editing else 'New ZIMRA case' }}</h1>
+    <div class="subtitle">{{ client.name }}</div>
+  </div>
+</div>
+{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}
+<form method="post" action="{{ url_for('zimra.edit_case', case_id=case.id) if editing else url_for('zimra.new_case') }}">
+  <input type="hidden" name="client_id" value="{{ client.id }}">
+  <div class="card">
+    <h3 class="mt-0">The case</h3>
+    <div class="form-row">
+      <div style="flex:2;"><label for="title">Title *</label><input type="text" id="title" name="title" required maxlength="200" value="{{ request.form.get('title', case.title or '') }}" placeholder="e.g. VAT audit 2023-2024"></div>
+      <div><label for="case_type">Type</label>
+        <select id="case_type" name="case_type">{% for t in case_types %}<option value="{{ t }}" {% if (request.form.get('case_type') or case.case_type) == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+      <div><label for="tax_head">Tax head</label>
+        <select id="tax_head" name="tax_head"><option value="">—</option>{% for t in tax_heads %}<option value="{{ t }}" {% if (request.form.get('tax_head') or case.tax_head) == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row">
+      <div><label for="period_from">Period under review: from</label><input type="date" id="period_from" name="period_from" value="{{ request.form.get('period_from', case.period_from.isoformat() if case.period_from else '') }}"></div>
+      <div><label for="period_to">to</label><input type="date" id="period_to" name="period_to" value="{{ request.form.get('period_to', case.period_to.isoformat() if case.period_to else '') }}"></div>
+      <div><label for="opened_on">Opened on</label><input type="date" id="opened_on" name="opened_on" value="{{ request.form.get('opened_on', case.opened_on.isoformat() if case.opened_on else '') }}"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="zimra_reference">ZIMRA reference</label><input type="text" id="zimra_reference" name="zimra_reference" maxlength="100" value="{{ request.form.get('zimra_reference', case.zimra_reference or '') }}"></div>
+      <div><label for="zimra_officer">ZIMRA officer / office</label><input type="text" id="zimra_officer" name="zimra_officer" maxlength="150" value="{{ request.form.get('zimra_officer', case.zimra_officer or '') }}"></div>
+      <div><label for="engagement_id">Handled under engagement <span class="muted" style="font-size:11px;">(optional - keeps the case confidential to that team)</span></label>
+        <select id="engagement_id" name="engagement_id"><option value="">— none —</option>
+          {% for e in engagements %}<option value="{{ e.id }}" {% if (request.form.get('engagement_id') or (case.engagement_id|string)) == e.id|string %}selected{% endif %}>{{ e.title }}</option>{% endfor %}</select></div>
+    </div>
+    <label for="description">What it is about</label>
+    <textarea id="description" name="description" rows="3">{{ request.form.get('description', case.description or '') }}</textarea>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Amounts</h3>
+    <div class="form-row">
+      <div><label for="currency">Currency</label>
+        <select id="currency" name="currency">{% for c in currencies %}<option value="{{ c }}" {% if (request.form.get('currency') or case.currency) == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+      <div><label for="amount_assessed">Tax assessed by ZIMRA</label><input type="number" step="0.01" id="amount_assessed" name="amount_assessed" value="{{ request.form.get('amount_assessed', case.amount_assessed if case.amount_assessed is not none else '') }}"></div>
+      <div><label for="penalties_interest">Penalties &amp; interest</label><input type="number" step="0.01" id="penalties_interest" name="penalties_interest" value="{{ request.form.get('penalties_interest', case.penalties_interest if case.penalties_interest is not none else '') }}"></div>
+      <div><label for="amount_agreed">Amount agreed / finally payable</label><input type="number" step="0.01" id="amount_agreed" name="amount_agreed" value="{{ request.form.get('amount_agreed', case.amount_agreed if case.amount_agreed is not none else '') }}"></div>
+      <div><label for="amount_paid">Paid to date</label><input type="number" step="0.01" id="amount_paid" name="amount_paid" value="{{ request.form.get('amount_paid', case.amount_paid if case.amount_paid is not none else '') }}"></div>
+    </div>
+    <label for="outcome">Outcome / how it was settled</label>
+    <textarea id="outcome" name="outcome" rows="2">{{ request.form.get('outcome', case.outcome or '') }}</textarea>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Payment plan &amp; Tax Clearance Certificate</h3>
+    <div class="form-row">
+      <div><label for="plan_status">Payment plan</label>
+        <select id="plan_status" name="plan_status"><option value="">None</option>{% for p in plan_statuses %}<option value="{{ p }}" {% if (request.form.get('plan_status') or case.plan_status) == p %}selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+      <div style="flex:2;"><label for="plan_notes">Plan terms</label><input type="text" id="plan_notes" name="plan_notes" maxlength="300" value="{{ request.form.get('plan_notes', case.plan_notes or '') }}" placeholder="e.g. 12 monthly instalments, first on 30 Nov"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="tcc_status">TCC</label>
+        <select id="tcc_status" name="tcc_status"><option value="">—</option>{% for t in tcc_statuses %}<option value="{{ t }}" {% if (request.form.get('tcc_status') or case.tcc_status) == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+      <div><label for="tcc_number">TCC number</label><input type="text" id="tcc_number" name="tcc_number" maxlength="60" value="{{ request.form.get('tcc_number', case.tcc_number or '') }}"></div>
+      <div><label for="tcc_expiry">TCC expiry</label><input type="date" id="tcc_expiry" name="tcc_expiry" value="{{ request.form.get('tcc_expiry', case.tcc_expiry.isoformat() if case.tcc_expiry else '') }}"></div>
+    </div>
+  </div>
+
+  <div><button type="submit" class="btn gold">{{ 'Save changes' if editing else 'Create case' }}</button>
+    <a href="{{ url_for('zimra.view_case', case_id=case.id) if editing else url_for('zimra.list_cases') }}" class="btn secondary">Cancel</a></div>
+</form>
+{% endblock %}

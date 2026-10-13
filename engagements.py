@@ -1106,6 +1106,7 @@ def view_engagement(engagement_id):
         vat_invoices_by_kind=vat_invoices_by_kind,
         engagement_tasks_sorted=engagement_tasks_sorted, ready_to_bill_count=ready_to_bill_count,
         vat_by_currency=vat_by_currency,
+        zimra_cases=sorted(engagement.zimra_cases, key=lambda c: (c.is_closed, -(c.id or 0))),
         vat_periods=vat_periods, vat_undated_docs=vat_undated_docs,
         vat_selected_key=vat_selected_key, vat_selected_period=vat_selected_period,
         vat_selected_docs=vat_selected_docs,

@@ -1,0 +1,482 @@
+"""ZIMRA Audits & Correspondence - a register of every ZIMRA audit, query,
+assessment, objection and payment-plan matter, with the letters sent and
+received, response deadlines, amounts assessed vs agreed, payment-plan
+instalments and Tax Clearance Certificate (TCC) status.
+
+* A case belongs to a Client and can optionally be linked to the engagement it
+  is handled under. A case linked to an engagement follows that engagement's
+  confidentiality: only its team (or Admin) can see it. A case with no
+  engagement is visible to the whole team, like the client itself.
+* Anyone who can see a case can work it (log letters, record payments). Only a
+  Partner or Admin can delete a case, a letter or an instalment.
+* Incoming letters can carry a response deadline; they stay on the deadline list
+  (and in the sidebar badge) until marked as responded to.
+"""
+import os
+import uuid
+from datetime import datetime, date, timedelta
+
+from flask import (
+    Blueprint, render_template, redirect, url_for, request, flash, abort, send_from_directory,
+)
+from flask_login import login_required, current_user
+from sqlalchemy.exc import IntegrityError
+from werkzeug.utils import secure_filename
+
+from config import Config
+from extensions import db
+from models import (
+    Client, Engagement, ZimraCase, ZimraCorrespondence, ZimraInstalment,
+    ZIMRA_CASE_TYPES, ZIMRA_CASE_STATUSES, ZIMRA_CORRESPONDENCE_KINDS, ZIMRA_DIRECTIONS,
+    ZIMRA_PLAN_STATUSES, ZIMRA_TCC_STATUSES, ZIMRA_CURRENCIES, TAX_HEADS,
+    user_can_access_engagement,
+)
+from invoicing import next_sequence_number
+
+zimra_bp = Blueprint("zimra", __name__, url_prefix="/zimra")
+
+DUE_SOON_DAYS = 7
+
+
+# ------------------------------------------------------------------ helpers
+
+def _can_see(case):
+    return not case.engagement_id or user_can_access_engagement(current_user, case.engagement)
+
+
+def _ensure_access(case):
+    if not _can_see(case):
+        abort(403, description=(
+            "This ZIMRA case is linked to an engagement you are not on, so you cannot open it. "
+            "Ask the engagement's Partner or Manager (or an Admin) to add you to the team."
+        ))
+
+
+def _is_senior():
+    return current_user.role in ("partner", "admin")
+
+
+def _require_senior(what):
+    if not _is_senior():
+        abort(403, description=f"Only a Partner or Admin can {what}.")
+
+
+def _parse_date(value):
+    try:
+        return datetime.strptime(value, "%Y-%m-%d").date() if value else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_amount(value):
+    try:
+        text = str(value).replace(",", "").strip()
+        return round(float(text), 2) if text else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _choice(value, options, default=None):
+    return value if value in options else default
+
+
+def _files_dir():
+    directory = Config.ZIMRA_DATA_DIR
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def _remove_file(stored_filename):
+    if stored_filename:
+        path = os.path.join(_files_dir(), stored_filename)
+        if os.path.exists(path):
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+
+def visible_cases(include_closed=True):
+    q = ZimraCase.query
+    if not include_closed:
+        q = q.filter(ZimraCase.status != "Closed")
+    return [c for c in q.all() if _can_see(c)]
+
+
+def overdue_response_count():
+    """Number of letters past their response deadline on cases the current user
+    can see - the sidebar badge."""
+    today = date.today()
+    items = (ZimraCorrespondence.query.join(ZimraCase, ZimraCorrespondence.case_id == ZimraCase.id)
+             .filter(ZimraCorrespondence.response_due.isnot(None), ZimraCorrespondence.response_due < today,
+                     ZimraCorrespondence.responded_on.is_(None), ZimraCase.status != "Closed").all())
+    return sum(1 for c in items if _can_see(c.case))
+
+
+def _back_to_case(case_id):
+    return redirect(url_for("zimra.view_case", case_id=case_id))
+
+
+def _apply_form(case, form):
+    """Copy the posted case fields onto `case`. Returns an error string or None."""
+    title = form.get("title", "").strip()
+    if not title:
+        return "Give the case a short title (for example 'VAT audit 2024')."
+    period_from, period_to = _parse_date(form.get("period_from")), _parse_date(form.get("period_to"))
+    if period_from and period_to and period_to < period_from:
+        return "The period 'to' date is before the 'from' date."
+    for field in ("amount_assessed", "penalties_interest", "amount_agreed", "amount_paid"):
+        raw = form.get(field, "").strip()
+        if raw and _parse_amount(raw) is None:
+            return "Amounts must be numbers (for example 12500.00)."
+    case.title = title[:200]
+    case.case_type = _choice(form.get("case_type"), ZIMRA_CASE_TYPES, "Other")
+    case.tax_head = _choice(form.get("tax_head"), TAX_HEADS, None) or (form.get("tax_head", "").strip()[:80] or None)
+    case.period_from, case.period_to = period_from, period_to
+    case.zimra_reference = form.get("zimra_reference", "").strip()[:100] or None
+    case.zimra_officer = form.get("zimra_officer", "").strip()[:150] or None
+    case.opened_on = _parse_date(form.get("opened_on"))
+    case.description = form.get("description", "").strip() or None
+    case.currency = _choice(form.get("currency"), ZIMRA_CURRENCIES, "USD")
+    case.amount_assessed = _parse_amount(form.get("amount_assessed"))
+    case.penalties_interest = _parse_amount(form.get("penalties_interest"))
+    case.amount_agreed = _parse_amount(form.get("amount_agreed"))
+    case.amount_paid = _parse_amount(form.get("amount_paid"))
+    case.outcome = form.get("outcome", "").strip() or None
+    case.plan_status = _choice(form.get("plan_status"), ZIMRA_PLAN_STATUSES, None)
+    case.plan_notes = form.get("plan_notes", "").strip()[:300] or None
+    case.tcc_status = _choice(form.get("tcc_status"), ZIMRA_TCC_STATUSES, None)
+    case.tcc_number = form.get("tcc_number", "").strip()[:60] or None
+    case.tcc_expiry = _parse_date(form.get("tcc_expiry"))
+    engagement_id = form.get("engagement_id", "").strip()
+    if engagement_id.isdigit():
+        eng = Engagement.query.get(int(engagement_id))
+        if eng is None or eng.client_id != case.client_id:
+            return "That engagement does not belong to this client."
+        if not user_can_access_engagement(current_user, eng):
+            return "You are not on that engagement's team, so you cannot link a case to it."
+        case.engagement_id = eng.id
+    else:
+        case.engagement_id = None
+    return None
+
+
+def _set_status(case, status):
+    case.status = status
+    if status == "Closed":
+        case.closed_on = case.closed_on or date.today()
+    else:
+        case.closed_on = None
+
+
+def _form_context(case, client, error=None):
+    return dict(
+        case=case, client=client, error=error,
+        engagements=[e for e in client.engagements if user_can_access_engagement(current_user, e)],
+        case_types=ZIMRA_CASE_TYPES, tax_heads=TAX_HEADS, currencies=ZIMRA_CURRENCIES,
+        plan_statuses=ZIMRA_PLAN_STATUSES, tcc_statuses=ZIMRA_TCC_STATUSES,
+    )
+
+
+# ------------------------------------------------------------------ routes
+
+@zimra_bp.route("/")
+@login_required
+def list_cases():
+    status = request.args.get("status", "")
+    client_filter = request.args.get("client_id", "")
+    type_filter = request.args.get("type", "")
+    flag = request.args.get("flag", "")  # overdue | due_soon
+    show_closed = request.args.get("closed") == "1"
+    q = ZimraCase.query
+    if client_filter.isdigit():
+        q = q.filter(ZimraCase.client_id == int(client_filter))
+    if type_filter in ZIMRA_CASE_TYPES:
+        q = q.filter(ZimraCase.case_type == type_filter)
+    if status in ZIMRA_CASE_STATUSES:
+        q = q.filter(ZimraCase.status == status)
+    elif not show_closed:
+        q = q.filter(ZimraCase.status != "Closed")
+    cases = [c for c in q.order_by(ZimraCase.created_at.desc()).all() if _can_see(c)]
+    soon = date.today() + timedelta(days=DUE_SOON_DAYS)
+    if flag == "overdue":
+        cases = [c for c in cases if c.overdue_deadlines or c.overdue_instalments]
+    elif flag == "due_soon":
+        cases = [c for c in cases if c.next_deadline and c.next_deadline.response_due <= soon]
+    # most urgent first: overdue, then nearest deadline, then newest
+    cases.sort(key=lambda c: (not (c.overdue_deadlines or c.overdue_instalments),
+                              c.next_deadline.response_due if c.next_deadline else date.max))
+    everything = visible_cases(include_closed=False)
+    stats = {
+        "open": len(everything),
+        "overdue": sum(1 for c in everything if c.overdue_deadlines or c.overdue_instalments),
+        "due_soon": sum(1 for c in everything if c.next_deadline and not c.next_deadline.is_overdue
+                        and c.next_deadline.response_due <= soon),
+    }
+    return render_template(
+        "zimra/list.html", cases=cases, stats=stats, statuses=ZIMRA_CASE_STATUSES, case_types=ZIMRA_CASE_TYPES,
+        clients=Client.query.order_by(Client.name).all(), status_filter=status, client_filter=client_filter,
+        type_filter=type_filter, flag=flag, show_closed=show_closed, due_soon_days=DUE_SOON_DAYS,
+    )
+
+
+@zimra_bp.route("/new", methods=["GET", "POST"])
+@login_required
+def new_case():
+    client_id = request.values.get("client_id", "")
+    if not client_id.isdigit():
+        return render_template("zimra/pick_client.html", clients=Client.query.order_by(Client.name).all())
+    client = Client.query.get_or_404(int(client_id))
+    case = ZimraCase(client_id=client.id, status="Open", currency="USD", opened_on=date.today())
+    engagement_id = request.values.get("engagement_id", "")
+    if request.method == "POST":
+        error = _apply_form(case, request.form)
+        if not error:
+            prefix = f"ZC-{date.today().year}-"
+            for attempt in (1, 2):
+                case.case_number = next_sequence_number(ZimraCase.case_number, prefix)
+                case.created_by_id = current_user.id
+                db.session.add(case)
+                try:
+                    db.session.commit()
+                    break
+                except IntegrityError:
+                    db.session.rollback()
+                    if attempt == 2:
+                        error = "Could not allocate a case number - please try again."
+            if not error:
+                flash(f"ZIMRA case {case.case_number} created.", "success")
+                return _back_to_case(case.id)
+    elif engagement_id.isdigit():
+        eng = Engagement.query.get(int(engagement_id))
+        if eng and eng.client_id == client.id and user_can_access_engagement(current_user, eng):
+            case.engagement_id = eng.id
+    return render_template("zimra/form.html", **_form_context(case, client, error if request.method == "POST" else None))
+
+
+@zimra_bp.route("/<int:case_id>")
+@login_required
+def view_case(case_id):
+    case = ZimraCase.query.get_or_404(case_id)
+    _ensure_access(case)
+    return render_template(
+        "zimra/detail.html", case=case, statuses=ZIMRA_CASE_STATUSES, kinds=ZIMRA_CORRESPONDENCE_KINDS,
+        directions=ZIMRA_DIRECTIONS, is_senior=_is_senior(), today=date.today(), due_soon_days=DUE_SOON_DAYS,
+    )
+
+
+@zimra_bp.route("/<int:case_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_case(case_id):
+    case = ZimraCase.query.get_or_404(case_id)
+    _ensure_access(case)
+    error = None
+    if request.method == "POST":
+        error = _apply_form(case, request.form)
+        if not error:
+            db.session.commit()
+            flash("Case updated.", "success")
+            return _back_to_case(case.id)
+        db.session.rollback()
+    return render_template("zimra/form.html", **_form_context(case, case.client, error))
+
+
+@zimra_bp.route("/<int:case_id>/status", methods=["POST"])
+@login_required
+def set_status(case_id):
+    case = ZimraCase.query.get_or_404(case_id)
+    _ensure_access(case)
+    status = request.form.get("status", "")
+    if status not in ZIMRA_CASE_STATUSES:
+        flash("Choose a status from the list.", "danger")
+        return _back_to_case(case_id)
+    _set_status(case, status)
+    db.session.commit()
+    flash(f"Case marked {status}." if status != "Closed" else "Case closed. Its open deadlines no longer show as due.", "success")
+    return _back_to_case(case_id)
+
+
+@zimra_bp.route("/<int:case_id>/delete", methods=["POST"])
+@login_required
+def delete_case(case_id):
+    case = ZimraCase.query.get_or_404(case_id)
+    _ensure_access(case)
+    _require_senior("delete a ZIMRA case")
+    client_id = case.client_id
+    for item in case.correspondence:
+        _remove_file(item.stored_filename)
+    db.session.delete(case)
+    db.session.commit()
+    flash("ZIMRA case and its correspondence deleted.", "info")
+    return redirect(url_for("zimra.list_cases", client_id=client_id))
+
+
+# ---- correspondence
+
+@zimra_bp.route("/<int:case_id>/correspondence/add", methods=["POST"])
+@login_required
+def add_correspondence(case_id):
+    case = ZimraCase.query.get_or_404(case_id)
+    _ensure_access(case)
+    form = request.form
+    subject = form.get("subject", "").strip()
+    corr_date = _parse_date(form.get("corr_date"))
+    direction = _choice(form.get("direction"), ZIMRA_DIRECTIONS)
+    if not subject or not corr_date or not direction:
+        flash("Enter the date, whether it is incoming or outgoing, and a subject.", "danger")
+        return _back_to_case(case_id)
+    response_due = _parse_date(form.get("response_due"))
+    if response_due and direction != "Incoming from ZIMRA":
+        flash("A response deadline only applies to a letter received from ZIMRA.", "danger")
+        return _back_to_case(case_id)
+    if response_due and response_due < corr_date:
+        flash("The response deadline is before the date of the letter.", "danger")
+        return _back_to_case(case_id)
+    file = request.files.get("file")
+    original_name = stored_name = None
+    if file and file.filename:
+        original_name = secure_filename(file.filename)
+        ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
+        if ext not in Config.ALLOWED_EXTENSIONS:
+            flash("That file type is not accepted (PDF, Word, Excel, images, text, zip or PowerPoint).", "danger")
+            return _back_to_case(case_id)
+    item = ZimraCorrespondence(
+        case_id=case.id, corr_date=corr_date, direction=direction,
+        kind=_choice(form.get("kind"), ZIMRA_CORRESPONDENCE_KINDS, "Other"),
+        subject=subject[:250], reference=form.get("reference", "").strip()[:100] or None,
+        notes=form.get("notes", "").strip() or None, response_due=response_due,
+        uploaded_by_id=current_user.id,
+    )
+    db.session.add(item)
+    db.session.flush()
+    if original_name:
+        stored_name = f"zc{case.id}_{item.id}_{uuid.uuid4().hex[:8]}_{original_name}"
+        file.save(os.path.join(_files_dir(), stored_name))
+        item.original_filename, item.stored_filename = original_name, stored_name
+    db.session.commit()
+    flash("Correspondence logged." + (f" Reply due {response_due.strftime('%d %b %Y')}." if response_due else ""), "success")
+    return _back_to_case(case_id)
+
+
+def _get_item(item_id):
+    item = ZimraCorrespondence.query.get_or_404(item_id)
+    _ensure_access(item.case)
+    return item
+
+
+@zimra_bp.route("/correspondence/<int:item_id>/download")
+@login_required
+def download_correspondence(item_id):
+    item = _get_item(item_id)
+    if not item.stored_filename:
+        abort(404)
+    return send_from_directory(_files_dir(), item.stored_filename, as_attachment=True,
+                               download_name=item.original_filename or item.stored_filename)
+
+
+@zimra_bp.route("/correspondence/<int:item_id>/responded", methods=["POST"])
+@login_required
+def mark_responded(item_id):
+    item = _get_item(item_id)
+    when = _parse_date(request.form.get("responded_on")) or date.today()
+    if item.corr_date and when < item.corr_date:
+        flash("The reply date is before the date of the letter.", "danger")
+        return _back_to_case(item.case_id)
+    item.responded_on = when
+    db.session.commit()
+    flash("Marked as responded to - it is off the deadline list.", "success")
+    return _back_to_case(item.case_id)
+
+
+@zimra_bp.route("/correspondence/<int:item_id>/reopen", methods=["POST"])
+@login_required
+def reopen_response(item_id):
+    item = _get_item(item_id)
+    item.responded_on = None
+    db.session.commit()
+    flash("Back on the deadline list.", "info")
+    return _back_to_case(item.case_id)
+
+
+@zimra_bp.route("/correspondence/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_correspondence(item_id):
+    item = _get_item(item_id)
+    _require_senior("delete a logged letter")
+    case_id = item.case_id
+    _remove_file(item.stored_filename)
+    db.session.delete(item)
+    db.session.commit()
+    flash("Entry deleted.", "info")
+    return _back_to_case(case_id)
+
+
+# ---- payment-plan instalments
+
+@zimra_bp.route("/<int:case_id>/instalments/add", methods=["POST"])
+@login_required
+def add_instalment(case_id):
+    case = ZimraCase.query.get_or_404(case_id)
+    _ensure_access(case)
+    due = _parse_date(request.form.get("due_date"))
+    amount = _parse_amount(request.form.get("amount"))
+    count = request.form.get("count", "1").strip()
+    count = int(count) if count.isdigit() and 1 <= int(count) <= 60 else 1
+    if not due or amount is None or amount <= 0:
+        flash("Enter the first due date and an instalment amount above zero.", "danger")
+        return _back_to_case(case_id)
+    y, m = due.year, due.month
+    for n in range(count):  # monthly, same day (clamped to month end)
+        yy, mm = y + (m - 1 + n) // 12, (m - 1 + n) % 12 + 1
+        day = due.day
+        while True:
+            try:
+                d = date(yy, mm, day)
+                break
+            except ValueError:
+                day -= 1
+        db.session.add(ZimraInstalment(case_id=case.id, due_date=d, amount=amount))
+    db.session.commit()
+    flash(f"{count} instalment(s) added.", "success")
+    return _back_to_case(case_id)
+
+
+def _get_instalment(inst_id):
+    inst = ZimraInstalment.query.get_or_404(inst_id)
+    _ensure_access(inst.case)
+    return inst
+
+
+@zimra_bp.route("/instalments/<int:inst_id>/paid", methods=["POST"])
+@login_required
+def instalment_paid(inst_id):
+    inst = _get_instalment(inst_id)
+    paid_on = _parse_date(request.form.get("paid_on")) or date.today()
+    if paid_on > date.today():
+        flash("The payment date cannot be in the future.", "danger")
+        return _back_to_case(inst.case_id)
+    if inst.paid_on:
+        flash("That instalment is already recorded as paid.", "info")
+        return _back_to_case(inst.case_id)
+    amount = _parse_amount(request.form.get("paid_amount"))
+    inst.paid_on = paid_on
+    inst.paid_amount = amount if amount is not None else inst.amount
+    case = inst.case
+    case.amount_paid = round((case.amount_paid or 0.0) + inst.paid_amount, 2)
+    db.session.commit()
+    flash("Instalment recorded as paid; the case's amount paid to date is updated.", "success")
+    return _back_to_case(inst.case_id)
+
+
+@zimra_bp.route("/instalments/<int:inst_id>/delete", methods=["POST"])
+@login_required
+def delete_instalment(inst_id):
+    inst = _get_instalment(inst_id)
+    _require_senior("delete an instalment")
+    case = inst.case
+    if inst.paid_on:  # take a recorded payment back out of the amount paid to date
+        case.amount_paid = max(0.0, round((case.amount_paid or 0.0) - (inst.paid_amount or 0.0), 2))
+    db.session.delete(inst)
+    db.session.commit()
+    flash("Instalment deleted.", "info")
+    return _back_to_case(case.id)

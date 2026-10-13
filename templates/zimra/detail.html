@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block title %}{{ case.case_number }} - ZIMRA - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ case.case_number }} &middot; {{ case.title }}</h1>
+    <div class="subtitle"><a href="{{ url_for('clients.view_client', client_id=case.client_id) }}">{{ case.client.name }}</a>
+      &middot; {{ case.case_type or 'ZIMRA matter' }}{% if case.tax_head %} &middot; {{ case.tax_head }}{% endif %}{% if case.period_label %} &middot; {{ case.period_label }}{% endif %}
+      {% if case.engagement %}&middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=case.engagement_id, tab='tax') }}">{{ case.engagement.title }}</a>{% endif %}</div>
+  </div>
+  <div>
+    <a href="{{ url_for('zimra.list_cases') }}" class="btn secondary">All cases</a>
+    <a href="{{ url_for('zimra.edit_case', case_id=case.id) }}" class="btn secondary">Edit</a>
+    {% if is_senior %}<form method="post" action="{{ url_for('zimra.delete_case', case_id=case.id) }}" class="inline" onsubmit="return confirm('Delete this case and every letter filed on it? This cannot be undone.');"><button type="submit" class="btn danger">Delete</button></form>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;">
+    <div>
+      <strong>Status: {{ case.status }}</strong>
+      {% if case.is_closed and case.closed_on %}<span class="muted"> since {{ case.closed_on.strftime('%d %b %Y') }}</span>{% endif %}
+      <div class="muted" style="font-size:12px;">
+        {% if case.zimra_reference %}ZIMRA ref {{ case.zimra_reference }}{% endif %}{% if case.zimra_officer %}{{ ' · ' if case.zimra_reference }}{{ case.zimra_officer }}{% endif %}
+        {% if case.opened_on %}{{ ' · ' if case.zimra_reference or case.zimra_officer }}opened {{ case.opened_on.strftime('%d %b %Y') }}{% endif %}
+      </div>
+    </div>
+    <form method="post" action="{{ url_for('zimra.set_status', case_id=case.id) }}" class="inline" style="display:flex;gap:6px;align-items:center;">
+      <select name="status" aria-label="Change status">{% for s in statuses %}<option value="{{ s }}" {% if case.status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+      <button type="submit" class="btn small secondary">Update status</button>
+    </form>
+  </div>
+  {% if case.description %}<p style="margin-bottom:0;">{{ case.description }}</p>{% endif %}
+</div>
+
+{% if case.overdue_deadlines or case.overdue_instalments %}
+<div class="flash danger">
+  {% if case.overdue_deadlines %}{{ case.overdue_deadlines|length }} ZIMRA letter(s) past the response deadline.{% endif %}
+  {% if case.overdue_instalments %} {{ case.overdue_instalments|length }} payment-plan instalment(s) overdue.{% endif %}
+</div>
+{% endif %}
+
+<div class="form-row" style="flex-wrap:wrap;">
+  <div class="card" style="flex:2;min-width:300px;">
+    <h3 class="mt-0">Amounts ({{ case.currency }})</h3>
+    <table>
+      <tbody>
+        <tr><td>Tax assessed by ZIMRA</td><td class="text-right">{{ '{:,.2f}'.format(case.amount_assessed) if case.amount_assessed is not none else '—' }}</td></tr>
+        <tr><td>Penalties &amp; interest</td><td class="text-right">{{ '{:,.2f}'.format(case.penalties_interest) if case.penalties_interest is not none else '—' }}</td></tr>
+        <tr><td>Amount agreed / finally payable</td><td class="text-right">{{ '{:,.2f}'.format(case.amount_agreed) if case.amount_agreed is not none else '—' }}</td></tr>
+        <tr><td>Paid to date</td><td class="text-right">{{ '{:,.2f}'.format(case.amount_paid) if case.amount_paid is not none else '—' }}</td></tr>
+        <tr style="font-weight:700;"><td>Balance still to pay</td><td class="text-right">{{ '{:,.2f}'.format(case.balance) if case.balance is not none else '—' }}</td></tr>
+      </tbody>
+    </table>
+    {% if case.amount_agreed is none and case.balance is not none %}<p class="muted" style="font-size:11.5px;margin-bottom:0;">No agreed amount yet, so the balance is assessed tax plus penalties and interest, less what is paid.</p>{% endif %}
+    {% if case.outcome %}<p style="margin-bottom:0;"><strong>Outcome:</strong> {{ case.outcome }}</p>{% endif %}
+  </div>
+  <div class="card" style="flex:1;min-width:260px;">
+    <h3 class="mt-0">Tax Clearance Certificate</h3>
+    {% if case.tcc_status %}
+    <p style="margin:0;"><strong>{{ case.tcc_status }}</strong>{% if case.tcc_number %} &middot; No. {{ case.tcc_number }}{% endif %}</p>
+    {% if case.tcc_expiry %}<p class="muted" style="margin:4px 0 0 0;font-size:12px;">Expires {{ case.tcc_expiry.strftime('%d %b %Y') }}{% if case.tcc_expiry < today %} <span class="badge overdue">expired</span>{% endif %}</p>{% endif %}
+    {% else %}<p class="muted" style="margin:0;">Not tracked on this case. Set it under Edit.</p>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Payment plan {% if case.plan_status %}<span class="muted" style="font-size:13px;font-weight:400;">&middot; {{ case.plan_status }}</span>{% endif %}</h3>
+  {% if case.plan_notes %}<p>{{ case.plan_notes }}</p>{% endif %}
+  {% if case.instalments %}
+  <table style="margin-bottom:10px;">
+    <thead><tr><th>Due</th><th class="text-right">Amount</th><th>Paid</th><th></th></tr></thead>
+    <tbody>
+      {% for i in case.instalments %}
+      <tr>
+        <td>{{ i.due_date.strftime('%d %b %Y') }}{% if i.is_overdue %} <span class="badge overdue">overdue</span>{% endif %}</td>
+        <td class="text-right">{{ case.currency }} {{ '{:,.2f}'.format(i.amount) }}</td>
+        <td>{% if i.is_paid %}{{ case.currency }} {{ '{:,.2f}'.format(i.paid_amount) }} on {{ i.paid_on.strftime('%d %b %Y') }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="text-right">
+          {% if not i.is_paid %}
+          <form method="post" action="{{ url_for('zimra.instalment_paid', inst_id=i.id) }}" class="inline" style="display:inline-flex;gap:4px;align-items:center;">
+            <input type="date" name="paid_on" max="{{ today.isoformat() }}" value="{{ today.isoformat() }}" aria-label="Date paid" style="width:auto;">
+            <button type="submit" class="btn small secondary">Mark paid</button>
+          </form>
+          {% endif %}
+          {% if is_senior %}<form method="post" action="{{ url_for('zimra.delete_instalment', inst_id=i.id) }}" class="inline" onsubmit="return confirm('Delete this instalment?');"><button type="submit" class="btn small danger">Delete</button></form>{% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <form method="post" action="{{ url_for('zimra.add_instalment', case_id=case.id) }}" class="form-row" style="align-items:flex-end;margin-bottom:0;">
+    <div><label for="inst_due">First due date</label><input type="date" id="inst_due" name="due_date" required></div>
+    <div><label for="inst_amount">Instalment ({{ case.currency }})</label><input type="number" step="0.01" min="0.01" id="inst_amount" name="amount" required></div>
+    <div><label for="inst_count">How many (monthly)</label><input type="number" min="1" max="60" id="inst_count" name="count" value="1"></div>
+    <div><button type="submit" class="btn small gold">Add instalments</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Reply deadlines</h3>
+  {% if case.open_deadlines %}
+  <table>
+    <thead><tr><th>Reply due</th><th>Letter</th><th></th></tr></thead>
+    <tbody>
+      {% for c in case.open_deadlines %}
+      <tr>
+        <td>{{ c.response_due.strftime('%d %b %Y') }}
+          {% if c.is_overdue %}<span class="badge overdue">{{ -c.days_left }} day(s) overdue</span>{% elif c.days_left <= due_soon_days %}<span class="badge" style="background:#b8923a;color:#fff;">{{ c.days_left }} day(s) left</span>{% endif %}</td>
+        <td>{{ c.subject }} <span class="muted" style="font-size:11px;">({{ c.corr_date.strftime('%d %b %Y') }})</span></td>
+        <td class="text-right">
+          <form method="post" action="{{ url_for('zimra.mark_responded', item_id=c.id) }}" class="inline" style="display:inline-flex;gap:4px;align-items:center;">
+            <input type="date" name="responded_on" max="{{ today.isoformat() }}" value="{{ today.isoformat() }}" aria-label="Date replied" style="width:auto;">
+            <button type="submit" class="btn small secondary">Mark responded</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="margin:0;">Nothing waiting for a reply.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Correspondence</h3>
+  <form method="post" action="{{ url_for('zimra.add_correspondence', case_id=case.id) }}" enctype="multipart/form-data" class="form-row" style="flex-wrap:wrap;align-items:flex-end;">
+    <div><label for="corr_date">Date *</label><input type="date" id="corr_date" name="corr_date" required max="{{ today.isoformat() }}" value="{{ today.isoformat() }}"></div>
+    <div><label for="direction">Direction *</label>
+      <select id="direction" name="direction" required>{% for d in directions %}<option value="{{ d }}">{{ d }}</option>{% endfor %}</select></div>
+    <div><label for="kind">Kind</label>
+      <select id="kind" name="kind">{% for k in kinds %}<option value="{{ k }}">{{ k }}</option>{% endfor %}</select></div>
+    <div style="flex:2;min-width:220px;"><label for="subject">Subject *</label><input type="text" id="subject" name="subject" required maxlength="250"></div>
+    <div><label for="reference">Letter reference</label><input type="text" id="reference" name="reference" maxlength="100"></div>
+    <div><label for="response_due">Reply due <span class="muted" style="font-size:11px;">(letters from ZIMRA)</span></label><input type="date" id="response_due" name="response_due"></div>
+    <div style="flex:2;min-width:220px;"><label for="notes">Notes</label><input type="text" id="notes" name="notes"></div>
+    <div><label for="file">Attach letter / response</label><input type="file" id="file" name="file"></div>
+    <div><button type="submit" class="btn small gold">Log it</button></div>
+  </form>
+
+  {% if case.correspondence %}
+  <table>
+    <thead><tr><th>Date</th><th></th><th>Subject</th><th>File</th><th></th></tr></thead>
+    <tbody>
+      {% for c in case.correspondence %}
+      <tr>
+        <td>{{ c.corr_date.strftime('%d %b %Y') }}</td>
+        <td><span class="badge" style="background:{{ '#7a4a1e' if c.direction.startswith('Incoming') else ('#1f5f8b' if c.direction.startswith('Outgoing') else '#6b6b6b') }};color:#fff;">{{ 'In' if c.direction.startswith('Incoming') else ('Out' if c.direction.startswith('Outgoing') else 'Note') }}</span></td>
+        <td><strong>{{ c.subject }}</strong>
+          <div class="muted" style="font-size:11.5px;">{{ c.kind or '' }}{% if c.reference %} &middot; ref {{ c.reference }}{% endif %}</div>
+          {% if c.notes %}<div style="font-size:12.5px;">{{ c.notes }}</div>{% endif %}
+          {% if c.response_due %}
+            <div style="font-size:12px;">
+            {% if c.responded_on %}Replied {{ c.responded_on.strftime('%d %b %Y') }} (due {{ c.response_due.strftime('%d %b %Y') }})
+              <form method="post" action="{{ url_for('zimra.reopen_response', item_id=c.id) }}" class="inline"><button type="submit" class="btn small secondary">Undo</button></form>
+            {% else %}Reply due {{ c.response_due.strftime('%d %b %Y') }}{% if c.is_overdue %} <span class="badge overdue">overdue</span>{% endif %}{% endif %}
+            </div>
+          {% endif %}
+        </td>
+        <td>{% if c.stored_filename %}<a href="{{ url_for('zimra.download_correspondence', item_id=c.id) }}">{{ c.original_filename }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="text-right">{% if is_senior %}<form method="post" action="{{ url_for('zimra.delete_correspondence', item_id=c.id) }}" class="inline" onsubmit="return confirm('Delete this entry and its file?');"><button type="submit" class="btn small danger">Delete</button></form>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty-state">Nothing logged yet. Log each letter received from ZIMRA and each response sent, with the file attached.</div>{% endif %}
+</div>
+{% endblock %}

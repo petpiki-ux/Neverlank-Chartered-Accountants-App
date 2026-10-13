@@ -149,6 +149,13 @@ def new_client():
     return render_template("clients/form.html", client=None, industry_options=INDUSTRY_OPTIONS)
 
 
+def _visible_zimra_cases(cases):
+    """The client's ZIMRA cases the current user may see (open first, newest first)."""
+    from models import user_can_access_engagement
+    shown = [c for c in cases if not c.engagement_id or user_can_access_engagement(current_user, c.engagement)]
+    return sorted(shown, key=lambda c: (c.is_closed, -(c.id or 0)))
+
+
 @clients_bp.route("/<int:client_id>")
 @login_required
 def view_client(client_id):
@@ -193,6 +200,7 @@ def view_client(client_id):
         tax_heads=TAX_HEADS,
         can_delete_filing_archive=user_has_permission(current_user, "delete_documents"),
         legislative_updates_for_tagging=LegislativeUpdate.query.order_by(LegislativeUpdate.created_at.desc()).all(),
+        zimra_cases=_visible_zimra_cases(client.zimra_cases),
     )
 
 

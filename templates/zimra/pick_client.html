@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block title %}New ZIMRA case - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>New ZIMRA case</h1><div class="subtitle">Choose the client this audit or correspondence is for</div></div></div>
+<div class="card">
+  <form method="get" action="{{ url_for('zimra.new_case') }}" class="form-row" style="align-items:flex-end;">
+    <div><label for="client_id">Client *</label>
+      <select id="client_id" name="client_id" required><option value="">—</option>
+        {% for c in clients %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+    <div><button type="submit" class="btn gold">Continue</button> <a href="{{ url_for('zimra.list_cases') }}" class="btn secondary">Cancel</a></div>
+  </form>
+</div>
+{% endblock %}
