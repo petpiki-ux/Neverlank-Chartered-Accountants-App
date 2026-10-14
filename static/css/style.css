@@ -164,7 +164,7 @@ select[multiple] { min-height: 110px; }
 .badge.status-Approved { background: #e5f6ea; color: var(--success); }
 .badge.type-Audit { background: var(--navy); color: white; }
 .badge.type-Assurance { background: var(--gold); color: white; }
-.badge.type-Consulting { background: #567; color: white; }
+.badge.type-Consulting, .badge.type-CorporateFinance\&BusinessAdvisory { background: #567; color: white; }
 .badge.type-Secretarial { background: #6b3fa0; color: white; }
 .badge.type-InvestigativeEngagement { background: #7a2e2e; color: white; }
 .badge.type-BusinessIntelligenceandITEngagements { background: #1f5f6b; color: white; }
@@ -181,6 +181,7 @@ select[multiple] { min-height: 110px; }
 .badge.status-Expired { background: #fdf1dc; color: var(--warning); }
 .badge.status-Invoiced { background: #0f2942; color: #d4af6a; }
 .badge.status-Finalized { background: #e5f6ea; color: var(--success); }
+.badge.status-Final { background: #e5f6ea; color: var(--success); }
 
 .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); margin-bottom: 18px; flex-wrap: wrap; }
 .tabs a {
@@ -344,3 +345,38 @@ select[multiple] { min-height: 110px; }
 .finance-tabs a { padding: 9px 18px; font-size: 14px; font-weight: 600; color: var(--navy, #0f2942); border: 1px solid transparent; border-bottom: 0; border-radius: 8px 8px 0 0; margin-bottom: -2px; text-decoration: none; }
 .finance-tabs a:hover { background: #f1f4f8; text-decoration: none; }
 .finance-tabs a.on { background: #fff; border-color: var(--border, #e3e8ee); border-bottom: 2px solid #fff; color: var(--gold, #b8934a); }
+
+
+/* ---- Corporate Finance & Business Advisory ---------------------------- */
+.cf-table { border-collapse: collapse; width: 100%; font-size: 12.5px; }
+.cf-table th, .cf-table td { padding: 5px 9px; border-bottom: 1px solid #eef1f4; white-space: nowrap; }
+.cf-table th { text-align: right; background: #f7f8fa; }
+.cf-table th:first-child, .cf-table td:first-child { text-align: left; position: sticky; left: 0; background: #fff; min-width: 230px; z-index: 1; }
+.cf-table th:first-child { background: #f7f8fa; }
+.cf-table td.n { text-align: right; font-variant-numeric: tabular-nums; }
+.cf-table tr.head td { background: var(--navy); color: #fff; font-weight: 700; letter-spacing: .02em; }
+.cf-table tr.total td { font-weight: 700; border-top: 1px solid #c9d1da; }
+.cf-table tr.grand td { font-weight: 700; border-top: 1px solid var(--navy); border-bottom: 3px double var(--navy); background: #f3f6fa; }
+.cf-table tr.indent td:first-child { padding-left: 24px; color: #52514e; }
+.cf-table tr.memo td { color: #6b6a66; font-style: italic; }
+.cf-table td.neg { color: #b3261e; }
+.cf-table tr:hover td { background: #fafbfc; }
+.cf-grid { border-collapse: collapse; font-size: 12.5px; }
+.cf-grid th, .cf-grid td { padding: 3px 5px; border-bottom: 1px solid #eef1f4; white-space: nowrap; }
+.cf-grid th { text-transform: none; letter-spacing: 0; font-size: 11.5px; text-align: center; color: #52514e; }
+.cf-grid td:first-child, .cf-grid th:first-child { text-align: left; min-width: 150px; }
+.cf-grid input[type=number], .cf-grid input[type=text], .cf-grid select { margin: 0; padding: 4px 6px; font-size: 12.5px; width: 92px; text-align: right; background: #fffbe6; border-color: #e6dcae; }
+.cf-grid input.wide, .cf-grid select.wide { width: 190px; text-align: left; }
+.cf-grid input.narrow { width: 62px; }
+.cf-in { margin: 0 !important; background: #fffbe6; border-color: #e6dcae !important; }
+.cf-sub { color: var(--text-muted); font-size: 12px; margin: 0 0 8px; }
+.cf-ok { color: #006300; font-weight: 600; } .cf-bad { color: #b3261e; font-weight: 600; }
+.cf-pass { background: #e5f6ea; color: #006300; } .cf-fail { background: #fdecea; color: #b3261e; font-weight: 600; }
+.cf-fav { color: #006300; } .cf-adv { color: #b3261e; }
+.cf-section { margin: 22px 0 8px; color: var(--navy); font-size: 15px; border-bottom: 2px solid var(--gold); padding-bottom: 4px; }
+.cf-range { position: relative; height: 14px; background: #eef1f4; border-radius: 7px; min-width: 260px; }
+.cf-range .bar { position: absolute; top: 0; height: 14px; background: #2a78d6; border-radius: 7px; opacity: .85; }
+.cf-range .mid { position: absolute; top: -3px; width: 3px; height: 20px; background: var(--gold); }
+.cf-sticky-actions { position: sticky; bottom: 0; background: rgba(255,255,255,.96); border-top: 1px solid var(--border); padding: 10px 0; margin-top: 14px; z-index: 5; }
+.cf-grid-sens td.base { background: #e8eef7; font-weight: 700; }
+.cf-banner { background: #f3f6fa; border-left: 4px solid var(--gold); padding: 10px 14px; border-radius: 4px; margin-bottom: 14px; font-size: 13px; }

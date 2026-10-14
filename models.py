@@ -7,8 +7,17 @@ from flask_login import UserMixin
 from extensions import db
 
 
+# "Corporate Finance & Business Advisory" replaced the old "Consulting" service line. Old rows are
+# renamed on startup (app._rename_consulting_service) and the old name is still recognised by
+# canonical_engagement_type so a stale bookmark or form cannot recreate it. The Document Templates for
+# this service stay in their original on-disk folder - see template_folder().
+CORPFIN_ENGAGEMENT_TYPE = "Corporate Finance & Business Advisory"
+LEGACY_CONSULTING_TYPE = "Consulting"
+CORPFIN_TASK_CATEGORY = "Corporate Finance & Advisory"
+IT_TASK_CATEGORY = "IT & Business Intelligence"
+
 ENGAGEMENT_TYPES = [
-    "Audit", "Assurance", "Consulting", "Secretarial", "Investigative Engagement",
+    "Audit", "Assurance", CORPFIN_ENGAGEMENT_TYPE, "Secretarial", "Investigative Engagement",
     "Business Intelligence and IT Engagements", "Tax Advisory",
     "Accounting & Bookkeeping",
     "Neverlank Anonymous Whistle-blower Services", "Neverlank Training Services",
@@ -211,7 +220,7 @@ TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
 # server-side by effective_task_priority() so no form, status change or
 # URL edit can leave one at Low/Normal.
 TASK_CATEGORIES = [
-    "Audit", "Forensic Audit", "Tax Services", "Consulting", "Accounting",
+    "Audit", "Forensic Audit", "Tax Services", CORPFIN_TASK_CATEGORY, IT_TASK_CATEGORY, "Accounting",
     "Secretarial", "Neverlank Anonymous Tipoff Services", "Training",
     "Admin Work", "Other", "Personal",
 ]
@@ -225,8 +234,9 @@ ENGAGEMENT_TYPE_TASK_CATEGORY = {
     "Tax Advisory": "Tax Services",
     "Tax Compliance": "Tax Services",  # legacy name, see LEGACY_TAX_ENGAGEMENT_TYPES
     "Tax Advisory & Health Check": "Tax Services",  # legacy name
-    "Consulting": "Consulting",
-    "Business Intelligence and IT Engagements": "Consulting",
+    CORPFIN_ENGAGEMENT_TYPE: CORPFIN_TASK_CATEGORY,
+    LEGACY_CONSULTING_TYPE: CORPFIN_TASK_CATEGORY,  # legacy name
+    "Business Intelligence and IT Engagements": IT_TASK_CATEGORY,
     "Accounting & Bookkeeping": "Accounting",
     "Secretarial": "Secretarial",
     "Neverlank Anonymous Whistle-blower Services": "Neverlank Anonymous Tipoff Services",
@@ -239,7 +249,18 @@ def canonical_engagement_type(value):
     ("Tax Compliance", "Tax Advisory & Health Check") become "Tax Advisory";
     anything else is returned unchanged. Used wherever a type arrives from a
     form so an old bookmark or stale page can't recreate a retired type."""
-    return TAX_ADVISORY_TYPE if value in LEGACY_TAX_ENGAGEMENT_TYPES else value
+    if value in LEGACY_TAX_ENGAGEMENT_TYPES:
+        return TAX_ADVISORY_TYPE
+    if value == LEGACY_CONSULTING_TYPE:
+        return CORPFIN_ENGAGEMENT_TYPE
+    return value
+
+
+def template_folder(eng_type):
+    """Folder name (under the Document Templates folders) that holds this type's files. Corporate Finance &
+    Business Advisory keeps the folder the Consulting templates were always stored in, so nothing on disk
+    has to move."""
+    return LEGACY_CONSULTING_TYPE if eng_type in (CORPFIN_ENGAGEMENT_TYPE, LEGACY_CONSULTING_TYPE) else eng_type
 
 
 def resolve_task_category(requested, engagement=None, fallback="Other"):
@@ -439,6 +460,9 @@ PERMISSIONS = [
     ("view_attendance", "View Attendance (Check In / Check Out)",
      "HR & Admin > Attendance: see who is in right now, when everyone checked in and out each day, hours worked, people who have not checked in or forgot to check out, and export the log. Management only by default.",
      ("partner", "admin")),
+    ("manage_corporate_finance", "Use Corporate Finance & Business Advisory models",
+     "Corporate Finance workspace: build and edit financial forecasts (income statement, balance sheet, cash flow), loans and covenants, valuations, capital-budgeting projects and budget-vs-actual reviews for the clients the person is working on. Making a model Final, and re-opening a Final model, is always limited to Partners and Admin.",
+     ("supervisor", "partner", "admin")),
     ("manage_whistleblower", "Manage Whistle-blower Service cases",
      "See and work the confidential reports received through Neverlank's Anonymous Whistle-blower Services - log cases, investigate, update status, reply to reporters and produce client reports. Reports can be highly sensitive, so this is limited to supervisors and above by default (and still only on engagements the person is staffed on, unless Admin).",
      ("supervisor", "partner", "admin")),
@@ -1835,7 +1859,7 @@ class Engagement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
     title = db.Column(db.String(200), nullable=False)
-    type = db.Column(db.String(30), nullable=False, default="Audit")
+    type = db.Column(db.String(60), nullable=False, default="Audit")
     subdivision = db.Column(db.String(50))  # only meaningful when type == "Secretarial"
 
     # Comma-separated SECRETARIAL_ACTIVITIES keys - which corporate
@@ -1988,6 +2012,10 @@ class Engagement(db.Model):
     @property
     def is_training_service(self):
         return self.type == TRAINING_SERVICE_TYPE
+
+    @property
+    def is_corporate_finance(self):
+        return self.type in (CORPFIN_ENGAGEMENT_TYPE, LEGACY_CONSULTING_TYPE)
 
     @property
     def is_standalone_service(self):
@@ -2144,7 +2172,7 @@ def engagement_acceptance_cleared(engagement):
 class ChecklistTemplate(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(150), nullable=False)
-    type = db.Column(db.String(30), nullable=False, default="Audit")
+    type = db.Column(db.String(60), nullable=False, default="Audit")
     description = db.Column(db.Text)
 
     items = db.relationship("ChecklistTemplateItem", backref="template", lazy=True, cascade="all, delete-orphan", order_by="ChecklistTemplateItem.order")
@@ -2639,7 +2667,7 @@ class DocumentTemplate(db.Model):
     in-app Edit/New/Delete screens modify.
     """
     id = db.Column(db.Integer, primary_key=True)
-    type = db.Column(db.String(30), nullable=False, default="Audit")  # Audit | Assurance | Consulting
+    type = db.Column(db.String(60), nullable=False, default="Audit")  # an ENGAGEMENT_TYPES value
     ref_code = db.Column(db.String(20))  # e.g. "SA-01" - shown on the document itself
     title = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
@@ -10149,3 +10177,152 @@ class TrainingMaterial(db.Model):
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
 
     document = db.relationship("Document")
+
+
+# ===========================================================================
+# Corporate Finance & Business Advisory
+#
+# Forecast models (three statements), their scenarios and valuations, and
+# capital-budgeting projects. All the numbers live in JSON columns that the
+# pure-Python engines (cf_engine.py / cf_tools.py) read and write; the tables
+# only hold who/what/when, ownership and status. Access follows the client
+# (and the engagement, when one is linked - same confidentiality rule as
+# invoices and quotations).
+# ===========================================================================
+
+CF_STATUSES = ["Draft", "Final"]
+
+
+def _json_load(text, default):
+    try:
+        value = json.loads(text) if text else default
+    except (TypeError, ValueError):
+        return default
+    return value if isinstance(value, type(default)) else default
+
+
+class CFModel(db.Model):
+    """A driver-based financial forecast (income statement, balance sheet, cash flow) for a client."""
+    __tablename__ = "cf_model"
+    id = db.Column(db.Integer, primary_key=True)
+    model_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    name = db.Column(db.String(200), nullable=False)
+    purpose = db.Column(db.Text)  # what the model is for / basis of preparation
+    status = db.Column(db.String(20), nullable=False, default="Draft")
+    assumptions_json = db.Column(db.Text)
+    historical_json = db.Column(db.Text)
+    actuals_json = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    finalised_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    finalised_at = db.Column(db.DateTime)
+
+    client = db.relationship("Client", backref=db.backref("cf_models", lazy=True, cascade="all, delete-orphan", order_by="CFModel.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("cf_models", lazy=True, order_by="CFModel.id.desc()"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    finalised_by = db.relationship("User", foreign_keys=[finalised_by_id])
+    scenarios = db.relationship("CFScenario", backref="model", lazy=True, cascade="all, delete-orphan",
+                                order_by="CFScenario.sort_order, CFScenario.id")
+    valuations = db.relationship("CFValuation", backref="model", lazy=True, cascade="all, delete-orphan",
+                                 order_by="CFValuation.id")
+
+    @property
+    def is_final(self):
+        return self.status == "Final"
+
+    @property
+    def assumptions(self):
+        return _json_load(self.assumptions_json, {})
+
+    @property
+    def historical(self):
+        return _json_load(self.historical_json, {})
+
+    @property
+    def actuals(self):
+        return _json_load(self.actuals_json, {})
+
+    def set_json(self, field, value):
+        setattr(self, field + "_json", json.dumps(value))
+
+    @property
+    def currency(self):
+        return (self.assumptions or {}).get("currency") or "USD"
+
+
+class CFScenario(db.Model):
+    """A what-if on a model: a set of adjustments ("shocks") applied to the base assumptions.
+    Every model has a Base scenario with no adjustments."""
+    __tablename__ = "cf_scenario"
+    id = db.Column(db.Integer, primary_key=True)
+    model_id = db.Column(db.Integer, db.ForeignKey("cf_model.id"), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    is_base = db.Column(db.Boolean, default=False, nullable=False)
+    sort_order = db.Column(db.Integer, default=0)
+    shocks_json = db.Column(db.Text)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def shocks(self):
+        return _json_load(self.shocks_json, {})
+
+
+class CFValuation(db.Model):
+    """A saved valuation (WACC, terminal value, bridge, comparables) of a model's forecast, optionally under a scenario."""
+    __tablename__ = "cf_valuation"
+    id = db.Column(db.Integer, primary_key=True)
+    model_id = db.Column(db.Integer, db.ForeignKey("cf_model.id"), nullable=False)
+    scenario_id = db.Column(db.Integer, db.ForeignKey("cf_scenario.id"))
+    name = db.Column(db.String(200), nullable=False)
+    valuation_date = db.Column(db.Date)
+    inputs_json = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    scenario = db.relationship("CFScenario")
+    created_by = db.relationship("User")
+
+    @property
+    def inputs(self):
+        return _json_load(self.inputs_json, {})
+
+
+class CFProject(db.Model):
+    """A capital-budgeting / feasibility study: investment, cash flows, NPV / IRR / payback, plus the written feasibility notes."""
+    __tablename__ = "cf_project"
+    id = db.Column(db.Integer, primary_key=True)
+    project_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    name = db.Column(db.String(200), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="Draft")
+    inputs_json = db.Column(db.Text)
+    narrative_json = db.Column(db.Text)
+    source_model_id = db.Column(db.Integer, db.ForeignKey("cf_model.id"))
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("cf_projects", lazy=True, cascade="all, delete-orphan", order_by="CFProject.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("cf_projects", lazy=True, order_by="CFProject.id.desc()"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    source_model = db.relationship("CFModel")
+
+    @property
+    def inputs(self):
+        return _json_load(self.inputs_json, {})
+
+    @property
+    def narrative(self):
+        return _json_load(self.narrative_json, {})

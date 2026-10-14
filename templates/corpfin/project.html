@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% import "corpfin/_macros.html" as m %}
+{% block title %}{{ proj.project_number }} {{ proj.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set cur = inputs.currency %}
+<div class="page-header">
+  <div>
+    <h1>{{ proj.name }} <span class="badge status-{{ proj.status }}" style="vertical-align:middle;">{{ proj.status }}</span></h1>
+    <div class="subtitle">{{ proj.project_number }} &middot; {{ proj.client.name }}{% if proj.engagement %} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=proj.engagement_id) }}">{{ proj.engagement.title }}</a>{% endif %}
+      {% if proj.source_model %} &middot; from model <a href="{{ url_for('corpfin.model_tab', model_id=proj.source_model_id, tab='overview') }}">{{ proj.source_model.model_number }}</a>{% endif %}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a class="btn secondary" href="{{ url_for('corpfin.project_excel', project_id=proj.id) }}">Excel (live formulas)</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.project_pdf', project_id=proj.id) }}" target="_blank">PDF report</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">All work</a>
+  </div>
+</div>
+
+<div class="kpi-grid">
+  {{ m.kpi('Net present value', an.npv|cfn, ('Accept - adds value' if an.accept else 'Reject - destroys value') ~ ' at ' ~ (inputs.discount_rate|cfpp)) }}
+  {{ m.kpi('Internal rate of return', an.irr|cfpp if an.irr is not none else 'n/a', 'hurdle ' ~ (inputs.discount_rate|cfpp)) }}
+  {{ m.kpi('Modified IRR', an.mirr|cfpp if an.mirr is not none else 'n/a', 'reinvesting at ' ~ (inputs.reinvest_rate|cfpp)) }}
+  {{ m.kpi('Payback', ('%.1f years'|format(an.payback)) if an.payback is not none else 'not repaid', 'discounted: ' ~ (('%.1f years'|format(an.discounted_payback)) if an.discounted_payback is not none else 'not repaid')) }}
+  {{ m.kpi('Profitability index', an.pi|cfx if an.pi is not none else 'n/a', 'PV of inflows / investment') }}
+  {{ m.kpi('Equivalent annual annuity', an.eaa|cfn if an.eaa is not none else 'n/a', 'NPV spread over the life') }}
+</div>
+
+<div class="viz-grid">
+  {{ m.chart('flows', 'Cash flow by year') }}
+  {{ m.chart('cum', 'Cumulative cash flow', 'undiscounted and discounted') }}
+</div>
+
+<form method="post" action="{{ url_for('corpfin.save_project', project_id=proj.id) }}">
+<fieldset {{ 'disabled' if proj.status == 'Final' }}>
+<h2 class="cf-section" id="flows">Inputs</h2>
+<div class="card">
+  <div class="form-row">
+    <div><label>Study name</label><input type="text" name="name" value="{{ proj.name }}" maxlength="200"></div>
+    <div><label>Engagement</label><select name="engagement_id"><option value="">None</option>{% for e in engagements %}<option value="{{ e.id }}" {% if e.id == proj.engagement_id %}selected{% endif %}>{{ e.title }} ({{ e.type }})</option>{% endfor %}</select></div>
+    <div><label>Currency</label><select name="currency">{% for c in currencies %}<option {% if c == inputs.currency %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div><label>Discount rate / hurdle rate %</label><input type="number" step="any" name="discount_rate" value="{{ inputs.discount_rate|cfin }}"></div>
+    <div><label>Reinvestment rate % (for MIRR)</label><input type="number" step="any" name="reinvest_rate" value="{{ inputs.reinvest_rate|cfin }}"></div>
+    <div><label>Initial investment (year 0)</label><input type="number" step="any" min="0" name="initial" value="{{ inputs.initial|cfin }}"></div>
+    <div><label>Residual / terminal value (added to the last year)</label><input type="number" step="any" name="residual" value="{{ inputs.residual|cfin }}"></div>
+  </div>
+  <input type="hidden" name="n_flows" value="{{ inputs.cash_flows|length }}">
+  <div class="tbl-scroll"><table class="cf-grid">
+    <thead><tr><th>Net cash flow after tax</th>{% for i in range(inputs.cash_flows|length) %}<th>Year {{ i + 1 }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr><td>Cash flow</td>{% for v in inputs.cash_flows %}<td><input type="number" step="any" name="cf_{{ loop.index0 }}" value="{{ v|cfin }}"></td>{% endfor %}</tr>
+      <tr><td></td>{% for v in inputs.cash_flows %}<td>{% if inputs.cash_flows|length > 1 %}<button class="btn small danger" name="action" value="del_year:{{ loop.index0 }}" formnovalidate title="Remove this year">&times;</button>{% endif %}</td>{% endfor %}</tr>
+    </tbody>
+  </table></div>
+  <button class="btn small secondary" name="action" value="add_year" formnovalidate style="margin-top:6px;">+ Add a year</button>
+  <span class="cf-sub" style="margin-left:8px;">Up to 20 years. Enter after-tax operating cash flows net of any further capital spending and working-capital changes.</span>
+</div>
+
+<h2 class="cf-section">Feasibility notes</h2>
+<div class="card">
+  {% for key, label in sections %}
+  <label for="nar_{{ key }}">{{ label }}</label>
+  <textarea id="nar_{{ key }}" name="nar_{{ key }}" rows="4">{{ narrative.get(key, '') }}</textarea>
+  {% endfor %}
+</div>
+</fieldset>
+{% if proj.status != 'Final' %}<button class="btn gold" type="submit" name="action" value="save">Save study</button>{% endif %}
+</form>
+
+<h2 class="cf-section">Workings</h2>
+<div class="card">
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for r in an.rows %}<th>Year {{ r.year }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr><td>Cash flow</td>{% for r in an.rows %}<td class="n">{{ r.cash_flow|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Cumulative cash flow</td>{% for r in an.rows %}<td class="n">{{ r.cumulative|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Discount factor</td>{% for r in an.rows %}<td class="n">{{ '%.4f'|format(r.df) }}</td>{% endfor %}</tr>
+      <tr class="total"><td>Present value</td>{% for r in an.rows %}<td class="n">{{ r.pv|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Cumulative present value</td>{% for r in an.rows %}<td class="n">{{ r.cum_pv|cfn }}</td>{% endfor %}</tr>
+    </tbody>
+  </table></div>
+</div>
+
+<div class="viz-grid">
+  <div class="card"><h3 style="margin-top:0;">NPV at different discount rates</h3>
+    <table class="cf-table"><thead><tr><th>Discount rate</th><th>NPV</th></tr></thead><tbody>
+    {% for r in sens.by_rate %}<tr><td>{{ r.rate|cfpp(1) }}</td><td class="n {{ 'neg' if r.npv < 0 }}">{{ r.npv|cfn }}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h3 style="margin-top:0;">NPV if inflows change</h3>
+    <table class="cf-table"><thead><tr><th>Change in cash inflows</th><th>NPV</th></tr></thead><tbody>
+    {% for r in sens.by_inflow %}<tr><td>{{ '%+d'|format(r.change) if r.change else '0' }}%</td><td class="n {{ 'neg' if r.npv < 0 }}">{{ r.npv|cfn }}</td></tr>{% endfor %}</tbody></table></div>
+  <div class="card"><h3 style="margin-top:0;">NPV if the investment changes</h3>
+    <table class="cf-table"><thead><tr><th>Change in investment</th><th>NPV</th></tr></thead><tbody>
+    {% for r in sens.by_invest %}<tr><td>{{ '%+d'|format(r.change) if r.change else '0' }}%</td><td class="n {{ 'neg' if r.npv < 0 }}">{{ r.npv|cfn }}</td></tr>{% endfor %}</tbody></table></div>
+</div>
+
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;">
+  {% if user_is_signoff %}
+  <form method="post" action="{{ url_for('corpfin.project_status', project_id=proj.id) }}" class="inline"><button class="btn gold">{{ 'Reopen' if proj.status == 'Final' else 'Mark Final & lock' }}</button></form>
+  {% endif %}
+  {% if proj.status != 'Final' %}
+  <form method="post" action="{{ url_for('corpfin.delete_project', project_id=proj.id) }}" class="inline" onsubmit="return confirm('Delete this study? This cannot be undone.');"><button class="btn danger">Delete</button></form>
+  {% endif %}
+</div>
+
+<script type="application/json" id="cf-data">{{ charts|tojson }}</script>
+{{ m.chart_boot() }}
+<script>
+(function () {
+  var D = JSON.parse(document.getElementById('cf-data').textContent), C = cfColors, base = { currency: D.currency, unit: 'money' };
+  function mk(o) { for (var k in base) if (!(k in o)) o[k] = base[k]; return o; }
+  cfGo('flows', mk({ type: 'columns', title: 'Cash flow by year', labels: D.labels, diverging: true, series: [cfSeries('Net cash flow', C.BLUE, D.flows)] }));
+  cfGo('cum', mk({ type: 'line', title: 'Cumulative cash flow', labels: D.labels,
+    series: [cfSeries('Cumulative', C.BLUE, D.cum), cfSeries('Cumulative present value', C.ORANGE, D.cum_pv)] }));
+})();
+</script>
+{% endblock %}

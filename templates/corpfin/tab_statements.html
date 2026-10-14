@@ -1,0 +1,15 @@
+{% extends "corpfin/_model_base.html" %}
+{% block tab %}
+<div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:12px;">
+  <div class="seg">
+    <a class="{{ 'on' if view == 'annual' }}" href="{{ url_for('corpfin.model_tab', model_id=model.id, tab='statements', view='annual', scenario=scenario.id) }}">Annual (all {{ a.years }} year{{ 's' if a.years != 1 }})</a>
+    <a class="{{ 'on' if view == 'monthly' }}" href="{{ url_for('corpfin.model_tab', model_id=model.id, tab='statements', view='monthly', scenario=scenario.id) }}">Monthly (year 1)</a>
+  </div>
+  <div class="cf-sub" style="margin:0;">Figures in {{ cur }}. Brackets are deductions or negatives.
+    {% if result.checks.balance_ok %}<span class="cf-ok">Balance sheet balances in every period.</span>{% endif %}</div>
+</div>
+{% for title, lines in tables.statements %}
+<div class="card">{{ m.statement(tables.columns, lines) }}</div>
+{% endfor %}
+<div class="cf-sub">Interest is charged on opening balances. Tax is paid in the period it arises and losses are carried forward. Working capital follows the days set on the Assumptions tab. A negative cash balance is shown as a bank overdraft.</div>
+{% endblock %}

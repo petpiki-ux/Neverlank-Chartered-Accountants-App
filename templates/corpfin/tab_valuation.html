@@ -1,0 +1,173 @@
+{% extends "corpfin/_model_base.html" %}
+{% block tab %}
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  <strong>Saved valuations:</strong>
+  {% for vo in valuations %}
+    <a class="btn small {{ '' if (val_obj and val_obj.id == vo.id) else 'secondary' }}" href="{{ url_for('corpfin.model_tab', model_id=model.id, tab='valuation', val=vo.id) }}">{{ vo.name }}{% if vo.valuation_date %} ({{ vo.valuation_date.strftime('%d %b %Y') }}){% endif %}</a>
+  {% else %}<span class="muted">none yet</span>{% endfor %}
+  {% if not model.is_final %}<a class="btn small gold" href="{{ url_for('corpfin.model_tab', model_id=model.id, tab='valuation', val='new') }}">+ New valuation</a>{% endif %}
+  {% if val_obj and not model.is_final %}
+  <form method="post" action="{{ url_for('corpfin.delete_valuation', model_id=model.id, val_id=val_obj.id) }}" class="inline" onsubmit="return confirm('Delete this valuation?');"><button class="btn small danger">Delete this valuation</button></form>
+  {% endif %}
+</div>
+
+{% if val_obj %}
+{# ------------------------------------------------ results #}
+<div class="cf-banner">Valuation <strong>{{ val_obj.name }}</strong>{% if val_obj.valuation_date %} as at {{ val_obj.valuation_date.strftime('%d %B %Y') }}{% endif %}, using the forecast <strong>{{ scenario.name }}</strong>. Discount rate {{ dcf.wacc|cfpp(2) }}; {{ 'Gordon growth' if dcf.method == 'gordon' else 'exit multiple' }} terminal value. Net debt is taken at the start of the forecast.</div>
+{% if dcf.error %}<div class="flash warning">{{ dcf.error }} The exit multiple was used instead.</div>{% endif %}
+<div class="kpi-grid">
+  {{ m.kpi('Enterprise value', dcf.ev|cfn, 'PV of cash flows + terminal value') }}
+  {{ m.kpi('Equity value (100%)', dcf.equity|cfn, 'after debt ' ~ (dcf.debt|cfn) ~ ' and cash ' ~ (dcf.cash|cfn)) }}
+  {{ m.kpi('Value of the stake', dcf.equity_after_dlom|cfn, (dcf.stake_pct|cfpp(0)) ~ ' stake, ' ~ (dcf.dlom|cfpp(0)) ~ ' marketability discount') }}
+  {{ m.kpi('Terminal value share', dcf.tv_share|cfp if dcf.tv_share is not none else '-', 'of enterprise value') }}
+  {{ m.kpi('Implied EV / EBITDA (year 1)', dcf.ev_ebitda_y1|cfx if dcf.ev_ebitda_y1 is not none else '-', 'EV / revenue ' ~ (dcf.ev_revenue_y1|cfx)) }}
+</div>
+{% if dcf.tv_share is not none and dcf.tv_share > 0.75 %}<div class="flash warning">{{ dcf.tv_share|cfp(0) }} of the value comes from the terminal value. Treat the result with care and test the growth rate / exit multiple.</div>{% endif %}
+
+<div class="card">
+  <h3 style="margin-top:0;">Discounted cash flow</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for r in dcf.rows %}<th>{{ r.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr><td>EBITDA</td>{% for r in dcf.rows %}<td class="n">{{ r.ebitda|cfn }}</td>{% endfor %}</tr>
+      <tr><td>NOPAT (EBIT less tax)</td>{% for r in dcf.rows %}<td class="n">{{ r.nopat|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Add depreciation</td>{% for r in dcf.rows %}<td class="n">{{ r.dep|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Less capital expenditure</td>{% for r in dcf.rows %}<td class="n">{{ (-r.capex)|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Change in working capital</td>{% for r in dcf.rows %}<td class="n">{{ r.nwc|cfn }}</td>{% endfor %}</tr>
+      <tr class="total"><td>Free cash flow (FCFF)</td>{% for r in dcf.rows %}<td class="n">{{ r.fcff|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Discount period (years)</td>{% for r in dcf.rows %}<td class="n">{{ '%.1f'|format(r.t) }}</td>{% endfor %}</tr>
+      <tr><td>Discount factor</td>{% for r in dcf.rows %}<td class="n">{{ '%.4f'|format(r.df) }}</td>{% endfor %}</tr>
+      <tr class="grand"><td>Present value</td>{% for r in dcf.rows %}<td class="n">{{ r.pv|cfn }}</td>{% endfor %}</tr>
+    </tbody>
+  </table></div>
+  <div class="form-row" style="margin-top:14px;">
+    <div><table class="cf-table" style="min-width:340px;">
+      <tr><td>Sum of present values of cash flows</td><td class="n">{{ dcf.pv_fcff|cfn }}</td></tr>
+      <tr><td>Terminal value ({{ 'Gordon growth' if dcf.method == 'gordon' else 'exit multiple' }})</td><td class="n">{{ dcf.tv|cfn }}</td></tr>
+      <tr><td>Present value of terminal value</td><td class="n">{{ dcf.pv_tv|cfn }}</td></tr>
+      <tr class="total"><td>Enterprise value</td><td class="n">{{ dcf.ev|cfn }}</td></tr>
+      <tr><td>Less: debt</td><td class="n">{{ (-dcf.debt)|cfn }}</td></tr>
+      <tr><td>Add: cash</td><td class="n">{{ dcf.cash|cfn }}</td></tr>
+      <tr><td>Other adjustments / minorities</td><td class="n">{{ (dcf.other - dcf.minorities)|cfn }}</td></tr>
+      <tr class="grand"><td>Equity value (100%)</td><td class="n">{{ dcf.equity|cfn }}</td></tr>
+    </table></div>
+    <div><table class="cf-table" style="min-width:340px;">
+      <tr><td>Cost of equity (CAPM + premia)</td><td class="n">{{ wacc.ke|cfpp(2) }}</td></tr>
+      <tr><td>Cost of debt after tax</td><td class="n">{{ wacc.kd_after_tax|cfpp(2) }}</td></tr>
+      <tr><td>Debt weighting</td><td class="n">{{ wacc.debt_weight|cfpp(0) }}</td></tr>
+      <tr><td>Calculated WACC</td><td class="n">{{ wacc.calculated|cfpp(2) }}</td></tr>
+      <tr class="total"><td>Discount rate used</td><td class="n">{{ wacc.used|cfpp(2) }}</td></tr>
+      <tr><td>Terminal growth / exit multiple</td><td class="n">{{ dcf.growth|cfpp(1) }} / {{ dcf.exit_multiple|cfx(1) }}</td></tr>
+      <tr><td>Implied exit multiple (from growth)</td><td class="n">{{ dcf.implied_exit_multiple|cfx(1) if dcf.implied_exit_multiple is not none else '-' }}</td></tr>
+      <tr><td>Implied growth (from exit multiple)</td><td class="n">{{ dcf.implied_growth|cfpp(1) if dcf.implied_growth is not none else '-' }}</td></tr>
+    </table></div>
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Sensitivity of enterprise value</h3>
+  <p class="cf-sub">Discount rate (down) against {{ 'exit multiple' if sens.exit_mode else 'terminal growth' }} (across).</p>
+  <div class="tbl-scroll"><table class="cf-table cf-grid-sens">
+    <thead><tr><th>Discount rate</th>{% for c in sens.cols %}<th>{{ (c|cfx(1)) if sens.exit_mode else (c|cfpp(1)) }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for row in sens.rows %}
+      <tr><td>{{ row.wacc|cfpp(1) }}</td>{% for v in row['values'] %}<td class="n {{ 'base' if loop.index0 == 2 and row.wacc == dcf.wacc }}">{{ v|cfn if v is not none else 'n/a' }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Trading multiples</h3>
+  {% if mult.methods %}
+  <p class="cf-sub">Earnings base: {% if v.ltm.ebitda is not none or v.ltm.revenue is not none or v.ltm.pat is not none %}last-twelve-months figures entered{% else %}the first forecast year{% endif %}. Net debt {{ mult.net_debt|cfn }}.</p>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Method</th><th>Metric ({{ cur }})</th><th>Multiple low</th><th>median</th><th>high</th><th>Equity value low</th><th>median</th><th>high</th></tr></thead>
+    <tbody>
+    {% for mm in mult.methods %}
+      <tr><td>{{ mm.label }}</td><td class="n">{{ mm.metric_value|cfn }}</td>
+        <td class="n">{{ mm.stats.low|cfx(1) }}</td><td class="n">{{ mm.stats.median|cfx(1) }}</td><td class="n">{{ mm.stats.high|cfx(1) }}</td>
+        <td class="n">{{ mm.equity.low|cfn }}</td><td class="n">{{ mm.equity.median|cfn }}</td><td class="n">{{ mm.equity.high|cfn }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">Enter comparable companies' multiples below and save to see a multiples valuation.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Football field - equity value by method</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Method</th><th>Low</th><th>Mid</th><th>High</th><th style="text-align:left;">Range</th></tr></thead>
+    <tbody>
+    {% for r in ff %}
+      <tr><td>{{ r.label }}</td><td class="n">{{ r.low|cfn }}</td><td class="n">{{ r.mid|cfn }}</td><td class="n">{{ r.high|cfn }}</td>
+        <td><div class="cf-range"><div class="bar" style="left:{{ '%.1f'|format(r.left) }}%;width:{{ '%.1f'|format(r.width) }}%;"></div><div class="mid" style="left:{{ '%.1f'|format(r.mid_at) }}%;"></div></div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endif %}
+
+{# ------------------------------------------------ inputs #}
+<h2 class="cf-section" id="inputs">{{ 'Valuation inputs' if val_obj else 'New valuation' }}</h2>
+<form method="post" action="{{ url_for('corpfin.save_valuation', model_id=model.id) }}" class="card">
+<fieldset {{ 'disabled' if model.is_final }}>
+  {% if val_obj %}<input type="hidden" name="valuation_id" value="{{ val_obj.id }}">{% endif %}
+  <div class="form-row">
+    <div><label>Valuation name</label><input type="text" name="name" value="{{ val_obj.name if val_obj else 'Valuation ' ~ (valuations|length + 1) }}" maxlength="200"></div>
+    <div><label>Valuation date</label><input type="date" name="valuation_date" value="{{ val_obj.valuation_date.isoformat() if val_obj and val_obj.valuation_date else '' }}"></div>
+    <div><label>Forecast scenario valued</label>
+      <select name="scenario_id">{% for s in scenarios %}<option value="{{ s.id }}" {% if (val_obj and val_obj.scenario_id == s.id) or (val_obj and not val_obj.scenario_id and s.is_base) %}selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></div>
+  </div>
+
+  <h4 style="margin:6px 0;">Discount rate (WACC)</h4>
+  <div class="form-row">
+    {% for key, label in [('rf', 'Risk-free rate %'), ('erp', 'Equity risk premium %'), ('beta', 'Beta'), ('crp', 'Country risk premium %'), ('size', 'Size premium %'), ('specific', 'Company-specific premium %'), ('kd', 'Pre-tax cost of debt %'), ('debt_weight', 'Debt weighting % (of capital)'), ('override', 'Override WACC % (optional)')] %}
+    <div><label>{{ label }}</label><input type="number" step="any" name="w_{{ key }}" value="{{ v.wacc[key]|cfin }}"></div>
+    {% endfor %}
+  </div>
+
+  <h4 style="margin:6px 0;">Terminal value</h4>
+  <div class="form-row">
+    <div><label>Method</label><select name="t_method"><option value="gordon" {% if v.terminal.method == 'gordon' %}selected{% endif %}>Gordon growth (perpetuity)</option><option value="exit_multiple" {% if v.terminal.method == 'exit_multiple' %}selected{% endif %}>Exit multiple (EV / EBITDA)</option></select></div>
+    <div><label>Terminal growth % a year</label><input type="number" step="any" name="t_growth" value="{{ v.terminal.growth|cfin }}"></div>
+    <div><label>Exit multiple (x EBITDA)</label><input type="number" step="any" name="t_exit" value="{{ v.terminal.exit_multiple|cfin }}"></div>
+    <div style="padding-top:22px;"><label style="font-weight:normal;"><input type="checkbox" name="mid_year" style="width:auto;" {% if v.mid_year %}checked{% endif %}> Mid-year discounting</label></div>
+  </div>
+
+  <h4 style="margin:6px 0;">From enterprise value to equity value</h4>
+  <div class="form-row">
+    <div><label>Debt (blank = model opening loans)</label><input type="number" step="any" name="b_debt" value="{{ v.bridge.debt|cfin }}"></div>
+    <div><label>Cash (blank = model opening cash)</label><input type="number" step="any" name="b_cash" value="{{ v.bridge.cash|cfin }}"></div>
+    <div><label>Other assets / (liabilities) to add</label><input type="number" step="any" name="b_other" value="{{ v.bridge.other|cfin }}"></div>
+    <div><label>Minority interests to deduct</label><input type="number" step="any" name="b_min" value="{{ v.bridge.minorities|cfin }}"></div>
+    <div><label>Stake being valued %</label><input type="number" step="any" name="stake_pct" value="{{ v.stake_pct|cfin }}"></div>
+    <div><label>Marketability discount %</label><input type="number" step="any" name="dlom" value="{{ v.dlom|cfin }}"></div>
+  </div>
+
+  <h4 style="margin:6px 0;">Comparable companies (trading multiples)</h4>
+  <div class="tbl-scroll"><table class="cf-grid">
+    <thead><tr><th>Company</th><th>EV / EBITDA</th><th>EV / Revenue</th><th>P / E</th></tr></thead>
+    <tbody>
+    {% set blank = {'name': '', 'ev_ebitda': none, 'ev_revenue': none, 'pe': none} %}
+    {% set comps = v.comparables + [blank, blank, blank] if v.comparables|length < 3 else v.comparables %}
+    {% for c in comps %}
+      <tr><td><input type="text" class="wide" name="comp_name" value="{{ c.name or '' }}" maxlength="80"></td>
+        <td><input type="number" step="any" name="comp_evebitda" value="{{ c.ev_ebitda|cfin }}"></td>
+        <td><input type="number" step="any" name="comp_evrev" value="{{ c.ev_revenue|cfin }}"></td>
+        <td><input type="number" step="any" name="comp_pe" value="{{ c.pe|cfin }}"></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if not model.is_final %}<button class="btn small secondary" name="action" value="add_comp" style="margin-top:6px;">+ Add comparable row</button>{% endif %}
+  <div class="form-row" style="margin-top:10px;">
+    <div><label>Last-twelve-months revenue (optional)</label><input type="number" step="any" name="ltm_revenue" value="{{ v.ltm.revenue|cfin }}"></div>
+    <div><label>Last-twelve-months EBITDA (optional)</label><input type="number" step="any" name="ltm_ebitda" value="{{ v.ltm.ebitda|cfin }}"></div>
+    <div><label>Last-twelve-months profit after tax (optional)</label><input type="number" step="any" name="ltm_pat" value="{{ v.ltm.pat|cfin }}"></div>
+  </div>
+  <label>Notes (sources of the rates and multiples, judgements)</label>
+  <textarea name="notes" rows="3">{{ v.notes }}</textarea>
+</fieldset>
+{% if not model.is_final %}<button class="btn gold" type="submit">Save valuation</button>{% endif %}
+</form>
+{% endblock %}

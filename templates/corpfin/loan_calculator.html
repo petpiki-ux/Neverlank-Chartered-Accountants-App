@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}Loan calculator - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Loan calculator</h1><div class="subtitle">Repayment schedule for any loan: equal instalments, equal capital, or interest-only with capital at the end.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">Corporate Finance</a></div>
+</div>
+<form method="get" class="card">
+  <div class="form-row">
+    <div><label>Loan amount</label><input type="number" step="any" min="0" name="principal" value="{{ args.principal|cfin }}" required></div>
+    <div><label>Interest rate % a year</label><input type="number" step="any" min="0" name="rate" value="{{ args.rate|cfin }}" required></div>
+    <div><label>Term (months)</label><input type="number" min="1" max="360" name="months" value="{{ args.months }}" required></div>
+    <div><label>Repayment</label><select name="repay_type">{% for k, lab in loan_types %}<option value="{{ k }}" {% if k == args.repay_type %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+    <div><label>Capital grace period (months)</label><input type="number" min="0" name="grace_months" value="{{ args.grace_months }}"></div>
+    <div><label>Balloon at the end % (equal instalments only)</label><input type="number" step="any" min="0" max="100" name="balloon_pct" value="{{ args.balloon_pct|cfin }}"></div>
+    <div><label>First repayment month</label><input type="month" name="start" value="{{ args.start }}"></div>
+    <div><label>Currency</label><select name="currency">{% for c in currencies %}<option {% if c == args.currency %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+  </div>
+  <button class="btn gold" type="submit">Calculate</button>
+</form>
+{% if calc %}
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-label">Total interest</div><div class="kpi-value">{{ calc.sched.total_interest|cfn }}</div><div class="kpi-sub">{{ args.currency }}</div></div>
+  <div class="kpi"><div class="kpi-label">Total repaid</div><div class="kpi-value">{{ calc.sched.total_paid|cfn }}</div></div>
+  {% if calc.sched.instalment is not none %}<div class="kpi"><div class="kpi-label">Monthly instalment</div><div class="kpi-value">{{ calc.sched.instalment|cfn(2) }}</div></div>{% endif %}
+  <div class="kpi"><div class="kpi-label">First month's payment</div><div class="kpi-value">{{ calc.sched.rows[0].payment|cfn(2) }}</div></div>
+</div>
+<div style="margin-bottom:12px;"><a class="btn secondary" href="{{ url_for('corpfin.loan_excel') }}?{{ query }}">Download as Excel (live formulas)</a></div>
+<div class="card">
+  <h3 style="margin-top:0;">By loan year</h3>
+  <table class="cf-table"><thead><tr><th>Year</th><th>Interest</th><th>Capital</th><th>Total paid</th><th>Closing balance</th></tr></thead><tbody>
+  {% for r in calc.annual %}<tr><td>Year {{ r.year }}</td><td class="n">{{ r.interest|cfn }}</td><td class="n">{{ r.principal|cfn }}</td><td class="n">{{ r.payment|cfn }}</td><td class="n">{{ r.closing|cfn }}</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+<div class="card">
+  <h3 style="margin-top:0;">Month by month</h3>
+  <div class="tbl-scroll" style="max-height:480px;overflow:auto;"><table class="cf-table">
+    <thead><tr><th>#</th><th>Month</th><th>Opening</th><th>Interest</th><th>Capital</th><th>Payment</th><th>Closing</th></tr></thead><tbody>
+    {% for r in calc.sched.rows %}<tr><td>{{ r.n }}</td><td>{{ r.date.strftime('%b %Y') if r.date else '' }}</td><td class="n">{{ r.opening|cfn(2) }}</td><td class="n">{{ r.interest|cfn(2) }}</td><td class="n">{{ r.principal|cfn(2) }}</td><td class="n">{{ r.payment|cfn(2) }}</td><td class="n">{{ r.closing|cfn(2) }}</td></tr>{% endfor %}
+  </tbody></table></div>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,74 @@
+{% extends "corpfin/_model_base.html" %}
+{% block tab %}
+<div class="cf-banner">Enter what actually happened for any month of year 1, or any later year. The tool compares it with the forecast (the budget) and shows each variance as favourable or adverse. Gross profit, EBITDA, profit before tax and net profit are worked out from what you enter. Compared with the <strong>base case</strong>.</div>
+
+<form method="post" action="{{ url_for('corpfin.save_actuals', model_id=model.id) }}">
+<fieldset {{ 'disabled' if model.is_final }}>
+<div class="card">
+  <div class="tbl-scroll"><table class="cf-grid">
+    <thead>
+      <tr><th rowspan="2">Period</th>{% for k in input_keys %}<th colspan="2">{{ input_labels[k] }}</th>{% endfor %}</tr>
+      <tr>{% for k in input_keys %}<th style="color:#8a8985;">Budget</th><th>Actual</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+    {% for p in periods %}{% set key = 'p' ~ p.idx %}
+      <tr><td>{{ p.label }}{% if p.year_no == 1 %} <span class="muted" style="font-size:11px;">(month)</span>{% else %} <span class="muted" style="font-size:11px;">(year)</span>{% endif %}</td>
+      {% for k in input_keys %}
+        <td class="n" style="color:#8a8985;text-align:right;">{{ p[k]|cfn }}</td>
+        <td><input type="number" step="any" name="{{ key }}__{{ k }}" value="{{ (actuals.get(key, {}).get(k))|cfin }}"></td>
+      {% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="cf-sub" style="margin-top:8px;">Enter costs and expenses as positive amounts. Closing cash is the balance at the end of the period. Leave a period blank if there are no actuals yet.</p>
+</div>
+</fieldset>
+{% if not model.is_final %}<button class="btn gold" type="submit">Save actuals &amp; compare</button>{% endif %}
+</form>
+
+<h2 class="cf-section" id="variance">Variance analysis</h2>
+{% if bva.n %}
+<div class="card">
+  <h3 style="margin-top:0;">Cumulative: {{ bva.periods[0].label }} to {{ bva.periods[-1].label }}</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Line</th><th>Budget</th><th>Actual</th><th>Variance</th><th>Variance %</th><th>Result</th></tr></thead>
+    <tbody>
+    {% for ln in bva.cumulative %}
+      <tr><td>{{ ln.label }}</td><td class="n">{{ ln.budget|cfn }}</td><td class="n">{{ ln.actual|cfn }}</td>
+        <td class="n {{ 'cf-fav' if ln.fav else ('cf-adv' if ln.fav is false) }}">{{ ln.var|cfn if ln.var is not none else '-' }}</td>
+        <td class="n">{{ ln.pct|cfpp if ln.pct is not none else '-' }}</td>
+        <td>{% if ln.fav is none %}{{ 'On budget' if ln.var is not none else '-' }}{% elif ln.fav %}<span class="cf-ok">Favourable</span>{% else %}<span class="cf-bad">Adverse</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+<div class="card">
+  <h3 style="margin-top:0;">Period by period</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Period</th><th>Revenue var.</th><th>EBITDA var.</th><th>Net profit var.</th><th>Cash var.</th></tr></thead>
+    <tbody>
+    {% for p in bva.periods %}
+      {% set d = {} %}{% for ln in p.lines %}{% if d.update({ln.key: ln}) %}{% endif %}{% endfor %}
+      <tr><td>{{ p.label }}</td>
+        {% for k in ['revenue', 'ebitda', 'pat', 'cash'] %}{% set ln = d.get(k) %}
+        <td class="n {{ 'cf-fav' if ln and ln.fav else ('cf-adv' if ln and ln.fav is false) }}">{{ ln.var|cfn if ln and ln.var is not none else '-' }}{% if ln and ln.pct is not none %} <span class="muted">({{ ln.pct|cfpp(0) }})</span>{% endif %}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <details style="margin-top:10px;"><summary style="cursor:pointer;font-weight:600;">Every line for every period</summary>
+    {% for p in bva.periods %}
+    <h4 style="margin:12px 0 4px;">{{ p.label }}</h4>
+    <div class="tbl-scroll"><table class="cf-table">
+      <thead><tr><th>Line</th><th>Budget</th><th>Actual</th><th>Variance</th><th>%</th></tr></thead>
+      <tbody>{% for ln in p.lines if ln.actual is not none %}
+        <tr><td>{{ ln.label }}</td><td class="n">{{ ln.budget|cfn }}</td><td class="n">{{ ln.actual|cfn }}</td>
+          <td class="n {{ 'cf-fav' if ln.fav else ('cf-adv' if ln.fav is false) }}">{{ ln.var|cfn }}</td><td class="n">{{ ln.pct|cfpp(1) if ln.pct is not none else '-' }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    {% endfor %}
+  </details>
+</div>
+{% else %}
+<div class="card"><div class="empty-state">No actuals entered yet. Fill in one or more periods above and save.</div></div>
+{% endif %}
+{% endblock %}

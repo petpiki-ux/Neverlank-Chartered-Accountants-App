@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "corpfin/_macros.html" as m %}
+{% block title %}{{ model.model_number }} {{ model.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ model.name }} <span class="badge status-{{ model.status }}" style="vertical-align:middle;">{{ model.status }}</span></h1>
+    <div class="subtitle">{{ model.model_number }} &middot; {{ model.client.name }}{% if model.engagement %} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=model.engagement_id) }}">{{ model.engagement.title }}</a>{% endif %}
+      &middot; {{ a.years }} year{{ 's' if a.years != 1 }} from {{ result.periods[0].label }} &middot; {{ cur }}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <a class="btn secondary" href="{{ url_for('corpfin.export_excel', model_id=model.id) }}">Excel (live formulas)</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.export_pdf', model_id=model.id, scenario=scenario.id) }}" target="_blank">PDF report</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">All models</a>
+  </div>
+</div>
+
+<div class="tabs">
+  {% for key, label in MODEL_TABS %}
+  <a href="{{ url_for('corpfin.model_tab', model_id=model.id, tab=key, scenario=(scenario.id if (not scenario.is_base and key not in ('assumptions','bva','history')) else None)) }}" class="{{ 'active' if tab == key }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{% if tab in ('statements', 'loans', 'ratios', 'overview', 'valuation', 'scenarios') and scenarios|length > 1 %}
+<form method="get" class="an-filters" style="margin-bottom:12px;">
+  {% for k, v in request.args.items() if k not in ('scenario', 'val') %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endfor %}
+  <div><label for="scenario">Scenario shown</label>
+    <select id="scenario" name="scenario" onchange="this.form.submit()">
+      {% for s in scenarios %}<option value="{{ s.id }}" {% if s.id == scenario.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}
+    </select></div>
+</form>
+{% endif %}
+{% if not scenario.is_base and tab in ('statements', 'loans', 'ratios', 'overview', 'valuation') %}
+<div class="cf-banner">Showing the scenario <strong>{{ scenario.name }}</strong>, not the base case. Edit the underlying assumptions on the Assumptions tab (they always apply to the base case).</div>
+{% endif %}
+{% if model.is_final %}
+<div class="cf-banner">This model is <strong>Final</strong> and locked{% if model.finalised_by %} (finalised by {{ model.finalised_by.name }}{% if model.finalised_at %} on {{ model.finalised_at.strftime('%d %b %Y') }}{% endif %}){% endif %}.{% if user_is_signoff %}
+  <form method="post" action="{{ url_for('corpfin.reopen_model', model_id=model.id) }}" class="inline" onsubmit="return confirm('Reopen this model for editing?');"><button class="btn small secondary">Reopen</button></form>{% else %} A Partner can reopen it.{% endif %}</div>
+{% endif %}
+{% for w in result.warnings %}<div class="flash warning">{{ w }}</div>{% endfor %}
+{% if not result.checks.balance_ok %}<div class="flash danger">The balance sheet is out by {{ result.checks.max_imbalance|cfn(2) }}. Please report this.</div>{% endif %}
+
+{% block tab %}{% endblock %}
+{% endblock %}

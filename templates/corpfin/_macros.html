@@ -1,0 +1,46 @@
+{# Shared bits for the Corporate Finance pages #}
+{% macro chart(id, title, sub='') %}
+<div class="viz-card" id="chart-{{ id }}">
+  <div class="viz-head">
+    <div><h3>{{ title }}</h3>{% if sub %}<div class="viz-sub">{{ sub }}</div>{% endif %}</div>
+    <button type="button" class="viz-toggle" title="Show the numbers behind this chart">Table</button>
+  </div>
+  <div class="viz-legend-host"></div>
+  <div class="viz-plot"></div>
+  <div class="viz-table-host" hidden></div>
+</div>
+{% endmacro %}
+
+{% macro statement(columns, lines) %}
+<div class="tbl-scroll"><table class="cf-table">
+  <thead><tr><th></th>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+  <tbody>
+  {% for ln in lines %}
+    {% if ln.kind == 'head' %}
+    <tr class="head"><td colspan="{{ columns|length + 1 }}">{{ ln.label }}</td></tr>
+    {% else %}
+    <tr class="{{ ln.kind }}"><td>{{ ln.label }}</td>
+      {% for v in ln["values"] %}<td class="n{% if v is not none and v < -0.5 and ln.fmt == 'money' and ln.kind == 'grand' %} neg{% endif %}">{{ v|cffmt(ln.fmt) }}</td>{% endfor %}
+    </tr>
+    {% endif %}
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endmacro %}
+
+{% macro badge_ok(ok, yes='Pass', no='Breach') -%}
+<span class="badge {{ 'status-Approved' if ok else 'overdue' }}">{{ yes if ok else no }}</span>
+{%- endmacro %}
+
+{% macro kpi(label, value, sub='') %}
+<div class="kpi"><div class="kpi-label">{{ label }}</div><div class="kpi-value">{{ value }}</div>{% if sub %}<div class="kpi-sub">{{ sub }}</div>{% endif %}</div>
+{% endmacro %}
+
+{% macro chart_boot() %}
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+<script>
+  window.cfGo = function (id, spec) { var el = document.getElementById('chart-' + id); if (el && window.NLCharts) NLCharts.render(el, spec); };
+  window.cfSeries = function (name, color, values, extra) { var o = { name: name, color: color, values: values }; for (var k in (extra || {})) o[k] = extra[k]; return o; };
+  window.cfColors = { BLUE: '#2a78d6', AQUA: '#1baf7a', ORANGE: '#eb6834', GREY: '#a9a7a0' };
+</script>
+{% endmacro %}

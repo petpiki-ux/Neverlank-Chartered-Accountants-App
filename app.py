@@ -38,7 +38,7 @@ def _merge_tax_engagement_types():
     (including the files on disk, which live in a folder named after the type;
     a file whose name already exists in the destination keeps both, the
     incoming one getting a numeric suffix), plus the bundled TX-* tax
-    templates that used to sit under Consulting. Safe to run on every
+    templates that used to sit under the old Consulting group. Safe to run on every
     startup."""
     import shutil
     from models import Engagement, ChecklistTemplate, LEGACY_TAX_ENGAGEMENT_TYPES, TAX_ADVISORY_TYPE
@@ -70,6 +70,50 @@ def _merge_tax_engagement_types():
             shutil.move(src, os.path.join(dest_dir, candidate))
             tpl.filename = candidate
         tpl.type = TAX_ADVISORY_TYPE
+        changed = True
+    if changed:
+        db.session.commit()
+
+
+def _rename_consulting_service():
+    """One-time (idempotent) rename of the old "Consulting" service line to "Corporate Finance & Business
+    Advisory" everywhere it is stored: engagements, checklist templates (the tax / CGT checklist that used to
+    sit under Consulting moves to Tax Advisory), the Document Templates library (files stay in their folder -
+    see models.template_folder) and task categories (tasks from Business Intelligence and IT engagements move
+    to their own "IT & Business Intelligence" category). Safe to run on every startup."""
+    from models import (Engagement, ChecklistTemplate, EngagementTask, PersonalTask, CORPFIN_ENGAGEMENT_TYPE,
+                        LEGACY_CONSULTING_TYPE, CORPFIN_TASK_CATEGORY, IT_TASK_CATEGORY, TAX_ADVISORY_TYPE)
+    changed = False
+    for row in Engagement.query.filter_by(type=LEGACY_CONSULTING_TYPE).all():
+        row.type = CORPFIN_ENGAGEMENT_TYPE
+        changed = True
+    new_name = "Corporate Finance & Advisory Engagement (General)"
+    for row in ChecklistTemplate.query.filter_by(type=LEGACY_CONSULTING_TYPE).all():
+        if row.name == "Tax / CGT Advisory":
+            row.type = TAX_ADVISORY_TYPE
+        else:
+            row.type = CORPFIN_ENGAGEMENT_TYPE
+            if row.name == "Consulting Engagement (General)":
+                if not ChecklistTemplate.query.filter_by(name=new_name).first():
+                    row.name = new_name
+                    row.description = ("Checklist for corporate finance and business advisory work: scoping, financial forecasts, "
+                                       "scenarios, valuation / investment analysis, reporting and close-out.")
+                else:  # the new standard checklist was already seeded: keep the old one, clearly labelled
+                    row.name = new_name + " - previous version"
+        changed = True
+    for row in DocumentTemplate.query.filter_by(type=LEGACY_CONSULTING_TYPE).all():
+        row.type = CORPFIN_ENGAGEMENT_TYPE
+        if row.description and "consult" in row.description.lower():
+            row.description = (row.description.replace("consulting", "corporate finance / advisory")
+                               .replace("Consulting", "Corporate finance / advisory"))
+        changed = True
+    for task in EngagementTask.query.filter_by(category=LEGACY_CONSULTING_TYPE).all():
+        eng = task.engagement
+        task.category = IT_TASK_CATEGORY if eng is not None and eng.type == "Business Intelligence and IT Engagements" else CORPFIN_TASK_CATEGORY
+        changed = True
+    for task in PersonalTask.query.filter_by(category=LEGACY_CONSULTING_TYPE).all():
+        eng = task.engagement
+        task.category = IT_TASK_CATEGORY if eng is not None and eng.type == "Business Intelligence and IT Engagements" else CORPFIN_TASK_CATEGORY
         changed = True
     if changed:
         db.session.commit()
@@ -606,6 +650,7 @@ def create_app():
     from recurring import recurring_bp
     from receipts import receipts_bp
     from credit_notes import credit_notes_bp
+    from corporate_finance import corpfin_bp
     from statements import statements_bp
     from attendance import attendance_bp
     from invoice_send import invoice_send_bp, public_invoice_bp
@@ -639,6 +684,7 @@ def create_app():
     app.register_blueprint(recurring_bp)
     app.register_blueprint(receipts_bp)
     app.register_blueprint(credit_notes_bp)
+    app.register_blueprint(corpfin_bp)
     app.register_blueprint(statements_bp)
     app.register_blueprint(attendance_bp)
     app.register_blueprint(invoice_send_bp)
@@ -782,6 +828,7 @@ def create_app():
         db.create_all()
         _add_missing_columns()
         _merge_tax_engagement_types()
+        _rename_consulting_service()
         _backfill_task_categories()
         # First-run convenience: seed an admin login + starter checklist
         # templates automatically so a freshly-installed copy works with zero
@@ -1024,7 +1071,7 @@ if __name__ == "__main__":
     debug = os.environ.get("FLASK_DEBUG", "0") == "1"
 
     print("=" * 64)
-    print(" Neverlank Audit, Assurance & Consulting App")
+    print(" Neverlank Audit, Assurance & Corporate Finance App")
     print(" Starting up...")
     print(f" On this computer:            http://localhost:{port}")
     print(f" From other office computers: http://<this-PC-IP>:{port}")

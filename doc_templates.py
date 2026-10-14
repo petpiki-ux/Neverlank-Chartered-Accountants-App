@@ -1,6 +1,6 @@
 """Library of downloadable, fillable Word/Excel workpaper templates
 (engagement letters, planning memos, a CGT computation sheet, etc), grouped
-by Audit / Assurance / Consulting. These are separate from the per-engagement
+by service line (Audit, Assurance, Corporate Finance & Business Advisory, Tax Advisory, ...). These are separate from the per-engagement
 "Documents" tab: that tab holds working papers actually produced on an
 engagement, while this library holds the blank starting templates staff
 download, fill in, and then upload back onto an engagement.
@@ -22,7 +22,7 @@ from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
 from extensions import db
-from models import DocumentTemplate, ENGAGEMENT_TYPES, canonical_engagement_type, user_has_permission
+from models import DocumentTemplate, ENGAGEMENT_TYPES, canonical_engagement_type, user_has_permission, template_folder
 from config import Config
 
 doc_templates_bp = Blueprint("doc_templates", __name__, url_prefix="/document-templates")
@@ -52,7 +52,7 @@ def _allowed_template_file(filename):
 
 
 def _template_dir(eng_type):
-    directory = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, eng_type)
+    directory = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, template_folder(eng_type))
     os.makedirs(directory, exist_ok=True)
     return directory
 

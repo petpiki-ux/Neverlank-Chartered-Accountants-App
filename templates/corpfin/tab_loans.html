@@ -1,0 +1,58 @@
+{% extends "corpfin/_model_base.html" %}
+{% block tab %}
+<h2 class="cf-section" style="margin-top:0;">Loan balances and interest</h2>
+{% if not a.loans %}
+<div class="card"><div class="empty-state">There are no loans in this model. Add one on the Assumptions tab (section 6).</div></div>
+{% endif %}
+{% for L in a.loans %}{% set k = loop.index0 %}
+<div class="card">
+  <h3 style="margin-top:0;">{{ L.name }}
+    <span class="cf-sub" style="font-weight:normal;">{{ L.rate|cfpp }} a year &middot; {{ 'bullet repayment in year ' ~ L.maturity_year if L.repay_type == 'bullet' else 'equal capital over ' ~ L.repay_years ~ ' year(s)' ~ (' after ' ~ L.grace_years ~ ' year(s) grace' if L.grace_years else '') }}</span></h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for d in result.annual %}<th>{{ d.label }}</th>{% endfor %}<th>Total</th></tr></thead>
+    <tbody>
+      <tr><td>Opening balance</td>{% for d in result.annual %}<td class="n">{{ d.loans[k].open|cfn }}</td>{% endfor %}<td></td></tr>
+      <tr><td>Drawdown</td>{% for d in result.annual %}<td class="n">{{ d.loans[k].draw|cfn }}</td>{% endfor %}<td class="n">{{ loan_totals[k].draw|cfn }}</td></tr>
+      <tr><td>Repayment</td>{% for d in result.annual %}<td class="n">{{ (-d.loans[k].repay)|cfn }}</td>{% endfor %}<td class="n">{{ (-loan_totals[k].repay)|cfn }}</td></tr>
+      <tr class="total"><td>Closing balance</td>{% for d in result.annual %}<td class="n">{{ d.loans[k].close|cfn }}</td>{% endfor %}<td></td></tr>
+      <tr><td>Interest charged</td>{% for d in result.annual %}<td class="n">{{ d.loans[k].interest|cfn }}</td>{% endfor %}<td class="n">{{ loan_totals[k].interest|cfn }}</td></tr>
+    </tbody>
+  </table></div>
+</div>
+{% endfor %}
+
+<div class="card">
+  <h3 style="margin-top:0;">Debt summary</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for d in result.annual %}<th>{{ d.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr><td>Total borrowings (closing)</td>{% for d in result.annual %}<td class="n">{{ d.borrowings|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Bank overdraft (closing)</td>{% for d in result.annual %}<td class="n">{{ d.overdraft|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Cash and bank (closing)</td>{% for d in result.annual %}<td class="n">{{ d.cash_positive|cfn }}</td>{% endfor %}</tr>
+      <tr class="total"><td>Net debt</td>{% for r in ratio_rows %}<td class="n">{{ r.net_debt|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Interest paid</td>{% for d in result.annual %}<td class="n">{{ d.interest_paid|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Capital repaid</td>{% for d in result.annual %}<td class="n">{{ d.loan_repay|cfn }}</td>{% endfor %}</tr>
+      <tr class="total"><td>Debt service (interest + capital)</td>{% for r in ratio_rows %}<td class="n">{{ r.debt_service|cfn }}</td>{% endfor %}</tr>
+    </tbody>
+  </table></div>
+</div>
+
+<h2 class="cf-section">Covenant tests</h2>
+<div class="card">
+  {% if tests %}
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Covenant</th><th>Limit</th>{% for d in result.annual %}<th>{{ d.label }}</th>{% endfor %}<th>Result</th></tr></thead>
+    <tbody>
+    {% for t in tests %}
+      <tr><td>{{ t.label }}</td><td class="n">{{ 'at least' if t.kind == 'min' else 'at most' }} {{ t.limit|cfx }}</td>
+        {% for c in t.cells %}<td class="n {{ 'cf-pass' if c.ok else 'cf-fail' }}">{{ c.value|cfx if c.value is not none else 'n/a' }}</td>{% endfor %}
+        <td class="n">{% if t.breaches %}<span class="cf-bad">{{ t.breaches }} breach{{ 'es' if t.breaches != 1 }}</span>{% else %}<span class="cf-ok">All pass</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="cf-sub" style="margin-top:8px;">A ratio that cannot be measured (for example debt service cover in a year with no debt service) counts as a pass. Limits are set in section 7 of the Assumptions tab.</p>
+  {% else %}
+  <div class="empty-state">No covenant limits are set. Add them in section 7 of the Assumptions tab.</div>
+  {% endif %}
+</div>
+{% endblock %}

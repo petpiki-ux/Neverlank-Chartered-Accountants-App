@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}New investment appraisal - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>New investment appraisal</h1>
+  <div class="subtitle">Capital budgeting and feasibility: NPV, IRR, payback and the written feasibility notes.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">Back</a></div>
+</div>
+<form method="post" class="card">
+  <div class="form-row">
+    <div><label for="client_id">Client *</label>
+      <select id="client_id" name="client_id" required onchange="filterEng()">
+        <option value="">Choose...</option>
+        {% for c in clients %}<option value="{{ c.id }}" {% if form.get('client_id') == c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select></div>
+    <div><label for="engagement_id">Engagement (optional)</label>
+      <select id="engagement_id" name="engagement_id">
+        <option value="">None</option>
+        {% for e in engagements %}<option value="{{ e.id }}" data-client="{{ e.client_id }}" {% if form.get('engagement_id') == e.id|string %}selected{% endif %}>{{ e.title }} ({{ e.type }})</option>{% endfor %}
+      </select></div>
+  </div>
+  <div class="form-row">
+    <div><label for="name">Study name *</label><input type="text" id="name" name="name" required maxlength="200" value="{{ form.get('name', '') }}" placeholder="e.g. New packaging line - feasibility"></div>
+    <div><label for="currency">Currency</label>
+      <select id="currency" name="currency">{% for c in currencies %}<option {% if form.get('currency', 'USD') == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+  </div>
+  <button class="btn gold" type="submit">Create study</button>
+</form>
+<script>
+function filterEng() {
+  var c = document.getElementById('client_id').value, sel = document.getElementById('engagement_id');
+  for (var i = 0; i < sel.options.length; i++) {
+    var o = sel.options[i], k = o.getAttribute('data-client');
+    o.hidden = !!k && !!c && k !== c; o.disabled = o.hidden;
+  }
+  if (sel.selectedOptions.length && sel.selectedOptions[0].disabled) sel.value = '';
+}
+filterEng();
+</script>
+{% endblock %}

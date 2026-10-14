@@ -1,0 +1,48 @@
+{% extends "corpfin/_model_base.html" %}
+{% block tab %}
+<div class="card">
+  <h3 style="margin-top:0;">Key ratios</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for c in rtable.columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in rtable.rows %}
+      <tr><td>{{ r.label }}</td>{% for v in r['values'] %}<td class="n">{{ v|cffmt(r.fmt) }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="cf-sub" style="margin-top:8px;">Debt service cover = (EBITDA less tax) / (interest + capital repaid). Interest cover = EBIT / interest. Gearing = (borrowings + overdraft) / equity. Days are measured on year-end balances.</p>
+</div>
+
+<h2 class="cf-section">Break-even</h2>
+<div class="card">
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for b in be %}<th>{{ b.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr><td>Revenue</td>{% for b in be %}<td class="n">{{ b.revenue|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Variable costs (cost of sales + % of revenue expenses)</td>{% for b in be %}<td class="n">{{ b.variable|cfn }}</td>{% endfor %}</tr>
+      <tr class="total"><td>Contribution</td>{% for b in be %}<td class="n">{{ b.contribution|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Contribution margin</td>{% for b in be %}<td class="n">{{ b.cm_ratio|cfp }}</td>{% endfor %}</tr>
+      <tr><td>Fixed costs (fixed expenses, depreciation, net finance cost)</td>{% for b in be %}<td class="n">{{ b.fixed|cfn }}</td>{% endfor %}</tr>
+      <tr class="grand"><td>Break-even revenue</td>{% for b in be %}<td class="n">{{ b.break_even_revenue|cfn if b.break_even_revenue is not none else 'n/a' }}</td>{% endfor %}</tr>
+      <tr><td>Margin of safety</td>{% for b in be %}<td class="n">{{ b.margin_of_safety|cfp }}</td>{% endfor %}</tr>
+    </tbody>
+  </table></div>
+</div>
+
+<h2 class="cf-section">Free cash flow to the firm</h2>
+<div class="card">
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for d in fcf %}<th>{{ d.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr><td>EBIT</td>{% for d in fcf %}<td class="n">{{ d.ebit|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Tax on EBIT</td>{% for d in fcf %}<td class="n">{{ (-d.tax_on_ebit)|cfn }}</td>{% endfor %}</tr>
+      <tr class="total"><td>NOPAT</td>{% for d in fcf %}<td class="n">{{ d.nopat|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Add back depreciation</td>{% for d in fcf %}<td class="n">{{ d.dep|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Capital expenditure</td>{% for d in fcf %}<td class="n">{{ (-d.capex)|cfn }}</td>{% endfor %}</tr>
+      <tr><td>Change in working capital</td>{% for d in fcf %}<td class="n">{{ d.nwc|cfn }}</td>{% endfor %}</tr>
+      <tr class="grand"><td>Free cash flow (FCFF)</td>{% for d in fcf %}<td class="n">{{ d.fcff|cfn }}</td>{% endfor %}</tr>
+    </tbody>
+  </table></div>
+  <p class="cf-sub" style="margin-top:8px;">This is the cash flow the Valuation tab discounts, and the cash flow used when you "Appraise as an investment".</p>
+</div>
+{% endblock %}

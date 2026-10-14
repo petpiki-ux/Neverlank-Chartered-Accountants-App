@@ -15,7 +15,7 @@
   <div class="topbar">
     <div class="brand">
       <img src="{{ url_for('static', filename='img/neverlank-logo.png') }}" alt="Neverlank">
-      Neverlank <span class="tag">Audit &middot; Assurance &middot; Consulting</span>
+      Neverlank <span class="tag">Audit &middot; Assurance &middot; Corporate Finance</span>
     </div>
     <nav>
       <a href="{{ url_for('engagements.dashboard') }}">Practice Dashboard</a>
@@ -33,6 +33,9 @@
       <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
       {% set finance_blueprints = ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'credit_notes', 'statements', 'analytics', 'expenses'] %}
       <a href="{{ url_for('invoicing.list_invoices') }}"{% if request.blueprint in finance_blueprints %} class="active"{% endif %}>Finance{% if recurring_review_count or invoice_reminder_count %} <span class="badge overdue" title="Recurring invoices waiting for review and overdue-invoice reminders due">{{ recurring_review_count + invoice_reminder_count }}</span>{% endif %}</a>
+      {% if user_has_permission(current_user, 'manage_corporate_finance') %}
+      <a href="{{ url_for('corpfin.dashboard') }}" style="white-space:nowrap;"{% if request.blueprint == 'corpfin' %} class="active"{% endif %}>Corporate Finance</a>
+      {% endif %}
       {% if user_has_permission(current_user, 'manage_whistleblower') %}
       <a href="{{ url_for('whistleblower.dashboard') }}">Whistle-blower</a>
       {% endif %}

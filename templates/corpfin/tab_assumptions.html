@@ -1,0 +1,153 @@
+{% extends "corpfin/_model_base.html" %}
+{% macro vrow(label, prefix, values, hint='') %}
+<tr><td title="{{ hint }}">{{ label }}{% if hint %}<div class="cf-sub" style="margin:0;">{{ hint }}</div>{% endif %}</td>
+  {% for v in values %}<td><input type="number" step="any" name="{{ prefix }}__{{ loop.index0 }}" value="{{ v|cfin }}"></td>{% endfor %}</tr>
+{% endmacro %}
+{% macro yhead(first_label='') %}
+<thead><tr><th>{{ first_label }}</th>{% for l in year_labels %}<th>{{ l }}</th>{% endfor %}</tr></thead>
+{% endmacro %}
+
+{% block tab %}
+<div class="cf-banner">Yellow cells are inputs. Everything on the Statements, Loans, Ratios, Scenarios and Valuation tabs is calculated from them. Amounts are in <strong>{{ cur }}</strong>, excluding VAT. Year 1 is forecast monthly; later years are annual.</div>
+
+<form method="post" action="{{ url_for('corpfin.save_assumptions', model_id=model.id) }}">
+<fieldset {{ 'disabled' if model.is_final }}>
+<input type="hidden" name="n_rev" value="{{ base.revenue|length }}">
+<input type="hidden" name="n_ox" value="{{ base.opex|length }}">
+<input type="hidden" name="n_ln" value="{{ base.loans|length }}">
+
+<h2 class="cf-section">1. General</h2>
+<div class="card">
+  <div class="form-row">
+    <div><label>Income tax rate (%)</label><input type="number" step="any" name="tax_rate" value="{{ base.tax_rate|cfin }}">
+      <div class="cf-sub">Zimbabwe: 25% plus 3% AIDS levy on the tax = 25.75%.</div></div>
+    <div><label>Depreciation rate (% of cost a year)</label><input type="number" step="any" name="dep_rate" value="{{ base.dep_rate|cfin }}"></div>
+    <div><label>Interest earned on positive cash (% a year)</label><input type="number" step="any" name="deposit_rate" value="{{ base.deposit_rate|cfin }}"></div>
+    <div><label>Overdraft interest rate (% a year)</label><input type="number" step="any" name="overdraft_rate" value="{{ base.overdraft_rate|cfin }}"></div>
+  </div>
+</div>
+
+<h2 class="cf-section">2. Revenue</h2>
+<div class="card">
+  <p class="cf-sub">Year-1 revenue for each stream and the growth rate for each later year. Year-1 revenue is spread across the months using the seasonality below.</p>
+  <div class="tbl-scroll"><table class="cf-grid">
+    <thead><tr><th>Revenue stream</th><th>Year 1 revenue</th>{% for l in year_labels[1:] %}<th>Growth in {{ l }} %</th>{% endfor %}<th></th></tr></thead>
+    <tbody>
+    {% for st in base.revenue %}{% set i = loop.index0 %}
+    <tr>
+      <td><input type="text" class="wide" name="rev_name_{{ i }}" value="{{ st.name }}" maxlength="60"></td>
+      <td><input type="number" step="any" min="0" name="rev_y1_{{ i }}" value="{{ st.y1|cfin }}"></td>
+      {% for y in range(1, base.years) %}<td><input type="number" step="any" name="rev_g_{{ i }}__{{ y }}" value="{{ st.growth[y]|cfin }}"></td>{% endfor %}
+      <td>{% if base.revenue|length > 1 %}<button class="btn small danger" name="action" value="del_rev:{{ i }}" formnovalidate onclick="return confirm('Remove this revenue stream?');">Remove</button>{% endif %}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <button class="btn small secondary" name="action" value="add_rev" formnovalidate style="margin-top:8px;">+ Add revenue stream</button>
+
+  <details style="margin-top:14px;"><summary style="cursor:pointer;font-weight:600;">Seasonality of year-1 revenue (share of the year by month)</summary>
+    <div class="tbl-scroll"><table class="cf-grid" style="margin-top:8px;">
+      <thead><tr>{% for mth in month_labels %}<th>{{ mth }} %</th>{% endfor %}</tr></thead>
+      <tbody><tr>{% for v in base.seasonality %}<td><input type="number" step="any" min="0" class="narrow" name="season__{{ loop.index0 }}" value="{{ v|cfin(3) }}"></td>{% endfor %}</tr></tbody>
+    </table></div>
+    <div class="cf-sub">The twelve percentages are scaled to total 100% when saved. Leave them equal for an even spread.</div>
+  </details>
+</div>
+
+<h2 class="cf-section" id="lines">3. Costs</h2>
+<div class="card">
+  <p class="cf-sub">Annual drivers - one column per forecast year.</p>
+  <div class="tbl-scroll"><table class="cf-grid">
+    {{ yhead('Cost of sales') }}
+    <tbody>{{ vrow('Cost of sales (% of revenue)', 'cogs', base.cogs_pct) }}</tbody>
+  </table></div>
+
+  <h3 style="margin:18px 0 6px;">Operating expenses</h3>
+  <p class="cf-sub"><strong>Fixed</strong> expenses start from a year-1 amount and grow by the % you enter each year. <strong>Variable</strong> expenses are a % of revenue. Only the row that matches the type is used. "Paid through creditors" means the expense builds up trade payables (rent, supplies); untick for items paid immediately (salaries).</p>
+  {% for o in base.opex %}{% set j = loop.index0 %}
+  <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+      <div><label>Expense</label><input type="text" class="cf-in" name="ox_name_{{ j }}" value="{{ o.name }}" maxlength="60" style="width:230px;"></div>
+      <div><label>Type</label><select class="cf-in" name="ox_kind_{{ j }}" style="width:200px;"><option value="fixed" {% if o.kind == 'fixed' %}selected{% endif %}>Fixed</option><option value="pct" {% if o.kind == 'pct' %}selected{% endif %}>Variable (% of revenue)</option></select></div>
+      <div><label>Year 1 amount (fixed)</label><input type="number" step="any" min="0" class="cf-in" name="ox_y1_{{ j }}" value="{{ o.y1|cfin }}" style="width:140px;"></div>
+      <div style="padding-bottom:14px;"><label style="font-weight:normal;"><input type="checkbox" style="width:auto;" name="ox_cred_{{ j }}" {% if o.creditors %}checked{% endif %}> Paid through creditors</label></div>
+      <div style="padding-bottom:14px;"><button class="btn small danger" name="action" value="del_ox:{{ j }}" formnovalidate onclick="return confirm('Remove this expense line?');">Remove</button></div>
+    </div>
+    <div class="tbl-scroll"><table class="cf-grid">
+      {{ yhead('') }}
+      <tbody>
+        <tr><td>Growth % a year (fixed)</td>{% for y in range(base.years) %}<td>{% if y == 0 %}<span class="muted">-</span>{% else %}<input type="number" step="any" name="ox_g_{{ j }}__{{ y }}" value="{{ o.growth[y]|cfin }}">{% endif %}</td>{% endfor %}</tr>
+        <tr><td>% of revenue (variable)</td>{% for y in range(base.years) %}<td><input type="number" step="any" min="0" name="ox_p_{{ j }}__{{ y }}" value="{{ o.pct[y]|cfin }}"></td>{% endfor %}</tr>
+      </tbody>
+    </table></div>
+  </div>
+  {% endfor %}
+  <button class="btn small secondary" name="action" value="add_ox" formnovalidate>+ Add expense line</button>
+</div>
+
+<h2 class="cf-section">4. Investment, working capital and shareholders</h2>
+<div class="card">
+  <div class="tbl-scroll"><table class="cf-grid">
+    {{ yhead('Annual driver') }}
+    <tbody>
+      {{ vrow('Capital expenditure', 'capex', base.capex, 'spent evenly across the year') }}
+      {{ vrow('Receivable days', 'rec', base.rec_days, 'days of revenue owed by customers') }}
+      {{ vrow('Inventory days', 'inv', base.inv_days, 'days of cost of sales held in stock') }}
+      {{ vrow('Payable days', 'pay', base.pay_days, 'days of cost of sales and creditor expenses owed') }}
+      {{ vrow('New share capital issued', 'eq', base.equity_issue, 'received at the start of the year') }}
+      {{ vrow('Dividend payout (% of profit after tax)', 'div', base.dividend_payout) }}
+    </tbody>
+  </table></div>
+</div>
+
+<h2 class="cf-section">5. Opening balance sheet</h2>
+<div class="card">
+  <p class="cf-sub">The position at the start of the forecast. Loans are entered below; retained earnings are the balancing figure (currently <strong>{{ opening_reserves|cfn }}</strong>).</p>
+  <div class="form-row">
+    {% for key, label in [('ppe_cost', 'Property, plant & equipment at cost'), ('ppe_accdep', 'Accumulated depreciation'), ('inventory', 'Inventory'), ('receivables', 'Trade receivables'), ('other_assets', 'Other assets'), ('cash', 'Cash and bank (negative = overdraft)'), ('payables', 'Trade payables'), ('other_liabilities', 'Other liabilities'), ('share_capital', 'Share capital'), ('tax_loss_bf', 'Assessed loss brought forward')] %}
+    <div><label>{{ label }}</label><input type="number" step="any" name="op_{{ key }}" value="{{ base.opening[key]|cfin }}"></div>
+    {% endfor %}
+  </div>
+</div>
+
+<h2 class="cf-section">6. Loans</h2>
+<div class="card">
+  <p class="cf-sub">Existing borrowings (opening balance) and new facilities (drawdown). Interest is charged on the balance at the start of each period. "Equal capital" repays the loan evenly over the repayment years after any grace period; "bullet" repays everything in the maturity year.</p>
+  {% for L in base.loans %}{% set k = loop.index0 %}
+  <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;">
+    <div class="form-row">
+      <div><label>Loan</label><input type="text" class="cf-in" name="ln_name_{{ k }}" value="{{ L.name }}" maxlength="60"></div>
+      <div><label>Opening balance</label><input type="number" step="any" min="0" class="cf-in" name="ln_open_{{ k }}" value="{{ L.opening_balance|cfin }}"></div>
+      <div><label>New drawdown amount</label><input type="number" step="any" min="0" class="cf-in" name="ln_draw_{{ k }}" value="{{ L.drawdown_amount|cfin }}"></div>
+      <div><label>Drawdown at start of year</label><input type="number" min="1" max="{{ base.years }}" class="cf-in" name="ln_dyear_{{ k }}" value="{{ L.drawdown_year }}"></div>
+      <div><label>Interest rate (% a year)</label><input type="number" step="any" min="0" class="cf-in" name="ln_rate_{{ k }}" value="{{ L.rate|cfin }}"></div>
+      <div><label>Repayment</label><select class="cf-in" name="ln_type_{{ k }}"><option value="straight" {% if L.repay_type == 'straight' %}selected{% endif %}>Equal capital repayments</option><option value="bullet" {% if L.repay_type == 'bullet' %}selected{% endif %}>Bullet (all at maturity)</option></select></div>
+      <div><label>Repayment period (years)</label><input type="number" min="1" max="30" class="cf-in" name="ln_ryears_{{ k }}" value="{{ L.repay_years }}"></div>
+      <div><label>Capital grace period (years)</label><input type="number" min="0" max="10" class="cf-in" name="ln_grace_{{ k }}" value="{{ L.grace_years }}"></div>
+      <div><label>Bullet maturity (year no.)</label><input type="number" min="1" max="30" class="cf-in" name="ln_mat_{{ k }}" value="{{ L.maturity_year }}"></div>
+    </div>
+    <button class="btn small danger" name="action" value="del_ln:{{ k }}" formnovalidate onclick="return confirm('Remove this loan?');">Remove loan</button>
+  </div>
+  {% else %}<p class="muted">No loans in the model.</p>{% endfor %}
+  <button class="btn small secondary" name="action" value="add_ln" formnovalidate>+ Add loan</button>
+</div>
+
+<h2 class="cf-section">7. Covenant limits</h2>
+<div class="card">
+  <p class="cf-sub">The tests a lender is likely to set. Leave a box empty to skip that test. Results are on the Loans &amp; covenants tab.</p>
+  <div class="form-row">
+    {% for key, label in [('min_dscr', 'Minimum debt service cover (x)'), ('min_interest_cover', 'Minimum interest cover (x)'), ('max_debt_equity', 'Maximum debt / equity (x)'), ('min_current_ratio', 'Minimum current ratio (x)'), ('max_net_debt_ebitda', 'Maximum net debt / EBITDA (x)')] %}
+    <div><label>{{ label }}</label><input type="number" step="any" name="cov_{{ key }}" value="{{ base.covenants[key]|cfin }}"></div>
+    {% endfor %}
+  </div>
+</div>
+</fieldset>
+
+{% if not model.is_final %}
+<div class="cf-sticky-actions">
+  <button class="btn gold" type="submit" name="action" value="save">Save assumptions</button>
+  <span class="cf-sub" style="margin-left:10px;">Saving recalculates every statement. Add / remove buttons also save what you have typed.</span>
+</div>
+{% endif %}
+</form>
+{% endblock %}

@@ -1,0 +1,86 @@
+{% extends "corpfin/_model_base.html" %}
+{% block tab %}
+{% set h = head %}
+<div class="kpi-grid">
+  {{ m.kpi('Revenue - year 1', h.revenue_first|cfn, cur) }}
+  {{ m.kpi('Revenue - year ' ~ a.years, h.revenue_last|cfn, ('growth ' ~ (h.cagr|cfp) ~ ' a year') if h.cagr is not none else cur) }}
+  {{ m.kpi('EBITDA margin - year 1', h.ebitda_margin_first|cfp, ('final year ' ~ (h.ebitda_margin_last|cfp))) }}
+  {{ m.kpi('Total profit after tax', h.pat_total|cfn, 'over ' ~ a.years ~ ' year(s)') }}
+  {{ m.kpi('Closing cash - final year', h.cash_last|cfn, 'lowest month: ' ~ (h.cash_min|cfn)) }}
+  {{ m.kpi('Borrowings - final year', h.borrowings_last|cfn, 'equity ' ~ (h.equity_last|cfn)) }}
+  {{ m.kpi('Covenant breaches', h.breaches, ('of ' ~ h.covenants_tested ~ ' covenant(s) tested') if h.covenants_tested else 'no covenant limits set') }}
+  {{ m.kpi('Balance sheet', 'Balances' if result.checks.balance_ok else 'OUT', 'cash flow ties: ' ~ ('yes' if result.checks.cash_ok else 'no')) }}
+</div>
+
+<div class="viz-grid">
+  {{ m.chart('pl', 'Revenue, EBITDA and profit', 'by year') }}
+  {{ m.chart('cash', 'Closing cash and borrowings', 'by year') }}
+  {{ m.chart('cfs', 'Cash flow by activity', 'operating, investing, financing') }}
+  {{ m.chart('mcash', 'Year 1 - month by month', 'closing cash') }}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Key figures by year</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for d in result.annual %}<th>{{ d.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      {% for label, key in [('Revenue', 'revenue'), ('Gross profit', 'gross_profit'), ('EBITDA', 'ebitda'), ('Profit after tax', 'pat'), ('Net cash from operations', 'cfo'), ('Capital expenditure', 'capex'), ('Closing cash', 'cash'), ('Borrowings', 'borrowings'), ('Total equity', 'total_equity')] %}
+      <tr><td>{{ label }}</td>{% for d in result.annual %}<td class="n">{{ d[key]|cfn }}</td>{% endfor %}</tr>
+      {% endfor %}
+      <tr><td>Debt service cover</td>{% for r in ratio_rows %}<td class="n">{{ r.dscr|cfx }}</td>{% endfor %}</tr>
+    </tbody>
+  </table></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Model details</h3>
+  {% if model.purpose %}<p style="white-space:pre-wrap;">{{ model.purpose }}</p>{% endif %}
+  <form method="post" action="{{ url_for('corpfin.save_settings', model_id=model.id) }}">
+    <div class="form-row">
+      <div><label>Model name</label><input type="text" name="name" value="{{ model.name }}" maxlength="200" {{ 'disabled' if model.is_final }}></div>
+      <div><label>Engagement</label>
+        <select name="engagement_id" {{ 'disabled' if model.is_final }}><option value="">None</option>
+          {% for e in engagements %}<option value="{{ e.id }}" {% if e.id == model.engagement_id %}selected{% endif %}>{{ e.title }} ({{ e.type }})</option>{% endfor %}
+        </select></div>
+      <div><label>Years to forecast (1 - {{ max_years }})</label><input type="number" min="1" max="{{ max_years }}" name="years" value="{{ a.years }}" {{ 'disabled' if model.is_final }}></div>
+      <div><label>First month</label><input type="month" name="start_month" value="{{ a.start_month }}" {{ 'disabled' if model.is_final }}></div>
+      <div><label>Currency</label>
+        <select name="currency" {{ 'disabled' if model.is_final }}>{% for c in currencies %}<option {% if c == a.currency %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    </div>
+    <label>Purpose / basis of preparation</label>
+    <textarea name="purpose" rows="3" {{ 'disabled' if model.is_final }}>{{ model.purpose or '' }}</textarea>
+    {% if not model.is_final %}<button class="btn" type="submit">Save details</button>{% endif %}
+    <span class="cf-sub" style="margin-left:10px;">Changing the number of years adds or removes forecast years; added years copy the last year's drivers.</span>
+  </form>
+</div>
+
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  <form method="post" action="{{ url_for('corpfin.duplicate_model', model_id=model.id) }}" class="inline"><button class="btn secondary">Duplicate model</button></form>
+  <form method="post" action="{{ url_for('corpfin.project_from_model', model_id=model.id) }}" class="inline">
+    <input type="hidden" name="scenario" value="{{ scenario.id }}"><button class="btn secondary" title="Opens an investment appraisal using this forecast's free cash flows">Appraise as an investment</button></form>
+  {% if user_is_signoff and not model.is_final %}
+  <form method="post" action="{{ url_for('corpfin.finalise_model', model_id=model.id) }}" class="inline" onsubmit="return confirm('Finalise and lock this model?');"><button class="btn gold">Finalise &amp; lock</button></form>
+  {% endif %}
+  {% if not model.is_final %}
+  <form method="post" action="{{ url_for('corpfin.delete_model', model_id=model.id) }}" class="inline" onsubmit="return confirm('Delete this model, its scenarios and valuations? This cannot be undone.');"><button class="btn danger">Delete</button></form>
+  {% endif %}
+  <span class="cf-sub" style="margin:0;">Created {{ model.created_at.strftime('%d %b %Y') if model.created_at }}{% if model.created_by %} by {{ model.created_by.name }}{% endif %}{% if model.updated_by %} &middot; last changed by {{ model.updated_by.name }}{% endif %}</span>
+</div>
+
+<script type="application/json" id="cf-data">{{ charts|tojson }}</script>
+{{ m.chart_boot() }}
+<script>
+(function () {
+  var D = JSON.parse(document.getElementById('cf-data').textContent), C = cfColors, base = { currency: D.currency, unit: 'money' };
+  function mk(o) { for (var k in base) if (!(k in o)) o[k] = base[k]; return o; }
+  cfGo('pl', mk({ type: 'columns', title: 'Revenue, EBITDA and profit', labels: D.years,
+    series: [cfSeries('Revenue', C.BLUE, D.revenue), cfSeries('EBITDA', C.AQUA, D.ebitda), cfSeries('Profit after tax', C.ORANGE, D.pat)] }));
+  cfGo('cash', mk({ type: 'line', title: 'Closing cash and borrowings', labels: D.years,
+    series: [cfSeries('Closing cash', C.BLUE, D.cash), cfSeries('Borrowings', C.ORANGE, D.borrowings), cfSeries('Equity', C.GREY, D.equity)] }));
+  cfGo('cfs', mk({ type: 'columns', title: 'Cash flow by activity', labels: D.years, diverging: true,
+    series: [cfSeries('Operating', C.BLUE, D.cfo), cfSeries('Investing', C.ORANGE, D.cfi), cfSeries('Financing', C.AQUA, D.cff)] }));
+  cfGo('mcash', mk({ type: 'line', title: 'Month by month', labels: D.months,
+    series: [cfSeries('Closing cash', C.BLUE, D.month_cash)] }));
+})();
+</script>
+{% endblock %}

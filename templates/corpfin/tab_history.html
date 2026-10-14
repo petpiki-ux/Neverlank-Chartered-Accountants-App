@@ -1,0 +1,71 @@
+{% extends "corpfin/_model_base.html" %}
+{% block tab %}
+<div class="cf-banner">Enter up to six years of the client's past results. The tool works out growth, margins, returns, liquidity, gearing and working-capital days, and can turn them into starting assumptions for the forecast.</div>
+
+<form method="post" action="{{ url_for('corpfin.save_history', model_id=model.id) }}">
+<fieldset {{ 'disabled' if model.is_final }}>
+<div class="card">
+  <div class="tbl-scroll"><table class="cf-grid">
+    <thead><tr><th>Financial year (oldest first)</th>
+      {% for i in range(6) %}<th><input type="text" class="narrow" style="width:90px;" name="year__{{ i }}" value="{{ hist.years[i] if i < hist.years|length else '' }}" placeholder="e.g. FY2024"></th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr><td colspan="7" style="background:#f3f6fa;"><strong>Income statement</strong></td></tr>
+      {% for k, label in hist_is %}
+      <tr><td>{{ label }}</td>{% for i in range(6) %}<td><input type="number" step="any" name="is_{{ k }}__{{ i }}" value="{{ (hist['is'][k][i] if i < hist.years|length else '')|cfin }}"></td>{% endfor %}</tr>
+      {% endfor %}
+      <tr><td colspan="7" style="background:#f3f6fa;"><strong>Balance sheet at year end</strong></td></tr>
+      {% for k, label in hist_bs %}
+      <tr><td>{{ label }}</td>{% for i in range(6) %}<td><input type="number" step="any" name="bs_{{ k }}__{{ i }}" value="{{ (hist['bs'][k][i] if i < hist.years|length else '')|cfin }}"></td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="cf-sub" style="margin-top:8px;">Enter costs as positive amounts. A column with no year heading is ignored. Net finance costs are interest paid less interest received.</p>
+</div>
+</fieldset>
+{% if not model.is_final %}<button class="btn gold" type="submit">Save &amp; analyse</button>{% endif %}
+</form>
+
+<h2 class="cf-section" id="analysis">Analysis</h2>
+{% if analysis.rows %}
+{% set rows = analysis.rows %}
+<div class="card">
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for r in rows %}<th>{{ r.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+      <tr class="head"><td colspan="{{ rows|length + 1 }}">Performance</td></tr>
+      {% for label, key, fmt in [('Revenue', 'revenue', 'money'), ('Revenue growth', 'growth', 'pctpt'), ('Gross profit', 'gross_profit', 'money'), ('EBITDA', 'ebitda', 'money'), ('Operating profit (EBIT)', 'ebit', 'money'), ('Profit before tax', 'pbt', 'money'), ('Profit after tax', 'pat', 'money'), ('Gross margin', 'gross_margin', 'pct'), ('EBITDA margin', 'ebitda_margin', 'pct'), ('Net margin', 'net_margin', 'pct'), ('Return on equity', 'roe', 'pct'), ('Return on assets', 'roa', 'pct'), ('Return on capital employed', 'roce', 'pct'), ('Asset turnover', 'asset_turnover', 'x')] %}
+      <tr><td>{{ label }}</td>{% for r in rows %}<td class="n">{% if fmt == 'pctpt' %}{{ r[key]|cfpp if r[key] is not none else '-' }}{% else %}{{ r[key]|cffmt(fmt) }}{% endif %}</td>{% endfor %}</tr>
+      {% endfor %}
+      <tr class="head"><td colspan="{{ rows|length + 1 }}">Liquidity, gearing and efficiency</td></tr>
+      {% for label, key, fmt in [('Current ratio', 'current_ratio', 'x'), ('Quick ratio', 'quick_ratio', 'x'), ('Debt / equity', 'debt_equity', 'x'), ('Net debt / EBITDA', 'net_debt_ebitda', 'x'), ('Interest cover', 'interest_cover', 'x'), ('Receivable days', 'receivable_days', 'days'), ('Inventory days', 'inventory_days', 'days'), ('Payable days', 'payable_days', 'days'), ('Cash conversion cycle (days)', 'cash_cycle', 'days')] %}
+      <tr><td>{{ label }}</td>{% for r in rows %}<td class="n">{{ r[key]|cffmt(fmt) }}</td>{% endfor %}</tr>
+      {% endfor %}
+      <tr class="head"><td colspan="{{ rows|length + 1 }}">Common-size income statement (% of revenue)</td></tr>
+      {% for label, key in [('Cost of sales', 'cogs'), ('Operating expenses', 'opex'), ('Depreciation', 'dep'), ('Finance costs', 'fin_cost'), ('Tax', 'tax'), ('Profit after tax', 'pat')] %}
+      <tr><td>{{ label }}</td>{% for r in rows %}<td class="n">{{ r.cs[key]|cfp }}</td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% for r in rows if r.bs_gap|abs > 1 %}
+  <div class="flash warning" style="margin-top:8px;">{{ r.label }}: the balance sheet figures entered differ by {{ r.bs_gap|cfn }} (assets less liabilities less equity). Check that every balance sheet line has been entered.</div>
+  {% endfor %}
+</div>
+
+{% if suggestion %}
+<div class="card">
+  <h3 style="margin-top:0;">Suggested starting assumptions</h3>
+  <p class="cf-sub">Taken from the latest year and the average growth. Applying them <strong>replaces</strong> the revenue, cost of sales, expense lines, working-capital days, opening balance sheet and existing borrowings on the Assumptions tab (loan terms are set to a default 12% over 5 years - review them).</p>
+  <ul>
+    <li>Year-1 revenue {{ suggestion.revenue[0].y1|cfn }}, growing {{ suggestion.revenue[0].growth[1]|cfpp if a.years > 1 else '' }} a year.</li>
+    <li>Cost of sales {{ suggestion.cogs_pct[0]|cfpp }} of revenue; operating expenses {{ suggestion.opex[0].y1|cfn }} in year 1.</li>
+    <li>Receivable / inventory / payable days {{ suggestion.rec_days[0]|cfn }} / {{ suggestion.inv_days[0]|cfn }} / {{ suggestion.pay_days[0]|cfn }}.</li>
+  </ul>
+  {% if not model.is_final %}
+  <form method="post" action="{{ url_for('corpfin.apply_history', model_id=model.id) }}" onsubmit="return confirm('Replace the current assumptions with these suggestions?');"><button class="btn">Use as starting assumptions</button></form>
+  {% endif %}
+</div>
+{% endif %}
+{% else %}
+<div class="card"><div class="empty-state">Enter the client's past figures above and save to see the analysis.</div></div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,82 @@
+{% extends "corpfin/_model_base.html" %}
+{% macro shock_form(sc, is_new=False) %}
+<form method="post" action="{{ url_for('corpfin.save_scenario', model_id=model.id) }}" style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;">
+  {% if sc %}<input type="hidden" name="scenario_id" value="{{ sc.id }}">{% endif %}
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+    <div><label>Scenario name</label><input type="text" class="cf-in" name="name" value="{{ sc.name if sc else '' }}" {% if sc and sc.is_base %}disabled{% endif %} maxlength="100" style="width:230px;" placeholder="e.g. Downside - slow collections"></div>
+    {% for key, label, _ in shock_fields %}
+    <div><label title="{{ label }}">{{ label.split(' (')[0] }}</label>
+      <input type="number" step="any" class="cf-in" name="s_{{ key }}" value="{{ (sc.shocks.get(key, 0) if sc else 0)|cfin }}" {% if sc and sc.is_base %}disabled{% endif %} style="width:100px;"></div>
+    {% endfor %}
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-top:6px;">
+    <div style="flex:1;min-width:260px;"><label>Notes</label><input type="text" class="cf-in" name="notes" value="{{ sc.notes if sc and sc.notes else '' }}" placeholder="What this scenario represents"></div>
+    {% if not model.is_final %}
+    <div style="padding-bottom:14px;"><button class="btn small" type="submit">{{ 'Add scenario' if is_new else 'Save' }}</button>
+      {% if sc and not sc.is_base %}<button class="btn small danger" formaction="{{ url_for('corpfin.delete_scenario', model_id=model.id, sid=sc.id) }}" formnovalidate onclick="return confirm('Delete this scenario?');">Delete</button>{% endif %}</div>
+    {% endif %}
+  </div>
+</form>
+{% endmacro %}
+
+{% block tab %}
+<h2 class="cf-section" style="margin-top:0;">Scenario comparison</h2>
+<div class="card">
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th>{% for r in scen_rows %}<th>{{ r.scenario.name }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for label, key in [('Revenue - year 1', 'revenue_y1'), ('Revenue - final year', 'revenue_last'), ('EBITDA - year 1', 'ebitda_y1'), ('EBITDA - final year', 'ebitda_last'), ('Total profit after tax', 'pat_total'), ('Closing cash - final year', 'cash_last'), ('Lowest cash balance (any month)', 'cash_min'), ('Borrowings - final year', 'borrowings_last'), ('Equity - final year', 'equity_last')] %}
+      <tr><td>{{ label }}</td>{% for r in scen_rows %}<td class="n {{ 'neg' if r.summary[key] is not none and r.summary[key] < 0 }}">{{ r.summary[key]|cfn }}</td>{% endfor %}</tr>
+    {% endfor %}
+      <tr><td>Lowest debt service cover</td>{% for r in scen_rows %}<td class="n">{{ r.summary.dscr_min|cfx }}</td>{% endfor %}</tr>
+    </tbody>
+  </table></div>
+</div>
+<div class="viz-grid">
+  {{ m.chart('sc_pat', 'Total profit by scenario') }}
+  {{ m.chart('sc_cash', 'Closing cash by scenario') }}
+</div>
+
+<h2 class="cf-section">Scenarios</h2>
+<div class="card">
+  <p class="cf-sub">A scenario is a set of adjustments to the base assumptions. Zero means "as in the base case". For example: revenue level -10, receivable days +15 and loan rates +3 describes a downturn.</p>
+  {% for r in scen_rows %}{{ shock_form(r.scenario) }}{% endfor %}
+  {% if not model.is_final %}
+  <h4 style="margin:14px 0 6px;">Add a scenario</h4>
+  {{ shock_form(None, True) }}
+  {% endif %}
+</div>
+
+<h2 class="cf-section" id="sensitivity">Sensitivity grid</h2>
+<div class="card">
+  <form method="get" class="an-filters">
+    <div><label>Across</label><select name="sx" onchange="this.form.submit()">{% for k, lab in sens_fields %}<option value="{{ k }}" {% if k == sens.sx %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+    <div><label>Down</label><select name="sy" onchange="this.form.submit()">{% for k, lab in sens_fields %}<option value="{{ k }}" {% if k == sens.sy %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+    <div><label>Measure</label><select name="sm" onchange="this.form.submit()">{% for k, lab in sens_metrics %}<option value="{{ k }}" {% if k == sens.metric %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+    <div><label>Starting from</label><select name="scenario" onchange="this.form.submit()">{% for s in scenarios %}<option value="{{ s.id }}" {% if s.id == chosen.id %}selected{% endif %}>{{ s.name }}</option>{% endfor %}</select></div>
+  </form>
+  <p class="cf-sub">{{ sens.metric_label }} when <strong>{{ sens.x_label }}</strong> (across) and <strong>{{ sens.y_label }}</strong> (down) are changed together. The model is re-run for every cell; the shaded cell is the starting point.</p>
+  <div class="tbl-scroll"><table class="cf-table cf-grid-sens">
+    <thead><tr><th>{{ sens.y_label.split(' (')[0] }} &darr; / {{ sens.x_label.split(' (')[0] }} &rarr;</th>{% for x in sens.xs %}<th>{{ '%+g'|format(x) if x else '0' }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for y in sens.ys %}{% set yi = loop.index0 %}
+      <tr><td>{{ '%+g'|format(y) if y else '0' }}</td>
+        {% for x in sens.xs %}{% set v = sens.grid[yi][loop.index0] %}
+        <td class="n {{ 'base' if x == 0 and y == 0 }} {{ 'neg' if v is not none and v < 0 }}">{{ v|cfx if sens.metric == 'dscr_min' else v|cfn }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<script type="application/json" id="cf-data">{{ {'currency': cur, 'names': scen_rows|map(attribute='scenario')|map(attribute='name')|list, 'pat': scen_rows|map(attribute='summary')|map(attribute='pat_total')|list, 'cash': scen_rows|map(attribute='summary')|map(attribute='cash_last')|list, 'cash_min': scen_rows|map(attribute='summary')|map(attribute='cash_min')|list}|tojson }}</script>
+{{ m.chart_boot() }}
+<script>
+(function () {
+  var D = JSON.parse(document.getElementById('cf-data').textContent), C = cfColors, base = { currency: D.currency, unit: 'money' };
+  function mk(o) { for (var k in base) if (!(k in o)) o[k] = base[k]; return o; }
+  cfGo('sc_pat', mk({ type: 'columns', title: 'Total profit by scenario', labels: D.names, diverging: true, series: [cfSeries('Total profit after tax', C.BLUE, D.pat)] }));
+  cfGo('sc_cash', mk({ type: 'columns', title: 'Closing cash by scenario', labels: D.names, diverging: true,
+    series: [cfSeries('Closing cash (final year)', C.AQUA, D.cash), cfSeries('Lowest cash balance', C.ORANGE, D.cash_min)] }));
+})();
+</script>
+{% endblock %}

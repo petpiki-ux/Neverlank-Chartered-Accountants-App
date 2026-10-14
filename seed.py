@@ -15,6 +15,7 @@ from models import (
     FilingIndexSection, StatutoryDeadline, PayrollTaxBand, PayrollTaxSettings, PAYROLL_PAY_FREQUENCIES,
     LeaveType, LEAVE_TYPES_STATUTORY_ZW, CompanyDocument, SubstantiveProcedureItem, FinalisationChecklist,
     FinalisationChecklistItem, QPDInstalmentRate, StandardChartOfAccounts,
+    CORPFIN_ENGAGEMENT_TYPE, TAX_ADVISORY_TYPE, template_folder,
 )
 from config import Config
 
@@ -103,28 +104,35 @@ FULL_AUDIT_PROGRAM = [
     ("Completion & Reporting", "Draft and issue the audit report"),
 ]
 
-CONSULTING_PROGRAM = [
-    ("Engagement Setup", "Understand and document the client's objectives"),
-    ("Engagement Setup", "Agree scope, deliverables and timeline with the client"),
-    ("Engagement Setup", "Issue engagement letter / proposal confirming terms and fees"),
-    ("Engagement Setup", "Confirm independence / conflict of interest check"),
+CORPFIN_PROGRAM = [
+    ("Engagement Setup", "Understand the client's objectives, the decision to be supported and who will rely on the work"),
+    ("Engagement Setup", "Agree scope, deliverables, timetable and fees; issue the engagement letter"),
+    ("Engagement Setup", "Confirm independence, conflicts of interest and any limitations on use of the work"),
 
-    ("Diagnostic & Data Gathering", "Collect relevant background documents and data"),
-    ("Diagnostic & Data Gathering", "Conduct interviews with key stakeholders"),
-    ("Diagnostic & Data Gathering", "Perform site visits/observations where relevant"),
+    ("Information & Basis of Preparation", "Obtain historical financial statements, management accounts and budgets"),
+    ("Information & Basis of Preparation", "Obtain loan agreements, covenants, capex plans, contracts and other source documents"),
+    ("Information & Basis of Preparation", "Perform a historical financial analysis (growth, margins, working capital, leverage)"),
+    ("Information & Basis of Preparation", "Document the basis of preparation and key limitations"),
 
-    ("Analysis", "Analyse findings against agreed objectives/benchmarks"),
-    ("Analysis", "Identify key issues, risks and opportunities"),
-    ("Analysis", "Develop recommendations"),
+    ("Financial Model", "Agree forecast horizon, revenue drivers and the opening balance sheet with management"),
+    ("Financial Model", "Build the income statement, balance sheet and cash flow forecast in the Corporate Finance module"),
+    ("Financial Model", "Confirm the balance sheet balances and the cash flow agrees to the balance sheet in every period"),
+    ("Financial Model", "Review assumptions with management and record their sign-off on the key drivers"),
+    ("Financial Model", "Run base, upside and downside scenarios and sensitivity tables"),
+    ("Financial Model", "Test loan repayments and covenant compliance in every scenario"),
 
-    ("Deliverable & Reporting", "Draft the report / recommendations document"),
-    ("Deliverable & Reporting", "Internal quality review of the deliverable"),
-    ("Deliverable & Reporting", "Present findings to the client"),
-    ("Deliverable & Reporting", "Incorporate client feedback"),
+    ("Valuation & Investment Analysis", "Select valuation approach(es): DCF, trading multiples, or net assets"),
+    ("Valuation & Investment Analysis", "Support the discount rate (WACC) inputs and terminal value assumptions"),
+    ("Valuation & Investment Analysis", "Prepare NPV / IRR / payback analysis for any investment or feasibility question"),
+    ("Valuation & Investment Analysis", "Cross-check the valuation range with a second method and explain differences"),
 
-    ("Engagement Close-out", "Obtain client sign-off/acceptance of the deliverable"),
-    ("Engagement Close-out", "Complete the engagement file and billing"),
-    ("Engagement Close-out", "Conduct a post-engagement review / lessons learned"),
+    ("Deliverable & Reporting", "Draft the report: summary, assumptions, forecasts, scenarios, valuation and recommendations"),
+    ("Deliverable & Reporting", "Independent internal review of the model (formulas, logic, assumptions) and of the report"),
+    ("Deliverable & Reporting", "Present the findings to the client and incorporate feedback"),
+
+    ("Engagement Close-out", "Obtain client sign-off / acceptance of the deliverable"),
+    ("Engagement Close-out", "Make the model Final and file the Excel export on the engagement file"),
+    ("Engagement Close-out", "Complete the engagement file and billing; hold a lessons-learned review"),
 ]
 
 TAX_CGT_PROGRAM = [
@@ -271,14 +279,14 @@ TEMPLATES = [
         SECRETARIAL_PROGRAM,
     ),
     (
-        "Consulting Engagement (General)",
-        "Consulting",
-        "General-purpose consulting checklist: scoping, diagnostic, analysis, deliverable and close-out.",
-        CONSULTING_PROGRAM,
+        "Corporate Finance & Advisory Engagement (General)",
+        CORPFIN_ENGAGEMENT_TYPE,
+        "Checklist for corporate finance and business advisory work: scoping, financial forecasts, scenarios, valuation / investment analysis, reporting and close-out.",
+        CORPFIN_PROGRAM,
     ),
     (
         "Tax / CGT Advisory",
-        "Consulting",
+        TAX_ADVISORY_TYPE,
         "Checklist for tax advisory and Capital Gains Tax engagements.",
         TAX_CGT_PROGRAM,
     ),
@@ -357,12 +365,12 @@ DOCUMENT_LIBRARY = [
      "Engagement letter referencing the agreed-upon-procedures standard."),
     ("Assurance", "AUP-02 Factual Findings Report.docx", "AUP-02", "Factual Findings Report",
      "Report of factual findings for an agreed-upon-procedures engagement."),
-    ("Consulting", "CE-01 Engagement Letter Proposal.docx", "CE-01", "Engagement Letter / Proposal",
-     "General consulting engagement letter and proposal."),
-    ("Consulting", "CE-02 Findings and Recommendations Report.docx", "CE-02", "Findings & Recommendations Report",
+    (CORPFIN_ENGAGEMENT_TYPE, "CE-01 Engagement Letter Proposal.docx", "CE-01", "Engagement Letter / Proposal",
+     "Engagement letter and proposal for corporate finance and business advisory work."),
+    (CORPFIN_ENGAGEMENT_TYPE, "CE-02 Findings and Recommendations Report.docx", "CE-02", "Findings & Recommendations Report",
      "Deliverable report template: findings, recommendations, next steps."),
-    ("Consulting", "CE-03 Client Sign-off Acceptance Form.docx", "CE-03", "Client Sign-off / Acceptance Form",
-     "Client acceptance form for a consulting deliverable."),
+    (CORPFIN_ENGAGEMENT_TYPE, "CE-03 Client Sign-off Acceptance Form.docx", "CE-03", "Client Sign-off / Acceptance Form",
+     "Client acceptance form for a corporate finance / advisory deliverable."),
     ("Tax Advisory", "TX-01 Engagement Letter.docx", "TX-01", "Engagement Letter (Tax / CGT Advisory)",
      "Engagement letter for tax advisory and CGT engagements."),
     ("Tax Advisory", "TX-02 Fact Finding Information Request Schedule.docx", "TX-02", "Fact-Finding / Information Request Schedule",
@@ -391,8 +399,8 @@ def seed_document_templates():
         if DocumentTemplate.query.filter_by(type=eng_type, filename=filename).first():
             continue
 
-        src_dir = os.path.join(Config.DOCUMENT_TEMPLATES_SEED_DIR, eng_type)
-        dst_dir = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, eng_type)
+        src_dir = os.path.join(Config.DOCUMENT_TEMPLATES_SEED_DIR, template_folder(eng_type))
+        dst_dir = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, template_folder(eng_type))
         os.makedirs(dst_dir, exist_ok=True)
         src_path = os.path.join(src_dir, filename)
         dst_path = os.path.join(dst_dir, filename)
