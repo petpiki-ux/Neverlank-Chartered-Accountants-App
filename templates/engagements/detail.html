@@ -120,6 +120,27 @@
 {% endif %}
 
 {% if tab == 'overview' %}
+  {% if engagement.is_corporate_finance %}
+  <div class="card">
+    <h3 class="mt-0">Advisory work on this engagement</h3>
+    <div class="form-row">
+      <div><strong>Forecast models:</strong> {{ engagement.cf_models|length }}
+        {% if engagement.cf_models %}<div class="muted" style="font-size:12px;">Latest: <a href="{{ url_for('corpfin.model_tab', model_id=engagement.cf_models[0].id, tab='overview') }}">{{ engagement.cf_models[0].model_number }} {{ engagement.cf_models[0].name }}</a> ({{ engagement.cf_models[0].status }})</div>{% endif %}</div>
+      <div><strong>Investment appraisals:</strong> {{ engagement.cf_projects|length }}
+        {% if engagement.cf_projects %}<div class="muted" style="font-size:12px;">Latest: <a href="{{ url_for('corpfin.view_project', project_id=engagement.cf_projects[0].id) }}">{{ engagement.cf_projects[0].project_number }} {{ engagement.cf_projects[0].name }}</a> ({{ engagement.cf_projects[0].status }})</div>{% endif %}</div>
+    </div>
+    {% if acceptance_cleared or current_user.role == 'admin' %}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+      <a class="btn gold" href="{{ url_for('corpfin.new_model', client_id=engagement.client_id, engagement_id=engagement.id) }}">New forecast model</a>
+      <a class="btn" href="{{ url_for('corpfin.new_project', client_id=engagement.client_id, engagement_id=engagement.id) }}">New investment appraisal</a>
+      <a class="btn secondary" href="{{ url_for('corpfin.engagement_models', engagement_id=engagement.id) }}">All models</a>
+      <a class="btn secondary" href="{{ url_for('corpfin.engagement_projects', engagement_id=engagement.id) }}">All appraisals</a>
+    </div>
+    {% else %}
+    <div class="muted" style="font-size:12px;">&#128274; Models and appraisals unlock once Client Acceptance &amp; Continuance is signed off.</div>
+    {% endif %}
+  </div>
+  {% endif %}
   <div class="card">
     <div class="form-row">
       <div><strong>Partner:</strong> {{ engagement.partner.name if engagement.partner else '—' }}</div>
@@ -2031,25 +2052,25 @@
       <div><label for="file">File *</label><input type="file" id="file" name="file" required></div>
       <div><label for="category">Category</label><input type="text" id="category" name="category" placeholder="e.g. Working Papers" value="General"></div>
       <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" placeholder="e.g. A-1"></div>
-      <div><label for="filing_index_id">WP No.</label>{{ filing_index_picker() }}</div>
+      {% if not engagement.is_corporate_finance %}<div><label for="filing_index_id">WP No.</label>{{ filing_index_picker() }}</div>{% endif %}
       <div><label for="notes">Notes</label><input type="text" id="notes" name="notes"></div>
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
     </form>
-    <p class="muted" style="font-size:12px;">Re-uploading a file with the same name and category creates a new version automatically. Reference is optional free text; WP No. picks a code from the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a> and follows the firm's N[code]_[Description]_[Year] naming convention on download.</p>
+    <p class="muted" style="font-size:12px;">Re-uploading a file with the same name and category creates a new version automatically. Reference is optional free text;{% if not engagement.is_corporate_finance %} WP No. picks a code from the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a> and follows the firm's N[code]_[Description]_[Year] naming convention on download.{% endif %}</p>
   </div>
 
   <div class="card">
     {% if engagement.documents %}
     <table>
-      <thead><tr><th>File</th><th>Reference</th><th>WP No.</th><th>Category</th><th>Substantive area</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+      <thead><tr><th>File</th><th>Reference</th>{% if not engagement.is_corporate_finance %}<th>WP No.</th>{% endif %}<th>Category</th>{% if not engagement.is_corporate_finance %}<th>Substantive area</th>{% endif %}<th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
       <tbody>
       {% for d in engagement.documents|sort(attribute='uploaded_at', reverse=True) %}
         <tr>
           <td>{{ d.original_filename }}{% if d.notes %}<div class="muted" style="font-size:11.5px;">{{ d.notes }}</div>{% endif %}</td>
           <td class="muted">{{ d.reference or '—' }}</td>
-          <td class="muted">{{ d.filing_index.display_label if d.filing_index else '—' }}</td>
+          {% if not engagement.is_corporate_finance %}<td class="muted">{{ d.filing_index.display_label if d.filing_index else '—' }}</td>{% endif %}
           <td>{{ d.category }}</td>
-          <td class="muted">{{ d.substantive_area.area if d.substantive_area else '—' }}</td>
+          {% if not engagement.is_corporate_finance %}<td class="muted">{{ d.substantive_area.area if d.substantive_area else '—' }}</td>{% endif %}
           <td>v{{ d.version }}</td>
           <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
           <td>{{ (d.uploaded_at|cat).strftime('%d %b %Y %H:%M') }}</td>

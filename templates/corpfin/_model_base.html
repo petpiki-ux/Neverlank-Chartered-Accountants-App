@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "corpfin/_macros.html" as m %}
+{% import "services/_tabs.html" as svc with context %}
 {% block title %}{{ model.model_number }} {{ model.name }} - {{ firm_name }}{% endblock %}
 {% block content %}
 <div class="page-header">
@@ -14,6 +15,9 @@
     <a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">All models</a>
   </div>
 </div>
+{% if model.engagement and model.engagement.is_corporate_finance %}
+{{ svc.service_tabs(model.engagement, 'models') }}
+{% endif %}
 
 <div class="tabs">
   {% for key, label in MODEL_TABS %}

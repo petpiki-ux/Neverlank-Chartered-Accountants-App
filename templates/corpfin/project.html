@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% import "corpfin/_macros.html" as m %}
+{% import "services/_tabs.html" as svc with context %}
 {% block title %}{{ proj.project_number }} {{ proj.name }} - {{ firm_name }}{% endblock %}
 {% block content %}
 {% set cur = inputs.currency %}
@@ -15,6 +16,9 @@
     <a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">All work</a>
   </div>
 </div>
+{% if proj.engagement and proj.engagement.is_corporate_finance %}
+{{ svc.service_tabs(proj.engagement, 'appraisals') }}
+{% endif %}
 
 <div class="kpi-grid">
   {{ m.kpi('Net present value', an.npv|cfn, ('Accept - adds value' if an.accept else 'Reject - destroys value') ~ ' at ' ~ (inputs.discount_rate|cfpp)) }}

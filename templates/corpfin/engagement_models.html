@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}Models &amp; Forecasts - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{{ svc.service_header(engagement) }}
+{{ svc.service_tabs(engagement, 'models') }}
+
+{% if not unlocked %}
+<div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before building models here.</div></div>
+{% else %}
+<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+  <div>
+    <strong>Financial forecasts for {{ engagement.client.name }}</strong>
+    <div class="muted" style="font-size:12px;">Income statement, balance sheet and cash flow for 1 to 10 years (monthly in year 1), with scenarios, loans &amp; covenants, valuation, budget vs actual and Excel / PDF output.</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a class="btn gold" href="{{ url_for('corpfin.new_model', client_id=engagement.client_id, engagement_id=engagement.id) }}">New forecast model</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.loan_calculator') }}">Loan calculator</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if models %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Number</th><th>Model</th><th>Years</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+    <tbody>
+    {% for m in models %}
+      <tr>
+        <td><a href="{{ url_for('corpfin.model_tab', model_id=m.id, tab='overview') }}">{{ m.model_number }}</a></td>
+        <td>{{ m.name }}</td>
+        <td>{{ (m.assumptions or {}).get('years', '-') }}</td>
+        <td><span class="badge status-{{ m.status }}">{{ m.status }}</span></td>
+        <td>{{ m.updated_at.strftime('%d %b %Y') if m.updated_at else '' }}</td>
+        <td class="text-right"><a class="btn small secondary" href="{{ url_for('corpfin.model_tab', model_id=m.id, tab='overview') }}">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="empty-state">No forecast models on this engagement yet. Choose <strong>New forecast model</strong> to build the first one.</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

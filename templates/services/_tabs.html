@@ -1,8 +1,9 @@
-{# Tab bar for the two stand-alone service engagements (Whistle-blower and
-   Training). Used by detail.html (for the shared Overview / Client Acceptance /
-   Documents / Tasks tabs) and by every page of the two service workspaces, so
-   the bar looks the same wherever you are. `active` is one of: overview,
-   acceptance, documents, tasks, subscription, cases, reports, sessions. #}
+{# Tab bar for the stand-alone service engagements (Whistle-blower, Training and
+   Corporate Finance & Business Advisory). Used by detail.html (for the shared
+   Overview / Client Acceptance / Documents / Tasks tabs) and by every page of
+   the service workspaces, so the bar looks the same wherever you are. `active`
+   is one of: overview, acceptance, documents, tasks, checklist, subscription,
+   cases, reports, sessions, models, appraisals. #}
 {% macro service_tabs(engagement, active) %}
 <div class="tabs">
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='overview') }}" class="{% if active=='overview' %}active{% endif %}">Overview</a>
@@ -13,6 +14,10 @@
   <a href="{{ url_for('whistleblower.reports', engagement_id=engagement.id) }}" class="{% if active=='reports' %}active{% endif %}">Client Reports</a>
   {% elif engagement.is_training_service %}
   <a href="{{ url_for('training.sessions', engagement_id=engagement.id) }}" class="{% if active=='sessions' %}active{% endif %}">Sessions ({{ engagement.training_sessions.count() }})</a>
+  {% elif engagement.is_corporate_finance %}
+  <a href="{{ url_for('corpfin.engagement_models', engagement_id=engagement.id) }}" class="{% if active=='models' %}active{% endif %}">Models &amp; Forecasts ({{ engagement.cf_models|length }})</a>
+  <a href="{{ url_for('corpfin.engagement_projects', engagement_id=engagement.id) }}" class="{% if active=='appraisals' %}active{% endif %}">Investment Appraisals ({{ engagement.cf_projects|length }})</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if active=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if active=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if active=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>

@@ -2019,9 +2019,11 @@ class Engagement(db.Model):
 
     @property
     def is_standalone_service(self):
-        """True for the two service lines that run in their own workspace
-        (no audit planning/fieldwork/finalisation tabs)."""
-        return self.type in (WHISTLEBLOWER_SERVICE_TYPE, TRAINING_SERVICE_TYPE)
+        """True for the service lines that run in their own workspace
+        (no audit planning/fieldwork/finalisation/tax-computation tabs):
+        Whistle-blower, Training and Corporate Finance & Business Advisory
+        (including engagements still carrying the old "Consulting" type)."""
+        return self.type in (WHISTLEBLOWER_SERVICE_TYPE, TRAINING_SERVICE_TYPE, CORPFIN_ENGAGEMENT_TYPE, LEGACY_CONSULTING_TYPE)
 
     @property
     def has_tax_module(self):

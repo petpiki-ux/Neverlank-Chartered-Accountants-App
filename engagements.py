@@ -547,11 +547,19 @@ def view_engagement(engagement_id):
     # still points at it.
     if tab == "trial_balance" and engagement.type == "Secretarial":
         tab = "overview"
-    # The two stand-alone service lines (Whistle-blower / Training) only have
-    # the shared Overview / Client Acceptance / Documents / Tasks tabs here -
-    # their own workspaces live in whistleblower.py / training.py.
-    if engagement.is_standalone_service and tab not in ("overview", "acceptance", "documents", "tasks"):
-        tab = "overview"
+    # The stand-alone service lines (Whistle-blower / Training) only have the
+    # shared Overview / Client Acceptance / Documents / Tasks tabs here - their
+    # own workspaces live in whistleblower.py / training.py. Corporate Finance &
+    # Business Advisory additionally keeps the Checklist tab; its models and
+    # appraisals live in corporate_finance.py. None of them has the audit
+    # (entity / analytical / risk / planning / TB / substantive / finalisation)
+    # or tax-computation tabs.
+    if engagement.is_standalone_service:
+        allowed_tabs = ("overview", "acceptance", "documents", "tasks")
+        if engagement.is_corporate_finance:
+            allowed_tabs += ("checklist",)
+        if tab not in allowed_tabs:
+            tab = "overview"
     # Document Templates matching this engagement's type (Audit/Assurance/
     # Consulting) - shown on the Documents tab so the right blank
     # letters/workpapers for this client's engagement are one click away,

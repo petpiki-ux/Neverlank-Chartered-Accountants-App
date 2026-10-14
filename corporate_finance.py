@@ -28,6 +28,7 @@ from extensions import db
 from models import (
     Client, Engagement, CFModel, CFScenario, CFValuation, CFProject, CF_STATUSES,
     user_has_permission, user_can_access_client, user_can_access_engagement, visible_clients,
+    engagement_acceptance_cleared,
 )
 from invoicing import FIRM_LETTERHEAD, next_sequence_number
 
@@ -260,6 +261,40 @@ def dashboard():
         client_filter = None
     clients, models, projects = _visible_models(client_filter)
     return render_template("corpfin/dashboard.html", clients=clients, models=models, projects=projects, client_filter=client_filter)
+
+
+# =========================================================================== engagement workspace
+# A Corporate Finance engagement has its own tab bar (Overview, Client Acceptance, Models & Forecasts,
+# Investment Appraisals, Checklist, Documents, Tasks - see templates/services/_tabs.html) in place of the audit
+# tabs. These two pages are the "Models & Forecasts" and "Investment Appraisals" tabs.
+
+def _advisory_engagement_or_404(engagement_id):
+    eng = Engagement.query.get_or_404(engagement_id)
+    if not eng.is_corporate_finance:
+        abort(404)
+    if not user_can_access_client(current_user, eng.client_id):
+        abort(403, description="You are not working on this client, so you cannot open this.")
+    if not user_can_access_engagement(current_user, eng):
+        abort(403, description="You are not on this engagement's team, so you cannot open anything inside it.")
+    return eng
+
+
+def _acceptance_open(eng):
+    return current_user.role == "admin" or engagement_acceptance_cleared(eng)
+
+
+@corpfin_bp.route("/engagements/<int:engagement_id>/models")
+def engagement_models(engagement_id):
+    eng = _advisory_engagement_or_404(engagement_id)
+    models = [m for m in eng.cf_models if _can_see(m)]
+    return render_template("corpfin/engagement_models.html", engagement=eng, models=models, unlocked=_acceptance_open(eng))
+
+
+@corpfin_bp.route("/engagements/<int:engagement_id>/appraisals")
+def engagement_projects(engagement_id):
+    eng = _advisory_engagement_or_404(engagement_id)
+    projects = [p for p in eng.cf_projects if _can_see(p)]
+    return render_template("corpfin/engagement_projects.html", engagement=eng, projects=projects, unlocked=_acceptance_open(eng))
 
 
 # =========================================================================== models: create / settings

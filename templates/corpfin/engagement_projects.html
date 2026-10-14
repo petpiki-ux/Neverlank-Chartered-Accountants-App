@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}Investment Appraisals - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{{ svc.service_header(engagement) }}
+{{ svc.service_tabs(engagement, 'appraisals') }}
+
+{% if not unlocked %}
+<div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before building appraisals here.</div></div>
+{% else %}
+<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+  <div>
+    <strong>Capital budgeting &amp; feasibility for {{ engagement.client.name }}</strong>
+    <div class="muted" style="font-size:12px;">NPV, IRR, MIRR, payback and profitability index for a project or investment, with written feasibility notes and Excel / PDF output.</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a class="btn gold" href="{{ url_for('corpfin.new_project', client_id=engagement.client_id, engagement_id=engagement.id) }}">New investment appraisal</a>
+  </div>
+</div>
+
+<div class="card">
+  {% if projects %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Number</th><th>Study</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+    <tbody>
+    {% for p in projects %}
+      <tr>
+        <td><a href="{{ url_for('corpfin.view_project', project_id=p.id) }}">{{ p.project_number }}</a></td>
+        <td>{{ p.name }}</td>
+        <td><span class="badge status-{{ p.status }}">{{ p.status }}</span></td>
+        <td>{{ p.updated_at.strftime('%d %b %Y') if p.updated_at else '' }}</td>
+        <td class="text-right"><a class="btn small secondary" href="{{ url_for('corpfin.view_project', project_id=p.id) }}">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="empty-state">No investment appraisals on this engagement yet.</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}
