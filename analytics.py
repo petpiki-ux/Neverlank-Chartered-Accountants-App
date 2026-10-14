@@ -111,8 +111,11 @@ def _invoice_rows(currency):
             payments = [(to_cat(inv.paid_at).date() if inv.paid_at else inv.issue_date, gross)]
         else:
             payments = [(r.paid_on, r.amount or 0.0) for r in inv.active_receipts]
+        # credit notes: (date, ex-VAT amount, VAT-inclusive amount)
+        credits = [(c.issue_date, c.subtotal, c.total) for c in inv.active_credit_notes]
+        credited_gross = sum(g for _, _, g in credits)
         paid = None  # the day it was settled in full (None while anything is owing)
-        if payments and sum(a for _, a in payments) >= gross - 0.005:
+        if payments and sum(a for _, a in payments) >= gross - credited_gross - 0.005:
             paid = max(d for d, _ in payments)
         elif inv.status == "Paid" and not payments:
             paid = inv.issue_date
@@ -123,7 +126,7 @@ def _invoice_rows(currency):
             "engagement_id": inv.engagement_id,
             "service": (eng.type if eng else None) or NO_ENGAGEMENT_LABEL,
             "issue": inv.issue_date, "due": inv.due_date or inv.issue_date,
-            "paid": paid, "net": net, "gross": gross, "payments": payments,
+            "paid": paid, "net": net, "gross": gross, "payments": payments, "credits": credits,
         })
     return rows
 
@@ -147,8 +150,14 @@ def _expense_rows(currency):
 def _owed_on(row, day):
     """What the client still owed on this invoice at the end of `day`."""
     received = sum(a for d, a in row["payments"] if d <= day)
-    left = row["gross"] - received
+    credited = sum(g for d, _n, g in row.get("credits", ()) if d <= day)
+    left = row["gross"] - received - credited
     return left if left > 0.005 else 0.0
+
+
+def _credited_to(row, day, index=2):
+    """Credit notes dated on/before `day` (index 2 = VAT-inclusive, 1 = ex-VAT)."""
+    return sum(c[index] for c in row.get("credits", ()) if c[0] <= day)
 
 
 def outstanding_at(rows, day):
@@ -177,7 +186,8 @@ def collected_net(rows, lo, hi):
 
 def dso_at(rows, day, window=DSO_WINDOW_DAYS):
     owed = sum(r["owed"] for r in outstanding_at(rows, day))
-    sales = sum(r["gross"] for r in rows if day - timedelta(days=window) < r["issue"] <= day)
+    sales = sum(r["gross"] - sum(g for d, _n, g in r.get("credits", ()) if d <= day)
+                for r in rows if day - timedelta(days=window) < r["issue"] <= day)
     if sales <= 0:
         return None
     return owed / sales * window
@@ -203,7 +213,12 @@ def ageing(rows, today):
 
 
 def _sum(rows, key, lo, hi, date_key):
-    return sum(r[key] for r in rows if r[date_key] is not None and lo <= r[date_key] <= hi)
+    total = sum(r[key] for r in rows if r[date_key] is not None and lo <= r[date_key] <= hi)
+    if date_key == "issue" and key in ("net", "gross"):
+        # a credit note reduces revenue / billing in the period it is dated
+        idx = 1 if key == "net" else 2
+        total -= sum(c[idx] for r in rows for c in r.get("credits", ()) if lo <= c[0] <= hi)
+    return total
 
 
 def _top_with_other(totals, how_many=8):
@@ -265,7 +280,9 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
     issued_in_period = [r for r in inv if start <= r["issue"] <= end]
     avg_terms = (sum((r["due"] - r["issue"]).days for r in issued_in_period) / len(issued_in_period)) if issued_in_period else None
     # share of the period's billing (incl. VAT) that has already been collected
-    collection_rate = (sum(r["gross"] - _owed_on(r, end_for_balances) for r in issued_in_period) / billed_gross * 100) if billed_gross else None
+    billed_after_credits = sum(r["gross"] - _credited_to(r, end_for_balances) for r in issued_in_period)
+    collection_rate = (sum(r["gross"] - _credited_to(r, end_for_balances) - _owed_on(r, end_for_balances)
+                           for r in issued_in_period) / billed_after_credits * 100) if billed_after_credits else None
 
     unpaid_exp = [e for e in exp if e["date"] <= end_for_balances and (e["paid"] is None or e["paid"] > end_for_balances)]
     creditors_total = sum(e["amount"] for e in unpaid_exp)
@@ -292,8 +309,9 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
     # ---- where the revenue comes from
     by_service, by_client = defaultdict(float), defaultdict(float)
     for r in issued_in_period:
-        by_service[r["service"]] += r["net"]
-        by_client[r["client"]] += r["net"]
+        net_after = r["net"] - _credited_to(r, end, 1)
+        by_service[r["service"]] += net_after
+        by_client[r["client"]] += net_after
     client_items_all = sorted(((k, v) for k, v in by_client.items() if v), key=lambda kv: -kv[1])
     top5_share = (sum(v for _, v in client_items_all[:5]) / revenue * 100) if revenue and client_items_all else None
 
@@ -309,7 +327,7 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
         c = clients.setdefault(r["client_id"], {"client_id": r["client_id"], "client": r["client"], "invoiced": 0.0,
                                                 "outstanding": 0.0, "overdue": 0.0, "oldest_overdue": 0, "_days": []})
         if start <= r["issue"] <= end:
-            c["invoiced"] += r["net"]
+            c["invoiced"] += r["net"] - _credited_to(r, end, 1)
         if r["paid"]:
             c["_days"].append((r["paid"] - r["issue"]).days)
     for r in owed_now:

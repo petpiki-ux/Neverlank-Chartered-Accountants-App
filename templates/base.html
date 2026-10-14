@@ -31,7 +31,7 @@
       <a href="{{ url_for('hr.project_board') }}">Tasks{% if my_open_task_count %} <span class="badge overdue">{{ my_open_task_count }}</span>{% endif %}</a>
       <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
       <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
-      {% set finance_blueprints = ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'statements', 'analytics', 'expenses'] %}
+      {% set finance_blueprints = ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'credit_notes', 'statements', 'analytics', 'expenses'] %}
       <a href="{{ url_for('invoicing.list_invoices') }}"{% if request.blueprint in finance_blueprints %} class="active"{% endif %}>Finance{% if recurring_review_count or invoice_reminder_count %} <span class="badge overdue" title="Recurring invoices waiting for review and overdue-invoice reminders due">{{ recurring_review_count + invoice_reminder_count }}</span>{% endif %}</a>
       {% if user_has_permission(current_user, 'manage_whistleblower') %}
       <a href="{{ url_for('whistleblower.dashboard') }}">Whistle-blower</a>
@@ -81,6 +81,7 @@
       <a href="{{ url_for('invoicing.list_invoices') }}"{% if request.blueprint in ['invoicing', 'recurring'] or (request.blueprint == 'invoice_send' and request.endpoint != 'invoice_send.reminders') %} class="on"{% endif %}>Invoices{% if recurring_review_count %} <span class="badge overdue" title="Recurring invoices raised as Drafts, waiting for your review">{{ recurring_review_count }}</span>{% endif %}</a>
       <a href="{{ url_for('invoice_send.reminders') }}"{% if request.endpoint == 'invoice_send.reminders' %} class="on"{% endif %}>Reminders{% if invoice_reminder_count %} <span class="badge overdue" title="Overdue invoices due a reminder">{{ invoice_reminder_count }}</span>{% endif %}</a>
       <a href="{{ url_for('receipts.list_receipts') }}"{% if request.blueprint == 'receipts' %} class="on"{% endif %}>Receipts</a>
+      <a href="{{ url_for('credit_notes.list_credit_notes') }}"{% if request.blueprint == 'credit_notes' %} class="on"{% endif %}>Credit notes</a>
       <a href="{{ url_for('statements.index') }}"{% if request.blueprint == 'statements' %} class="on"{% endif %}>Statements</a>
       {% if user_has_permission(current_user, 'view_firm_finances') %}
       <a href="{{ url_for('analytics.dashboard') }}"{% if request.blueprint in ['analytics', 'expenses'] %} class="on"{% endif %}>Analytics</a>

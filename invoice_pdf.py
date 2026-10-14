@@ -131,11 +131,16 @@ def build_invoice_pdf(invoice, firm):
         [f"VAT ({invoice.vat_pct:g}%)", f"{cur} {money(invoice.vat_amount)}"],
         ["Total", f"{cur} {money(invoice.total)}"],
     ]
+    for c in invoice.active_credit_notes:
+        total_rows.append([f"Credit note {c.credit_note_number}", f"({cur} {money(c.total)})"])
     paid = invoice.total if invoice.legacy_paid else invoice.amount_paid
     if paid > 0.005:
         total_rows.append(["Received", f"({cur} {money(paid)})"])
-    total_rows.append(["Balance due", f"{cur} {money(invoice.balance)}"])
-    tt = Table([[_p(a), _p(b, _right)] for a, b in total_rows], colWidths=[38 * mm, 42 * mm], hAlign="RIGHT")
+    if invoice.refund_due > 0.005:
+        total_rows.append(["Refund due to you", f"{cur} {money(invoice.refund_due)}"])
+    else:
+        total_rows.append(["Balance due", f"{cur} {money(invoice.balance)}"])
+    tt = Table([[_p(a), _p(b, _right)] for a, b in total_rows], colWidths=[50 * mm, 38 * mm], hAlign="RIGHT")
     last = len(total_rows) - 1
     tt.setStyle(TableStyle([
         ("BOX", (0, 0), (-1, -1), 0.5, LINE), ("LINEBELOW", (0, 0), (-1, -2), 0.5, LINE),

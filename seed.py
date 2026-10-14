@@ -1082,3 +1082,70 @@ if __name__ == "__main__":
     with app.app_context():
         run_seed()
         print("Seed complete. Admin login -> username: admin / password: changeme123")
+
+
+# --------------------------------------------------------------------------
+# Branded template refresh (invoice-style design, Oct 2026).
+# The templates in document_templates/ were restyled into the firm's invoice
+# design. Existing installs already hold OLD copies in the writable library
+# (seed_document_templates only ever copies a file the first time), so on
+# startup each library file is replaced by its new version - but ONLY when the
+# copy on disk is still byte-for-byte the old bundled original. A template the
+# firm has edited or re-uploaded through the app is never touched.
+# Keys are "<type folder>/<filename>"; values are the md5 of the old original.
+LEGACY_TEMPLATE_MD5 = {
+    'Assurance/AS-01 Engagement Letter.docx': '03f5b9cc80118929c3a6489145fbdbaf',
+    'Assurance/AS-02 Assurance Report.docx': 'dcf82b11a990aa2281b505b99c1e0444',
+    'Assurance/AUP-01 Engagement Letter.docx': 'd016faf428d7b8e5c9981c61218f79c1',
+    'Assurance/AUP-02 Factual Findings Report.docx': '54b342eab09647f0b5345e8087388591',
+    'Audit/FA-01 Engagement Letter.docx': 'c14744c69db70d293b9c69c2fd0c4645',
+    'Audit/FA-02 Audit Planning Memorandum.docx': '0db3fb6757bdd8296186ff22762aedaa',
+    'Audit/FA-03 Materiality and Risk Assessment Workpaper.docx': 'aeb3a57707d8cda7522ebc77f52d2ffe',
+    'Audit/FA-04 Management Representation Letter.docx': 'b33683f9b470a53bc94ca68f18851f6f',
+    'Audit/FA-05 Audit Completion Memorandum.docx': 'b91537ff1dcb71549a6e0f29526ca6f9',
+    'Audit/FR-01 Engagement Letter Terms of Reference.docx': 'e7da7860e5f4b6ac17858c5fbe06c543',
+    'Audit/FR-02 Evidence Chain of Custody Log.docx': 'ac015ef8cf21d08e2bdf18052502eea3',
+    'Audit/FR-03 Findings Report.docx': '7dcbe6ca2dc184e610eaec85e67aadf0',
+    'Audit/SA-01 Engagement Letter.docx': '1fcb615613fa7f258da93f02eff247b5',
+    'Audit/SA-02 Management Representation Letter.docx': 'b55f93a3623ae0aa5c3765715e13c3b8',
+    'Audit/SA-03 Audit Completion Checklist.docx': '27b0a7c712f2303a680edab38f06c855',
+    'Consulting/CE-01 Engagement Letter Proposal.docx': '71917deafa0970b102c9c05218c7f03d',
+    'Consulting/CE-02 Findings and Recommendations Report.docx': '11530c3b8188a06391eef600bdba18f7',
+    'Consulting/CE-03 Client Sign-off Acceptance Form.docx': '6ed356dddce063a362e5e98bf0510d14',
+    'Consulting/TX-01 Engagement Letter.docx': '5adcacd83ebc9f5cff919303840a72b5',
+    'Consulting/TX-02 Fact Finding Information Request Schedule.docx': 'a741149146f29d29e8726e92a3071839',
+    'Consulting/TX-04 Technical Position Memo.docx': '7949e2a8b451902ae968e396e7cd78f2',
+    'Consulting/TX-05 Client Outcome Letter.docx': '314d7674e5df4877eeede0dcb5a17a1e',
+    'Tax Advisory/TX-01 Engagement Letter.docx': '5adcacd83ebc9f5cff919303840a72b5',
+    'Tax Advisory/TX-02 Fact Finding Information Request Schedule.docx': 'a741149146f29d29e8726e92a3071839',
+    'Tax Advisory/TX-04 Technical Position Memo.docx': '7949e2a8b451902ae968e396e7cd78f2',
+    'Tax Advisory/TX-05 Client Outcome Letter.docx': '314d7674e5df4877eeede0dcb5a17a1e',
+    'Consulting/TX-03 CGT Computation Workpaper.xlsx': '2f37b3cbbbc83dfaec4948b90d1feb3e',
+    'Tax Advisory/TX-03 CGT Computation Workpaper.xlsx': '2f37b3cbbbc83dfaec4948b90d1feb3e',
+}
+
+
+def refresh_branded_document_templates():
+    """Swap untouched old template copies for their restyled versions. Safe to run on every start."""
+    import hashlib
+
+    def md5(path):
+        h = hashlib.md5()
+        with open(path, "rb") as fh:
+            for chunk in iter(lambda: fh.read(65536), b""):
+                h.update(chunk)
+        return h.hexdigest()
+
+    replaced = 0
+    for rel, old_hash in LEGACY_TEMPLATE_MD5.items():
+        src = os.path.join(Config.DOCUMENT_TEMPLATES_SEED_DIR, *rel.split("/"))
+        dst = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, *rel.split("/"))
+        if not (os.path.exists(src) and os.path.exists(dst)):
+            continue
+        try:
+            if md5(dst) == old_hash and md5(src) != old_hash:
+                shutil.copy2(src, dst)
+                replaced += 1
+        except OSError:
+            continue
+    return replaced

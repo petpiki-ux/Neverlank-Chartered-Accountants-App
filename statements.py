@@ -9,6 +9,8 @@ What counts:
 * Invoices that have been issued (status Sent or Paid), on their issue date.
   Drafts and Cancelled invoices are left out.
 * Receipts that have not been voided, on the date the money was received.
+* Credit notes that have not been voided, on the credit note's date (they
+  reduce the balance like a payment but are labelled as credit notes).
 * An invoice marked Paid before receipting existed (no receipt on file) is
   shown as settled by a "Marked paid" credit, so the ledger still balances.
 
@@ -58,6 +60,8 @@ def credit_events(invoice):
         events.append((when, round(invoice.total or 0, 2), "Marked paid (no receipt on file)", None))
     for r in invoice.active_receipts:
         events.append((r.paid_on, round(r.amount or 0, 2), "Payment received", r))
+    for c in invoice.active_credit_notes:
+        events.append((c.issue_date, round(c.total, 2), "Credit note", c))
     return events
 
 
@@ -127,11 +131,18 @@ def build_statement(invoices, date_from, date_to):
                 if cdate < date_from:
                     opening -= amount
                 else:
-                    rows.append({"date": cdate, "order": 1, "id": receipt.id if receipt else inv.id, "kind": "Payment",
-                                 "ref": receipt.receipt_number if receipt else "—",
-                                 "description": f"{text} - {inv.invoice_number}"
-                                                + (f" ({receipt.method})" if receipt and receipt.method else ""),
-                                 "debit": 0.0, "credit": amount, "due": None, "invoice": inv, "receipt": receipt})
+                    is_credit_note = receipt is not None and hasattr(receipt, "credit_note_number")
+                    if is_credit_note:
+                        ref, kind = receipt.credit_note_number, "Credit note"
+                        detail = f"Credit note - {inv.invoice_number}" + (f" ({receipt.reason[:60]})" if receipt.reason else "")
+                    else:
+                        ref, kind = (receipt.receipt_number if receipt else "—"), "Payment"
+                        detail = f"{text} - {inv.invoice_number}" + (f" ({receipt.method})" if receipt and receipt.method else "")
+                    rows.append({"date": cdate, "order": 1, "id": receipt.id if receipt else inv.id, "kind": kind,
+                                 "ref": ref, "description": detail,
+                                 "debit": 0.0, "credit": amount, "due": None, "invoice": inv,
+                                 "receipt": None if is_credit_note else receipt,
+                                 "credit_note": receipt if is_credit_note else None})
         rows.sort(key=lambda r: (r["date"], r["order"], r["id"]))
         opening = round(opening, 2)
         running = opening

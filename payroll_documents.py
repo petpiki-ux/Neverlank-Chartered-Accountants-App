@@ -21,6 +21,9 @@ from reportlab.lib.enums import TA_CENTER
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
 
+from xml.sax.saxutils import escape
+
+import brand_docs as brand
 from workpapers import FIRM_NAME, FIRM_ADDRESS, _LOGO_PATH, _GOLD, _GOLD_HEX, _fmt_date, _fmt_num
 
 
@@ -79,6 +82,38 @@ def _leave_rows(leave_balances):
     ]
 
 
+# ---------------------------------------------------------------- shared look
+
+def _letterhead_firm(period):
+    """Letterhead lines: the firm's own for an internal payslip; the client's
+    name (as employer of record) with 'Payroll processed by <firm>' for a
+    client-payroll-service payslip."""
+    if period.scope == "client" and period.client:
+        return brand.letter_firm(name=period.client.name, strapline=f"Payroll processed by {FIRM_NAME}", address="")
+    return brand.letter_firm()
+
+
+def _meta_items(employee, period):
+    return [
+        ("Employee no.", employee.employee_number or "—"),
+        ("Pay date", _fmt_date(period.pay_date)),
+        ("Period", f"{_fmt_date(period.period_start)} - {_fmt_date(period.period_end)}"),
+        ("Currency", period.currency or "—"),
+    ]
+
+
+def _employee_lines(employee):
+    return [x for x in (
+        employee.job_title or None,
+        "  ·  ".join(p for p in (f"NSSA No: {employee.nssa_number}" if employee.nssa_number else "",
+                                f"National ID: {employee.national_id}" if employee.national_id else "") if p) or None,
+    ) if x]
+
+
+CAVEAT = ("Tax figures calculated per this firm's own editable Payroll Tax Settings. "
+          "Verify current PAYE bands, AIDS levy and NSSA rates against ZIMRA/NSSA before relying on this payslip.")
+
+
 # ---------------------------------------------------------------- Word (.docx)
 
 def generate_payslip_docx(payslip, leave_balances=None):
@@ -86,141 +121,56 @@ def generate_payslip_docx(payslip, leave_balances=None):
     period = payslip.period
 
     doc = Document()
-    section = doc.sections[0]
-    section.left_margin = Inches(0.9)
-    section.right_margin = Inches(0.9)
-
-    style = doc.styles["Normal"]
-    style.font.name = "Calibri"
-    style.font.size = Pt(10.5)
-
-    header = doc.add_paragraph()
-    header.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if os.path.exists(_LOGO_PATH):
-        run = header.add_run()
-        try:
-            run.add_picture(_LOGO_PATH, height=Inches(0.6))
-        except Exception:
-            pass
-
-    name_p = doc.add_paragraph()
-    name_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    name_run = name_p.add_run(_employer_name(period))
-    name_run.bold = True
-    name_run.font.size = Pt(15)
-    name_run.font.color.rgb = _GOLD
-
-    sub_p = doc.add_paragraph()
-    sub_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if period.scope == "client":
-        sub_run = sub_p.add_run(f"Payroll processed by {FIRM_NAME}")
-    else:
-        sub_run = sub_p.add_run(FIRM_ADDRESS)
-    sub_run.font.size = Pt(9)
-    sub_run.italic = True
-
-    doc.add_paragraph()
-
-    title_p = doc.add_paragraph()
-    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title_p.add_run("PAYSLIP")
-    title_run.bold = True
-    title_run.font.size = Pt(14)
-
-    meta_p = doc.add_paragraph()
-    meta_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    meta_run = meta_p.add_run(f"{employee.full_name} — {period.name}")
-    meta_run.font.size = Pt(11)
-
-    doc.add_paragraph()
-
-    info_table = doc.add_table(rows=3, cols=4)
-    info_table.alignment = WD_TABLE_ALIGNMENT.CENTER
-    info_rows = [
-        ("Employee No.", employee.employee_number or "—", "Pay Date", _fmt_date(period.pay_date)),
-        ("Job Title", employee.job_title or "—", "Period",
-         f"{_fmt_date(period.period_start)} - {_fmt_date(period.period_end)}"),
-        ("NSSA No.", employee.nssa_number or "—", "National ID", employee.national_id or "—"),
-    ]
-    for r, (l1, v1, l2, v2) in enumerate(info_rows):
-        cells = info_table.rows[r].cells
-        for idx, text in enumerate((l1, v1, l2, v2)):
-            p = cells[idx].paragraphs[0]
-            run = p.add_run(text)
-            run.font.size = Pt(9.5)
-            if idx in (0, 2):
-                run.bold = True
-
-    doc.add_paragraph()
+    brand.setup_document(doc)
+    brand.branded_footer(doc, _letterhead_firm(period))
+    brand.letterhead_band(doc, "Payslip", sub=period.name, number=employee.employee_number or None,
+                          firm=_letterhead_firm(period))
+    brand.meta_strip(doc, _meta_items(employee, period))
+    brand.party_block(doc, "Employee", employee.full_name, _employee_lines(employee))
 
     earnings, deductions = _payslip_rows(payslip)
     max_rows = max(len(earnings), len(deductions))
     body_table = doc.add_table(rows=max_rows + 2, cols=4)
-    body_table.style = "Light Grid Accent 1"
-
-    hdr = body_table.rows[0].cells
     for idx, text in enumerate(["Earnings", "Amount", "Deductions", "Amount"]):
-        p = hdr[idx].paragraphs[0]
-        run = p.add_run(text)
-        run.bold = True
-        run.font.size = Pt(10)
-
+        body_table.rows[0].cells[idx].paragraphs[0].add_run(text)
     for i in range(max_rows):
         row = body_table.rows[i + 1].cells
         e_label, e_amt = earnings[i] if i < len(earnings) else ("", None)
         d_label, d_amt = deductions[i] if i < len(deductions) else ("", None)
-        row[0].paragraphs[0].add_run(e_label).font.size = Pt(9.5)
-        row[1].paragraphs[0].add_run(_fmt_num(e_amt) if e_amt is not None else "").font.size = Pt(9.5)
-        row[2].paragraphs[0].add_run(d_label).font.size = Pt(9.5)
-        row[3].paragraphs[0].add_run(_fmt_num(d_amt) if d_amt is not None else "").font.size = Pt(9.5)
-
+        for idx, text in enumerate((e_label, _fmt_num(e_amt) if e_amt is not None else "",
+                                    d_label, _fmt_num(d_amt) if d_amt is not None else "")):
+            row[idx].paragraphs[0].add_run(text)
     total_row = body_table.rows[max_rows + 1].cells
-    total_labels = ["Gross Pay", _fmt_num(payslip.gross_pay), "Total Deductions", _fmt_num(payslip.total_deductions)]
-    for idx, text in enumerate(total_labels):
-        run = total_row[idx].paragraphs[0].add_run(text)
-        run.bold = True
-        run.font.size = Pt(9.5)
+    for idx, text in enumerate(["Gross Pay", _fmt_num(payslip.gross_pay), "Total Deductions", _fmt_num(payslip.total_deductions)]):
+        total_row[idx].paragraphs[0].add_run(text).bold = True
+        brand.shade(total_row[idx], brand.TINT)
+    brand.style_table(body_table)
+    for row in body_table.rows:
+        for idx in (1, 3):
+            row.cells[idx].paragraphs[0].alignment = WD_ALIGN_PARAGRAPH.RIGHT
 
     leave_rows = _leave_rows(leave_balances)
     if leave_rows:
-        doc.add_paragraph()
-        leave_title_p = doc.add_paragraph()
-        leave_title_run = leave_title_p.add_run("Leave")
-        leave_title_run.bold = True
-        leave_title_run.font.size = Pt(10.5)
-
+        brand.heading(doc, "Leave", level=2)
         leave_table = doc.add_table(rows=len(leave_rows) + 1, cols=4)
-        leave_table.style = "Light Grid Accent 1"
-        leave_hdr = leave_table.rows[0].cells
         for idx, text in enumerate(["Leave Type", "Accrued (days)", "Taken (days)", "Available (days)"]):
-            run = leave_hdr[idx].paragraphs[0].add_run(text)
-            run.bold = True
-            run.font.size = Pt(9.5)
+            leave_table.rows[0].cells[idx].paragraphs[0].add_run(text)
         for i, (name, accrued, taken, available) in enumerate(leave_rows):
             row = leave_table.rows[i + 1].cells
             for idx, text in enumerate([name, _fmt_num(accrued), _fmt_num(taken), _fmt_num(available)]):
-                row[idx].paragraphs[0].add_run(text).font.size = Pt(9.5)
+                row[idx].paragraphs[0].add_run(text)
+        brand.style_table(leave_table, numeric_from=1)
 
     doc.add_paragraph()
-
-    net_p = doc.add_paragraph()
-    net_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    net_run = net_p.add_run(f"NET PAY: {period.currency or ''} {_fmt_num(payslip.net_pay)}")
-    net_run.bold = True
-    net_run.font.size = Pt(13)
-    net_run.font.color.rgb = _GOLD
-
+    brand.total_panel(doc, "NET PAY", f"{period.currency or ''} {_fmt_num(payslip.net_pay)}", width_in=3.4)
     doc.add_paragraph()
     caveat_p = doc.add_paragraph()
-    caveat_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    caveat_run = caveat_p.add_run(
-        "Tax figures calculated per this firm's own editable Payroll Tax Settings. "
-        "Verify current PAYE bands, AIDS levy and NSSA rates against ZIMRA/NSSA before relying on this payslip."
-    )
-    caveat_run.font.size = Pt(7)
+    caveat_run = caveat_p.add_run(CAVEAT)
+    caveat_run.font.size = Pt(7.5)
     caveat_run.italic = True
     caveat_run.font.color.rgb = RGBColor(0x66, 0x66, 0x66)
 
+    brand.fix_document(doc)
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
@@ -230,115 +180,76 @@ def generate_payslip_docx(payslip, leave_balances=None):
 # ---------------------------------------------------------------------- PDF
 
 def generate_payslip_pdf(payslip, leave_balances=None):
+    from reportlab.lib.enums import TA_RIGHT
+    from reportlab.lib.units import mm
     employee = payslip.employee
     period = payslip.period
+    firm = _letterhead_firm(period)
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(
-        buf, pagesize=A4,
-        leftMargin=0.9 * inch, rightMargin=0.9 * inch,
-        topMargin=0.7 * inch, bottomMargin=0.7 * inch,
+        buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm, topMargin=12 * mm, bottomMargin=16 * mm,
+        title=f"Payslip - {employee.full_name} - {period.name}", author=firm.get("name", ""),
     )
+    width = A4[0] - 32 * mm
     styles = getSampleStyleSheet()
-    center = ParagraphStyle("center", parent=styles["Normal"], alignment=TA_CENTER)
-    gold = colors.HexColor(f"#{_GOLD_HEX}")
+    base = ParagraphStyle("pb", parent=styles["Normal"], fontSize=9.5, leading=13)
+    navy = colors.HexColor(f"#{brand.NAVY}")
+    gold = colors.HexColor(f"#{brand.GOLD}")
+    tint = colors.HexColor(f"#{brand.TINT}")
 
-    story = []
-    if os.path.exists(_LOGO_PATH):
-        try:
-            img = Image(_LOGO_PATH, width=1.3 * inch, height=0.55 * inch)
-            img.hAlign = "CENTER"
-            story.append(img)
-            story.append(Spacer(1, 6))
-        except Exception:
-            pass
+    story = [brand.pdf_letterhead(width, "Payslip", number=employee.employee_number or None, sub=period.name, firm=firm),
+             Spacer(1, 8 * mm), brand.pdf_meta_strip(width, _meta_items(employee, period)), Spacer(1, 5 * mm)]
 
-    story.append(Paragraph(f"<b><font color='#{_GOLD_HEX}' size=15>{_employer_name(period)}</font></b>", center))
-    if period.scope == "client":
-        story.append(Paragraph(f"<i>Payroll processed by {FIRM_NAME}</i>", center))
-    else:
-        story.append(Paragraph(f"<i>{FIRM_ADDRESS}</i>", center))
-    story.append(Spacer(1, 10))
-    story.append(Paragraph("<b>PAYSLIP</b>", ParagraphStyle("title", parent=styles["Normal"], alignment=TA_CENTER, fontSize=14)))
-    story.append(Paragraph(f"{employee.full_name} - {period.name}", center))
-    story.append(Spacer(1, 14))
-
-    info_data = [
-        ["Employee No.", employee.employee_number or "—", "Pay Date", _fmt_date(period.pay_date)],
-        ["Job Title", employee.job_title or "—", "Period", f"{_fmt_date(period.period_start)} - {_fmt_date(period.period_end)}"],
-        ["NSSA No.", employee.nssa_number or "—", "National ID", employee.national_id or "—"],
-    ]
-    info_table = Table(info_data, colWidths=[80, 155, 80, 130])
-    info_table.setStyle(TableStyle([
-        ("FONTSIZE", (0, 0), (-1, -1), 9),
-        ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-        ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
-        ("TEXTCOLOR", (0, 0), (0, -1), colors.grey),
-        ("TEXTCOLOR", (2, 0), (2, -1), colors.grey),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-    ]))
-    story.append(info_table)
-    story.append(Spacer(1, 14))
+    party = [Paragraph("<font size='7' color='#b8934a'><b>EMPLOYEE</b></font>", base),
+             Paragraph(f"<font name='Helvetica-Bold' size='11.5' color='#{brand.NAVY}'>{escape(employee.full_name)}</font>", ParagraphStyle("pn", parent=base, leading=15))]
+    for line in _employee_lines(employee):
+        party.append(Paragraph(f"<font size='8.5' color='#555555'>{escape(line)}</font>", base))
+    pt = Table([[party]], colWidths=[width])
+    pt.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), tint), ("LINEBEFORE", (0, 0), (0, -1), 3.5, gold),
+                            ("LEFTPADDING", (0, 0), (-1, -1), 12), ("TOPPADDING", (0, 0), (-1, -1), 8), ("BOTTOMPADDING", (0, 0), (-1, -1), 8)]))
+    story += [pt, Spacer(1, 6 * mm)]
 
     earnings, deductions = _payslip_rows(payslip)
     max_rows = max(len(earnings), len(deductions))
-    body = [["Earnings", "Amount", "Deductions", "Amount"]]
+    body = [["EARNINGS", "AMOUNT", "DEDUCTIONS", "AMOUNT"]]
     for i in range(max_rows):
         e_label, e_amt = earnings[i] if i < len(earnings) else ("", None)
         d_label, d_amt = deductions[i] if i < len(deductions) else ("", None)
-        body.append([
-            e_label, _fmt_num(e_amt) if e_amt is not None else "",
-            d_label, _fmt_num(d_amt) if d_amt is not None else "",
-        ])
+        body.append([e_label, _fmt_num(e_amt) if e_amt is not None else "", d_label, _fmt_num(d_amt) if d_amt is not None else ""])
     body.append(["Gross Pay", _fmt_num(payslip.gross_pay), "Total Deductions", _fmt_num(payslip.total_deductions)])
-
-    body_table = Table(body, colWidths=[120, 90, 120, 90])
+    body_table = Table(body, colWidths=[width * 0.32, width * 0.18, width * 0.32, width * 0.18], repeatRows=1)
+    style = brand.pdf_table_style()
+    body_table.setStyle(style)
     body_table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), gold),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-        ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.grey),
-        ("LINEABOVE", (0, -1), (-1, -1), 0.75, colors.black),
-        ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
-        ("ALIGN", (1, 0), (1, -1), "RIGHT"),
-        ("ALIGN", (3, 0), (3, -1), "RIGHT"),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ("TOPPADDING", (0, 0), (-1, -1), 5),
+        ("ALIGN", (1, 0), (1, -1), "RIGHT"), ("ALIGN", (3, 0), (3, -1), "RIGHT"),
+        ("FONTSIZE", (0, 1), (-1, -1), 9.5),
+        ("BACKGROUND", (0, -1), (-1, -1), tint), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"),
+        ("LINEABOVE", (0, -1), (-1, -1), 0.75, navy),
     ]))
-    story.append(body_table)
-    story.append(Spacer(1, 16))
+    story += [body_table, Spacer(1, 6 * mm)]
 
     leave_rows = _leave_rows(leave_balances)
     if leave_rows:
-        story.append(Paragraph("<b>Leave</b>", ParagraphStyle("leave_title", parent=styles["Normal"], fontSize=10.5)))
-        story.append(Spacer(1, 4))
-        leave_body = [["Leave Type", "Accrued (days)", "Taken (days)", "Available (days)"]]
+        story += [Paragraph("<font size='7.5' color='#b8934a'><b>LEAVE</b></font>", base), Spacer(1, 2 * mm)]
+        leave_body = [["LEAVE TYPE", "ACCRUED (DAYS)", "TAKEN (DAYS)", "AVAILABLE (DAYS)"]]
         for name, accrued, taken, available in leave_rows:
             leave_body.append([name, _fmt_num(accrued), _fmt_num(taken), _fmt_num(available)])
-        leave_table = Table(leave_body, colWidths=[150, 90, 90, 90])
-        leave_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), gold),
-            ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTSIZE", (0, 0), (-1, -1), 9.5),
-            ("LINEBELOW", (0, 0), (-1, 0), 0.5, colors.grey),
-            ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-        ]))
-        story.append(leave_table)
-        story.append(Spacer(1, 16))
+        leave_table = Table(leave_body, colWidths=[width * 0.4, width * 0.2, width * 0.2, width * 0.2], repeatRows=1)
+        leave_table.setStyle(brand.pdf_table_style())
+        leave_table.setStyle(TableStyle([("ALIGN", (1, 0), (-1, -1), "RIGHT"), ("FONTSIZE", (0, 1), (-1, -1), 9.5)]))
+        story += [leave_table, Spacer(1, 6 * mm)]
 
-    story.append(Paragraph(
-        f"<b>NET PAY: {period.currency or ''} {_fmt_num(payslip.net_pay)}</b>",
-        ParagraphStyle("net", parent=styles["Normal"], alignment=TA_CENTER, fontSize=13, textColor=gold),
-    ))
-    story.append(Spacer(1, 20))
-    story.append(Paragraph(
-        "<font size=7 color='grey'>Tax figures calculated per this firm's own editable Payroll Tax Settings. "
-        "Verify current PAYE bands, AIDS levy and NSSA rates against ZIMRA/NSSA before relying on this payslip.</font>",
-        center,
-    ))
+    right = ParagraphStyle("nr", parent=base, alignment=TA_RIGHT)
+    net = Table([[Paragraph("<font color='white'><b>NET PAY</b></font>", base),
+                  Paragraph(f"<font color='#{brand.GOLD_LIGHT}' size='12'><b>{escape(period.currency or '')} {escape(_fmt_num(payslip.net_pay))}</b></font>", right)]],
+                colWidths=[40 * mm, 52 * mm], hAlign="RIGHT")
+    net.setStyle(TableStyle([("BACKGROUND", (0, 0), (-1, -1), navy), ("TOPPADDING", (0, 0), (-1, -1), 8),
+                             ("BOTTOMPADDING", (0, 0), (-1, -1), 8), ("LEFTPADDING", (0, 0), (-1, -1), 10), ("RIGHTPADDING", (0, 0), (-1, -1), 10)]))
+    story += [net, Spacer(1, 8 * mm),
+              Paragraph(f"<font size='7.5' color='#6b7684'><i>{escape(CAVEAT)}</i></font>", base)]
 
-    doc.build(story)
+    footer = brand.pdf_footer(firm)
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
     buf.seek(0)
     return buf

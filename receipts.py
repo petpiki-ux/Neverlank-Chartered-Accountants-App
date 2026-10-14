@@ -5,6 +5,8 @@ towards an invoice.
   invoice shows amount paid and balance, and becomes Paid automatically once
   its receipts add up to the invoice total (and goes back to Sent if a receipt
   is voided).
+* Credit notes (credit_notes.py) reduce what is owing: the invoice becomes Paid
+  once its receipts cover the invoice total LESS its credit notes.
 * A receipt is never deleted. A receipt issued in error is VOIDED (Partner or
   Admin only): it stays on file with who/when/why, its number is not reused,
   and it is ignored in every total.
@@ -57,7 +59,8 @@ def settle_invoice(invoice):
     Sent if a receipt has been voided and it is no longer fully covered."""
     active = invoice.active_receipts
     total = invoice.total or 0
-    if active and total > 0 and invoice.amount_paid >= round(total, 2) - MONEY_TOLERANCE:
+    due = invoice.net_total  # the invoice total less any credit notes
+    if active and total > 0 and invoice.amount_paid >= round(due, 2) - MONEY_TOLERANCE:
         invoice.status = "Paid"
         last = max(r.paid_on for r in active)
         invoice.paid_at = datetime.combine(last, time(0, 0))
@@ -76,6 +79,8 @@ def add_receipt(invoice, amount, paid_on, method, user):
     balance = invoice.receiptable_balance
     if invoice.status == "Paid" and invoice.receipts and balance <= MONEY_TOLERANCE:
         return None, "This invoice is already paid in full."
+    if invoice.is_fully_credited:
+        return None, "This invoice has been credited in full by credit note, so there is nothing left to pay."
     if amount is None or amount <= 0:
         return None, "Enter the amount received (more than zero)."
     if amount > balance + MONEY_TOLERANCE:

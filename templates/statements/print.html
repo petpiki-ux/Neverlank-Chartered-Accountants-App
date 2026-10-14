@@ -25,7 +25,7 @@
 {% for currency, s in sections.items() %}
   <h4 style="margin:{{ '0' if loop.first else '26px' }} 0 6px;font-size:12px;text-transform:uppercase;letter-spacing:.14em;color:var(--gold);font-weight:800;">Account in {{ currency }}</h4>
   <table class="items">
-    <thead><tr><th style="width:96px;">Date</th><th>Details</th><th>Ref</th><th class="r">Charges</th><th class="r">Payments</th><th class="r">Balance</th></tr></thead>
+    <thead><tr><th style="width:96px;">Date</th><th>Details</th><th>Ref</th><th class="r">Charges</th><th class="r">Payments / credits</th><th class="r">Balance</th></tr></thead>
     <tbody>
       <tr style="font-weight:600;"><td></td><td>Balance brought forward</td><td></td><td class="r"></td><td class="r"></td><td class="r">{{ '{:,.2f}'.format(s.opening) }}</td></tr>
       {% for r in s.rows %}
@@ -46,7 +46,7 @@
     <div class="totals">
       <div class="row"><span>Balance brought forward</span><span>{{ currency }} {{ '{:,.2f}'.format(s.opening) }}</span></div>
       <div class="row"><span>Charges in period</span><span>{{ currency }} {{ '{:,.2f}'.format(s.debits) }}</span></div>
-      <div class="row"><span>Payments in period</span><span>({{ currency }} {{ '{:,.2f}'.format(s.credits) }})</span></div>
+      <div class="row"><span>Payments &amp; credit notes in period</span><span>({{ currency }} {{ '{:,.2f}'.format(s.credits) }})</span></div>
       <div class="row grand"><span>{{ 'Balance due' if s.closing > 0.005 else ('In credit' if s.closing < -0.005 else 'Balance') }}</span><span>{{ currency }} {{ '{:,.2f}'.format(s.closing|abs if s.closing < -0.005 else s.closing) }}</span></div>
     </div>
   </div>

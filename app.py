@@ -605,6 +605,7 @@ def create_app():
     from quotations import quotations_bp
     from recurring import recurring_bp
     from receipts import receipts_bp
+    from credit_notes import credit_notes_bp
     from statements import statements_bp
     from attendance import attendance_bp
     from invoice_send import invoice_send_bp, public_invoice_bp
@@ -637,6 +638,7 @@ def create_app():
     app.register_blueprint(quotations_bp)
     app.register_blueprint(recurring_bp)
     app.register_blueprint(receipts_bp)
+    app.register_blueprint(credit_notes_bp)
     app.register_blueprint(statements_bp)
     app.register_blueprint(attendance_bp)
     app.register_blueprint(invoice_send_bp)
@@ -794,6 +796,10 @@ def create_app():
             # steps needed from the user. Safe/idempotent either way.
             from seed import seed_document_templates
             seed_document_templates()
+        # Restyled (invoice-design) Word/Excel templates: replace untouched old
+        # copies in the writable library; edited ones are left alone.
+        from seed import refresh_branded_document_templates
+        refresh_branded_document_templates()
         # Configurable role permissions: seed_permissions() only ever adds a
         # (role, key) row that doesn't already exist, so it's safe/cheap to
         # call on every startup rather than gating it on the table being

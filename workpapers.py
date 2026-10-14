@@ -36,6 +36,7 @@ from reportlab.platypus import (
 from models import DEFAULT_WORKPAPER_NARRATIVE_BODIES, default_workpaper_narrative_body, WORKPAPER_SECTIONS, effectively_reviewed, ENTITY_UNDERSTANDING_FIELDS, filing_reference, CASH_FLOW_METHOD_LABELS
 from config import Config
 import financials as fin
+import brand_docs as brand
 
 FIRM_NAME = "Neverlank Chartered Accountants"
 FIRM_ADDRESS = "2nd Floor, Michael House, 62 Nelson Mandela Avenue, Harare, Zimbabwe"
@@ -59,90 +60,38 @@ def _fmt_num(n):
 # ---------------------------------------------------------------- Word helpers
 
 def _new_document(title, engagement, subtitle=None, doc=None):
-    """A Word document with the firm's letterhead (logo if available, firm
-    name/address) and a title block for this working paper. Pass an
-    existing `doc` (e.g. one that already has a client-facing cover page
-    and Client Details/Table of Contents page ahead of this letterhead -
-    see build_financial_statements_docx) to append the letterhead to it
-    instead of starting a fresh document."""
+    """A Word document in the firm's invoice-style design: navy letterhead band
+    (logo, firm name, gold strapline, address; this working paper's title on the
+    right), a details strip (client, engagement, period) and a branded footer.
+    Pass an existing `doc` (e.g. one that already has a client-facing cover page
+    and Client Details/Table of Contents page ahead of this letterhead - see
+    build_financial_statements_docx) to append the letterhead to it instead of
+    starting a fresh document."""
     if doc is None:
         doc = Document()
-
-    section = doc.sections[0]
-    section.left_margin = Inches(0.9)
-    section.right_margin = Inches(0.9)
-
-    style = doc.styles["Normal"]
-    style.font.name = "Calibri"
-    style.font.size = Pt(10.5)
-
-    header = doc.add_paragraph()
-    header.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    if os.path.exists(_LOGO_PATH):
-        run = header.add_run()
-        try:
-            run.add_picture(_LOGO_PATH, height=Inches(0.7))
-        except Exception:
-            pass
-
-    name_p = doc.add_paragraph()
-    name_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    name_run = name_p.add_run(FIRM_NAME)
-    name_run.bold = True
-    name_run.font.size = Pt(15)
-    name_run.font.color.rgb = _GOLD
-
-    addr_p = doc.add_paragraph()
-    addr_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    addr_run = addr_p.add_run(FIRM_ADDRESS)
-    addr_run.font.size = Pt(9)
-    addr_run.italic = True
-
-    doc.add_paragraph()
-
-    title_p = doc.add_paragraph()
-    title_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    title_run = title_p.add_run(title)
-    title_run.bold = True
-    title_run.font.size = Pt(14)
-
+    brand.setup_document(doc)
+    brand.branded_footer(doc)
+    brand.letterhead_band(doc, title, sub=subtitle)
     client_name = engagement.client.name if engagement.client else ""
-    meta_p = doc.add_paragraph()
-    meta_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    meta_run = meta_p.add_run(
-        f"{client_name} — {engagement.title}"
-        + (f"\nPeriod ended {_fmt_date(engagement.period_end)}" if engagement.period_end else "")
-    )
-    meta_run.font.size = Pt(11)
-
-    if subtitle:
-        sub_p = doc.add_paragraph()
-        sub_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        sub_run = sub_p.add_run(subtitle)
-        sub_run.italic = True
-        sub_run.font.size = Pt(10)
-
-    doc.add_paragraph()
+    brand.meta_strip(doc, [
+        ("Client", client_name),
+        ("Engagement", engagement.title),
+        ("Period ended", _fmt_date(engagement.period_end)),
+        ("Prepared", _fmt_date(date.today())),
+    ])
     return doc
 
 
 def _add_heading(doc, text, level=1):
-    h = doc.add_heading(text, level=level)
-    for run in h.runs:
-        run.font.color.rgb = _GOLD if level == 1 else RGBColor(0x00, 0x00, 0x00)
-    return h
+    return brand.heading(doc, text, level=level)
 
 
 def _style_table(table):
-    table.style = "Light Grid Accent 1"
-    for cell in table.rows[0].cells:
-        for p in cell.paragraphs:
-            for r in p.runs:
-                r.bold = True
-    return table
+    return brand.style_table(table)
 
 
 def _finish(doc):
+    brand.fix_document(doc)
     buf = io.BytesIO()
     doc.save(buf)
     buf.seek(0)
@@ -206,10 +155,7 @@ def _fs_row_cells(r, with_prior=True):
 
 # ---------------------------------------------------------------- Excel helpers
 
-_HEADER_FILL = PatternFill(start_color=_GOLD_HEX, end_color=_GOLD_HEX, fill_type="solid")
-_HEADER_FONT = Font(bold=True, color="FFFFFF")
-_THIN = Side(style="thin", color="CCCCCC")
-_BORDER = Border(left=_THIN, right=_THIN, top=_THIN, bottom=_THIN)
+_HEADER_FONT, _HEADER_FILL, _HEADER_ALIGN, _BORDER = brand.xlsx_header_style()
 
 
 def _new_workbook_sheet(wb_title, engagement, sheet_title="Sheet1"):
@@ -217,15 +163,11 @@ def _new_workbook_sheet(wb_title, engagement, sheet_title="Sheet1"):
     ws = wb.active
     ws.title = sheet_title[:31]
     client_name = engagement.client.name if engagement.client else ""
-    ws["A1"] = FIRM_NAME
-    ws["A1"].font = Font(bold=True, size=14, color=_GOLD_HEX)
-    ws["A2"] = FIRM_ADDRESS
-    ws["A2"].font = Font(italic=True, size=9)
-    ws["A3"] = wb_title
-    ws["A3"].font = Font(bold=True, size=12)
-    ws["A4"] = f"{client_name} — {engagement.title}"
+    details = f"{client_name} — {engagement.title}"
     if engagement.period_end:
-        ws["A5"] = f"Period ended {_fmt_date(engagement.period_end)}"
+        details += f"  ·  Period ended {_fmt_date(engagement.period_end)}"
+    brand.xlsx_title_band(ws, wb_title, [details], ncols=8)
+    brand.xlsx_page_setup(ws)
     return wb, ws
 
 
@@ -234,7 +176,7 @@ def _header_row(ws, row, headers, start_col=1):
         cell = ws.cell(row=row, column=start_col + i, value=h)
         cell.font = _HEADER_FONT
         cell.fill = _HEADER_FILL
-        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.alignment = _HEADER_ALIGN
         cell.border = _BORDER
     return row + 1
 
@@ -389,6 +331,8 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     show_opinion = engagement.type in ("Audit", "Assurance")
 
     doc = Document()
+    brand.setup_document(doc)
+    brand.branded_footer(doc)
     _cover_page(doc, engagement)
 
     toc_sections = ["Directors' Statement"]
@@ -719,16 +663,12 @@ def build_ppe_asset_register_xlsx(engagement, asset_classes, assets):
     _autofit(ws, [28, 22, 16, 18])
 
     ws2 = wb.create_sheet("Asset Register")
-    ws2["A1"] = FIRM_NAME
-    ws2["A1"].font = Font(bold=True, size=14, color=_GOLD_HEX)
-    ws2["A2"] = FIRM_ADDRESS
-    ws2["A2"].font = Font(italic=True, size=9)
-    ws2["A3"] = "PPE Asset Register — Ref. N3300"
-    ws2["A3"].font = Font(bold=True, size=12)
     client_name = engagement.client.name if engagement.client else ""
-    ws2["A4"] = f"{client_name} — {engagement.title}"
+    details = f"{client_name} — {engagement.title}"
     if engagement.period_end:
-        ws2["A5"] = f"Period ended {_fmt_date(engagement.period_end)}"
+        details += f"  ·  Period ended {_fmt_date(engagement.period_end)}"
+    brand.xlsx_title_band(ws2, "PPE Asset Register — Ref. N3300", [details], ncols=8)
+    brand.xlsx_page_setup(ws2)
 
     headers = [
         "Asset code", "Description", "Asset class", "Date acquired", "Cost",
@@ -1464,15 +1404,7 @@ def _checklist_items_table(items):
             Paragraph(comment, getSampleStyleSheet()["BodyText"]),
         ])
     table = Table(data, colWidths=[220, 70, 200], repeatRows=1)
-    table.setStyle(TableStyle([
-        ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor(f"#{_GOLD_HEX}")),
-        ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-        ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-        ("VALIGN", (0, 0), (-1, -1), "TOP"),
-        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DDDDDD")),
-        ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
-        ("TOPPADDING", (0, 0), (-1, -1), 4),
-    ]))
+    table.setStyle(brand.pdf_table_style())
     return table
 
 
@@ -1493,35 +1425,28 @@ def build_engagement_file_summary_pdf(engagement):
     doc = SimpleDocTemplate(
         buf, pagesize=A4,
         leftMargin=0.8 * inch, rightMargin=0.8 * inch,
-        topMargin=0.7 * inch, bottomMargin=0.7 * inch,
+        topMargin=0.5 * inch, bottomMargin=0.8 * inch,
+        title=f"Engagement File Summary - {engagement.title}", author=FIRM_NAME,
     )
+    page_width = A4[0] - 1.6 * inch
     styles = getSampleStyleSheet()
     center = ParagraphStyle("center", parent=styles["Normal"], alignment=TA_CENTER)
     body = styles["BodyText"]
-    gold = colors.HexColor(f"#{_GOLD_HEX}")
-    h1 = ParagraphStyle("h1", parent=styles["Heading1"], textColor=gold, fontSize=13, spaceBefore=14, spaceAfter=6)
+    navy = colors.HexColor(f"#{brand.NAVY}")
+    h1 = ParagraphStyle("h1", parent=styles["Heading1"], fontName="Times-Bold", textColor=navy, fontSize=13, spaceBefore=14, spaceAfter=6)
     status_style = ParagraphStyle("status", parent=styles["Normal"], fontSize=8.5, textColor=colors.grey, spaceAfter=8)
 
-    story = []
-    if os.path.exists(_LOGO_PATH):
-        try:
-            img = Image(_LOGO_PATH, width=1.4 * inch, height=0.6 * inch)
-            img.hAlign = "CENTER"
-            story.append(img)
-            story.append(Spacer(1, 8))
-        except Exception:
-            pass
-    story.append(Paragraph(f"<b><font color='#{_GOLD_HEX}' size=16>{FIRM_NAME}</font></b>", center))
-    story.append(Paragraph(f"<font size=9>{FIRM_ADDRESS}</font>", center))
-    story.append(Spacer(1, 16))
-    story.append(Paragraph("<b>ENGAGEMENT FILE SUMMARY</b>", ParagraphStyle("title", parent=styles["Normal"], alignment=TA_CENTER, fontSize=15)))
-    story.append(Spacer(1, 10))
-    story.append(Paragraph(f"{engagement.title}", ParagraphStyle("sub", parent=styles["Normal"], alignment=TA_CENTER, fontSize=12)))
-    story.append(Paragraph(f"{engagement.client.name if engagement.client else ''} &middot; {engagement.type}", center))
-    story.append(Paragraph(f"Period ended {_fmt_date(engagement.period_end)}", center))
-    story.append(Spacer(1, 4))
-    story.append(Paragraph(f"<font size=8 color='grey'>Generated {_fmt_date(date.today())}</font>", center))
-    story.append(PageBreak())
+    story = [
+        brand.pdf_letterhead(page_width, "File Summary", sub=f"Generated {_fmt_date(date.today())}"),
+        Spacer(1, 14),
+        brand.pdf_meta_strip(page_width, [
+            ("Client", engagement.client.name if engagement.client else ""),
+            ("Engagement", engagement.title),
+            ("Type", engagement.type),
+            ("Period ended", _fmt_date(engagement.period_end)),
+        ]),
+        Spacer(1, 6),
+    ]
 
     for code, key, label, filing_code in WORKPAPER_SECTIONS:
         if key == "forensic_report" and not is_forensic:
@@ -1650,10 +1575,10 @@ def build_engagement_file_summary_pdf(engagement):
         data = [["Symbol", "Meaning"]] + [[tm.symbol, tm.meaning] for tm in sorted(used.values(), key=lambda t: t.symbol)]
         legend_table = Table(data, colWidths=[80, 400])
         legend_table.setStyle(TableStyle([
-            ("BACKGROUND", (0, 0), (-1, 0), gold),
+            ("BACKGROUND", (0, 0), (-1, 0), navy),
             ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
             ("FONTSIZE", (0, 0), (-1, -1), 9),
-            ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#DDDDDD")),
+            ("LINEBELOW", (0, 1), (-1, -1), 0.5, colors.HexColor(f"#{brand.LINE}")),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ("TOPPADDING", (0, 0), (-1, -1), 5),
         ]))
@@ -1661,6 +1586,7 @@ def build_engagement_file_summary_pdf(engagement):
     else:
         story.append(Paragraph("No tickmarks were used anywhere in this engagement's file.", body))
 
-    doc.build(story)
+    footer = brand.pdf_footer()
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
     buf.seek(0)
     return buf

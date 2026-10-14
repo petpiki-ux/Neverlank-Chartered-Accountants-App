@@ -29,6 +29,7 @@
       <div class="totals-wrap">
         <div class="totals">
           <div class="row"><span>Invoice total</span><span>{{ receipt.currency }} {{ '{:,.2f}'.format(invoice.total) }}</span></div>
+          {% if invoice.credited_total > 0.005 %}<div class="row"><span>Less credit notes</span><span>({{ receipt.currency }} {{ '{:,.2f}'.format(invoice.credited_total) }})</span></div>{% endif %}
           <div class="row"><span>Received before this payment</span><span>{{ receipt.currency }} {{ '{:,.2f}'.format(receipt.paid_to_date - receipt.amount) }}</span></div>
           <div class="row"><span>This payment</span><span>{{ receipt.currency }} {{ '{:,.2f}'.format(receipt.amount) }}</span></div>
           <div class="row grand"><span>Balance owing</span><span>{{ receipt.currency }} {{ '{:,.2f}'.format(receipt.balance_after) }}</span></div>

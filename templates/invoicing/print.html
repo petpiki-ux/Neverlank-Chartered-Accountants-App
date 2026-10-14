@@ -22,6 +22,20 @@
 {% endblock %}
 {% block total_label %}Total due{% endblock %}
 {% block extras %}
+  {% if invoice.active_credit_notes %}
+  <div class="totals-wrap">
+    <div class="totals">
+      <div class="row"><span>Invoice total</span><span>{{ invoice.currency }} {{ '{:,.2f}'.format(invoice.total) }}</span></div>
+      {% for c in invoice.active_credit_notes %}<div class="row"><span>Less credit note {{ c.credit_note_number }}</span><span>({{ invoice.currency }} {{ '{:,.2f}'.format(c.total) }})</span></div>{% endfor %}
+      {% if invoice.amount_paid > 0.005 or invoice.legacy_paid %}<div class="row"><span>Less received</span><span>({{ invoice.currency }} {{ '{:,.2f}'.format(invoice.total if invoice.legacy_paid else invoice.amount_paid) }})</span></div>{% endif %}
+      {% if invoice.refund_due > 0.005 %}
+      <div class="row grand"><span>Refund due to you</span><span>{{ invoice.currency }} {{ '{:,.2f}'.format(invoice.refund_due) }}</span></div>
+      {% else %}
+      <div class="row grand"><span>Balance due</span><span>{{ invoice.currency }} {{ '{:,.2f}'.format(invoice.balance) }}</span></div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
   {% if invoice.notes %}<div class="block"><h4>Notes</h4><div class="txt">{{ invoice.notes }}</div></div>{% endif %}
 {% endblock %}
 {% block thanks %}Thank you for your business.{% endblock %}

@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}Issue credit note - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Issue credit note</h1>
+    <div class="subtitle">Against invoice <a href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}">{{ invoice.invoice_number }}</a> &middot; {{ invoice.client.name }}</div>
+  </div>
+  <div><a class="btn secondary" href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}">Cancel</a></div>
+</div>
+
+<div class="card" style="max-width:860px;">
+  <div class="form-row" style="margin-bottom:6px;">
+    <div><strong>Invoice total:</strong> {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.total) }}</div>
+    <div><strong>Already credited:</strong> {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.credited_total) }}</div>
+    <div><strong>Still creditable:</strong> {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.creditable_balance) }}</div>
+    <div><strong>VAT:</strong> {{ '%g'|format(invoice.vat_pct) }}%</div>
+  </div>
+  {% if invoice.amount_paid > 0.005 or invoice.legacy_paid %}
+  <p class="muted" style="font-size:12.5px;">The client has already paid {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.total if invoice.legacy_paid else invoice.amount_paid) }} on this invoice. If the credit takes the amount owed below what they have paid, the invoice will show a refund due to the client.</p>
+  {% endif %}
+
+  <form method="post" id="cn-form">
+    <div class="form-row">
+      <div style="flex:1;">
+        <label><input type="radio" name="mode" value="partial" checked style="width:auto;" onchange="cnMode()"> Credit selected amounts (part credit)</label>
+      </div>
+      <div style="flex:1;">
+        <label><input type="radio" name="mode" value="full" style="width:auto;" onchange="cnMode()"> Credit the whole invoice{% if invoice.credited_total > 0.005 %} (the balance still creditable){% endif %}</label>
+      </div>
+    </div>
+
+    <div id="cn-lines">
+      <table>
+        <thead><tr><th>Description</th><th style="width:90px;" class="text-right">Qty</th><th style="width:130px;" class="text-right">Unit price (ex VAT)</th><th style="width:120px;" class="text-right">Amount</th></tr></thead>
+        <tbody id="cn-body">
+          {% for desc, qty, price in lines %}
+          <tr>
+            <td><input type="text" name="description" value="{{ desc }}" maxlength="300"></td>
+            <td><input type="number" name="quantity" step="any" min="0" value="{{ '%g'|format(qty) }}" class="text-right"></td>
+            <td><input type="number" name="unit_price" step="0.01" min="0" value="{{ '%.2f'|format(price) }}" class="text-right"></td>
+            <td class="text-right cn-amt">0.00</td>
+          </tr>
+          {% endfor %}
+          {% for i in range(3) %}
+          <tr>
+            <td><input type="text" name="description" value="" maxlength="300" placeholder="Another line (optional)"></td>
+            <td><input type="number" name="quantity" step="any" min="0" value="" class="text-right"></td>
+            <td><input type="number" name="unit_price" step="0.01" min="0" value="" class="text-right"></td>
+            <td class="text-right cn-amt">0.00</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:12px;">The lines start as a copy of the invoice. Reduce the quantity or unit price to credit only part of a line, or clear a line (leave its description, quantity and price empty) to leave it out.</p>
+      <div class="form-row" style="justify-content:flex-end;">
+        <div style="min-width:260px;">
+          <div class="form-row" style="margin:0;"><span style="flex:1;">Credit (ex VAT)</span><span id="cn-sub">0.00</span></div>
+          <div class="form-row" style="margin:0;"><span style="flex:1;">VAT ({{ '%g'|format(invoice.vat_pct) }}%)</span><span id="cn-vat">0.00</span></div>
+          <div class="form-row" style="margin:0;font-weight:700;"><span style="flex:1;">Credit note total ({{ invoice.currency }})</span><span id="cn-tot">0.00</span></div>
+        </div>
+      </div>
+    </div>
+    <div id="cn-full" style="display:none;" class="muted">
+      <p>A credit note for {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.creditable_balance) }} (including VAT) will be issued, cancelling what is left of this invoice.</p>
+    </div>
+
+    <div class="form-row">
+      <div>
+        <label for="issue_date">Credit note date</label>
+        <input type="date" id="issue_date" name="issue_date" value="{{ issue_date }}" max="{{ today_iso }}"{% if invoice.issue_date %} min="{{ invoice.issue_date.isoformat() }}"{% endif %} required>
+      </div>
+    </div>
+    <div>
+      <label for="reason">Reason for the credit note *</label>
+      <textarea id="reason" name="reason" rows="2" required placeholder="e.g. Fee reduced by agreement with the client; duplicate billing; service not performed">{{ reason }}</textarea>
+    </div>
+    <div>
+      <label for="notes">Notes to print on the credit note (optional)</label>
+      <textarea id="notes" name="notes" rows="2">{{ notes }}</textarea>
+    </div>
+    <button type="submit" class="btn gold">Issue credit note</button>
+    <span class="muted" style="font-size:12px;margin-left:8px;">A credit note cannot be edited or deleted once issued - if it is wrong, void it and issue a new one.</span>
+  </form>
+</div>
+
+<script>
+  var VAT = {{ (invoice.vat_pct or 0) }};
+  function cnRecalc() {
+    var rows = document.querySelectorAll('#cn-body tr'), sub = 0;
+    rows.forEach(function (tr) {
+      var q = parseFloat(tr.querySelector('[name=quantity]').value) || 0;
+      var p = parseFloat(tr.querySelector('[name=unit_price]').value) || 0;
+      var a = q * p; sub += a;
+      tr.querySelector('.cn-amt').textContent = a.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+    });
+    var vat = sub * VAT / 100;
+    var f = function (n) { return n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}); };
+    document.getElementById('cn-sub').textContent = f(sub);
+    document.getElementById('cn-vat').textContent = f(vat);
+    document.getElementById('cn-tot').textContent = f(sub + vat);
+  }
+  function cnMode() {
+    var full = document.querySelector('input[name=mode]:checked').value === 'full';
+    document.getElementById('cn-lines').style.display = full ? 'none' : '';
+    document.getElementById('cn-full').style.display = full ? '' : 'none';
+  }
+  document.getElementById('cn-body').addEventListener('input', cnRecalc);
+  cnRecalc(); cnMode();
+</script>
+{% endblock %}

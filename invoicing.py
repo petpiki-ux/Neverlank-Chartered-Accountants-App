@@ -39,6 +39,22 @@ def _ensure_invoice_access(invoice):
         abort(403)
 
 
+CREDIT_LOCK_MESSAGE = ("This invoice has credit note(s) issued against it, so its lines, currency and VAT rate can no "
+                       "longer be changed. Void the credit note(s) first if they were issued in error.")
+
+
+def _credit_locked(invoice):
+    """True once a (non-voided) credit note exists: the invoice amounts must stay as the credit notes were based on."""
+    return bool(invoice.active_credit_notes)
+
+
+def _safe_float(value, default):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def next_sequence_number(column, prefix):
     """prefix + the next 4-digit number after the highest one already used.
     (Counting rows would hand out a number twice once any document in the
@@ -205,6 +221,9 @@ def print_invoice(invoice_id):
 def add_invoice_line(invoice_id):
     invoice = Invoice.query.get_or_404(invoice_id)
     _ensure_invoice_access(invoice)
+    if _credit_locked(invoice):
+        flash(CREDIT_LOCK_MESSAGE, "danger")
+        return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
     description = request.form.get("description", "").strip()
     if not description:
         flash("Please describe the line item.", "danger")
@@ -230,6 +249,9 @@ def add_invoice_line(invoice_id):
 def update_invoice_line(line_id):
     line = InvoiceLineItem.query.get_or_404(line_id)
     _ensure_invoice_access(line.invoice)
+    if _credit_locked(line.invoice):
+        flash(CREDIT_LOCK_MESSAGE, "danger")
+        return redirect(url_for("invoicing.view_invoice", invoice_id=line.invoice_id))
     line.description = request.form.get("description", line.description).strip() or line.description
     try:
         line.quantity = float(request.form.get("quantity", line.quantity))
@@ -250,6 +272,9 @@ def delete_invoice_line(line_id):
     line = InvoiceLineItem.query.get_or_404(line_id)
     _ensure_invoice_access(line.invoice)
     invoice_id = line.invoice_id
+    if _credit_locked(line.invoice):
+        flash(CREDIT_LOCK_MESSAGE, "danger")
+        return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
     db.session.delete(line)
     db.session.commit()
     flash("Line item removed.", "info")
@@ -273,6 +298,9 @@ def update_invoice_status(invoice_id):
         if invoice.status == "Paid" and (invoice.balance <= 0.005):
             flash("This invoice is already paid.", "info")
             return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
+        if invoice.is_fully_credited:
+            flash("This invoice has been credited in full, so there is nothing left to pay.", "info")
+            return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
         try:
             chosen = datetime.strptime(request.form.get("paid_on", ""), "%Y-%m-%d").date()
         except ValueError:
@@ -288,6 +316,10 @@ def update_invoice_status(invoice_id):
         return redirect(url_for("receipts.view_receipt", receipt_id=receipt.id))
     if invoice.amount_paid > 0.005:
         flash("This invoice has receipts issued against it. Void the receipt(s) first if the payment was recorded in error.", "danger")
+        return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
+    if status in ("Draft", "Cancelled") and _credit_locked(invoice):
+        flash("This invoice has credit note(s) issued against it, so it cannot go back to Draft or be Cancelled. "
+              "Void the credit note(s) first if they were issued in error.", "danger")
         return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
     invoice.status = status
     invoice.paid_at = None
@@ -326,6 +358,9 @@ def add_task_lines(invoice_id):
         return back
     if invoice.status not in ("Draft", "Sent"):
         flash("Lines can only be added to a Draft or Sent invoice.", "danger")
+        return back
+    if _credit_locked(invoice):
+        flash(CREDIT_LOCK_MESSAGE, "danger")
         return back
     ids = [int(i) for i in request.form.getlist("task_id") if i.isdigit()]
     tasks = EngagementTask.query.filter(EngagementTask.id.in_(ids)).all() if ids else []
@@ -408,6 +443,11 @@ def edit_invoice(invoice_id):
     clients = visible_clients(current_user)
 
     if request.method == "POST":
+        if _credit_locked(invoice) and (
+                request.form.get("currency", invoice.currency) != invoice.currency
+                or abs(_safe_float(request.form.get("vat_pct"), invoice.vat_pct) - (invoice.vat_pct or 0)) > 1e-9):
+            flash(CREDIT_LOCK_MESSAGE, "danger")
+            return redirect(url_for("invoicing.edit_invoice", invoice_id=invoice.id))
         try:
             vat_pct = float(request.form.get("vat_pct", invoice.vat_pct))
         except ValueError:
@@ -434,6 +474,9 @@ def delete_invoice(invoice_id):
     _ensure_invoice_access(invoice)
     if invoice.status != "Draft" and current_user.role not in ("partner", "admin"):
         flash("Only a Partner or Admin can delete an invoice that's already been sent.", "danger")
+        return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
+    if invoice.credit_notes:
+        flash("This invoice has credit note(s) on file (kept for the audit trail), so it cannot be deleted.", "danger")
         return redirect(url_for("invoicing.view_invoice", invoice_id=invoice_id))
     if invoice.active_receipts:
         flash("This invoice has receipts issued against it, so it cannot be deleted. Void the receipt(s) first if the payment was recorded in error.", "danger")

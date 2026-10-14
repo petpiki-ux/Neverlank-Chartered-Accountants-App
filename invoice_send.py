@@ -207,8 +207,25 @@ def _sendable(invoice):
 
 
 def _html_body(text):
-    paragraphs = "".join(f"<p style='margin:0 0 10px'>{escape(p).replace(chr(10), '<br>')}</p>" for p in re.split(r"\n\s*\n", text.strip()))
-    return f"<div style='font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1f2933'>{paragraphs}</div>"
+    """The email body in the firm's design: navy header band with the firm name and gold
+    strapline, the message, then a footer with the firm's address and website. Table
+    layout with inline styles so it renders the same in Gmail, Outlook and phones."""
+    firm = FIRM_LETTERHEAD
+    paragraphs = "".join(f"<p style='margin:0 0 12px;line-height:1.55'>{escape(p).replace(chr(10), '<br>')}</p>"
+                         for p in re.split(r"\n\s*\n", text.strip()))
+    contact = " &nbsp;&middot;&nbsp; ".join(escape(x) for x in (firm.get("web"), firm.get("email"), firm.get("phone")) if x)
+    return (
+        "<div style='background:#eef1f5;padding:18px 8px;font-family:Segoe UI,Arial,sans-serif'>"
+        "<table role='presentation' width='100%' cellpadding='0' cellspacing='0' style='max-width:620px;margin:0 auto;background:#ffffff;border-collapse:collapse'>"
+        "<tr><td style='background:#0f2942;padding:20px 26px;border-bottom:4px solid #b8934a'>"
+        f"<div style='font-family:Georgia,serif;font-size:21px;font-weight:bold;color:#ffffff'>{escape(firm.get('name', ''))}</div>"
+        f"<div style='font-size:11px;letter-spacing:2px;color:#d4af6a;margin-top:4px;font-weight:600'>{escape((firm.get('strapline') or firm.get('tagline') or '').upper())}</div>"
+        "</td></tr>"
+        f"<tr><td style='padding:26px;font-size:14px;color:#1f2933'>{paragraphs}</td></tr>"
+        "<tr><td style='background:#0a1c2e;padding:14px 26px;font-size:11px;color:#cdd8e4;border-top:2px solid #b8934a'>"
+        f"{escape(firm.get('address', ''))}<br><span style='color:#d4af6a'>{contact}</span>"
+        "</td></tr></table></div>"
+    )
 
 
 def _back(invoice_id, anchor="send"):

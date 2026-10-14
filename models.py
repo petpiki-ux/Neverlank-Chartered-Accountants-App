@@ -433,6 +433,9 @@ PERMISSIONS = [
     ("send_invoices", "Send Invoices & Reminders to Clients",
      "Email an invoice (with the PDF attached) or open a WhatsApp message with its link straight from the invoice page, and send overdue-payment reminders. Open to everyone who can see the invoice by default; remove it from a role to stop staff contacting clients themselves.",
      tuple(USER_ROLES)),
+    ("issue_credit_notes", "Issue & Void Credit Notes",
+     "Finance > Credit notes: issue a credit note against a client invoice (in full or in part) to correct or reduce what the client owes, and void one issued in error. Partners and Admin only by default.",
+     ("partner", "admin")),
     ("view_attendance", "View Attendance (Check In / Check Out)",
      "HR & Admin > Attendance: see who is in right now, when everyone checked in and out each day, hours worked, people who have not checked in or forgot to check out, and export the log. Management only by default.",
      ("partner", "admin")),
@@ -9048,10 +9051,41 @@ class Invoice(db.Model):
         ever issued, so the invoice is simply treated as settled in full."""
         return self.status == "Paid" and not self.receipts
 
+    # ---- credit notes (see CreditNote below) ----
+    @property
+    def active_credit_notes(self):
+        return [c for c in self.credit_notes if not c.is_void]
+
+    @property
+    def credited_total(self):
+        """Total (incl. VAT) credited back to the client by non-voided credit notes."""
+        return round(sum(c.total for c in self.active_credit_notes), 2)
+
+    @property
+    def net_total(self):
+        """What the client is actually liable for: invoice total less credit notes."""
+        return max(round((self.total or 0) - self.credited_total, 2), 0.0)
+
+    @property
+    def creditable_balance(self):
+        """How much (incl. VAT) may still be credited against this invoice."""
+        return max(round((self.total or 0) - self.credited_total, 2), 0.0)
+
+    @property
+    def is_fully_credited(self):
+        return bool(self.active_credit_notes) and self.net_total <= 0.005
+
+    @property
+    def refund_due(self):
+        """Money the client has paid in excess of what they now owe (a credit
+        note issued after payment). Zero unless the firm owes the client."""
+        paid = (self.total or 0) if self.legacy_paid else self.amount_paid
+        return max(round(paid - self.net_total, 2), 0.0)
+
     @property
     def receiptable_balance(self):
-        """What a new receipt may still be issued for (total less receipts)."""
-        return max(round((self.total or 0) - self.amount_paid, 2), 0.0)
+        """What a new receipt may still be issued for (net of credit notes, less receipts)."""
+        return max(round(self.net_total - self.amount_paid, 2), 0.0)
 
     @property
     def balance(self):
@@ -9067,6 +9101,8 @@ class Invoice(db.Model):
             return "Paid"
         if self.amount_paid > 0.005:
             return "Part-paid"
+        if self.is_fully_credited:
+            return "Credited"
         return ""
 
     def __repr__(self):
@@ -9167,10 +9203,85 @@ class Receipt(db.Model):
 
     @property
     def balance_after(self):
-        return max(round((self.invoice.total or 0) - self.paid_to_date, 2), 0.0)
+        return max(round(self.invoice.net_total - self.paid_to_date, 2), 0.0)
 
     def __repr__(self):
         return f"<Receipt {self.receipt_number} {self.amount}>"
+
+
+# ---------- Credit notes (a reduction of an Invoice) ----------
+
+class CreditNote(db.Model):
+    """A credit note reduces what a client owes on an invoice - in full or in
+    part (a billing error, a discount agreed afterwards, a service not
+    delivered). Numbered CN-YYYY-NNNN. Like a receipt it is never deleted: one
+    issued in error is voided (kept on file with who/when/why, number not
+    reused, ignored in every total). It carries the invoice's currency and VAT
+    rate, and the invoice's balance, status, statements and analytics all
+    follow it. If the client had already paid, the invoice then shows a
+    refund due."""
+    id = db.Column(db.Integer, primary_key=True)
+    credit_note_number = db.Column(db.String(30), unique=True, nullable=False)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    issue_date = db.Column(db.Date, nullable=False, default=date.today)
+    currency = db.Column(db.String(10), nullable=False, default="USD")  # always the invoice's currency
+    vat_pct = db.Column(db.Float, nullable=False, default=15.0)  # the invoice's VAT rate, at issue time
+    reason = db.Column(db.Text, nullable=False)
+    notes = db.Column(db.Text)
+
+    issued_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    issued_at = db.Column(db.DateTime, default=datetime.utcnow)
+    voided_at = db.Column(db.DateTime)
+    voided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    void_reason = db.Column(db.Text)
+
+    invoice = db.relationship("Invoice", backref=db.backref(
+        "credit_notes", lazy=True, cascade="all, delete-orphan", order_by="CreditNote.issue_date, CreditNote.id"))
+    issued_by = db.relationship("User", foreign_keys=[issued_by_id])
+    voided_by = db.relationship("User", foreign_keys=[voided_by_id])
+    lines = db.relationship("CreditNoteLine", backref="credit_note", lazy=True,
+                            cascade="all, delete-orphan", order_by="CreditNoteLine.id")
+
+    @property
+    def is_void(self):
+        return self.voided_at is not None
+
+    @property
+    def client(self):
+        return self.invoice.client
+
+    @property
+    def bill_to(self):
+        return self.invoice.bill_to
+
+    # Not rounded, so a credit note for every line of an invoice adds up to
+    # exactly the invoice's own (unrounded) total.
+    @property
+    def subtotal(self):
+        return sum((l.quantity or 0) * (l.unit_price or 0) for l in self.lines)
+
+    @property
+    def vat_amount(self):
+        return self.subtotal * (self.vat_pct or 0) / 100.0
+
+    @property
+    def total(self):
+        return self.subtotal + self.vat_amount
+
+    def __repr__(self):
+        return f"<CreditNote {self.credit_note_number}>"
+
+
+class CreditNoteLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    credit_note_id = db.Column(db.Integer, db.ForeignKey("credit_note.id"), nullable=False)
+    description = db.Column(db.String(300), nullable=False)
+    quantity = db.Column(db.Float, default=1.0)
+    unit_price = db.Column(db.Float, default=0.0)
+
+    @property
+    def line_total(self):
+        return (self.quantity or 0) * (self.unit_price or 0)
 
 
 # ---------- Quotations (convert to Invoices) ----------

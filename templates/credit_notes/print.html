@@ -1,0 +1,56 @@
+{% extends "invoicing/print_base.html" %}
+{% set doc_number = note.credit_note_number %}
+{% block doc_title %}Credit note{% endblock %}
+{% block back_link %}<a class="secondary" href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}">Back to invoice</a>
+  <a class="secondary" href="{{ url_for('credit_notes.credit_note_pdf', note_id=note.id) }}" target="_blank">Download PDF</a>
+  {% if not note.is_void and user_has_permission(current_user, 'send_invoices') and invoice.client.email %}
+  <form method="post" action="{{ url_for('credit_notes.email_credit_note', note_id=note.id) }}" style="display:inline;" onsubmit="return confirm('Email this credit note to {{ invoice.client.email }}?');">
+    <button type="submit" style="background:#fff;color:#0f2942;border:1px solid #c9d2dc;">Email to client</button>
+  </form>
+  {% endif %}
+  {% if can_void %}
+  <form method="post" action="{{ url_for('credit_notes.void_credit_note', note_id=note.id) }}" style="display:inline;" onsubmit="var r = prompt('Why is this credit note being voided?'); if (!r) { return false; } this.reason.value = r; return true;">
+    <input type="hidden" name="reason" value="">
+    <button type="submit" style="background:#c0392b;">Void credit note</button>
+  </form>
+  {% endif %}{% endblock %}
+{% block doc_label %}Credit note{% endblock %}
+{% block doc_sub %}{% if note.is_void %}VOID{% else %}Against {{ invoice.invoice_number }}{% endif %}{% endblock %}
+{% block stamp %}{% if note.is_void %}<div class="stamp cancelled">Void</div>{% else %}<div class="stamp paid">Credit</div>{% endif %}{% endblock %}
+{% block meta %}
+  <div><div class="k">Credit note no.</div><div class="v">{{ note.credit_note_number }}</div></div>
+  <div><div class="k">Date</div><div class="v">{{ note.issue_date.strftime('%d %b %Y') }}</div></div>
+  <div><div class="k">Against invoice</div><div class="v">{{ invoice.invoice_number }}</div></div>
+  <div><div class="k">Currency</div><div class="v">{{ note.currency }}</div></div>
+{% endblock %}
+{% block party_label %}Credit to{% endblock %}
+{% block party_re %}
+  <div class="re"><b>Original invoice:</b> {{ invoice.invoice_number }}{% if invoice.issue_date %} dated {{ invoice.issue_date.strftime('%d %b %Y') }}{% endif %}{% if invoice.engagement %}  &middot;  <b>Re:</b> {{ invoice.engagement.title }}{% endif %}</div>
+{% endblock %}
+{% block intro %}
+  <div class="block"><h4>Reason for credit</h4><div class="txt">{{ note.reason }}</div></div>
+{% endblock %}
+{% block total_label %}Total credited{% endblock %}
+{% block extras %}
+  <div class="words"><div class="k">Amount credited</div>
+    <div class="v">{{ note.currency }} {{ '{:,.2f}'.format(note.total) }}</div>
+    <div style="font-size:12px;color:#3b4652;margin-top:2px;">{{ words }}</div></div>
+
+  <div class="totals-wrap">
+    <div class="totals">
+      <div class="row"><span>Invoice total</span><span>{{ note.currency }} {{ '{:,.2f}'.format(invoice.total) }}</span></div>
+      <div class="row"><span>Total credited to date</span><span>({{ note.currency }} {{ '{:,.2f}'.format(invoice.credited_total) }})</span></div>
+      <div class="row grand"><span>Invoice net of credits</span><span>{{ note.currency }} {{ '{:,.2f}'.format(invoice.net_total) }}</span></div>
+    </div>
+  </div>
+  {% if invoice.refund_due > 0.005 and not note.is_void %}
+  <div class="block"><h4>Refund due</h4><div class="txt">The client has paid more than is now owing on this invoice. An amount of {{ note.currency }} {{ '{:,.2f}'.format(invoice.refund_due) }} is due back to the client or may be held as credit against future invoices.</div></div>
+  {% endif %}
+  {% if note.notes %}<div class="block"><h4>Notes</h4><div class="txt">{{ note.notes }}</div></div>{% endif %}
+  {% if note.is_void %}
+  <div class="block"><h4>This credit note has been voided</h4><div class="txt">Voided {{ (note.voided_at|cat).strftime('%d %b %Y') }}{% if note.voided_by %} by {{ note.voided_by.name }}{% endif %}.{% if note.void_reason %} Reason: {{ note.void_reason }}{% endif %} It no longer reduces the invoice.</div></div>
+  {% endif %}
+  <div class="accept"><div class="sig">Issued by{% if note.issued_by %}: {{ note.issued_by.name }}{% endif %}<br>For {{ firm.name }}</div><div></div></div>
+{% endblock %}
+{% block bank_block %}{% endblock %}
+{% block thanks %}This credit note reduces the amount due on invoice {{ invoice.invoice_number }}.{% endblock %}
