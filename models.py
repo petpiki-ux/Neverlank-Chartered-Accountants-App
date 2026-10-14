@@ -10328,3 +10328,42 @@ class CFProject(db.Model):
     @property
     def narrative(self):
         return _json_load(self.narrative_json, {})
+
+
+class CFMgmtPack(db.Model):
+    """A monthly management accounts reporting pack for a client: actuals (trial balance upload, manual capture or modelled from
+    the prior year's accounts), budget (from a forecast model or typed in) and prior-year comparatives, all held in one JSON
+    document (see cf_ma.py for its shape). The arithmetic is in cf_ma.py; this row only holds who/what/when and the data."""
+    __tablename__ = "cf_mgmt_pack"
+    id = db.Column(db.Integer, primary_key=True)
+    pack_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    name = db.Column(db.String(200), nullable=False)
+    currency = db.Column(db.String(6), nullable=False, default="USD")
+    status = db.Column(db.String(20), nullable=False, default="Draft")
+    data_json = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    finalised_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    finalised_at = db.Column(db.DateTime)
+
+    client = db.relationship("Client", backref=db.backref("cf_packs", lazy=True, cascade="all, delete-orphan", order_by="CFMgmtPack.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("cf_packs", lazy=True, order_by="CFMgmtPack.id.desc()"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    finalised_by = db.relationship("User", foreign_keys=[finalised_by_id])
+
+    @property
+    def is_final(self):
+        return self.status == "Final"
+
+    @property
+    def data(self):
+        return _json_load(self.data_json, {})
+
+    def set_data(self, value):
+        self.data_json = json.dumps(value)

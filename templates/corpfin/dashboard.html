@@ -8,6 +8,7 @@
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
     <a class="btn gold" href="{{ url_for('corpfin.new_model', client_id=client_filter) }}">New forecast model</a>
+    <a class="btn gold" href="{{ url_for('corpfin.new_pack', client_id=client_filter) }}">New management accounts</a>
     <a class="btn" href="{{ url_for('corpfin.new_project', client_id=client_filter) }}">New investment appraisal</a>
     <a class="btn secondary" href="{{ url_for('corpfin.loan_calculator') }}">Loan calculator</a>
   </div>
@@ -46,6 +47,29 @@
   {% endif %}
 </div>
 
+<h2 class="cf-section">Management accounts</h2>
+<div class="card">
+  {% if packs %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Number</th><th>Pack</th><th>Client</th><th>Engagement</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+    <tbody>
+    {% for p in packs %}
+      <tr>
+        <td><a href="{{ url_for('corpfin.pack_tab', pack_id=p.id, tab='summary') }}">{{ p.pack_number }}</a></td>
+        <td>{{ p.name }}</td><td>{{ p.client.name }}</td>
+        <td>{% if p.engagement %}<a href="{{ url_for('engagements.view_engagement', engagement_id=p.engagement_id) }}">{{ p.engagement.title }}</a>{% else %}<span class="muted">-</span>{% endif %}</td>
+        <td><span class="badge status-{{ p.status }}">{{ p.status }}</span></td>
+        <td>{{ p.updated_at.strftime('%d %b %Y') if p.updated_at else '' }}</td>
+        <td class="text-right"><a class="btn small secondary" href="{{ url_for('corpfin.pack_tab', pack_id=p.id, tab='summary') }}">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="empty-state">No management accounts yet. Choose <strong>New management accounts</strong> to start a monthly reporting pack.</div>
+  {% endif %}
+</div>
+
 <h2 class="cf-section">Investment appraisals &amp; feasibility studies</h2>
 <div class="card">
   {% if projects %}
@@ -75,6 +99,7 @@
     <dt>Scenarios</dt><dd>Each scenario is a set of adjustments to the base case (for example revenue -10%, receivable days +15). Compare them side by side or run a two-way sensitivity grid.</dd>
     <dt>Loans &amp; covenants</dt><dd>Loan balances and interest feed the statements. Set covenant limits (debt service cover, interest cover, gearing, current ratio, net debt / EBITDA) and see every year pass or breach.</dd>
     <dt>Valuation</dt><dd>Build a discount rate (CAPM / WACC), value the free cash flows (DCF), cross-check with trading multiples and see the ranges on a football field.</dd>
+    <dt>Management accounts</dt><dd>A monthly pack of income statement, balance sheet and cash flow set against budget, forecast and last year, with KPIs, variances and commentary. Actuals come from a trial balance, manual capture, or are modelled from the prior year's accounts; existing financial statements can be loaded to supply the comparatives.</dd>
     <dt>Excel</dt><dd>Every model downloads as a workbook with live formulas - change an input in Excel and the statements, ratios and DCF recalculate.</dd>
   </dl>
 </details>

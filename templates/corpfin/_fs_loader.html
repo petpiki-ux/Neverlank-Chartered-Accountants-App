@@ -1,0 +1,26 @@
+{# Load existing financial statements. Needs: fs_target ("pack:ID" / "model:ID"), fs_docs, fs_ai #}
+<form method="post" action="{{ url_for('corpfin.fs_read') }}" enctype="multipart/form-data" class="card">
+  <h3 style="margin-top:0;">Load existing financial statements</h3>
+  <p class="cf-sub">{% if fs_target.startswith('pack') %}Read the prior year's signed accounts (PDF, Word, Excel or CSV) and take the key figures into this pack: they become the comparatives, the opening balance sheet and the base for modelled months.{% else %}Read the client's financial statements (PDF, Word, Excel or CSV) and take the key figures into the historical analysis, which in turn suggests the opening balance sheet and starting assumptions for this model.{% endif %}
+    You will see the figures and checks, and can correct them, before anything is saved.
+    {% if fs_ai %}<span class="badge status-Approved">AI reader on</span>{% else %}<span class="badge">Built-in reader</span> <span class="muted">Works best on text-based statements with one line per item.</span>{% endif %}</p>
+  <input type="hidden" name="target" value="{{ fs_target }}">
+  <div class="form-row">
+    <div><label>Upload a file</label><input type="file" name="file" accept=".pdf,.docx,.xlsx,.xlsm,.csv,.txt"></div>
+    <div><label>Or pick a document already filed on this client's engagements</label>
+      <select name="document_id"><option value="">None</option>
+        {% for dc in fs_docs %}<option value="{{ dc.id }}">{{ dc.name }} - {{ dc.engagement }}{% if dc.category %} ({{ dc.category }}){% endif %}{% if dc.date %}, {{ dc.date }}{% endif %}</option>{% endfor %}
+      </select></div>
+  </div>
+  <details><summary style="cursor:pointer;">Or paste the statements text</summary><textarea name="text" rows="6" placeholder="Paste the income statement and balance sheet here"></textarea></details>
+  <input type="hidden" name="source" id="fs-source" value="upload">
+  <button class="btn gold" type="submit" onclick="fsPick(this.form)" style="margin-top:8px;">Read the statements</button>
+</form>
+<script>
+function fsPick(f) {
+  var s = f.querySelector('#fs-source');
+  if (f.document_id.value && !f.file.value) s.value = 'document';
+  else if (!f.file.value && f.text.value.trim()) s.value = 'paste';
+  else s.value = 'upload';
+}
+</script>

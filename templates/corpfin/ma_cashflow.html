@@ -1,0 +1,20 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<div class="ma-toolbar">
+  <div class="seg">
+    <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='cashflow', month=request.args.get('month')) }}" class="{{ 'on' if var }}">With variances</a>
+    <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='cashflow', month=request.args.get('month'), var='0') }}" class="{{ 'on' if not var }}">Figures only</a>
+  </div>
+</div>
+{% if cfl.rows[0].a is none and cfl.rows[0].ya is none %}
+<div class="card"><div class="empty-state">The cash flow is worked out from two balance sheets. It needs the closing balance sheet for {{ labels.month }} and the opening position (the prior-year balance sheet or the previous month). Add them on the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='actuals') }}">Actuals</a> and <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='prior') }}">Prior year</a> tabs.</div></div>
+{% else %}
+<div class="card">
+  <h3 style="margin-top:0;">Cash flow &ndash; {{ labels.month }}</h3>
+  {{ ma.cashflow_table(cfl, var, labels) }}
+  <p class="cf-sub">{{ cur }}. Indirect method, derived from the movement between consecutive balance sheets. Opening and closing cash are shown net of any overdraft.</p>
+  {% if cfl.unreconciled and (cfl.unreconciled > 0.5 or cfl.unreconciled < -0.5) %}<div class="flash warning">The cash flow does not reconcile to the cash movement by {{ cfl.unreconciled|cfn }}. Check the balance sheets.</div>{% endif %}
+</div>
+{% if d.commentary.cash %}<div class="card"><h3 style="margin-top:0;">Commentary</h3><p style="white-space:pre-wrap;">{{ d.commentary.cash }}</p></div>{% endif %}
+{% endif %}
+{% endblock %}

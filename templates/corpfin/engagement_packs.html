@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}Management Accounts - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{{ svc.service_header(engagement) }}
+{{ svc.service_tabs(engagement, 'packs') }}
+
+{% if not unlocked %}
+<div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before preparing management accounts here.</div></div>
+{% else %}
+<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+  <div>
+    <strong>Management accounts for {{ engagement.client.name }}</strong>
+    <div class="muted" style="font-size:12px;">Monthly packs: income statement, balance sheet and cash flow against budget, forecast and last year, with KPIs, variance analysis, commentary, and branded PDF / Excel output. Actuals come from a trial balance, manual capture or are modelled from the prior year.</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a class="btn gold" href="{{ url_for('corpfin.new_pack', client_id=engagement.client_id, engagement_id=engagement.id) }}">New management accounts</a>
+  </div>
+</div>
+<div class="card">
+  {% if packs %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Number</th><th>Pack</th><th>Financial year</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+    <tbody>
+    {% for p in packs %}
+      <tr>
+        <td><a href="{{ url_for('corpfin.pack_tab', pack_id=p.id, tab='summary') }}">{{ p.pack_number }}</a></td>
+        <td>{{ p.name }}</td>
+        <td>{{ (p.data.get('settings') or {}).get('fy_start_year', '-') }}</td>
+        <td><span class="badge status-{{ p.status }}">{{ p.status }}</span></td>
+        <td>{{ p.updated_at.strftime('%d %b %Y') if p.updated_at else '' }}</td>
+        <td class="text-right"><a class="btn small secondary" href="{{ url_for('corpfin.pack_tab', pack_id=p.id, tab='summary') }}">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="empty-state">No management accounts on this engagement yet. Choose <strong>New management accounts</strong> to start the first pack.</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

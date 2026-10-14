@@ -1,0 +1,65 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+{% set com = d.commentary %}
+{% set A = V.actual_ytd %}
+{% if A is none %}
+<div class="card"><div class="empty-state">No actual figures yet for {{ labels.month }}. Go to the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='actuals') }}">Actuals</a> tab to upload a trial balance, capture the month by hand, or model the months from the prior year's accounts.</div></div>
+{% else %}
+{% set Bm = V.budget_ytd %}
+<div class="kpi-grid">
+  {{ m.kpi('Revenue - ' ~ labels.month, V.actual_month.revenue|cfn if V.actual_month else '-', ('budget ' ~ (V.budget_month.revenue|cfn)) if V.budget_month else 'no budget') }}
+  {{ m.kpi('EBITDA - ' ~ labels.month, V.actual_month.ebitda|cfn if V.actual_month else '-', ('budget ' ~ (V.budget_month.ebitda|cfn)) if V.budget_month else 'no budget') }}
+  {{ m.kpi('Revenue - year to date', A.revenue|cfn, ('budget ' ~ (Bm.revenue|cfn)) if Bm else 'no budget') }}
+  {{ m.kpi('EBITDA - year to date', A.ebitda|cfn, ('budget ' ~ (Bm.ebitda|cfn)) if Bm else (A.ebitda_margin|cfp ~ ' margin')) }}
+  {{ m.kpi('Profit after tax - YTD', A.pat|cfn, ('budget ' ~ (Bm.pat|cfn)) if Bm else cur) }}
+  {% for k in kpis if k.key in ('cash', 'net_debt', 'current_ratio') %}
+    {{ m.kpi(k.label, k.actual|cffmt(k.fmt) if k.fmt != 'money' else k.actual|cfn, ('budget ' ~ (k.budget|cffmt(k.fmt) if k.fmt != 'money' else k.budget|cfn)) if k.budget is not none else '') }}
+  {% endfor %}
+  {% if V.outlook %}{{ m.kpi('Full-year profit after tax', V.outlook.pat|cfn, ('budget ' ~ (V.budget_fy.pat|cfn)) if V.budget_fy else 'outlook') }}{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Key messages</h3>
+  {% if com.summary %}<p style="white-space:pre-wrap;">{{ com.summary }}</p>{% else %}
+  <ul class="ma-msgs">{% for t in msgs %}<li>{{ t }}</li>{% endfor %}</ul>
+  <p class="cf-sub">Drafted from the numbers. Write your own on the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='commentary') }}">Commentary</a> tab and it replaces this.</p>{% endif %}
+</div>
+
+<div class="viz-grid">
+  {{ m.chart('rev', 'Revenue by month', 'actual, forecast and budget') }}
+  {{ m.chart('ebitda', 'EBITDA by month', 'actual, forecast and budget') }}
+  {{ m.chart('cash', 'Cash, net of overdraft', 'month end') }}
+</div>
+{{ ma.basis(d, V, status) }}
+{% endif %}
+
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  {% if user_is_signoff and not pack.is_final %}
+  <form method="post" action="{{ url_for('corpfin.pack_finalise', pack_id=pack.id) }}" class="inline" onsubmit="return confirm('Finalise and lock this pack?');"><button class="btn gold">Finalise &amp; lock</button></form>
+  {% endif %}
+  {% if not pack.is_final %}
+  <form method="post" action="{{ url_for('corpfin.pack_delete', pack_id=pack.id) }}" class="inline" onsubmit="return confirm('Delete this pack and all its figures? This cannot be undone.');"><button class="btn danger">Delete</button></form>
+  {% endif %}
+  <span class="cf-sub" style="margin:0;">Created {{ pack.created_at.strftime('%d %b %Y') if pack.created_at }}{% if pack.created_by %} by {{ pack.created_by.name }}{% endif %}{% if pack.updated_by %} &middot; last changed by {{ pack.updated_by.name }}{% endif %}</span>
+</div>
+
+<script type="application/json" id="cf-data">{{ charts|tojson }}</script>
+{{ m.chart_boot() }}
+<script>
+(function () {
+  var D = JSON.parse(document.getElementById('cf-data').textContent), C = cfColors;
+  var base = { currency: '{{ cur }}', unit: 'money', labels: D.months };
+  function mk(o) { for (var k in base) if (!(k in o)) o[k] = base[k]; return o; }
+  function has(a) { return a.some(function (x) { return x !== null; }); }
+  function ser(a, b, f) {
+    var s = [cfSeries('Actual', C.BLUE, a)];
+    if (has(f)) s.push(cfSeries('Forecast', C.AQUA, f));
+    if (has(b)) s.push(cfSeries('Budget', C.ORANGE, b));
+    return s;
+  }
+  cfGo('rev', mk({ type: 'columns', title: 'Revenue by month', series: ser(D.rev_a, D.rev_b, D.rev_f) }));
+  cfGo('ebitda', mk({ type: 'columns', title: 'EBITDA by month', diverging: true, series: ser(D.ebitda_a, D.ebitda_b, D.ebitda_f) }));
+  cfGo('cash', mk({ type: 'line', title: 'Cash, net of overdraft', series: ser(D.cash_a, D.cash_b, D.cash_f) }));
+})();
+</script>
+{% endblock %}

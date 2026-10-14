@@ -380,3 +380,29 @@ select[multiple] { min-height: 110px; }
 .cf-sticky-actions { position: sticky; bottom: 0; background: rgba(255,255,255,.96); border-top: 1px solid var(--border); padding: 10px 0; margin-top: 14px; z-index: 5; }
 .cf-grid-sens td.base { background: #e8eef7; font-weight: 700; }
 .cf-banner { background: #f3f6fa; border-left: 4px solid var(--gold); padding: 10px 14px; border-radius: 4px; margin-bottom: 14px; font-size: 13px; }
+
+/* ---- Management accounts packs (corporate finance) ---- */
+.ma-table th, .ma-table td { padding: 4px 8px; }
+.ma-table thead tr.ma-band th { background: #d9dde3; color: #1d2733; text-align: center; font-size: 11.5px; letter-spacing: .06em; border-bottom: 1px solid #fff; border-left: 2px solid #fff; }
+.ma-table thead tr.ma-sub th { background: #eceef2; color: #1d2733; font-size: 11.5px; text-align: right; }
+.ma-table th.ma-lm, .ma-table td.ma-lm { position: static; background: transparent; text-align: right; min-width: 92px; color: #52514e; border-right: 1px solid #e3e7ec; }
+.ma-table thead th.ma-lm { background: #d9dde3; }
+.ma-table thead tr.ma-sub th.ma-lm { background: #eceef2; }
+.ma-table th.ma-label, .ma-table td.ma-label { position: sticky; left: 0; background: #fff; min-width: 230px; text-align: left; z-index: 1; }
+.ma-table thead th.ma-label { background: #d9dde3; }
+.ma-table thead tr.ma-sub th.ma-label { background: #eceef2; }
+.ma-table tr.ma-section td { background: #f7f8fa; text-align: center; font-weight: 700; color: var(--navy); letter-spacing: .03em; }
+.ma-table tr.indent td.ma-label { padding-left: 24px; }
+.ma-table tr.pct td { color: #6b6a66; font-style: italic; }
+.ma-table tr.line td.ma-label { padding-left: 12px; }
+.ma-na { color: #b9b8b4; }
+.ma-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; vertical-align: middle; background: #c9c8c4; }
+.ma-dot.ma-green { background: #1f9d55; } .ma-dot.ma-amber { background: #f0a30a; } .ma-dot.ma-red { background: #d93025; }
+.ma-legend { display: flex; gap: 18px; flex-wrap: wrap; font-size: 12px; color: var(--text-muted); margin-top: 10px; }
+.ma-basis { font-size: 12.5px; margin: 6px 0 14px; display: grid; gap: 6px; }
+.ma-toolbar { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 12px; }
+.ma-toolbar .seg { display: inline-flex; border: 1px solid var(--border); border-radius: 6px; overflow: hidden; }
+.ma-toolbar .seg a { padding: 6px 14px; font-size: 13px; color: var(--navy); text-decoration: none; background: #fff; }
+.ma-toolbar .seg a.on { background: var(--navy); color: #fff; }
+.ma-msgs { margin: 6px 0 0 18px; padding: 0; } .ma-msgs li { margin-bottom: 5px; }
+.ma-note { font-size: 12px; color: #52514e; font-style: italic; padding-left: 24px !important; white-space: normal !important; background: #fcfcfd; }

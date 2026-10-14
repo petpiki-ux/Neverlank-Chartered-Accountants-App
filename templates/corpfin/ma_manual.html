@@ -1,0 +1,26 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<form method="post" class="card">
+  <h3 style="margin-top:0;">Capture {{ month_name }}</h3>
+  <p class="cf-sub">Enter the <strong>month's own</strong> income and costs (not year to date), and the <strong>closing balances</strong> at the end of the month. Leave the balance sheet blank for a P&amp;L-only month; leave retained earnings blank and it rolls forward from the previous month. All amounts positive, in {{ cur }}.</p>
+  {% if replacing_tb %}<div class="flash warning">This month currently holds a trial balance (cumulative). Saving replaces it with the month's own figures.</div>{% endif %}
+  <div class="viz-grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));">
+    <div>
+      <h4>Income statement for the month</h4>
+      <table class="cf-grid">
+        {% for x in line_defs %}<tr><td>{{ x.label }}</td><td><input type="number" step="any" name="pl_{{ x.key }}" value="{{ entry.get('pl', {}).get(x.key)|cfin }}"></td></tr>{% endfor %}
+      </table>
+    </div>
+    <div>
+      <h4>Balance sheet at the end of the month</h4>
+      <table class="cf-grid">
+        {% for k, label, side in bs_lines %}<tr><td>{{ label }}</td><td><input type="number" step="any" name="bs_{{ k }}" value="{{ (entry.get('bs') or {}).get(k)|cfin }}"></td></tr>{% endfor %}
+      </table>
+    </div>
+  </div>
+  <label>Note (optional)</label>
+  <input type="text" name="note" maxlength="300" value="{{ entry.get('note') or '' }}" placeholder="e.g. management figures per client email of 5 Oct">
+  <button class="btn gold" type="submit">Save {{ month_name }}</button>
+  <a class="btn secondary" href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='actuals') }}">Cancel</a>
+</form>
+{% endblock %}

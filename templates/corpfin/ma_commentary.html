@@ -1,0 +1,23 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<form method="post" action="{{ url_for('corpfin.pack_commentary', pack_id=pack.id) }}" class="card">
+  <h3 style="margin-top:0;">Commentary</h3>
+  <p class="cf-sub">Written for the client. Leave a box blank to leave that section out. The summary can start from the messages drafted from the numbers.</p>
+  <label>Summary / key messages</label>
+  <textarea name="c_summary" rows="6" {{ 'disabled' if pack.is_final }}>{{ com.summary or '' }}</textarea>
+  {% if not com.summary and not pack.is_final %}
+  <button type="button" class="btn small secondary" onclick='document.getElementsByName("c_summary")[0].value = {{ msgs|join("\n")|tojson }};'>Start from the drafted messages</button>
+  {% endif %}
+  {% for key, label in [('income', 'Income statement'), ('balance', 'Balance sheet'), ('cash', 'Cash flow and funding'), ('outlook', 'Full-year outlook'), ('actions', 'Actions and recommendations')] %}
+  <label>{{ label }}</label>
+  <textarea name="c_{{ key }}" rows="3" {{ 'disabled' if pack.is_final }}>{{ com.get(key) or '' }}</textarea>
+  {% endfor %}
+  <h4>Explain individual lines</h4>
+  <div class="tbl-scroll"><table class="cf-grid">
+    {% for x in line_defs if x.key != 'div' %}
+    <tr><td>{{ x.label }}</td><td><input type="text" class="wide" style="width:520px;max-width:80vw;" name="ln_{{ x.key }}" maxlength="500" value="{{ notes.get(x.key, '') }}" {{ 'disabled' if pack.is_final }} placeholder="Reason for the movement"></td></tr>
+    {% endfor %}
+  </table></div>
+  {% if not pack.is_final %}<button class="btn gold" type="submit" style="margin-top:12px;">Save commentary</button>{% endif %}
+</form>
+{% endblock %}

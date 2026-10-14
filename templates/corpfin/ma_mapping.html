@@ -1,0 +1,36 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<form method="post" action="{{ url_for('corpfin.pack_tb_confirm', pack_id=pack.id) }}" class="card">
+  <h3 style="margin-top:0;">Check the account mapping &ndash; {{ 'the prior year' if target == 'prior' else month_name ~ ' (year to date)' }}</h3>
+  <p class="cf-sub">{{ rows|length }} accounts were read from <strong>{{ filename }}</strong>. Each one must go to a line of the pack (or be ignored). Suggestions come from earlier mappings of this pack, the client's account mapping and the account name; check them. Your choices are remembered for the next upload.</p>
+  <input type="hidden" name="target" value="{{ target }}">
+  <input type="hidden" name="month" value="{{ month or '' }}">
+  <input type="hidden" name="filename" value="{{ filename }}">
+  <textarea name="rows_json" hidden>{{ rows_json }}</textarea>
+  {% if target == 'prior' %}<div class="form-row"><div><label>Label for these accounts</label><input type="text" name="label" maxlength="30" value="{{ label or prior_label }}"></div></div>{% endif %}
+  {% set unmapped = namespace(n=0) %}
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Code</th><th>Account</th><th>Debit / (credit)</th><th>Goes to</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      {% set i = loop.index0 %}
+      {% set sel = chosen.get(i|string) %}
+      {% if not sel %}{% set unmapped.n = unmapped.n + 1 %}{% endif %}
+      <tr {% if not sel %}style="background:#fff7e0;"{% endif %}>
+        <td>{{ r.code }}</td><td style="white-space:normal;">{{ r.name }}</td><td class="n">{{ r.net_dr|cfn(2) }}</td>
+        <td><select name="map_{{ i }}" class="cf-in" style="min-width:230px;">
+          <option value="">- choose -</option>
+          {% for group, opts in options %}<optgroup label="{{ group }}">{% for k, lab in opts %}<option value="{{ k }}" {% if sel == k %}selected{% endif %}>{{ lab }}</option>{% endfor %}</optgroup>{% endfor %}
+        </select></td>
+        <td class="muted">{{ {'remembered': 'remembered', 'client': 'client mapping', 'suggested': 'suggested'}.get(hows.get(i|string), '') }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if unmapped.n %}<div class="flash warning">{{ unmapped.n }} account(s) have no suggestion yet. Choose a line for each, or Ignore.</div>{% endif %}
+  <div class="cf-sticky-actions">
+    <button class="btn gold" type="submit">Save these figures</button>
+    <a class="btn secondary" href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab=('prior' if target == 'prior' else 'actuals')) }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

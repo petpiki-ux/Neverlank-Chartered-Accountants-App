@@ -26,7 +26,7 @@ import cf_tools as T
 import cf_report as R
 from extensions import db
 from models import (
-    Client, Engagement, CFModel, CFScenario, CFValuation, CFProject, CF_STATUSES,
+    Client, Engagement, CFModel, CFScenario, CFValuation, CFProject, CFMgmtPack, CF_STATUSES,
     user_has_permission, user_can_access_client, user_can_access_engagement, visible_clients,
     engagement_acceptance_cleared,
 )
@@ -260,7 +260,9 @@ def dashboard():
     except ValueError:
         client_filter = None
     clients, models, projects = _visible_models(client_filter)
-    return render_template("corpfin/dashboard.html", clients=clients, models=models, projects=projects, client_filter=client_filter)
+    ids = [c.id for c in clients if not client_filter or c.id == client_filter]
+    packs = [p for p in (CFMgmtPack.query.filter(CFMgmtPack.client_id.in_(ids)).order_by(CFMgmtPack.updated_at.desc()).all() if ids else []) if _can_see(p)]
+    return render_template("corpfin/dashboard.html", clients=clients, models=models, projects=projects, packs=packs, client_filter=client_filter)
 
 
 # =========================================================================== engagement workspace
@@ -498,8 +500,10 @@ def model_tab(model_id, tab):
                                                               "Net finance cost", "Tax", "Closing cash"])))
     elif tab == "history":
         hist = T.normalise_hist(model.historical)
+        import corporate_finance_ma as MA
         ctx.update(hist=hist, analysis=T.historical_analysis(hist), hist_is=T.HIST_IS, hist_bs=T.HIST_BS,
-                   suggestion=T.suggest_assumptions(hist, a["years"]))
+                   suggestion=T.suggest_assumptions(hist, a["years"]), fs_target=f"model:{model.id}",
+                   **MA.loader_context(model.client_id, model.engagement_id))
     return render_template(f"corpfin/tab_{tab}.html", **ctx)
 
 
@@ -1167,3 +1171,8 @@ def loan_excel():
     data = cf_excel.build_loan_workbook(meta, args["principal"], args["rate"], args["months"], args["repay_type"], args["grace_months"],
                                         args["balloon_pct"] if args["repay_type"] == "annuity" else 0.0, args["start"])
     return Response(data, mimetype=XLSX_MIME, headers={"Content-Disposition": 'attachment; filename="Loan_schedule.xlsx"'})
+
+
+# Management accounts packs and the financial-statements loader live in their own module; importing it here (after everything
+# above is defined) adds its routes to this same blueprint.
+import corporate_finance_ma  # noqa: E402,F401

@@ -1,0 +1,72 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<div class="cf-banner">The <strong>budget</strong> is the approved plan for the year. The <strong>forecast</strong> is the latest view (usually the budget revised for what has happened). Both can come from a forecast model, be typed as annual figures phased over the months, or be adjusted month by month. Model snapshots also bring a balance sheet, so the balance sheet and cash flow can be compared too.</div>
+
+{% for name in ['budget', 'forecast'] %}
+{% set plan = plans[name] %}
+{% set pl = plan_pl[name] %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+    <h3 style="margin:0;">{{ PLAN_NAMES[name] }}</h3>
+    <div>{% if pl %}<span class="badge status-Approved">{{ pl|length }} month(s) loaded</span>{% else %}<span class="badge">Not loaded</span>{% endif %}</div>
+  </div>
+  {% if plan %}<div class="cf-sub" style="margin-top:6px;">
+    {% if plan.source == 'model' %}From forecast model {{ plan.model_number }} ({{ plan.model_name }}{% if plan.scenario %}, {{ plan.scenario }}{% endif %}){% if plan.edited %}, then edited{% endif %}
+    {% elif plan.copied_from %}Copied from the {{ plan.copied_from }}
+    {% else %}Typed in{% endif %}{% if plan.saved %} &middot; {{ plan.saved.by }}, {{ plan.saved.at }}{% endif %}
+    {% if plan.bs %} &middot; includes a balance sheet{% endif %}</div>{% endif %}
+
+  {% if not pack.is_final %}
+  <div class="viz-grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));margin-top:12px;">
+    <form method="post" action="{{ url_for('corpfin.pack_plan_model', pack_id=pack.id, name=name) }}">
+      <label>Take it from a forecast model</label>
+      <select name="model_id" required>
+        <option value="">Choose a model...</option>
+        {% for mo in models %}<option value="{{ mo.id }}" {% if plan.model_id == mo.id %}selected{% endif %}>{{ mo.model_number }} - {{ mo.name }}</option>{% endfor %}
+      </select>
+      <button class="btn secondary" type="submit" {{ 'disabled' if not models }}>Use year 1 of this model (base case)</button>
+      {% if not models %}<div class="cf-sub">This client has no forecast models yet.</div>{% endif %}
+    </form>
+    <div>
+      <label>Or copy</label>
+      <form method="post" action="{{ url_for('corpfin.pack_plan_copy', pack_id=pack.id, name=name) }}" class="inline"><button class="btn secondary" type="submit">Copy from the {{ 'budget' if name == 'forecast' else 'forecast' }}</button></form>
+      {% if pl %}<form method="post" action="{{ url_for('corpfin.pack_plan_clear', pack_id=pack.id, name=name) }}" class="inline" onsubmit="return confirm('Clear the {{ name }}?');"><button class="btn danger" type="submit">Clear</button></form>{% endif %}
+    </div>
+  </div>
+
+  <details style="margin-top:12px;"><summary style="cursor:pointer;font-weight:600;">Type annual figures and phase them over the year</summary>
+    <form method="post" action="{{ url_for('corpfin.pack_plan_annual', pack_id=pack.id, name=name) }}">
+      <p class="cf-sub">Replaces the {{ name }} with these annual totals (positive amounts, {{ cur }}). A typed {{ name }} has no balance sheet.</p>
+      <table class="cf-grid">
+        {% for x in line_defs %}<tr><td>{{ x.label }}</td><td><input type="number" step="any" name="annual_{{ x.key }}" value="{{ (plan.annual or {}).get(x.key)|cfin }}"></td></tr>{% endfor %}
+      </table>
+      <label>Phasing</label>
+      <select name="phasing" onchange="document.getElementById('w-{{ name }}').hidden = this.value !== 'custom'">
+        <option value="even">Evenly over 12 months</option>
+        <option value="custom" {% if plan.weights %}selected{% endif %}>By my weights (seasonal)</option>
+      </select>
+      <div id="w-{{ name }}" {% if not plan.weights %}hidden{% endif %}>
+        <table class="cf-grid"><tr>{% for mo in months %}<th>{{ month_label(mo) }}</th>{% endfor %}</tr>
+        <tr>{% for mo in months %}<td><input type="number" step="any" min="0" class="narrow" name="w_{{ loop.index0 }}" value="{{ ((plan.weights or [])[loop.index0])|cfin if plan.weights else 1 }}"></td>{% endfor %}</tr></table>
+        <div class="cf-sub">Relative weights: 1 for a normal month, 2 for a month twice as busy, and so on.</div>
+      </div>
+      <button class="btn gold" type="submit">Save annual {{ name }}</button>
+    </form>
+  </details>
+
+  <details style="margin-top:8px;"><summary style="cursor:pointer;font-weight:600;">Monthly grid</summary>
+    <form method="post" action="{{ url_for('corpfin.pack_plan_grid', pack_id=pack.id, name=name) }}">
+      <p class="cf-sub">Each month's figures. A month left completely blank has no {{ name }}. Editing a model-based {{ name }} changes the income statement only; its balance sheet stays as taken.</p>
+      <div class="tbl-scroll"><table class="cf-grid">
+        <tr><th></th>{% for mo in months %}<th>{{ month_label(mo) }}</th>{% endfor %}</tr>
+        {% for x in line_defs %}
+        <tr><td>{{ x.label }}</td>{% for mo in months %}<td><input type="number" step="any" name="g__{{ x.key }}__{{ loop.index0 }}" value="{{ (pl.get(mo) or {}).get(x.key)|cfin if pl.get(mo) else '' }}"></td>{% endfor %}</tr>
+        {% endfor %}
+      </table></div>
+      <button class="btn gold" type="submit">Save monthly {{ name }}</button>
+    </form>
+  </details>
+  {% endif %}
+</div>
+{% endfor %}
+{% endblock %}

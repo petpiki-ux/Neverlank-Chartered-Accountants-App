@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}New management accounts - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>New management accounts</h1>
+  <div class="subtitle">A monthly reporting pack: actual against budget, forecast and last year, with statements, KPIs and commentary.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">Back</a></div>
+</div>
+<form method="post" class="card">
+  <div class="form-row">
+    <div><label for="client_id">Client *</label>
+      <select id="client_id" name="client_id" required onchange="filt()">
+        <option value="">Choose...</option>
+        {% for c in clients %}<option value="{{ c.id }}" {% if form.get('client_id') == c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select></div>
+    <div><label for="engagement_id">Engagement (optional)</label>
+      <select id="engagement_id" name="engagement_id">
+        <option value="">None</option>
+        {% for e in engagements %}<option value="{{ e.id }}" data-client="{{ e.client_id }}" {% if form.get('engagement_id') == e.id|string %}selected{% endif %}>{{ e.title }} ({{ e.type }})</option>{% endfor %}
+      </select></div>
+  </div>
+  <div class="form-row">
+    <div style="flex:2;"><label for="name">Pack name *</label><input type="text" id="name" name="name" required maxlength="200" value="{{ form.get('name', '') }}" placeholder="e.g. Monthly management accounts FY{{ default_year }}"></div>
+    <div><label for="currency">Currency</label><select id="currency" name="currency">{% for c in currencies %}<option {% if form.get('currency', 'USD') == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="form-row">
+    <div><label for="fy_start_month">Financial year starts in</label>
+      <select id="fy_start_month" name="fy_start_month">{% for n in months %}<option value="{{ loop.index }}" {% if form.get('fy_start_month', '1') == loop.index|string %}selected{% endif %}>{{ n }}</option>{% endfor %}</select></div>
+    <div><label for="fy_start_year">Year of the first month</label><input type="number" id="fy_start_year" name="fy_start_year" min="2000" max="2100" value="{{ form.get('fy_start_year', default_year) }}"></div>
+  </div>
+  <h4>Where do the lines and the budget come from?</h4>
+  <label class="inline"><input type="radio" name="basis" value="simple" {% if form.get('basis', 'simple') == 'simple' %}checked{% endif %} onchange="filt()"> Start simple: one revenue line and one expense line (rename and add lines in Setup)</label><br>
+  <label class="inline"><input type="radio" name="basis" value="model" {% if form.get('basis') == 'model' %}checked{% endif %} onchange="filt()"> Start from one of the client's forecast models: its revenue streams and expense lines become the pack's lines and year 1 becomes the budget</label>
+  <div id="model-box" style="margin-top:8px;" hidden>
+    <label for="model_id">Forecast model</label>
+    <select id="model_id" name="model_id">
+      <option value="">Choose...</option>
+      {% for mo in models %}<option value="{{ mo.id }}" data-client="{{ mo.client_id }}" {% if form.get('model_id') == mo.id|string %}selected{% endif %}>{{ mo.model_number }} - {{ mo.name }}</option>{% endfor %}
+    </select>
+    <div class="cf-sub">The financial year then follows the model's first month and currency.</div>
+  </div>
+  <div style="margin-top:12px;"><button class="btn gold" type="submit">Create pack</button></div>
+</form>
+<script>
+function filt() {
+  var c = document.getElementById('client_id').value;
+  ['engagement_id', 'model_id'].forEach(function (id) {
+    var sel = document.getElementById(id);
+    for (var i = 0; i < sel.options.length; i++) {
+      var o = sel.options[i], k = o.getAttribute('data-client');
+      o.hidden = !!k && !!c && k !== c; o.disabled = o.hidden;
+    }
+    if (sel.selectedOptions.length && sel.selectedOptions[0].disabled) sel.value = '';
+  });
+  document.getElementById('model-box').hidden = document.querySelector('input[name=basis]:checked').value !== 'model';
+}
+filt();
+</script>
+{% endblock %}

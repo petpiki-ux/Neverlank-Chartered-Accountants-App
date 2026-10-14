@@ -1,0 +1,26 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+{% set V = inc.V %}
+<div class="ma-toolbar">
+  <div class="seg">
+    <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='income', month=request.args.get('month'), var=request.args.get('var')) }}" class="{{ 'on' if view == 'month' }}">Month</a>
+    <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='income', month=request.args.get('month'), var=request.args.get('var'), view='ytd') }}" class="{{ 'on' if view == 'ytd' }}">Year to date</a>
+  </div>
+  <div class="seg">
+    <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='income', month=request.args.get('month'), view=request.args.get('view')) }}" class="{{ 'on' if var }}">With variances</a>
+    <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='income', month=request.args.get('month'), view=request.args.get('view'), var='0') }}" class="{{ 'on' if not var }}">Figures only</a>
+  </div>
+</div>
+{% if V.actual_ytd is none %}
+<div class="card"><div class="empty-state">No actual figures for {{ labels.month }} yet. Add them on the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='actuals') }}">Actuals</a> tab.</div></div>
+{% else %}
+<div class="card">
+  <h3 style="margin-top:0;">Income statement &ndash; {{ labels.month }}{% if view == 'ytd' %} (year to date, {{ labels.n }} month{{ 's' if labels.n != 1 }}){% endif %}</h3>
+  {{ ma.income_table(inc, view, var, cur, labels) }}
+  {{ ma.legend() }}
+  <p class="cf-sub">{{ cur }}. Last year is the {{ prior_label }} accounts spread evenly across the months. {% if not V.has_budget %}No budget is loaded.{% endif %}</p>
+</div>
+{{ ma.basis(d, V, status) }}
+{% if d.commentary.income %}<div class="card"><h3 style="margin-top:0;">Commentary</h3><p style="white-space:pre-wrap;">{{ d.commentary.income }}</p></div>{% endif %}
+{% endif %}
+{% endblock %}

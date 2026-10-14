@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block title %}Check the figures - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Check the figures read from the statements</h1>
+  <div class="subtitle">{{ source_name }} &middot; read by the {{ 'AI reader' if ex.method == 'ai' else 'built-in reader' }}{% if ex.entity %} &middot; {{ ex.entity }}{% endif %} &middot; for {{ 'pack ' ~ obj.pack_number if kind == 'pack' else 'model ' ~ obj.model_number }} ({{ obj.client.name }})</div></div>
+  <div><a class="btn secondary" href="{{ url_for('corpfin.pack_tab', pack_id=obj.id, tab='prior') if kind == 'pack' else url_for('corpfin.model_tab', model_id=obj.id, tab='history') }}">Cancel</a></div>
+</div>
+
+{% for n in ex.notes %}<div class="flash warning">{{ n }}</div>{% endfor %}
+<div class="cf-banner">Compare these with the document before saving. Amounts are as printed in the statements; choose the units below if they are in thousands or millions. Leave a box blank where the statements have no such line. Costs are positive numbers.</div>
+
+<form method="post" action="{{ url_for('corpfin.fs_apply') }}" class="card">
+  <input type="hidden" name="target" value="{{ target }}">
+  <input type="hidden" name="source_name" value="{{ source_name }}">
+  <input type="hidden" name="n_periods" value="{{ periods|length }}">
+  <div class="form-row">
+    <div><label>Amounts in the statements are in</label>
+      <select name="scale">{% for k, mult in scales.items() %}<option value="{{ k }}" {% if ex.scale == mult %}selected{% endif %}>{{ k }}{% if cur_code %} ({{ cur_code }}){% endif %}</option>{% endfor %}</select></div>
+    {% if kind == 'pack' %}
+    <div><label>Use this year as the prior year</label>
+      <select name="pick">{% for p in periods %}<option value="{{ loop.index0 }}">{{ p.label }}</option>{% endfor %}</select></div>
+    {% else %}
+    <div style="align-self:flex-end;"><label class="inline"><input type="checkbox" name="apply_assumptions" value="1" checked> Also take the starting assumptions, opening balance sheet and borrowings from the history</label></div>
+    {% endif %}
+  </div>
+
+  <div class="tbl-scroll"><table class="cf-grid">
+    <thead>
+      <tr><th></th>{% for p in periods %}<th>{% if kind != 'pack' %}<label class="inline" style="font-weight:400;"><input type="checkbox" name="use_{{ loop.index0 }}" value="1" checked> use</label><br>{% endif %}<input type="text" name="label_{{ loop.index0 }}" value="{{ p.label }}" maxlength="30" style="width:110px;text-align:center;"></th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+      <tr><td colspan="{{ periods|length + 1 }}"><strong>Income statement</strong></td></tr>
+      {% for k, label in STD_IS %}
+      <tr><td>{{ label }}</td>{% set outer = loop.index0 %}{% for p in periods %}<td><input type="number" step="any" name="is_{{ k }}_{{ loop.index0 }}" value="{{ p['is'].get(k)|cfin }}"></td>{% endfor %}</tr>
+      {% endfor %}
+      <tr><td colspan="{{ periods|length + 1 }}"><strong>Balance sheet</strong></td></tr>
+      {% for k, label in STD_BS %}
+      <tr><td>{{ label }}</td>{% for p in periods %}<td><input type="number" step="any" name="bs_{{ k }}_{{ loop.index0 }}" value="{{ p['bs'].get(k)|cfin }}"></td>{% endfor %}</tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+
+  <h4>Checks</h4>
+  {% for p in periods %}
+  <div style="margin-bottom:8px;"><strong>{{ p.label }}</strong>
+    <ul class="ma-msgs">{% for c in p.checks %}<li class="{{ 'cf-ok' if ('add up' in c or 'balances' in c) else 'cf-bad' }}">{{ c }}</li>{% else %}<li class="muted">Not enough lines were found to check.</li>{% endfor %}</ul></div>
+  {% endfor %}
+  <div class="cf-sticky-actions">
+    <button class="btn gold" type="submit">{{ 'Use as the prior year' if kind == 'pack' else 'Load into the historical analysis' }}</button>
+    <a class="btn secondary" href="{{ url_for('corpfin.pack_tab', pack_id=obj.id, tab='prior') if kind == 'pack' else url_for('corpfin.model_tab', model_id=obj.id, tab='history') }}">Cancel</a>
+  </div>
+</form>
+{% endblock %}

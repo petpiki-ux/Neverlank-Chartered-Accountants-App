@@ -1,0 +1,20 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<div class="ma-toolbar">
+  <div class="seg">
+    <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='balance', month=request.args.get('month')) }}" class="{{ 'on' if var }}">With variances</a>
+    <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='balance', month=request.args.get('month'), var='0') }}" class="{{ 'on' if not var }}">Figures only</a>
+  </div>
+</div>
+{% if bal.rows[0].a is none %}
+<div class="card"><div class="empty-state">No balance sheet for {{ labels.month }}. Upload a trial balance, or enter closing balances when capturing the month by hand, on the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='actuals') }}">Actuals</a> tab.</div></div>
+{% else %}
+<div class="card">
+  <h3 style="margin-top:0;">Balance sheet &ndash; {{ labels.month }}</h3>
+  {{ ma.balance_table(bal, var, labels) }}
+  <p class="cf-sub">{{ cur }}. Forecast and budget balance sheets are available when they come from a forecast model. Retained earnings include the current year's profit.</p>
+</div>
+{{ ma.basis(d, none, status) }}
+{% if d.commentary.balance %}<div class="card"><h3 style="margin-top:0;">Commentary</h3><p style="white-space:pre-wrap;">{{ d.commentary.balance }}</p></div>{% endif %}
+{% endif %}
+{% endblock %}

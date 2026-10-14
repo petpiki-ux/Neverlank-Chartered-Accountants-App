@@ -1,0 +1,67 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+{% if not prior_ok %}
+<div class="cf-banner">Load the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='prior') }}">prior year's accounts</a> first if you want comparatives, an opening balance sheet for the cash flow, or modelled months.</div>
+{% endif %}
+
+<div class="card">
+  <h3 style="margin-top:0;">Months of {{ fy }}</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Month</th><th>Source</th><th>Income statement</th><th>Balance sheet</th><th>Check</th><th>Note</th><th></th></tr></thead>
+    <tbody>
+    {% for s in status %}
+      <tr>
+        <td>{{ s.label }}</td>
+        <td>{% if s.source == 'tb' %}<span class="badge status-Approved">Trial balance</span>
+            {% elif s.source == 'manual' %}<span class="badge">Manual</span>
+            {% elif s.source == 'modelled' %}<span class="badge overdue">Modelled</span>
+            {% elif s.est %}<span class="badge">Estimated</span>
+            {% else %}<span class="muted">&ndash;</span>{% endif %}</td>
+        <td>{{ 'Yes' if s.has_pl else '-' }}{% if s.kind == 'ytd' %} <span class="muted">(cumulative)</span>{% endif %}</td>
+        <td>{{ 'Yes' if s.has_bs else '-' }}</td>
+        <td>{% if s.has_bs %}{% if s.bs_check is not none and (s.bs_check > 0.5 or s.bs_check < -0.5) %}<span class="cf-bad">out by {{ s.bs_check|cfn }}</span>{% else %}<span class="cf-ok">balances</span>{% endif %}{% endif %}</td>
+        <td class="muted" style="white-space:normal;max-width:340px;">{{ s.note or '' }}{% if s.saved %} <span class="cf-sub">({{ s.saved.by }}, {{ s.saved.at }})</span>{% endif %}</td>
+        <td class="text-right" style="white-space:nowrap;">
+          {% if not pack.is_final %}
+          <a class="btn small secondary" href="{{ url_for('corpfin.pack_manual', pack_id=pack.id, month=s.month) }}">{{ 'Edit' if s.has_entry else 'Capture' }}</a>
+          {% if s.has_entry %}<form method="post" action="{{ url_for('corpfin.pack_delete_month', pack_id=pack.id, month=s.month) }}" class="inline" onsubmit="return confirm('Remove {{ s.label }}?');"><button class="btn small danger">Remove</button></form>{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="cf-sub">A trial balance holds the year to date, so uploading it for a month sets that month's cumulative figures; the month's own result is the difference from the earlier month. Manually captured and modelled months hold that month's figures. Months with nothing captured that sit between two known months are estimated evenly.</p>
+</div>
+
+{% if not pack.is_final %}
+<div class="viz-grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));">
+  <form method="post" action="{{ url_for('corpfin.pack_tb_upload', pack_id=pack.id) }}" enctype="multipart/form-data" class="card">
+    <h3 style="margin-top:0;">Upload a trial balance</h3>
+    <p class="cf-sub">Excel or CSV with an account name column and Debit and Credit columns (or one Balance column, debit positive). It must be the <strong>cumulative year to date</strong> trial balance. You will check how each account maps before anything is saved.</p>
+    <input type="hidden" name="target" value="actual">
+    <label>Month the trial balance is for</label>
+    <select name="month" required>{% for s in status %}<option value="{{ s.month }}" {% if s.month == report_month %}selected{% endif %}>{{ s.label }}</option>{% endfor %}</select>
+    <label>File</label>
+    <input type="file" name="file" accept=".xlsx,.xlsm,.csv" required>
+    <button class="btn gold" type="submit">Read trial balance</button>
+  </form>
+
+  <form method="post" action="{{ url_for('corpfin.pack_modelled', pack_id=pack.id) }}" class="card">
+    <h3 style="margin-top:0;">Model months from the prior year</h3>
+    <p class="cf-sub">For months with no books yet (for example to test a funding request): each month = last year's figure x (1 + growth) / 12, so 9 months is 9/12 of last year grown. Balances move to year end x (1 + growth); cash or overdraft balances the sheet, so a funding gap shows as an overdraft.</p>
+    <div class="form-row">
+      <div><label>First month</label><select name="start_month">{% for s in status %}<option value="{{ s.month }}">{{ s.label }}</option>{% endfor %}</select></div>
+      <div><label>Number of months</label><input type="number" name="n_months" min="1" max="12" value="9" required></div>
+    </div>
+    <div class="form-row">
+      <div><label>Growth on income &amp; costs (%)</label><input type="number" step="0.1" name="growth_pl" value="5"></div>
+      <div><label>Growth on balances (%)</label><input type="number" step="0.1" name="growth_bs" value="5"></div>
+      <div><label>Revenue growth, if different (%)</label><input type="number" step="0.1" name="growth_rev" placeholder="same"></div>
+    </div>
+    <label class="inline"><input type="checkbox" name="overwrite" value="1"> Replace months that already have real figures</label>
+    <div><button class="btn gold" type="submit" {{ 'disabled' if not prior_ok }}>Create modelled months</button>{% if not prior_ok %} <span class="cf-sub">needs the prior-year accounts</span>{% endif %}</div>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

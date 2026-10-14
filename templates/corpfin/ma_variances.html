@@ -1,0 +1,26 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+{% if V.actual_ytd is none %}
+<div class="card"><div class="empty-state">No actual figures for {{ labels.month }} yet.</div></div>
+{% elif not V.has_budget %}
+<div class="card"><div class="empty-state">There is no budget to compare with. Load one on the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='budget') }}">Budget &amp; forecast</a> tab.</div></div>
+{% else %}
+<div class="card">
+  <h3 style="margin-top:0;">Variance analysis &ndash; ranked by year-to-date variance to budget</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Line</th><th>Month actual</th><th>Month budget</th><th>Var</th><th>YTD actual</th><th>YTD budget</th><th>Var</th><th>Var %</th><th>YTD {{ prior_label }}</th><th>Var</th></tr></thead>
+    <tbody>
+    {% for x in vl %}
+      <tr><td>{{ x.label }}</td>
+        <td class="n">{{ x.month_actual|cfn }}</td><td class="n">{{ x.month_budget|cfn }}</td>{{ ma.vc(x.month_var, x.month_var) }}
+        <td class="n">{{ x.ytd_actual|cfn }}</td><td class="n">{{ x.ytd_budget|cfn }}</td>{{ ma.vc(x.ytd_var, x.ytd_var) }}{{ ma.pc(x.ytd_pct, x.rag) }}
+        <td class="n">{{ x.ytd_prior|cfn }}</td>{{ ma.vc(x.prior_var, x.prior_var) }}</tr>
+      {% if d.line_notes.get(x.key) %}<tr><td colspan="10" class="ma-note">{{ d.line_notes[x.key] }}</td></tr>{% endif %}
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {{ ma.legend() }}
+  <p class="cf-sub">Add an explanation against any line on the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='commentary') }}">Commentary</a> tab; it prints here and in the PDF.</p>
+</div>
+{% endif %}
+{% endblock %}

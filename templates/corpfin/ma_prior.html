@@ -1,0 +1,37 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+{% include "corpfin/_fs_loader.html" %}
+
+{% if prior.pl %}
+<div class="card">
+  <strong>Prior year loaded:</strong> {{ prior.label }} ({{ {'tb': 'trial balance', 'manual': 'typed in', 'statements': 'financial statements'}.get(prior.source, prior.source) }}){% if prior.note %} &middot; {{ prior.note }}{% endif %}
+  {% if not pack.is_final %}<form method="post" action="{{ url_for('corpfin.pack_prior_clear', pack_id=pack.id) }}" class="inline" onsubmit="return confirm('Clear the prior-year accounts?');"><button class="btn small danger">Clear</button></form>{% endif %}
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('corpfin.pack_prior_save', pack_id=pack.id) }}" class="card">
+  <h3 style="margin-top:0;">Prior-year accounts</h3>
+  <p class="cf-sub">The comparatives (last-year columns), the opening balance sheet for the cash flow, and the starting point for modelled months. Income and costs for the whole year; balances at the year end. Amounts positive, in {{ cur }}. You can type them, or use the loader above to read them from the signed financial statements.</p>
+  <div class="form-row"><div><label>Label</label><input type="text" name="label" maxlength="30" value="{{ prior.label or prior_label }}"></div></div>
+  <div class="viz-grid" style="grid-template-columns:repeat(auto-fit,minmax(320px,1fr));">
+    <div><h4>Income statement for the year</h4>
+      <table class="cf-grid">{% for x in line_defs %}<tr><td>{{ x.label }}</td><td><input type="number" step="any" name="pl_{{ x.key }}" value="{{ (prior.pl or {}).get(x.key)|cfin }}" {{ 'disabled' if pack.is_final }}></td></tr>{% endfor %}</table></div>
+    <div><h4>Balance sheet at the year end</h4>
+      <table class="cf-grid">{% for k, label, side in bs_lines %}<tr><td>{{ label }}</td><td><input type="number" step="any" name="bs_{{ k }}" value="{{ (prior.bs or {}).get(k)|cfin }}" {{ 'disabled' if pack.is_final }}></td></tr>{% endfor %}</table>
+      <div class="cf-sub">Leave retained earnings blank to have it worked out so the sheet balances.</div></div>
+  </div>
+  {% if not pack.is_final %}<button class="btn gold" type="submit">Save prior-year accounts</button>{% endif %}
+</form>
+
+{% if not pack.is_final %}
+<form method="post" action="{{ url_for('corpfin.pack_tb_upload', pack_id=pack.id) }}" enctype="multipart/form-data" class="card">
+  <h3 style="margin-top:0;">Or upload the prior year's trial balance</h3>
+  <input type="hidden" name="target" value="prior">
+  <div class="form-row">
+    <div><label>File (.xlsx or .csv, full-year closing trial balance)</label><input type="file" name="file" accept=".xlsx,.xlsm,.csv" required></div>
+    <div><label>Label</label><input type="text" name="prior_label" maxlength="30" value="{{ prior.label or prior_label }}"></div>
+  </div>
+  <button class="btn secondary" type="submit">Read trial balance</button>
+</form>
+{% endif %}
+{% endblock %}

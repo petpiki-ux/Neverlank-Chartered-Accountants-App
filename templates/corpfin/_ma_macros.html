@@ -1,0 +1,151 @@
+{# Statement tables for a management accounts pack, in the firm's layout:
+   LAST MONTH | line | CURRENT MONTH (actual, forecast, budget, last year) | FULL YEAR (forecast, budget, last year) #}
+
+{% macro v(x, kind='money') -%}
+{%- if x is none -%}<span class="ma-na">&ndash;</span>{%- elif kind == 'pct' -%}{{ x|cfp }}{%- else -%}{{ x|cfn }}{%- endif -%}
+{%- endmacro %}
+
+{# a variance cell: favourable green, adverse red. `fav` is the favourable-positive variance. #}
+{% macro vc(x, fav, kind='money') -%}
+{%- set t = 0.0005 if kind == 'pp' else 0.5 -%}
+{%- if x is none -%}<td class="n ma-na">&ndash;</td>
+{%- else -%}{% set fv = fav if fav is not none else x %}<td class="n {{ 'cf-fav' if fv > t else ('cf-adv' if fv < -t else '') }}">{% if kind == 'pp' %}{{ (x * 100)|cfn(1) }}{% else %}{{ x|cfn }}{% endif %}</td>{%- endif -%}
+{%- endmacro %}
+
+{% macro pc(x, rag) -%}
+{%- if x is none -%}<td class="n ma-na">&ndash;</td>
+{%- else -%}<td class="n">{{ x|cfp }}{% if rag and rag != 'na' %} <span class="ma-dot ma-{{ rag }}" title="{{ rag|capitalize }}"></span>{% endif %}</td>{%- endif -%}
+{%- endmacro %}
+
+{% macro legend() %}
+<div class="ma-legend">
+  <span><span class="ma-dot ma-green"></span> within tolerance</span>
+  <span><span class="ma-dot ma-amber"></span> adverse, over the amber threshold</span>
+  <span><span class="ma-dot ma-red"></span> adverse, over the red threshold</span>
+  <span>Variances: favourable positive, adverse in brackets.</span>
+</div>
+{% endmacro %}
+
+{# ---------------------------------------------------------------- income statement #}
+{% macro income_table(inc, view, var, pack_cur, labels) %}
+{% set ytd = (view == 'ytd') %}
+{% set mid_cols = (6 if var else 3) if ytd else (7 if var else 4) %}
+{% set fy_cols = 6 if var else 3 %}
+<div class="tbl-scroll"><table class="cf-table ma-table">
+  <thead>
+    <tr class="ma-band">
+      <th class="ma-lm">LAST MONTH</th><th class="ma-label"></th>
+      <th colspan="{{ mid_cols }}">{{ 'YEAR TO DATE' if ytd else 'CURRENT MONTH' }} &ndash; {{ labels.month }}</th>
+      <th colspan="{{ fy_cols }}">FULL YEAR &ndash; {{ labels.fy }}</th>
+    </tr>
+    <tr class="ma-sub">
+      <th class="ma-lm">{{ labels.last_month }}</th><th class="ma-label"></th>
+      <th>Actual</th>{% if not ytd %}<th>Forecast</th>{% endif %}<th>Budget</th>{% if var %}<th>Var</th><th>Var %</th>{% endif %}<th>{{ labels.prior }}</th>{% if var %}<th>Var</th>{% endif %}
+      <th>Forecast</th><th>Budget</th>{% if var %}<th>Var</th><th>Var %</th>{% endif %}<th>{{ labels.prior }}</th>{% if var %}<th>Var</th>{% endif %}
+    </tr>
+  </thead>
+  <tbody>
+  {% set ns = namespace(group=None) %}
+  {% for r in inc.rows %}
+    {% set g = ('Revenue' if r.income else 'Operating expenses') if r.kind == 'indent' else None %}
+    {% if g and g != ns.group %}
+    <tr class="ma-section"><td class="ma-lm"></td><td class="ma-label" colspan="{{ 1 + mid_cols + fy_cols }}">{{ g }}</td></tr>
+    {% endif %}
+    {% set ns.group = g %}
+    {% set b = r.ytd if ytd else r.month %}
+    {% set pct = r.kind == 'pct' %}
+    <tr class="{{ r.kind }}">
+      <td class="n ma-lm">{{ v(r.lm, 'pct' if pct else 'money') }}</td>
+      <td class="ma-label">{{ r.label }}</td>
+      <td class="n">{{ v(b.a, 'pct' if pct else 'money') }}</td>
+      {% if not ytd %}<td class="n">{{ v(b.f, 'pct' if pct else 'money') }}</td>{% endif %}
+      <td class="n">{{ v(b.b, 'pct' if pct else 'money') }}</td>
+      {% if var %}{{ vc(b.var, b.var, 'pp' if pct else 'money') }}{{ pc(b.varpct, b.rag) }}{% endif %}
+      <td class="n">{{ v(b.p, 'pct' if pct else 'money') }}</td>
+      {% if var %}{{ vc(b.pvar, b.pvar, 'pp' if pct else 'money') }}{% endif %}
+      {% set fy = r.fy %}
+      <td class="n">{{ v(fy.f, 'pct' if pct else 'money') }}</td>
+      <td class="n">{{ v(fy.b, 'pct' if pct else 'money') }}</td>
+      {% if var %}{{ vc(fy.var, fy.var, 'pp' if pct else 'money') }}{{ pc(fy.varpct, fy.rag) }}{% endif %}
+      <td class="n">{{ v(fy.p, 'pct' if pct else 'money') }}</td>
+      {% if var %}{{ vc(fy.pvar, fy.pvar, 'pp' if pct else 'money') }}{% endif %}
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endmacro %}
+
+{# ---------------------------------------------------------------- balance sheet #}
+{% macro balance_table(bal, var, labels) %}
+<div class="tbl-scroll"><table class="cf-table ma-table">
+  <thead>
+    <tr class="ma-band">
+      <th class="ma-lm">LAST MONTH</th><th class="ma-label"></th>
+      <th colspan="{{ 6 if var else 4 }}">CURRENT MONTH &ndash; {{ labels.month }}</th>
+      <th colspan="3">FULL YEAR (YEAR END) &ndash; {{ labels.fy }}</th>
+    </tr>
+    <tr class="ma-sub">
+      <th class="ma-lm">{{ labels.last_month }}</th><th class="ma-label"></th>
+      <th>Actual</th><th>Forecast</th><th>Budget</th>{% if var %}<th>Var</th>{% endif %}<th>{{ labels.prior }} year end</th>{% if var %}<th>Change in year</th>{% endif %}
+      <th>Forecast</th><th>Budget</th><th>{{ labels.prior }}</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in bal.rows %}
+    <tr class="{{ r.kind }}">
+      <td class="n ma-lm">{{ v(r.lm) }}</td>
+      <td class="ma-label">{{ r.label }}</td>
+      <td class="n">{{ v(r.a) }}</td><td class="n">{{ v(r.f) }}</td><td class="n">{{ v(r.b) }}</td>
+      {% if var %}<td class="n">{{ v(r.var) }}</td>{% endif %}
+      <td class="n">{{ v(r.py) }}</td>
+      {% if var %}<td class="n">{{ v(r.chg_year) }}</td>{% endif %}
+      <td class="n">{{ v(r.ffy) }}</td><td class="n">{{ v(r.bfy) }}</td><td class="n">{{ v(r.py) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endmacro %}
+
+{# ---------------------------------------------------------------- cash flow #}
+{% macro cashflow_table(cfl, var, labels) %}
+<div class="tbl-scroll"><table class="cf-table ma-table">
+  <thead>
+    <tr class="ma-band">
+      <th class="ma-lm">LAST MONTH</th><th class="ma-label"></th>
+      <th colspan="{{ 4 if var else 3 }}">CURRENT MONTH &ndash; {{ labels.month }}</th>
+      <th colspan="{{ 3 if var else 2 }}">YEAR TO DATE</th>
+      <th colspan="2">FULL YEAR &ndash; {{ labels.fy }}</th>
+    </tr>
+    <tr class="ma-sub">
+      <th class="ma-lm">{{ labels.last_month }}</th><th class="ma-label"></th>
+      <th>Actual</th><th>Forecast</th><th>Budget</th>{% if var %}<th>Var</th>{% endif %}
+      <th>Actual</th><th>Budget</th>{% if var %}<th>Var</th>{% endif %}
+      <th>Forecast</th><th>Budget</th>
+    </tr>
+  </thead>
+  <tbody>
+  {% for r in cfl.rows %}
+    <tr class="{{ r.kind }}">
+      <td class="n ma-lm">{{ v(r.lm) }}</td>
+      <td class="ma-label">{{ r.label }}</td>
+      <td class="n">{{ v(r.a) }}</td><td class="n">{{ v(r.f) }}</td><td class="n">{{ v(r.b) }}</td>
+      {% if var %}{{ vc(r['var'], r['var']) }}{% endif %}
+      <td class="n">{{ v(r.ya) }}</td><td class="n">{{ v(r.yb) }}</td>
+      {% if var %}{{ vc(r.yvar, r.yvar) }}{% endif %}
+      <td class="n">{{ v(r.ffy) }}</td><td class="n">{{ v(r.bfy) }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table></div>
+{% endmacro %}
+
+{# the small "where do these numbers come from" strip #}
+{% macro basis(d, V, status) %}
+<div class="ma-basis">
+  {% set modelled = status|selectattr('source', 'equalto', 'modelled')|list %}
+  {% set est = status|selectattr('est')|list %}
+  {% if modelled %}<div><span class="badge overdue">MODELLED</span> {{ modelled|length }} month(s) in this financial year are modelled from the prior-year accounts, not recorded actuals: {{ modelled|map(attribute='label')|join(', ') }}.</div>{% endif %}
+  {% if est %}<div><span class="badge">ESTIMATED</span> {{ est|map(attribute='label')|join(', ') }}: no figures were captured, so they are spread evenly between the months either side.</div>{% endif %}
+  {% if V and V.outlook_basis %}<div class="muted">Full-year forecast basis: {{ V.outlook_basis }}.</div>{% endif %}
+</div>
+{% endmacro %}

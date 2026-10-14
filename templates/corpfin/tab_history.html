@@ -2,6 +2,8 @@
 {% block tab %}
 <div class="cf-banner">Enter up to six years of the client's past results. The tool works out growth, margins, returns, liquidity, gearing and working-capital days, and can turn them into starting assumptions for the forecast.</div>
 
+{% if not model.is_final %}{% include "corpfin/_fs_loader.html" %}{% endif %}
+
 <form method="post" action="{{ url_for('corpfin.save_history', model_id=model.id) }}">
 <fieldset {{ 'disabled' if model.is_final }}>
 <div class="card">

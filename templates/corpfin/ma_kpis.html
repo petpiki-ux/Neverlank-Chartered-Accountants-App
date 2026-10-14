@@ -1,0 +1,23 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+{% if V.actual_ytd is none %}
+<div class="card"><div class="empty-state">No actual figures for {{ labels.month }} yet.</div></div>
+{% else %}
+<div class="card">
+  <h3 style="margin-top:0;">Key performance indicators &ndash; year to date, {{ labels.month }}</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Indicator</th><th>Actual</th><th>Budget</th><th>{{ prior_label }}</th><th></th></tr></thead>
+    <tbody>
+    {% for k in kpis %}
+      <tr><td>{{ k.label }}</td>
+        <td class="n">{% if k.fmt == 'money' %}{{ k.actual|cfn }}{% else %}{{ k.actual|cffmt(k.fmt) }}{% endif %}</td>
+        <td class="n">{% if k.fmt == 'money' %}{{ k.budget|cfn }}{% else %}{{ k.budget|cffmt(k.fmt) }}{% endif %}</td>
+        <td class="n">{% if k.fmt == 'money' %}{{ k.prior|cfn }}{% else %}{{ k.prior|cffmt(k.fmt) }}{% endif %}</td>
+        <td>{% if k.rag != 'na' %}<span class="ma-dot ma-{{ k.rag }}" title="{{ k.rag|capitalize }}"></span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="cf-sub">Ratios use the year-to-date figures (days measures are annualised for the months elapsed). Margin and cost ratios are judged against the budget (or last year if there is none); liquidity, leverage and cover ratios against fixed thresholds.</p>
+</div>
+{% endif %}
+{% endblock %}

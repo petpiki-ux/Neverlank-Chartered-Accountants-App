@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% import "corpfin/_macros.html" as m %}
+{% import "corpfin/_ma_macros.html" as ma %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}{{ pack.pack_number }} {{ pack.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ pack.name }} <span class="badge status-{{ pack.status }}" style="vertical-align:middle;">{{ pack.status }}</span></h1>
+    <div class="subtitle">{{ pack.pack_number }} &middot; {{ pack.client.name }}{% if pack.engagement %} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=pack.engagement_id) }}">{{ pack.engagement.title }}</a>{% endif %}
+      &middot; Management accounts &middot; {{ fy }} &middot; {{ cur }}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <a class="btn secondary" href="{{ url_for('corpfin.pack_excel', pack_id=pack.id, month=request.args.get('month')) }}">Excel pack</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.pack_pdf', pack_id=pack.id, month=request.args.get('month'), var=request.args.get('var')) }}" target="_blank">PDF pack</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.engagement_packs', engagement_id=pack.engagement_id) if pack.engagement_id else url_for('corpfin.dashboard') }}">All packs</a>
+  </div>
+</div>
+{% if pack.engagement and pack.engagement.is_corporate_finance %}
+{{ svc.service_tabs(pack.engagement, 'packs') }}
+{% endif %}
+
+<div class="tabs">
+  {% for key, label in PACK_TABS %}
+  <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab=key, month=request.args.get('month')) }}" class="{{ 'active' if tab == key }}">{{ label }}</a>
+  {% endfor %}
+</div>
+
+{% if pack.is_final %}
+<div class="cf-banner">This pack is <strong>Final</strong> and locked{% if pack.finalised_by %} (finalised by {{ pack.finalised_by.name }}{% if pack.finalised_at %} on {{ pack.finalised_at.strftime('%d %b %Y') }}{% endif %}){% endif %}.{% if user_is_signoff %}
+  <form method="post" action="{{ url_for('corpfin.pack_reopen', pack_id=pack.id) }}" class="inline" onsubmit="return confirm('Reopen this pack for editing?');"><button class="btn small secondary">Reopen</button></form>{% else %} A Partner can reopen it.{% endif %}</div>
+{% endif %}
+
+{% if tab in ('summary', 'income', 'balance', 'cashflow', 'kpis', 'variances', 'commentary') %}
+<form method="get" class="an-filters" style="margin-bottom:12px;">
+  {% for k, val in request.args.items() if k != 'month' %}<input type="hidden" name="{{ k }}" value="{{ val }}">{% endfor %}
+  <div><label for="month">Reporting month</label>
+    <select id="month" name="month" onchange="this.form.submit()">
+      {% for mo in months %}<option value="{{ mo }}" {% if mo == report_month %}selected{% endif %}>{{ month_label(mo, False) }}{% if status[loop.index0].has_pl %}{% else %} (no data){% endif %}</option>{% endfor %}
+    </select></div>
+  {% if not pack.is_final and settings.report_month != report_month %}
+  <div style="align-self:flex-end;"><button class="btn small secondary" type="submit" formaction="{{ url_for('corpfin.pack_report_month', pack_id=pack.id) }}" formmethod="post" name="report_month" value="{{ report_month }}" title="Make this the month the PDF, Excel and summary open on">Set as the pack's month</button></div>
+  {% endif %}
+</form>
+{% endif %}
+
+{% for w in warnings %}<div class="flash warning">{{ w }}</div>{% endfor %}
+{% block tab %}{% endblock %}
+{% endblock %}

@@ -1,0 +1,36 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<form method="post" action="{{ url_for('corpfin.pack_setup', pack_id=pack.id) }}" class="card">
+  <h3 style="margin-top:0;">Pack setup</h3>
+  {% set dis = 'disabled' if pack.is_final else '' %}
+  <div class="form-row">
+    <div><label>Pack name</label><input type="text" name="name" maxlength="200" value="{{ pack.name }}" {{ dis }}></div>
+    <div><label>Engagement</label><select name="engagement_id" {{ dis }}><option value="">None</option>{% for e in engagements %}<option value="{{ e.id }}" {% if e.id == pack.engagement_id %}selected{% endif %}>{{ e.title }} ({{ e.type }})</option>{% endfor %}</select></div>
+    <div><label>Currency</label><select name="currency" {{ dis }}>{% for c in currencies %}<option {% if c == pack.currency %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="form-row">
+    <div><label>Financial year starts in</label><select name="fy_start_month" {{ dis }}>{% for n in months_full %}<option value="{{ loop.index }}" {% if settings.fy_start_month == loop.index %}selected{% endif %}>{{ n }}</option>{% endfor %}</select></div>
+    <div><label>Year of the first month</label><input type="number" name="fy_start_year" min="2000" max="2100" value="{{ settings.fy_start_year }}" {{ dis }}></div>
+    <div><label>Reporting month</label><select name="report_month" {{ dis }}><option value="">Latest month with figures</option>{% for mo in months %}<option value="{{ mo }}" {% if settings.report_month == mo %}selected{% endif %}>{{ month_label(mo, False) }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="form-row">
+    <div style="flex:2;"><label>Full-year outlook basis</label><select name="outlook" {{ dis }}>{% for k, lab in outlooks %}<option value="{{ k }}" {% if settings.outlook == k %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+    <div><label>Amber when adverse by more than (%)</label><input type="number" step="0.5" min="0" name="rag_amber" value="{{ settings.rag_amber }}" {{ dis }}></div>
+    <div><label>Red when adverse by more than (%)</label><input type="number" step="0.5" min="0" name="rag_red" value="{{ settings.rag_red }}" {{ dis }}></div>
+  </div>
+
+  <h4>Lines of the income statement</h4>
+  <p class="cf-sub">Name the revenue streams and expense lines you want shown. Clear a name to remove a line (its figures move to the first line of that section). Cost of sales, depreciation, interest, tax and dividends are fixed lines.</p>
+  <div class="viz-grid" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr));">
+    <div><label>Revenue lines</label>
+      {% for r in structure.revenue + [{'key': '', 'label': ''}, {'key': '', 'label': ''}] %}
+      <input type="hidden" name="rev_key" value="{{ r.key }}"><input type="text" name="rev_label" maxlength="60" value="{{ r.label }}" placeholder="Add a revenue line" {{ dis }}>
+      {% endfor %}</div>
+    <div><label>Operating expense lines</label>
+      {% for r in structure.opex + [{'key': '', 'label': ''}, {'key': '', 'label': ''}] %}
+      <input type="hidden" name="opx_key" value="{{ r.key }}"><input type="text" name="opx_label" maxlength="60" value="{{ r.label }}" placeholder="Add an expense line" {{ dis }}>
+      {% endfor %}</div>
+  </div>
+  {% if not pack.is_final %}<button class="btn gold" type="submit">Save setup</button>{% endif %}
+</form>
+{% endblock %}
