@@ -7,7 +7,12 @@
     <div class="subtitle">Blank workpapers and letters to download, fill in, and upload back onto an engagement's Documents tab.</div>
   </div>
   {% if can_edit %}
-  <a href="{{ url_for('doc_templates.new_template') }}" class="btn gold">+ New Template</a>
+  <div>
+    <form method="post" action="{{ url_for('doc_templates.apply_design_all') }}" style="display:inline;" onsubmit="return confirm('Restyle every template that is not yet in the Neverlank design? Wording is kept; the previous copy of each file is kept on the server.');">
+      <button type="submit" class="btn secondary">Apply Neverlank design to all</button>
+    </form>
+    <a href="{{ url_for('doc_templates.new_template') }}" class="btn gold">+ New Template</a>
+  </div>
   {% endif %}
 </div>
 
@@ -27,6 +32,9 @@
           <a href="{{ url_for('doc_templates.download_template', template_id=tpl.id) }}" class="btn small secondary">Download</a>
           {% if can_edit %}
           <a href="{{ url_for('doc_templates.edit_template', template_id=tpl.id) }}" class="btn small secondary">Edit</a>
+          <form method="post" action="{{ url_for('doc_templates.apply_design', template_id=tpl.id) }}" style="display:inline;" onsubmit="return confirm('Restyle this template in the Neverlank design? Wording is kept; the previous copy is kept on the server.');">
+            <button type="submit" class="btn small secondary">Apply design</button>
+          </form>
           <form method="post" action="{{ url_for('doc_templates.delete_template', template_id=tpl.id) }}" style="display:inline;" onsubmit="return confirm('Delete this template? This cannot be undone.');">
             <button type="submit" class="btn small danger">Delete</button>
           </form>

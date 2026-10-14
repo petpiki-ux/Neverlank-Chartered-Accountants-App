@@ -158,35 +158,71 @@ def _restyle_headings(doc):
             brand.para_border(p, "bottom", brand.GOLD_LIGHT, size=6, space=2)
 
 
-def restyle(path):
+def _norm(text):
+    return re.sub(r"[^a-z0-9]+", " ", (text or "").lower()).strip()
+
+
+def _find_loose_title(body, title):
+    """For a template that was edited in Word and no longer has the original title paragraph: look in the
+    first few elements for a paragraph that carries the template's name. Returns (index, text) or (None, None)."""
+    want = _norm(title)
+    if not want:
+        return None, None
+    for i, el in enumerate(list(body)[:15]):
+        if el.tag != qn("w:p"):
+            continue
+        got = _norm(_text(el))
+        if got and (got == want or (len(got) >= 8 and (got in want or want in got)) ):
+            return i, _text(el).strip()
+    return None, None
+
+
+def restyle(path, title=None, ref=None, flexible=False):
+    """Restyle one Word template in place. Returns True if changed, False if it was already in the design.
+    flexible=True is for copies that were edited or re-uploaded by the firm: if the original title paragraph
+    is gone, the template's own title/ref (passed in) are used and the old letterhead is only removed when it
+    can be recognised."""
     doc = Document(path)
     if doc.core_properties.keywords and MARKER in doc.core_properties.keywords:
         return False
     body = doc.element.body
     idx = _find_title_index(body)
-    if idx is None:
+    if idx is not None:
+        title = _text(body[idx]).strip()
+    elif flexible:
+        idx, found = _find_loose_title(body, title)
+        title = found or title or os.path.splitext(os.path.basename(path))[0]
+    else:
         raise RuntimeError(f"{path}: could not find the title paragraph")
-    title = _text(body[idx]).strip()
-    ref = _template_ref(doc, path)
+    if not ref:
+        ref = _template_ref(doc, path)
 
     # drop the old centred logo / tagline / address / gold rule and the title (they move into the band)
-    for el in list(body)[:idx + 1]:
-        if el.tag != qn("w:sectPr"):
-            body.remove(el)
+    if idx is not None:
+        for el in list(body)[:idx + 1]:
+            if el.tag != qn("w:sectPr"):
+                body.remove(el)
 
-    _restyle_tables(doc)  # before the band is added, so the band itself is not treated as a data table
+    try:
+        _restyle_tables(doc)  # before the band is added, so the band itself is not treated as a data table
+    except Exception:
+        if not flexible:
+            raise
     _ensure_base_styles(doc)
     for section in doc.sections:
         section.top_margin = brand.Inches(0.6)
         section.bottom_margin = brand.Inches(0.9)
         section.footer_distance = brand.Inches(0.0)
-    first = body[0]
+    first = next((el for el in body if el.tag != qn("w:sectPr")), None)
     band = brand.letterhead_band(doc, title.title() if title.isupper() else title, sub="Template", number=f"Ref. {ref}" if ref else None)
     # letterhead_band appends at the end of the body (before sectPr); move table + spacer to the top
     band_el, spacer_el = band._tbl, band._tbl.getnext()
     for el in (spacer_el, band_el):
         body.remove(el)
-        first.addprevious(el)
+        if first is not None:
+            first.addprevious(el)
+        else:
+            body.insert(0, el)
     # first.addprevious inserts before 'first', so insert band first then spacer after it
     band_el.addnext(spacer_el)
 

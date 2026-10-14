@@ -11,6 +11,7 @@ copies live in Config.DOCUMENT_TEMPLATES_DATA_DIR, a writable folder next to
 the database, not the read-only bundle the app ships with.
 """
 import os
+import shutil
 from functools import wraps
 
 from flask import (
@@ -190,4 +191,66 @@ def delete_template(template_id):
     db.session.delete(tpl)
     db.session.commit()
     flash(f"Template '{title}' deleted.", "info")
+    return redirect(url_for("doc_templates.list_templates"))
+
+
+def _apply_design_to_file(tpl):
+    """Restyle one library template in place in the firm's invoice design (wording, fields and tables are
+    kept). The first untouched copy is kept beside it as '<file>.before-design'. Returns 'done',
+    'already' or an error message string starting with 'error:'."""
+    path = os.path.join(_template_dir(tpl.type), tpl.filename)
+    if not os.path.exists(path):
+        return "error: the file is missing from the server"
+    backup = path + ".before-design"
+    if not os.path.exists(backup):
+        shutil.copy2(path, backup)
+    try:
+        from tools.restyle_document_templates import restyle, restyle_xlsx
+        if tpl.file_ext == "xlsx":
+            changed = restyle_xlsx(path)
+        else:
+            changed = restyle(path, title=tpl.title, ref=tpl.ref_code, flexible=True)
+    except Exception as exc:  # leave the firm's file exactly as it was
+        shutil.copy2(backup, path)
+        return f"error: {exc}"
+    return "done" if changed else "already"
+
+
+@doc_templates_bp.route("/<int:template_id>/apply-design", methods=["POST"])
+@login_required
+@editor_required
+def apply_design(template_id):
+    tpl = DocumentTemplate.query.get_or_404(template_id)
+    result = _apply_design_to_file(tpl)
+    if result == "done":
+        tpl.updated_by_id = current_user.id
+        db.session.commit()
+        flash(f"'{tpl.title}' now uses the Neverlank design. Your wording is unchanged; the previous copy is kept on the server.", "success")
+    elif result == "already":
+        flash(f"'{tpl.title}' already uses the Neverlank design.", "info")
+    else:
+        flash(f"Could not restyle '{tpl.title}' ({result[7:]}). The template was left as it was.", "danger")
+    return redirect(url_for("doc_templates.list_templates"))
+
+
+@doc_templates_bp.route("/apply-design-all", methods=["POST"])
+@login_required
+@editor_required
+def apply_design_all():
+    done, already, failed = 0, 0, []
+    for tpl in DocumentTemplate.query.order_by(DocumentTemplate.id).all():
+        result = _apply_design_to_file(tpl)
+        if result == "done":
+            tpl.updated_by_id = current_user.id
+            done += 1
+        elif result == "already":
+            already += 1
+        else:
+            failed.append(tpl.title)
+    db.session.commit()
+    msg = f"{done} template(s) restyled, {already} already in the Neverlank design."
+    if failed:
+        flash(msg + " Could not restyle: " + ", ".join(failed) + " (left as they were).", "warning")
+    else:
+        flash(msg, "success")
     return redirect(url_for("doc_templates.list_templates"))
