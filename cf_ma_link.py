@@ -346,7 +346,7 @@ def overlay_forward(a_new, a_old):
     for L in out["loans"]:
         o = oldl.get(L["name"].strip().lower())
         if o:
-            for k in ("rate", "repay_type", "repay_years", "grace_years", "maturity_year"):
+            for k in ("rate", "repay_type", "repay_years", "grace_years", "maturity_year", "end_date", "fee_pct", "fee_amount"):
                 L[k] = o[k]
     for L in old["loans"]:
         if L["opening_balance"] == 0 and L["drawdown_amount"] > 0:
@@ -378,7 +378,7 @@ def plan_from_result(structure, result, a, fy_month_keys, n_actual, oth_stream=F
             v[key] = f(r["opex_lines"][j])
         v["dep"] = f(r["dep"])
         v["int_inc"] = f(r["int_income"])
-        v["int_exp"] = f(r["int_loans"]) + f(r["int_od"])
+        v["int_exp"] = f(r["int_loans"]) + f(r["int_od"]) + f(r.get("loan_fees"))
         v["tax"] = f(r["tax"])
         v["div"] = f(r["dividends"])
         pl[mk] = {k: round(x, 2) for k, x in v.items()}

@@ -155,20 +155,29 @@
 
 <h2 class="cf-section">6. Loans</h2>
 <div class="card">
-  <p class="cf-sub">Existing borrowings (opening balance) and new facilities (drawdown). Interest is charged on the balance at the start of each period. "Equal capital" repays the loan evenly over the repayment years after any grace period; "bullet" repays everything in the maturity year.</p>
+  <p class="cf-sub">Existing borrowings (opening balance) and new facilities (drawdown). Enter the <strong>start date</strong> (drawdown) and <strong>end date</strong> (last repayment); the model works in months. Interest is charged on the balance outstanding, and the <strong>establishment fee</strong> is paid when the loan is drawn, on top of interest, and charged to finance costs. "Equal capital" repays evenly by month from the start to the end date (after any grace period); "bullet" repays everything at the end date. After year 1 the model runs annually, so a part-year loan carries interest only for the months it is outstanding.</p>
   {% for L in base.loans %}{% set k = loop.index0 %}
   <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;">
     <div class="form-row">
       <div><label>Loan</label><input type="text" class="cf-in" name="ln_name_{{ k }}" value="{{ L.name }}" maxlength="60"></div>
       <div><label>Opening balance</label><input type="number" step="any" min="0" class="cf-in" name="ln_open_{{ k }}" value="{{ L.opening_balance|cfin }}"></div>
       <div><label>New drawdown amount</label><input type="number" step="any" min="0" class="cf-in" name="ln_draw_{{ k }}" value="{{ L.drawdown_amount|cfin }}"></div>
-      <div><label>Drawdown at start of year</label><input type="number" min="1" max="{{ base.years }}" class="cf-in" name="ln_dyear_{{ k }}" value="{{ L.drawdown_year }}"></div>
+      <div><label>Start date (drawdown)</label><input type="date" class="cf-in" name="ln_start_{{ k }}" value="{{ L.start_date }}"></div>
+      <div><label>End date (last repayment)</label><input type="date" class="cf-in" name="ln_end_{{ k }}" value="{{ L.end_date }}"></div>
       <div><label>Interest rate (% a year)</label><input type="number" step="any" min="0" class="cf-in" name="ln_rate_{{ k }}" value="{{ L.rate|cfin }}"></div>
-      <div><label>Repayment</label><select class="cf-in" name="ln_type_{{ k }}"><option value="straight" {% if L.repay_type == 'straight' %}selected{% endif %}>Equal capital repayments</option><option value="bullet" {% if L.repay_type == 'bullet' %}selected{% endif %}>Bullet (all at maturity)</option></select></div>
-      <div><label>Repayment period (years)</label><input type="number" min="1" max="30" class="cf-in" name="ln_ryears_{{ k }}" value="{{ L.repay_years }}"></div>
-      <div><label>Capital grace period (years)</label><input type="number" min="0" max="10" class="cf-in" name="ln_grace_{{ k }}" value="{{ L.grace_years }}"></div>
-      <div><label>Bullet maturity (year no.)</label><input type="number" min="1" max="30" class="cf-in" name="ln_mat_{{ k }}" value="{{ L.maturity_year }}"></div>
+      <div><label>Establishment fee (% of amount drawn)</label><input type="number" step="any" min="0" max="100" class="cf-in" name="ln_fee_{{ k }}" value="{{ L.fee_pct|cfin }}"></div>
+      <div><label>Establishment fee (fixed amount)</label><input type="number" step="any" min="0" class="cf-in" name="ln_feeamt_{{ k }}" value="{{ L.fee_amount|cfin }}"></div>
+      <div><label>Repayment</label><select class="cf-in" name="ln_type_{{ k }}"><option value="straight" {% if L.repay_type == 'straight' %}selected{% endif %}>Equal capital repayments</option><option value="bullet" {% if L.repay_type == 'bullet' %}selected{% endif %}>Bullet (all at the end date)</option></select></div>
     </div>
+    <details style="margin:6px 0;"><summary style="cursor:pointer;" class="cf-sub">Year-based timing (used only when the dates above are left blank)</summary>
+      <div class="form-row" style="margin-top:6px;">
+        <div><label>Drawdown at start of year</label><input type="number" min="1" max="{{ base.years }}" class="cf-in" name="ln_dyear_{{ k }}" value="{{ L.drawdown_year }}"></div>
+        <div><label>Repayment period (years)</label><input type="number" min="1" max="30" class="cf-in" name="ln_ryears_{{ k }}" value="{{ L.repay_years }}"></div>
+        <div><label>Capital grace period (years)</label><input type="number" min="0" max="10" class="cf-in" name="ln_grace_{{ k }}" value="{{ L.grace_years }}"></div>
+        <div><label>Bullet maturity (year no.)</label><input type="number" min="1" max="30" class="cf-in" name="ln_mat_{{ k }}" value="{{ L.maturity_year }}"></div>
+      </div>
+    </details>
+    <div class="cf-sub" style="margin:4px 0 8px;">As the model reads it: {{ loan_when[k] }}</div>
     <button class="btn small danger" name="action" value="del_ln:{{ k }}" formnovalidate onclick="return confirm('Remove this loan?');">Remove loan</button>
   </div>
   {% else %}<p class="muted">No loans in the model.</p>{% endfor %}

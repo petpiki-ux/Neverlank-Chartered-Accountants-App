@@ -14,6 +14,7 @@
     <div class="muted" style="font-size:12px;">Income statement, balance sheet and cash flow for 1 to 10 years (monthly in year 1), with scenarios, loans &amp; covenants, valuation, budget vs actual and Excel / PDF output.</div>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% if models %}<a class="btn secondary" href="{{ url_for('corpfin.engagement_models_download_all', engagement_id=engagement.id) }}" title="One ZIP with a folder per model: live-formula Excel, PDF, statements and cash flow forecast, assumptions workbook">Download all sheets (ZIP)</a>{% endif %}
     <a class="btn gold" href="{{ url_for('corpfin.new_model', client_id=engagement.client_id, engagement_id=engagement.id) }}">New forecast model</a>
     <a class="btn secondary" href="{{ url_for('corpfin.loan_calculator') }}">Loan calculator</a>
   </div>
@@ -35,7 +36,10 @@
           {% for pl in links.get(m.id, []) %}<div style="font-size:12px;margin-bottom:4px;">Continues <a href="{{ url_for('corpfin.pack_tab', pack_id=pl.pack.id, tab='budget') }}">{{ pl.pack.pack_number }}</a>{% if pl.status and pl.status.stale %} - <strong>actuals have moved on</strong>{% endif %}</div>{% endfor %}
           {% set model = m %}{% set next_page = 'models' %}{% include "corpfin/_update_from_pack.html" %}
         </td>
-        <td class="text-right"><a class="btn small secondary" href="{{ url_for('corpfin.model_tab', model_id=m.id, tab='overview') }}">Open</a></td>
+        <td class="text-right" style="white-space:nowrap;"><a class="btn small secondary" href="{{ url_for('corpfin.model_download_all', model_id=m.id) }}" title="Excel model, PDF, statements and cash flow forecast, assumptions workbook in one ZIP">All sheets</a>
+          <a class="btn small secondary" href="{{ url_for('corpfin.export_excel', model_id=m.id) }}">Excel</a>
+          <a class="btn small secondary" href="{{ url_for('corpfin.export_pdf', model_id=m.id) }}" target="_blank">PDF</a>
+          <a class="btn small secondary" href="{{ url_for('corpfin.model_tab', model_id=m.id, tab='overview') }}">Open</a></td>
       </tr>
     {% endfor %}
     </tbody>

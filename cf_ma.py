@@ -1236,7 +1236,7 @@ def budget_from_model(structure, result, a, fy_month_keys):
             v[find(opx_names, okeys, o["name"])] += f(r["opex_lines"][j])
         v["dep"] = f(r["dep"])
         v["int_inc"] = f(r["int_income"])
-        v["int_exp"] = f(r["int_loans"]) + f(r["int_od"])
+        v["int_exp"] = f(r["int_loans"]) + f(r["int_od"]) + f(r.get("loan_fees"))
         v["tax"] = f(r["tax"])
         v["div"] = f(r["dividends"])
         pl[mk] = v

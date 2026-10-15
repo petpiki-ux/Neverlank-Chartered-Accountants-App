@@ -70,7 +70,7 @@ def _footer(firm, label):
     return footer
 
 
-def _grid(columns, lines, first_w=62 * mm, size=None):
+def _grid(columns, lines, first_w=62 * mm, size=None, heads=False):
     """A statement-style table from cf_report lines."""
     n = len(columns)
     if size is None:
@@ -90,8 +90,15 @@ def _grid(columns, lines, first_w=62 * mm, size=None):
     ]
     for ln in lines:
         i = len(data)
+        if ln["kind"] == "gap":
+            data.append([""] * (n + 1))
+            styles += [("TOPPADDING", (0, i), (-1, i), 0.5), ("BOTTOMPADDING", (0, i), (-1, i), 0.5), ("LINEBELOW", (0, i), (-1, i), 0, LINE)]
+            continue
         if ln["kind"] == "head":
-            continue  # the section title above the table already says it
+            if heads:
+                data.append([ln["label"]] + [""] * n)
+                styles += [("FONT", (0, i), (-1, i), "Helvetica-Bold", size), ("BACKGROUND", (0, i), (-1, i), TINT)]
+            continue  # otherwise the section title above the table already says it
         label = ("    " if ln["kind"] == "indent" else "") + ln["label"]
         data.append([label] + [R.fmt_value(v, ln.get("fmt", "money")) for v in ln["values"]])
         if ln["kind"] in ("total", "grand"):
@@ -214,6 +221,13 @@ def build_model_pdf(model, scenario, result, firm, valuation=None, scenarios=Non
     for title, lines in mt["statements"]:
         story.append(KeepTogether([Paragraph(title, _h3), _grid(mt["columns"], lines, first_w=44 * mm, size=6.2)]))
         story.append(Spacer(1, 3 * mm))
+
+    # ---- cash flow forecast (monthly, reconciled to the cash flow statement)
+    cff = R.cashflow_forecast(result, later_years=False)
+    story += [PageBreak(), Paragraph(f"Cash flow forecast - year 1 by month ({cur})", _h2),
+              _p("Every cash movement under its heading, built separately from the cash flow statement and reconciled to it: "
+                 + ("the two agree in every month." if cff["ok"] else "<b>WARNING: the two do not agree.</b>"), _note),
+              Spacer(1, 1.5 * mm), _grid(cff["columns"], cff["lines"], first_w=46 * mm, size=5.9, heads=True)]
 
     # ---- loans & covenants
     story += [PageBreak(), Paragraph("Loans and covenants", _h2)]

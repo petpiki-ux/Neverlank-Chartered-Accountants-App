@@ -14,6 +14,7 @@
     <div class="muted" style="font-size:12px;">Monthly packs: income statement, balance sheet and cash flow against budget, forecast and last year, with KPIs, variance analysis, commentary, and branded PDF / Excel output. Actuals come from a trial balance, manual capture or are modelled from the prior year.</div>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% if packs %}<a class="btn secondary" href="{{ url_for('corpfin.engagement_packs_download_all', engagement_id=engagement.id) }}" title="One ZIP with a folder per pack: Excel pack, PDF and every sheet as its own Excel file">Download all sheets (ZIP)</a>{% endif %}
     <a class="btn gold" href="{{ url_for('corpfin.new_pack', client_id=engagement.client_id, engagement_id=engagement.id) }}">New management accounts</a>
   </div>
 </div>
@@ -29,7 +30,10 @@
         <td>{{ (p.data.get('settings') or {}).get('fy_start_year', '-') }}</td>
         <td><span class="badge status-{{ p.status }}">{{ p.status }}</span></td>
         <td>{{ p.updated_at.strftime('%d %b %Y') if p.updated_at else '' }}</td>
-        <td class="text-right"><a class="btn small secondary" href="{{ url_for('corpfin.pack_tab', pack_id=p.id, tab='summary') }}">Open</a></td>
+        <td class="text-right" style="white-space:nowrap;"><a class="btn small secondary" href="{{ url_for('corpfin.pack_download_all', pack_id=p.id) }}" title="Excel pack, PDF and every sheet in one ZIP">All sheets</a>
+          <a class="btn small secondary" href="{{ url_for('corpfin.pack_excel', pack_id=p.id) }}">Excel</a>
+          <a class="btn small secondary" href="{{ url_for('corpfin.pack_pdf', pack_id=p.id) }}" target="_blank">PDF</a>
+          <a class="btn small secondary" href="{{ url_for('corpfin.pack_tab', pack_id=p.id, tab='summary') }}">Open</a></td>
       </tr>
     {% endfor %}
     </tbody>

@@ -16,7 +16,9 @@
   <thead><tr><th></th>{% for c in columns %}<th>{{ c }}</th>{% endfor %}</tr></thead>
   <tbody>
   {% for ln in lines %}
-    {% if ln.kind == 'head' %}
+    {% if ln.kind == 'gap' %}
+    <tr class="gap"><td colspan="{{ columns|length + 1 }}" style="padding:3px 0;border:0;"></td></tr>
+    {% elif ln.kind == 'head' %}
     <tr class="head"><td colspan="{{ columns|length + 1 }}">{{ ln.label }}</td></tr>
     {% else %}
     <tr class="{{ ln.kind }}"><td>{{ ln.label }}</td>

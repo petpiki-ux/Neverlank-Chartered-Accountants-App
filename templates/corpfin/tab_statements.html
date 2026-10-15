@@ -11,5 +11,16 @@
 {% for title, lines in tables.statements %}
 <div class="card">{{ m.statement(tables.columns, lines) }}</div>
 {% endfor %}
+{% if cff %}
+<div class="card" id="cashflow-forecast">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;margin-bottom:8px;">
+    <h3 style="margin:0;">Cash flow forecast - year 1 by month</h3>
+    <div>{{ m.badge_ok(cff.ok, 'Reconciles to the cash flow statement', 'Does not reconcile') }}
+      <a class="btn btn-sm" href="{{ url_for('corpfin.export_statements_excel', model_id=model.id, scenario=scenario.id) }}">Download (Excel)</a></div>
+  </div>
+  <div class="cf-sub">Every cash movement under its heading, with the revenue distribution set on the Assumptions tab. It is built separately from the cash flow statement above and checked against it line by line (largest difference {{ cff.max_diff|cffmt('money') if cff.max_diff > 0.005 else 'nil' }}).</div>
+  {{ m.statement(cff.columns, cff.lines) }}
+</div>
+{% endif %}
 <div class="cf-sub">Interest is charged on opening balances. Tax is paid in the period it arises and losses are carried forward. Working capital follows the days set on the Assumptions tab. A negative cash balance is shown as a bank overdraft.</div>
 {% endblock %}

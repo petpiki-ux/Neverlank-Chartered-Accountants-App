@@ -7,7 +7,7 @@
 {% for L in a.loans %}{% set k = loop.index0 %}
 <div class="card">
   <h3 style="margin-top:0;">{{ L.name }}
-    <span class="cf-sub" style="font-weight:normal;">{{ L.rate|cfpp }} a year &middot; {{ 'bullet repayment in year ' ~ L.maturity_year if L.repay_type == 'bullet' else 'equal capital over ' ~ L.repay_years ~ ' year(s)' ~ (' after ' ~ L.grace_years ~ ' year(s) grace' if L.grace_years else '') }}</span></h3>
+    <span class="cf-sub" style="font-weight:normal;">{{ L.rate|cfpp }} a year{% if L.fee_pct or L.fee_amount %} + establishment fee{% endif %} &middot; {{ loan_when[loop.index0] }}</span></h3>
   <div class="tbl-scroll"><table class="cf-table">
     <thead><tr><th></th>{% for d in result.annual %}<th>{{ d.label }}</th>{% endfor %}<th>Total</th></tr></thead>
     <tbody>
@@ -16,6 +16,7 @@
       <tr><td>Repayment</td>{% for d in result.annual %}<td class="n">{{ (-d.loans[k].repay)|cfn }}</td>{% endfor %}<td class="n">{{ (-loan_totals[k].repay)|cfn }}</td></tr>
       <tr class="total"><td>Closing balance</td>{% for d in result.annual %}<td class="n">{{ d.loans[k].close|cfn }}</td>{% endfor %}<td></td></tr>
       <tr><td>Interest charged</td>{% for d in result.annual %}<td class="n">{{ d.loans[k].interest|cfn }}</td>{% endfor %}<td class="n">{{ loan_totals[k].interest|cfn }}</td></tr>
+      {% if loan_totals[k].fee %}<tr><td>Establishment fee</td>{% for d in result.annual %}<td class="n">{{ d.loans[k].fee|cfn }}</td>{% endfor %}<td class="n">{{ loan_totals[k].fee|cfn }}</td></tr>{% endif %}
     </tbody>
   </table></div>
 </div>
@@ -31,8 +32,9 @@
       <tr><td>Cash and bank (closing)</td>{% for d in result.annual %}<td class="n">{{ d.cash_positive|cfn }}</td>{% endfor %}</tr>
       <tr class="total"><td>Net debt</td>{% for r in ratio_rows %}<td class="n">{{ r.net_debt|cfn }}</td>{% endfor %}</tr>
       <tr><td>Interest paid</td>{% for d in result.annual %}<td class="n">{{ d.interest_paid|cfn }}</td>{% endfor %}</tr>
+      {% if result.annual|sum(attribute='loan_fees') %}<tr><td>Loan establishment fees</td>{% for d in result.annual %}<td class="n">{{ d.loan_fees|cfn }}</td>{% endfor %}</tr>{% endif %}
       <tr><td>Capital repaid</td>{% for d in result.annual %}<td class="n">{{ d.loan_repay|cfn }}</td>{% endfor %}</tr>
-      <tr class="total"><td>Debt service (interest + capital)</td>{% for r in ratio_rows %}<td class="n">{{ r.debt_service|cfn }}</td>{% endfor %}</tr>
+      <tr class="total"><td>Debt service (interest, fees + capital)</td>{% for r in ratio_rows %}<td class="n">{{ r.debt_service|cfn }}</td>{% endfor %}</tr>
     </tbody>
   </table></div>
 </div>

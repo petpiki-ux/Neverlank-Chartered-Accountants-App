@@ -28,6 +28,8 @@ def income_statement(a, rows):
     out.append(_line("Interest income", _col(rows, lambda r: r["int_income"])))
     out.append(_line("Interest on loans", _col(rows, lambda r: -r["int_loans"])))
     out.append(_line("Interest on overdraft", _col(rows, lambda r: -r["int_od"])))
+    if any(abs(r.get("loan_fees", 0.0)) > 1e-9 for r in rows):
+        out.append(_line("Loan establishment fees", _col(rows, lambda r: -r["loan_fees"])))
     out.append(_line("Profit before tax", _col(rows, lambda r: r["pbt"]), "total"))
     out.append(_line("Income tax", _col(rows, lambda r: -r["tax"])))
     out.append(_line("Profit after tax", _col(rows, lambda r: r["pat"]), "grand"))
@@ -64,6 +66,8 @@ def cash_flow(a, rows):
     out.append(_line("Change in payables", _col(rows, lambda r: r["d_payables"]), "indent"))
     out.append(_line("Cash generated from operations", _col(rows, lambda r: r["cash_ops"]), "total"))
     out.append(_line("Interest paid", _col(rows, lambda r: -r["interest_paid"])))
+    if any(abs(r.get("loan_fees", 0.0)) > 1e-9 for r in rows):
+        out.append(_line("Loan establishment fees paid", _col(rows, lambda r: -r["loan_fees"])))
     out.append(_line("Interest received", _col(rows, lambda r: r["interest_received"])))
     out.append(_line("Tax paid", _col(rows, lambda r: -r["tax_paid"])))
     out.append(_line("Net cash from operating activities", _col(rows, lambda r: r["cfo"]), "total"))
@@ -78,6 +82,113 @@ def cash_flow(a, rows):
     out.append(_line("Opening cash", _col(rows, lambda r: r["cash_open"])))
     out.append(_line("Closing cash", _col(rows, lambda r: r["cash"]), "grand"))
     return out
+
+
+def cashflow_forecast(result, later_years=True):
+    """The cash flow FORECAST in the firm's layout: year 1 by month then a Year 1 total (and later years), listing every cash
+    movement under its heading - loan finance, revenue (with the monthly distribution), cost of sales, operating expenditure by line,
+    working capital, finance charges (establishment fees, loan principal, loan interest), tax, capex, shareholders - to a closing
+    cash balance. It is built independently from the cash flow STATEMENT and then reconciled to it, line by line.
+    Returns {'columns', 'lines', 'max_diff', 'ok'}."""
+    a = result["a"]
+    per = result["periods"][:12]
+    ann = result["annual"] if later_years else result["annual"][:1]
+    src = list(per) + list(ann)
+    columns = [r["label"] for r in per] + ["Year 1"] + [d["label"] for d in ann[1:]]
+    lines = []
+
+    def vals(fn):
+        return [fn(r) for r in src]
+
+    def row(label, fn, kind="line", fmt="money"):
+        v = vals(fn)
+        lines.append(_line(label, v, kind, fmt))
+        return v
+
+    def blank():
+        lines.append(_line("", [None] * len(src), "gap"))
+
+    def any_nonzero(fn):
+        return any(abs(fn(r)) > 0.005 for r in src)
+
+    loans = a["loans"]
+    sums = {}   # section -> values, to build the net movement from the rows themselves
+
+    opening = row("Opening cash balance", lambda r: r["cash_open"], "total")
+    blank()
+    draws = [any_nonzero(lambda r, k=k: r["loans"][k]["draw"]) for k in range(len(loans))]
+    if any(draws):
+        sums["loan"] = row("Loan finance", lambda r: r["loan_draw"], "total")
+        for k, L in enumerate(loans):
+            if draws[k]:
+                row(L["name"], lambda r, k=k: r["loans"][k]["draw"], "indent")
+        blank()
+    share = [r["share"] for r in per] + [1.0] + [None] * (len(ann) - 1)
+    lines.append(_line("Revenue distribution during year 1", share, "memo", "pct"))
+    sums["rev"] = row("Revenue", lambda r: r["revenue"], "total")
+    for i, st in enumerate(a["revenue"]):
+        row(st["name"], lambda r, i=i: r["streams"][i], "indent")
+    blank()
+    sums["cogs"] = row("Cost of sales", lambda r: -r["cogs"], "total")
+    blank()
+    sums["opex"] = row("Operating expenditure", lambda r: -r["opex"], "total")
+    for j, o in enumerate(a["opex"]):
+        row(o["name"], lambda r, j=j: -r["opex_lines"][j], "indent")
+    blank()
+    sums["wc"] = row("Working capital movements", lambda r: r["d_inventory"] + r["d_receivables"] + r["d_payables"], "total")
+    row("Change in inventory", lambda r: r["d_inventory"], "indent")
+    row("Change in receivables", lambda r: r["d_receivables"], "indent")
+    row("Change in payables", lambda r: r["d_payables"], "indent")
+    blank()
+    fin = lambda r: (-sum(x["fee"] for x in r["loans"]) - r["loan_repay"] - r["int_loans"] - r["int_od"] + r["int_income"])
+    sums["fin"] = row("Finance charges", fin, "total")
+    for k, L in enumerate(loans):
+        fee_txt = []
+        if L["fee_pct"] > 0:
+            fee_txt.append(f"{L['fee_pct']:g}%")
+        if L["fee_amount"] > 0:
+            fee_txt.append(f"{L['fee_amount']:,.0f} fixed")
+        if any_nonzero(lambda r, k=k: r["loans"][k]["fee"]):
+            row(f"Establishment fee @ {' + '.join(fee_txt) or '0%'} - {L['name']}", lambda r, k=k: -r["loans"][k]["fee"], "indent")
+    for k, L in enumerate(loans):
+        if any_nonzero(lambda r, k=k: r["loans"][k]["repay"]):
+            row(f"Loan repayment - principal - {L['name']}", lambda r, k=k: -r["loans"][k]["repay"], "indent")
+    for k, L in enumerate(loans):
+        if any_nonzero(lambda r, k=k: r["loans"][k]["interest"]):
+            row(f"Loan repayment - interest @ {L['rate']:g}% - {L['name']}", lambda r, k=k: -r["loans"][k]["interest"], "indent")
+    if any_nonzero(lambda r: r["int_od"]):
+        row("Overdraft interest", lambda r: -r["int_od"], "indent")
+    if any_nonzero(lambda r: r["int_income"]):
+        row("Interest received", lambda r: r["int_income"], "indent")
+    blank()
+    sums["tax"] = row("Taxation", lambda r: -r["tax"], "total")
+    blank()
+    sums["capex"] = row("Capital expenditure", lambda r: -r["capex"], "total")
+    if any_nonzero(lambda r: r["equity_issue"]) or any_nonzero(lambda r: r["dividends"]):
+        blank()
+        sums["owners"] = row("Shareholders", lambda r: r["equity_issue"] - r["dividends"], "total")
+        if any_nonzero(lambda r: r["equity_issue"]):
+            row("Share capital issued", lambda r: r["equity_issue"], "indent")
+        if any_nonzero(lambda r: r["dividends"]):
+            row("Dividends paid", lambda r: -r["dividends"], "indent")
+    blank()
+    net = [sum(x[i] for x in sums.values()) for i in range(len(src))]
+    lines.append(_line("Net cash movement", net, "total"))
+    closing = [opening[i] + net[i] for i in range(len(src))]
+    lines.append(_line("Closing cash balance", closing, "grand"))
+    blank()
+    lines.append(_line("Reconciliation to the cash flow statement", [None] * len(src), "head"))
+    row("Net cash from operating activities", lambda r: r["cfo"], "indent")
+    row("Net cash from investing activities", lambda r: r["cfi"], "indent")
+    row("Net cash from financing activities", lambda r: r["cff"], "indent")
+    stmt_net = row("Net change in cash per the cash flow statement", lambda r: r["net_cash"], "total")
+    diff_net = [net[i] - stmt_net[i] for i in range(len(src))]
+    lines.append(_line("Difference: forecast less cash flow statement (nil)", diff_net, "memo"))
+    stmt_close = row("Closing cash per the balance sheet (cash less overdraft)", lambda r: r["cash"], "total")
+    diff_close = [closing[i] - stmt_close[i] for i in range(len(src))]
+    lines.append(_line("Difference: closing cash less balance sheet (nil)", diff_close, "memo"))
+    worst = max([abs(x) for x in diff_net + diff_close] or [0.0])
+    return {"columns": columns, "lines": lines, "max_diff": worst, "ok": worst < 0.01}
 
 
 def statement_tables(result, view="annual"):

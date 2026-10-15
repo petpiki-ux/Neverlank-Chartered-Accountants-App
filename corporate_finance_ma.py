@@ -1384,12 +1384,31 @@ def pack_plan_clear(pack_id, name):
 
 # =========================================================================== exports
 
+def _pack_excel_bytes(pack, d):
+    import cf_ma_excel
+    return cf_ma_excel.build_pack_workbook(_meta(pack, d), d)
+
+
+def _pack_page_bytes(pack, d, tab, args):
+    import cf_ma_excel_page as XP
+    ctx = None
+    if tab == "varmodel":
+        ctx = _varmodel_ctx(d)
+    elif tab == "reforecast":
+        ctx = _reforecast_ctx(pack, d)
+    return XP.build_page_workbook(_meta(pack, d), d, tab, args, ctx)
+
+
+def _pack_pdf_bytes(pack, d, opts):
+    import cf_ma_pdf
+    return cf_ma_pdf.build_pack_pdf(pack, _meta(pack, d), d, FIRM_LETTERHEAD, opts)
+
+
 @corpfin_bp.route("/management-accounts/<int:pack_id>/excel")
 def pack_excel(pack_id):
-    import cf_ma_excel
     pack = _pack_or_404(pack_id)
     d = _view_data(pack)
-    data = cf_ma_excel.build_pack_workbook(_meta(pack, d), d)
+    data = _pack_excel_bytes(pack, d)
     fn = f"{pack.pack_number}_{_safe_name(pack.name)}_{M.report_month(d)}.xlsx"
     return Response(data, mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
@@ -1402,25 +1421,66 @@ def pack_excel_page(pack_id, tab):
     if tab not in XP.PAGES:
         abort(404)
     d = _view_data(pack)
-    ctx = None
-    if tab == "varmodel":
-        ctx = _varmodel_ctx(d)
-    elif tab == "reforecast":
-        ctx = _reforecast_ctx(pack, d)
-    data = XP.build_page_workbook(_meta(pack, d), d, tab, request.args, ctx)
+    data = _pack_page_bytes(pack, d, tab, request.args)
     fn = f"{pack.pack_number}_{_safe_name(pack.name)}_{_safe_name(XP.PAGES[tab])}_{M.report_month(d)}.xlsx"
     return Response(data, mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
 @corpfin_bp.route("/management-accounts/<int:pack_id>/pdf")
 def pack_pdf(pack_id):
-    import cf_ma_pdf
     pack = _pack_or_404(pack_id)
     d = _view_data(pack)
     opts = {"var": request.args.get("var") != "0", "ytd": request.args.get("view") == "ytd"}
-    data = cf_ma_pdf.build_pack_pdf(pack, _meta(pack, d), d, FIRM_LETTERHEAD, opts)
+    data = _pack_pdf_bytes(pack, d, opts)
     fn = f"{pack.pack_number}_{_safe_name(pack.name)}_{M.report_month(d)}.pdf"
     return Response(data, mimetype="application/pdf", headers={"Content-Disposition": f'inline; filename="{fn}"'})
+
+
+def _pack_bundle(pack, d=None):
+    """[(filename, bytes)] - the full Excel pack, the PDF and every one-page Excel sheet of a management accounts pack."""
+    import cf_ma_excel_page as XP
+    d = d if d is not None else _data(pack)
+    base = f"{pack.pack_number}_{_safe_name(pack.name)}_{M.report_month(d)}"
+    files, notes = [], []
+
+    def add(label, fn, build):
+        try:
+            files.append((fn, build()))
+        except Exception as exc:  # one failing sheet must not stop the rest
+            current_app.logger.exception("pack bundle: %s failed", label)
+            notes.append(f"{label}: could not be built ({type(exc).__name__}).")
+
+    add("Excel pack", f"{base}_pack.xlsx", lambda: _pack_excel_bytes(pack, d))
+    add("PDF pack", f"{base}_pack.pdf", lambda: _pack_pdf_bytes(pack, d, {"var": True, "ytd": False}))
+    for tab, title in XP.PAGES.items():
+        add(f"{title} sheet", f"sheets/{_safe_name(title)}.xlsx", lambda tab=tab: _pack_page_bytes(pack, d, tab, {}))
+    if notes:
+        files.append(("NOT_INCLUDED.txt", ("\n".join(notes) + "\n").encode()))
+    return files
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/download-all")
+def pack_download_all(pack_id):
+    from corporate_finance import _zip_response
+    pack = _pack_or_404(pack_id)
+    d = _view_data(pack)
+    return _zip_response(_pack_bundle(pack, d), f"{pack.pack_number}_{_safe_name(pack.name)}_{M.report_month(d)}_all_sheets.zip")
+
+
+@corpfin_bp.route("/engagements/<int:engagement_id>/management-accounts/download-all")
+def engagement_packs_download_all(engagement_id):
+    from corporate_finance import _zip_response
+    eng = _advisory_engagement_or_404(engagement_id)
+    if not _acceptance_open(eng):
+        abort(403, description="This engagement is pending Client Acceptance sign-off.")
+    files = []
+    for p in [p for p in eng.cf_packs if _can_see(p)]:
+        folder = f"{p.pack_number}_{_safe_name(p.name)}"
+        files += [(f"{folder}/{fn}", data) for fn, data in _pack_bundle(p)]
+    if not files:
+        flash("There are no management accounts on this engagement to download.", "warning")
+        return redirect(url_for("corpfin.engagement_packs", engagement_id=eng.id))
+    return _zip_response(files, f"Management_accounts_{_safe_name(eng.client.name)}_{eng.id}.zip")
 
 
 # =========================================================================== import a corrected Excel pack

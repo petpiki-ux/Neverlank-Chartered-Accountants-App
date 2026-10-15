@@ -462,6 +462,26 @@ def _chart_payload(result):
     }
 
 
+def _loan_when(a, L):
+    """Plain-English timing of a loan as the model reads it (shown under the loan on the Assumptions tab)."""
+    T = E.loan_timing(a, L)
+    start = E.parse_start_month(a["start_month"])
+    lab = lambda i: (lambda d: f"{E.MONTH_ABBR[d.month - 1]} {d.year}")(E.add_months(start, i))
+    parts = []
+    if L["opening_balance"] > 0:
+        parts.append(f"{L['opening_balance']:,.0f} outstanding at the start")
+    if L["drawdown_amount"] > 0:
+        parts.append(f"{L['drawdown_amount']:,.0f} drawn in {lab(T['draw_idx'])}")
+    if L["repay_type"] == "bullet":
+        parts.append(f"repaid in full at the end of {lab(T['end_idx'])}")
+    else:
+        parts.append(f"{T['term']} monthly principal instalment(s) from {lab(T['first_idx'])} to {lab(T['end_idx'])}")
+    fee = L["drawdown_amount"] * L["fee_pct"] / 100.0 + L["fee_amount"] if L["drawdown_amount"] > 0 else 0.0
+    if fee > 0:
+        parts.append(f"establishment fee {fee:,.0f} paid when drawn")
+    return "; ".join(parts) + "."
+
+
 def _pack_links(model):
     """Management Accounts packs whose forecast is linked to this model (for the banner on the model pages)."""
     try:
@@ -496,14 +516,16 @@ def model_tab(model_id, tab):
                    year_labels=[E.year_label(a, y) for y in range(1, a["years"] + 1)],
                    month_labels=E.MONTH_ABBR, opening_reserves=E.opening_reserves(a), presets=list(E.BUSINESS_PRESETS))
         ctx["scenario"] = _base_scenario(model)  # assumptions are always edited on the base case
+        ctx["loan_when"] = [_loan_when(ctx["base"], L) for L in ctx["base"]["loans"]]
     elif tab == "statements":
         view = "monthly" if request.args.get("view") == "monthly" else "annual"
-        ctx.update(view=view, tables=R.statement_tables(result, view), charts=_chart_payload(result))
+        ctx.update(view=view, tables=R.statement_tables(result, view), charts=_chart_payload(result),
+                   cff=R.cashflow_forecast(result))
     elif tab == "loans":
         rt = E.ratios(result)
-        totals = [{key: sum(d["loans"][k][key] for d in result["annual"]) for key in ("draw", "repay", "interest")}
+        totals = [{key: sum(d["loans"][k][key] for d in result["annual"]) for key in ("draw", "repay", "interest", "fee")}
                   for k in range(len(a["loans"]))]
-        ctx.update(tests=E.covenant_tests(result, rt), ratio_rows=rt, loan_totals=totals)
+        ctx.update(tests=E.covenant_tests(result, rt), ratio_rows=rt, loan_totals=totals, loan_when=[_loan_when(a, L) for L in a["loans"]])
     elif tab == "ratios":
         ctx.update(rtable=R.ratio_table(result), be=E.break_even(result), fcf=E.free_cash_flows(result))
     elif tab == "scenarios":
@@ -592,7 +614,9 @@ def _parse_assumptions(form, base):
                       "drawdown_amount": g(f"ln_draw_{k}"), "drawdown_year": g(f"ln_dyear_{k}", 1),
                       "rate": g(f"ln_rate_{k}", 12.0), "repay_type": form.get(f"ln_type_{k}", "straight"),
                       "repay_years": g(f"ln_ryears_{k}", 5), "grace_years": g(f"ln_grace_{k}", 0),
-                      "maturity_year": g(f"ln_mat_{k}", n)})
+                      "maturity_year": g(f"ln_mat_{k}", n),
+                      "start_date": (form.get(f"ln_start_{k}") or "").strip(), "end_date": (form.get(f"ln_end_{k}") or "").strip(),
+                      "fee_pct": g(f"ln_fee_{k}", 0.0), "fee_amount": g(f"ln_feeamt_{k}", 0.0)})
     if loans or "n_ln" in form:
         a["loans"] = loans
 
@@ -1015,19 +1039,20 @@ def _safe_name(text):
     return "".join(ch if ch.isalnum() or ch in "-_ " else "" for ch in text).strip().replace(" ", "_")[:60] or "model"
 
 
-@corpfin_bp.route("/models/<int:model_id>/excel")
-def export_excel(model_id):
+def _val_arg(model, raw):
+    try:
+        return next((v for v in model.valuations if v.id == int(raw or 0)), None)
+    except ValueError:
+        return None
+
+
+def _model_excel_bytes(model, val_raw=None):
+    """The live-formula model workbook (all sheets): assumptions, calc, statements, cash flow forecast, valuation, scenarios."""
     import cf_excel
-    model = _model_or_404(model_id)
     a = E.normalise(model.assumptions)
     val = None
     if model.valuations:
-        chosen = None
-        try:
-            chosen = next((v for v in model.valuations if v.id == int(request.args.get("val", 0))), None)
-        except ValueError:
-            pass
-        val = (chosen or model.valuations[-1]).inputs
+        val = ((_val_arg(model, val_raw)) or model.valuations[-1]).inputs
     scen = []
     for s in model.scenarios:
         res = E.run(E.apply_shocks(a, s.shocks if not s.is_base else {}))
@@ -1040,21 +1065,13 @@ def export_excel(model_id):
                      "x_values": xs, "y_values": ys, "rows": E.sensitivity_grid(a, sx, xs, sy, ys, metric)})
     data, _ = cf_excel.build_model_workbook(_meta(model), a, valuation=val, scenarios=scen if len(scen) > 1 else None,
                                             sensitivity=sens, actuals=T.normalise_actuals(model.actuals) or None)
-    fn = f"{model.model_number}_{_safe_name(model.name)}.xlsx"
-    return Response(data, mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+    return data
 
 
-@corpfin_bp.route("/models/<int:model_id>/pdf")
-def export_pdf(model_id):
+def _model_pdf_bytes(model, scenario, val_raw=None):
     import cf_pdf
-    model = _model_or_404(model_id)
-    scenario = _pick_scenario(model)
     result = _run(model, scenario)
-    val_obj = None
-    try:
-        val_obj = next((v for v in model.valuations if v.id == int(request.args.get("val", 0))), None)
-    except ValueError:
-        pass
+    val_obj = _val_arg(model, val_raw)
     if val_obj is None and model.valuations:
         val_obj = model.valuations[-1]
     valuation = None
@@ -1068,10 +1085,90 @@ def export_pdf(model_id):
         for s in model.scenarios:
             res = E.run(E.apply_shocks(a, s.shocks if not s.is_base else {}))
             scen.append({"name": s.name, "notes": s.notes, "summary": E.scenario_summary(res)})
-    data = cf_pdf.build_model_pdf(model, scenario, result, FIRM_LETTERHEAD, valuation=valuation, scenarios=scen,
+    return cf_pdf.build_model_pdf(model, scenario, result, FIRM_LETTERHEAD, valuation=valuation, scenarios=scen,
                                   bva=T.budget_vs_actual(result, model.actuals))
+
+
+def _model_statements_bytes(model, scenario):
+    """Values-only workbook: the three statements (annual and year 1 by month) and the cash flow forecast."""
+    import cf_excel
+    return cf_excel.build_statements_workbook(_meta(model), _run(model, scenario))
+
+
+@corpfin_bp.route("/models/<int:model_id>/excel")
+def export_excel(model_id):
+    model = _model_or_404(model_id)
+    data = _model_excel_bytes(model, request.args.get("val", 0))
+    fn = f"{model.model_number}_{_safe_name(model.name)}.xlsx"
+    return Response(data, mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@corpfin_bp.route("/models/<int:model_id>/excel/statements")
+def export_statements_excel(model_id):
+    """The statements and the cash flow forecast as a plain-values workbook (no formulas)."""
+    model = _model_or_404(model_id)
+    data = _model_statements_bytes(model, _pick_scenario(model))
+    fn = f"{model.model_number}_{_safe_name(model.name)}_statements_and_cashflow_forecast.xlsx"
+    return Response(data, mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@corpfin_bp.route("/models/<int:model_id>/pdf")
+def export_pdf(model_id):
+    model = _model_or_404(model_id)
+    data = _model_pdf_bytes(model, _pick_scenario(model), request.args.get("val", 0))
     fn = f"{model.model_number}_{_safe_name(model.name)}.pdf"
     return Response(data, mimetype="application/pdf", headers={"Content-Disposition": f'inline; filename="{fn}"'})
+
+
+def _model_bundle(model, scenario=None):
+    """[(filename, bytes)] - every important output of one model, plus notes on anything that could not be built."""
+    import cf_assump_import as AI
+    base = f"{model.model_number}_{_safe_name(model.name)}"
+    scenario = scenario or _base_scenario(model)
+    files, notes = [], []
+    for label, fn, build in (
+            ("Excel model (live formulas, all sheets)", f"{base}_model.xlsx", lambda: _model_excel_bytes(model)),
+            ("PDF report", f"{base}_report.pdf", lambda: _model_pdf_bytes(model, scenario)),
+            ("Statements and cash flow forecast (values)", f"{base}_statements_and_cashflow_forecast.xlsx", lambda: _model_statements_bytes(model, scenario)),
+            ("Assumptions workbook (edit and upload back)", f"{base}_assumptions.xlsx", lambda: AI.build_workbook(_meta(model), E.normalise(model.assumptions)))):
+        try:
+            files.append((fn, build()))
+        except Exception as exc:  # one broken output must not stop the rest being downloaded
+            current_app.logger.exception("model bundle: %s failed", label)
+            notes.append(f"{label}: could not be built ({type(exc).__name__}).")
+    if notes:
+        files.append(("NOT_INCLUDED.txt", ("\n".join(notes) + "\n").encode()))
+    return files
+
+
+def _zip_response(files, name):
+    import io, zipfile
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for fn, data in files:
+            z.writestr(fn, data)
+    return Response(buf.getvalue(), mimetype="application/zip", headers={"Content-Disposition": f'attachment; filename="{name}"'})
+
+
+@corpfin_bp.route("/models/<int:model_id>/download-all")
+def model_download_all(model_id):
+    model = _model_or_404(model_id)
+    return _zip_response(_model_bundle(model, _pick_scenario(model)), f"{model.model_number}_{_safe_name(model.name)}_all_sheets.zip")
+
+
+@corpfin_bp.route("/engagements/<int:engagement_id>/models/download-all")
+def engagement_models_download_all(engagement_id):
+    eng = _advisory_engagement_or_404(engagement_id)
+    if not _acceptance_open(eng):
+        abort(403, description="This engagement is pending Client Acceptance sign-off.")
+    files = []
+    for m in [m for m in eng.cf_models if _can_see(m)]:
+        folder = f"{m.model_number}_{_safe_name(m.name)}"
+        files += [(f"{folder}/{fn}", data) for fn, data in _model_bundle(m)]
+    if not files:
+        flash("There are no forecast models on this engagement to download.", "warning")
+        return redirect(url_for("corpfin.engagement_models", engagement_id=eng.id))
+    return _zip_response(files, f"Forecast_models_{_safe_name(eng.client.name)}_{eng.id}.zip")
 
 
 # =========================================================================== projects (capital budgeting / feasibility)

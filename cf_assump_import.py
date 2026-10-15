@@ -147,7 +147,7 @@ def _text(cell):
 def fmt_val(v):
     if isinstance(v, (list, tuple)):
         return ", ".join(fmt_val(x) for x in v)
-    if v is None:
+    if v is None or v == "":
         return "none"
     if isinstance(v, bool):
         return "Yes" if v else "No"
@@ -258,10 +258,11 @@ def build_workbook(meta, a):
     row += 1
 
     section("Loans")
-    head(["Name", "Opening balance", "New drawdown", "Drawdown year", "Interest rate %", "Repayment (straight / bullet)", "Repayment years", "Grace years", "Maturity year"])
+    head(["Name", "Opening balance", "New drawdown", "Drawdown year", "Interest rate %", "Repayment (straight / bullet)", "Repayment years", "Grace years", "Maturity year",
+          "Start date (YYYY-MM-DD)", "End date (YYYY-MM-DD)", "Establishment fee % of drawdown", "Establishment fee fixed amount"])
     for L in a["loans"]:
         put("ln", L["name"], [L["opening_balance"], L["drawdown_amount"], L["drawdown_year"], L["rate"], L["repay_type"], L["repay_years"],
-                              L["grace_years"], L["maturity_year"]], "#,##0.00")
+                              L["grace_years"], L["maturity_year"], L.get("start_date", ""), L.get("end_date", ""), L.get("fee_pct", 0.0), L.get("fee_amount", 0.0)], "#,##0.00")
         ws.cell(row=row - 1, column=2).fill = FILL_IN
         ws.cell(row=row - 1, column=2).font = F_IN
     row += 1
@@ -338,6 +339,17 @@ def _row_cells(ws, r, c0, c1):
     return [ws.cell(row=r, column=c) for c in range(c0, c1 + 1)]
 
 
+def _date_cell(cell, default=""):
+    """A loan date cell (a real date or text like 2027-03-01); blank keeps the model's date, '-' clears it."""
+    v = cell.value
+    if v is None or (isinstance(v, str) and not v.strip()):
+        return default
+    if isinstance(v, str) and v.strip() in ("-", "none", "None"):
+        return ""
+    got = E._ym(v)
+    return got or default
+
+
 def _read_template(ws, rd, wsname):
     """Rows keyed in column A. Returns True when the sheet is a template sheet."""
     keyed = False
@@ -412,7 +424,7 @@ def _read_template(ws, rd, wsname):
             rd.ox_rows.append((r, label, [ws.cell(row=r, column=c) for c in range(3, 3 + 3 + (n - 1) + n)]))
         elif key == "ln":
             keyed = True
-            rd.ln_rows.append((r, label, [ws.cell(row=r, column=c) for c in range(3, 11)]))
+            rd.ln_rows.append((r, label, [ws.cell(row=r, column=c) for c in range(3, 15)]))
     return keyed
 
 
@@ -478,7 +490,9 @@ def _apply_tables(rd, wsname):
             out.append({"name": name, "opening_balance": pick(0, "opening_balance", 0.0), "drawdown_amount": pick(1, "drawdown_amount", 0.0),
                         "drawdown_year": pick(2, "drawdown_year", 1), "rate": pick(3, "rate", 12.0),
                         "repay_type": "bullet" if rt.startswith("b") else ("straight" if rt.startswith("s") else (prev["repay_type"] if prev else "straight")),
-                        "repay_years": pick(5, "repay_years", 5), "grace_years": pick(6, "grace_years", 0), "maturity_year": pick(7, "maturity_year", n)})
+                        "repay_years": pick(5, "repay_years", 5), "grace_years": pick(6, "grace_years", 0), "maturity_year": pick(7, "maturity_year", n),
+                        "start_date": _date_cell(cells[8], prev["start_date"] if prev else ""), "end_date": _date_cell(cells[9], prev["end_date"] if prev else ""),
+                        "fee_pct": pick(10, "fee_pct", 0.0), "fee_amount": pick(11, "fee_amount", 0.0)})
         base["loans"] = out
         rd.matched += len(out)
 
@@ -654,7 +668,9 @@ def diff(old, new):
                                                                ("growth", "Growth % (years 2+)"), ("pct", "% of revenue (by year)")]),
                                ("Loans", "loans", [("opening_balance", "Opening balance"), ("drawdown_amount", "New drawdown"), ("drawdown_year", "Drawdown year"),
                                                    ("rate", "Interest rate %"), ("repay_type", "Repayment type"), ("repay_years", "Repayment years"),
-                                                   ("grace_years", "Grace years"), ("maturity_year", "Maturity year")])):
+                                                   ("grace_years", "Grace years"), ("maturity_year", "Maturity year"),
+                                                   ("start_date", "Start date"), ("end_date", "End date"), ("fee_pct", "Establishment fee %"),
+                                                   ("fee_amount", "Establishment fee (fixed)")])):
         o, nw = by_name(old[sec]), by_name(new[sec])
         for k, x in nw.items():
             if k not in o:

@@ -12,6 +12,8 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
     <a class="btn secondary" href="{{ url_for('corpfin.export_excel', model_id=model.id) }}">Excel (live formulas)</a>
     <a class="btn secondary" href="{{ url_for('corpfin.export_pdf', model_id=model.id, scenario=scenario.id) }}" target="_blank">PDF report</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.export_statements_excel', model_id=model.id, scenario=scenario.id) }}" title="The statements and the cash flow forecast as a plain Excel workbook">Excel: statements</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.model_download_all', model_id=model.id, scenario=scenario.id) }}" title="One ZIP: live-formula Excel model, PDF report, statements and cash flow forecast, and the assumptions workbook">Download all (ZIP)</a>
     <a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">All models</a>
   </div>
 </div>
