@@ -170,7 +170,8 @@ def waterfall_svg(b, width=880, height=340):
         x0 = cx - bw / 2
         top, bot = y(bar["hi"]), y(bar["lo"])
         h = max(1.5, bot - top)
-        out.append(f'<rect x="{x0:.1f}" y="{top:.1f}" width="{bw:.1f}" height="{h:.1f}" fill="{col[bar["kind"]]}" rx="2"><title>{esc(bar["label"])}: {esc(f"{bar["value"]:,.0f}")}</title></rect>')
+        val_txt = format(bar["value"], ",.0f")
+        out.append(f'<rect x="{x0:.1f}" y="{top:.1f}" width="{bw:.1f}" height="{h:.1f}" fill="{col[bar["kind"]]}" rx="2"><title>{esc(bar["label"])}: {esc(val_txt)}</title></rect>')
         above = bar["value"] >= 0 or bar["kind"] != "total"
         ly = top - 5 if (bar["value"] >= 0) else bot + 13
         out.append(f'<text x="{cx:.1f}" y="{ly:.1f}" text-anchor="middle" font-size="11.5" font-weight="600" fill="#0b0b0b">{esc(_short(bar["value"]))}</text>')
