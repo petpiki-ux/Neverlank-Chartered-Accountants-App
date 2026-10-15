@@ -1,0 +1,20 @@
+{# Update a forecast model from a Management Accounts pack. Needs: model, pack_opts, next_page. #}
+{% set ok_opts = pack_opts|selectattr('ok')|list %}
+{% if model.is_final %}
+  <span class="muted" style="font-size:12px;">Final - reopen to update</span>
+{% elif ok_opts %}
+<form method="post" action="{{ url_for('corpfin.model_update_from_pack', model_id=model.id) }}" class="inline" style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;"
+      onsubmit="return confirm('Update {{ model.model_number }} from the Management Accounts?\n\nThe model will open from the actual balance sheet and take its year-1 run-rates from the actuals. Growth, capex, dividends, tax and loan terms already set in the model are kept.');">
+  <input type="hidden" name="next" value="{{ next_page }}">
+  {% if ok_opts|length > 1 %}
+  <select name="pack_id" aria-label="Management Accounts pack" style="max-width:240px;">
+    {% for o in ok_opts %}<option value="{{ o.pack.id }}" {% if o.linked_model_id == model.id %}selected{% endif %}>{{ o.pack.pack_number }} - actuals to {{ o.month }}</option>{% endfor %}
+  </select>
+  {% else %}<input type="hidden" name="pack_id" value="{{ ok_opts[0].pack.id }}">{% endif %}
+  <button class="btn small gold" type="submit">Update from Management Accounts{% if ok_opts|length == 1 %} ({{ ok_opts[0].month }}){% endif %}</button>
+</form>
+{% elif pack_opts %}
+  <span class="muted" style="font-size:12px;">{{ pack_opts[0].pack.pack_number }}: {{ pack_opts[0].reason }}</span>
+{% else %}
+  <span class="muted" style="font-size:12px;">No Management Accounts for this client yet</span>
+{% endif %}

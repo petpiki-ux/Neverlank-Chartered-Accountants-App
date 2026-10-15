@@ -908,13 +908,17 @@ def _apply_model_to_pack(pack, d, model, scenario, built_for, params, fingerprin
     return plan, result, link, notes
 
 
-def _continue_core(pack, d, params, mode):
+def _continue_core(pack, d, params, mode, target=None):
     """Create / roll forward / rebuild the continuation model and put its remaining months in d["forecast"].
-    Returns (model, plan, link, notes, verb). Raises LK.LinkError with a message for the user."""
+    `target` is an existing model chosen by the preparer (for example from the Models page): it is updated from the actuals
+    and becomes the pack's linked model. Returns (model, plan, link, notes, verb). Raises LK.LinkError with a message for the user."""
     a, info = LK.continuation_assumptions(d, params, pack.currency)
     old = d.get("forecast_link") or {}
     notes = []
-    model = CFModel.query.get(old["model_id"]) if (old.get("model_id") and mode != "new") else None
+    if target is not None:
+        model = target
+    else:
+        model = CFModel.query.get(old["model_id"]) if (old.get("model_id") and mode != "new") else None
     if model is not None and (model.client_id != pack.client_id or not _can_see(model)):
         model = None
     if model is not None and model.is_final:
@@ -941,7 +945,7 @@ def _continue_core(pack, d, params, mode):
         model.purpose = purpose
         _touch(model)
         db.session.commit()
-        verb = "rolled forward" if mode == "roll" else "rebuilt from the actuals"
+        verb = "updated from the actuals" if target is not None else ("rolled forward" if mode == "roll" else "rebuilt from the actuals")
     plan, result, link, more = _apply_model_to_pack(pack, d, model, _base_scenario(model), M.report_month(d), params, LK.fingerprint(d))
     return model, plan, link, notes + more + info["notes"], verb
 
@@ -1036,6 +1040,103 @@ def pack_continuation_unlink(pack_id):
         _save(pack, d)
         flash("The forecast is no longer linked to the model. The forecast figures stay as they are.", "success")
     return _back(pack, "budget")
+
+
+# --------------------------------------------------------------------------- update an existing model from a pack (Models page)
+
+def pack_options(client_id, engagement_id=None):
+    """Management Accounts packs a forecast model of this client can be updated from: [{pack, month, ok, reason, linked_model_id, stale}].
+    Packs of the model's own engagement come first."""
+    out = []
+    packs = CFMgmtPack.query.filter_by(client_id=client_id).order_by(CFMgmtPack.id.desc()).all()
+    packs.sort(key=lambda p: 0 if (engagement_id and p.engagement_id == engagement_id) else 1)
+    for pk in packs:
+        if not _can_see(pk):
+            continue
+        try:
+            d = _data(pk)
+            A = LK.anchor(d)
+            st = LK.link_status(d)
+            out.append({"pack": pk, "ok": True, "reason": "", "month": M.month_label(A["month"], False), "bs_month": M.month_label(A["bs_month"], False),
+                        "linked_model_id": (d.get("forecast_link") or {}).get("model_id"), "stale": bool(st and st["stale"])})
+        except LK.LinkError as e:
+            out.append({"pack": pk, "ok": False, "reason": str(e), "month": "", "bs_month": "", "linked_model_id": None, "stale": False})
+        except Exception:
+            current_app.logger.exception("pack option failed")
+    return out
+
+
+def _model_back(model, nxt, engagement_id=None):
+    if nxt == "models" and model.engagement_id:
+        return redirect(url_for("corpfin.engagement_models", engagement_id=model.engagement_id))
+    return redirect(url_for("corpfin.model_tab", model_id=model.id, tab=nxt if nxt in dict(corp_model_tabs()) else "overview"))
+
+
+def corp_model_tabs():
+    from corporate_finance import MODEL_TABS
+    return MODEL_TABS
+
+
+@corpfin_bp.route("/models/<int:model_id>/update-from-pack", methods=["POST"])
+def model_update_from_pack(model_id):
+    """Bring an existing forecast model up to date with a Management Accounts pack: the model opens from the pack's actual balance
+    sheet, starts the month after the reporting month and takes its year-1 run-rates from the actuals. The growth, capex, dividend,
+    tax and loan choices already made in the model are kept. The pack's forecast then follows the model."""
+    from corporate_finance import _model_or_404, _locked
+    model = _model_or_404(model_id)
+    nxt = request.form.get("next") or "overview"
+    back = _model_back(model, nxt)
+    if _locked(model):
+        return back
+    try:
+        pack = _pack_or_404(int(request.form.get("pack_id")))
+    except (TypeError, ValueError):
+        flash("Choose the Management Accounts pack to update the model from.", "danger")
+        return back
+    if pack.client_id != model.client_id:
+        flash("That pack belongs to a different client.", "danger")
+        return back
+    d = _data(pack)
+    link = d.get("forecast_link") or {}
+    params = LK.normalise_params(link.get("params") if link.get("model_id") == model.id else None)
+    params["years"] = E.normalise(model.assumptions)["years"]
+    month_txt = M.month_label(M.report_month(d), False)
+    if pack.is_final:
+        # A Final pack cannot be changed, so only the model is brought up to date; the pack's forecast is left alone.
+        try:
+            a, info = LK.continuation_assumptions(d, params, pack.currency)
+        except LK.LinkError as e:
+            flash(str(e), "danger")
+            return back
+        if params["keep_forward"]:
+            a = LK.overlay_forward(a, model.assumptions)
+        model.set_json("assumptions", a)
+        model.purpose = (f"Continues the actuals in Management Accounts {pack.pack_number} from {month_txt}. "
+                         "The opening balance sheet is the actual balance sheet.")
+        _touch(model)
+        db.session.commit()
+        flash(f"Model {model.model_number} was updated from {pack.pack_number} (Final): it opens from the actual balance sheet at {month_txt} and starts in "
+              f"{M.month_label(a['start_month'], False)}. The pack is Final, so its own forecast was not changed.", "success")
+        for n_ in info["notes"]:
+            flash(n_, "warning")
+        return back
+    prev = link.get("model_number") if link.get("model_id") and link.get("model_id") != model.id else None
+    try:
+        model, plan, new_link, notes, verb = _continue_core(pack, d, params, "roll", target=model)
+    except LK.LinkError as e:
+        flash(str(e), "danger")
+        return back
+    _save(pack, d)
+    msg = (f"Model {model.model_number} {verb} from Management Accounts {pack.pack_number}: it opens from the actual balance sheet at {month_txt} and runs from "
+           f"{M.month_label(new_link['start_month'], False)}. Revenue and expense lines now follow the pack; growth, capex, dividends, tax and loan terms you set in the model were kept.")
+    if plan["months"]:
+        msg += f" The pack's forecast covers {M.month_label(plan['months'][0], False)} to {M.month_label(plan['months'][-1], False)}."
+    flash(msg, "success")
+    if prev:
+        flash(f"The pack's forecast was previously linked to {prev}. It now follows {model.model_number}.", "warning")
+    for n_ in notes:
+        flash(n_, "warning")
+    return _model_back(model, nxt)
 
 
 # =========================================================================== diagnose a saved balance sheet

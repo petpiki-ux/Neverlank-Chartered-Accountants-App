@@ -50,6 +50,13 @@
     <button class="btn small gold" type="submit">Update the pack's forecast from this model ({{ scenario.name }})</button></form>{% endif %}
 </div>
 {% endfor %}
+{% if not model.is_final and (pack_opts|selectattr('ok')|list) %}
+<div class="cf-banner" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+  <span><strong>Management Accounts:</strong>
+  {% if pack_links %}{% if pack_links[0].status and pack_links[0].status.stale %}the actuals have moved on since this model was built. {% endif %}Bring the statements up to date with the latest actuals{% else %}This model is not yet tied to the client's actuals. Update it from the Management Accounts so that the statements open from the actual balance sheet{% endif %}.</span>
+  {% set next_page = tab %}{% include "corpfin/_update_from_pack.html" %}
+</div>
+{% endif %}
 {% for w in result.warnings %}<div class="flash warning">{{ w }}</div>{% endfor %}
 {% if not result.checks.balance_ok %}<div class="flash danger">The balance sheet is out by {{ result.checks.max_imbalance|cfn(2) }}. Please report this.</div>{% endif %}
 

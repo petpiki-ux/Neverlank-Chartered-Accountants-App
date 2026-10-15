@@ -22,7 +22,7 @@
 <div class="card">
   {% if models %}
   <div class="tbl-scroll"><table>
-    <thead><tr><th>Number</th><th>Model</th><th>Years</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+    <thead><tr><th>Number</th><th>Model</th><th>Years</th><th>Status</th><th>Updated</th><th>Management Accounts</th><th></th></tr></thead>
     <tbody>
     {% for m in models %}
       <tr>
@@ -31,6 +31,10 @@
         <td>{{ (m.assumptions or {}).get('years', '-') }}</td>
         <td><span class="badge status-{{ m.status }}">{{ m.status }}</span></td>
         <td>{{ m.updated_at.strftime('%d %b %Y') if m.updated_at else '' }}</td>
+        <td>
+          {% for pl in links.get(m.id, []) %}<div style="font-size:12px;margin-bottom:4px;">Continues <a href="{{ url_for('corpfin.pack_tab', pack_id=pl.pack.id, tab='budget') }}">{{ pl.pack.pack_number }}</a>{% if pl.status and pl.status.stale %} - <strong>actuals have moved on</strong>{% endif %}</div>{% endfor %}
+          {% set model = m %}{% set next_page = 'models' %}{% include "corpfin/_update_from_pack.html" %}
+        </td>
         <td class="text-right"><a class="btn small secondary" href="{{ url_for('corpfin.model_tab', model_id=m.id, tab='overview') }}">Open</a></td>
       </tr>
     {% endfor %}

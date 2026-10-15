@@ -289,7 +289,11 @@ def _acceptance_open(eng):
 def engagement_models(engagement_id):
     eng = _advisory_engagement_or_404(engagement_id)
     models = [m for m in eng.cf_models if _can_see(m)]
-    return render_template("corpfin/engagement_models.html", engagement=eng, models=models, unlocked=_acceptance_open(eng))
+    import corporate_finance_ma as MA
+    pack_opts = MA.pack_options(eng.client_id, eng.id)
+    links = {m.id: _pack_links(m) for m in models}
+    return render_template("corpfin/engagement_models.html", engagement=eng, models=models, unlocked=_acceptance_open(eng),
+                           pack_opts=pack_opts, links=links)
 
 
 @corpfin_bp.route("/engagements/<int:engagement_id>/appraisals")
@@ -480,6 +484,8 @@ def model_tab(model_id, tab):
     ctx = dict(model=model, tab=tab, scenario=scenario, scenarios=model.scenarios, result=result, a=a,
                cur=a["currency"], engagement=model.engagement)
     ctx["pack_links"] = _pack_links(model)
+    import corporate_finance_ma as MA
+    ctx["pack_opts"] = MA.pack_options(model.client_id, model.engagement_id)
     if tab == "overview":
         ctx.update(head=R.headline(result), charts=_chart_payload(result), ratio_rows=E.ratios(result))
         ctx["engagements"] = _engagement_choices([model.client])
@@ -654,6 +660,95 @@ def save_assumptions(model_id):
     if not res["checks"]["balance_ok"]:
         flash(f"The balance sheet is out by {res['checks']['max_imbalance']:,.2f}. Please report this - the model should always balance.", "danger")
     return redirect(url_for("corpfin.model_tab", model_id=model.id, tab="assumptions") + ("#lines" if msg else ""))
+
+
+# --------------------------------------------------------------------------- assumptions in Excel
+
+def _assump_hash(a):
+    import hashlib
+    import json as _json
+    def rnd(x):
+        # normalise() re-scales the seasonality, which can move the last float digit between Python versions
+        if isinstance(x, float):
+            return round(x, 6)
+        if isinstance(x, dict):
+            return {k: rnd(v) for k, v in x.items()}
+        if isinstance(x, (list, tuple)):
+            return [rnd(v) for v in x]
+        return x
+    return hashlib.sha1(_json.dumps(rnd(E.normalise(a)), sort_keys=True).encode()).hexdigest()[:16]
+
+
+@corpfin_bp.route("/models/<int:model_id>/assumptions/excel")
+def assumptions_excel(model_id):
+    """The model's assumptions as a plain workbook that can be changed in Excel and uploaded back."""
+    import cf_assump_import as AI
+    model = _model_or_404(model_id)
+    data = AI.build_workbook(_meta(model), E.normalise(model.assumptions))
+    fn = f"{model.model_number}_{_safe_name(model.name)}_assumptions.xlsx"
+    return Response(data, mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
+@corpfin_bp.route("/models/<int:model_id>/assumptions/import/review", methods=["POST"])
+def assumptions_import_review(model_id):
+    import json as _json
+    import cf_assump_import as AI
+    model = _model_or_404(model_id)
+    back = redirect(url_for("corpfin.model_tab", model_id=model.id, tab="assumptions"))
+    if _locked(model):
+        return back
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("Choose the Excel workbook with the assumptions (.xlsx).", "danger")
+        return back
+    if not f.filename.lower().endswith((".xlsx", ".xlsm")):
+        flash("Upload an .xlsx workbook.", "danger")
+        return back
+    raw = f.stream.read(AI.MAX_BYTES + 1)
+    base = E.normalise(model.assumptions)
+    try:
+        rep = AI.read_workbook(raw, base)
+    except AI.ImportError_ as e:
+        flash(str(e), "danger")
+        return back
+    except Exception:
+        current_app.logger.exception("assumptions import failed")
+        flash("That workbook could not be read. Use the file downloaded with 'Assumptions workbook' or a workbook with labelled rows.", "danger")
+        return back
+    if rep["model_number"] and rep["model_number"] != model.model_number:
+        rep["warnings"].insert(0, f"This workbook was downloaded for model {rep['model_number']}, not {model.model_number}. Check the changes below before applying them.")
+    result = E.run(rep["assumptions"])
+    payload = _json.dumps({"a": rep["assumptions"], "base": _assump_hash(base), "file": f.filename[:120]})
+    return render_template("corpfin/assumptions_import.html", model=model, rep=rep, payload=payload, filename=f.filename,
+                           run_warnings=result["warnings"], balanced=result["checks"]["balance_ok"], engagement=model.engagement)
+
+
+@corpfin_bp.route("/models/<int:model_id>/assumptions/import/apply", methods=["POST"])
+def assumptions_import_apply(model_id):
+    import json as _json
+    model = _model_or_404(model_id)
+    back = redirect(url_for("corpfin.model_tab", model_id=model.id, tab="assumptions"))
+    if _locked(model):
+        return back
+    try:
+        pl = _json.loads(request.form.get("payload") or "")
+        new = E.normalise(pl["a"])
+    except (ValueError, KeyError, TypeError):
+        flash("The upload could not be read back. Please upload the workbook again.", "danger")
+        return back
+    if pl.get("base") != _assump_hash(model.assumptions):
+        flash("The model's assumptions were changed after you uploaded the workbook, so nothing was applied. Upload the workbook again to compare it with the latest assumptions.", "warning")
+        return back
+    model.set_json("assumptions", new)
+    _touch(model)
+    db.session.commit()
+    res = E.run(new)
+    flash(f"The assumptions from {pl.get('file') or 'the workbook'} were applied to {model.model_number}.", "success")
+    for w in res["warnings"]:
+        flash(w, "warning")
+    if not res["checks"]["balance_ok"]:
+        flash(f"The balance sheet is out by {res['checks']['max_imbalance']:,.2f}. Check the opening balance sheet in the workbook.", "danger")
+    return back
 
 
 # --------------------------------------------------------------------------- scenarios

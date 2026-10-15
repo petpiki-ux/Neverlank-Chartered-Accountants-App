@@ -15,8 +15,8 @@
   {% elif engagement.is_training_service %}
   <a href="{{ url_for('training.sessions', engagement_id=engagement.id) }}" class="{% if active=='sessions' %}active{% endif %}">Sessions ({{ engagement.training_sessions.count() }})</a>
   {% elif engagement.is_corporate_finance %}
-  <a href="{{ url_for('corpfin.engagement_models', engagement_id=engagement.id) }}" class="{% if active=='models' %}active{% endif %}">Models &amp; Forecasts ({{ engagement.cf_models|length }})</a>
   <a href="{{ url_for('corpfin.engagement_packs', engagement_id=engagement.id) }}" class="{% if active=='packs' %}active{% endif %}">Management Accounts ({{ engagement.cf_packs|length }})</a>
+  <a href="{{ url_for('corpfin.engagement_models', engagement_id=engagement.id) }}" class="{% if active=='models' %}active{% endif %}">Models &amp; Forecasts ({{ engagement.cf_models|length }})</a>
   <a href="{{ url_for('corpfin.engagement_projects', engagement_id=engagement.id) }}" class="{% if active=='appraisals' %}active{% endif %}">Investment Appraisals ({{ engagement.cf_projects|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if active=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   {% endif %}

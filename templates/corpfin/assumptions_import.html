@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}Review assumptions - {{ model.model_number }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div>
+  <h1>Review assumptions from Excel</h1>
+  <div class="subtitle">{{ model.model_number }} &middot; {{ model.name }} &middot; {{ model.client.name }} &middot; {{ filename }}</div>
+</div></div>
+{% if model.engagement and model.engagement.is_corporate_finance %}{{ svc.service_tabs(model.engagement, 'models') }}{% endif %}
+
+<div class="card">
+  <p class="cf-sub" style="margin-top:0;">
+    {% if rep.mode == 'template' %}This is an <strong>assumptions workbook</strong> from this app; every row was read by its key.{% else %}This workbook was <strong>matched by its row labels</strong> ({{ rep.matched }} row{{ 's' if rep.matched != 1 }} recognised). Check each change below; rows that were not recognised are listed at the end.{% endif %}
+    Nothing has been changed yet.</p>
+  {% for w in rep.warnings %}<div class="flash warning">{{ w }}</div>{% endfor %}
+  {% for w in run_warnings %}<div class="flash warning">With these assumptions the model says: {{ w }}</div>{% endfor %}
+  {% if not balanced %}<div class="flash danger">With these assumptions the balance sheet does not balance. Check the opening balance sheet before applying.</div>{% endif %}
+  {% if rep.changes %}
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Area</th><th>Assumption</th><th>Model now</th><th>Workbook</th></tr></thead>
+    <tbody>
+    {% for c in rep.changes %}
+      <tr><td>{{ c.group }}</td><td>{{ c.item }}</td><td>{{ c.old }}</td><td><strong>{{ c.new }}</strong></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <form method="post" action="{{ url_for('corpfin.assumptions_import_apply', model_id=model.id) }}" style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;">
+    <input type="hidden" name="payload" value="{{ payload }}">
+    <button class="btn gold" type="submit">Apply these {{ rep.changes|length }} change{{ 's' if rep.changes|length != 1 }} to the model</button>
+    <a class="btn secondary" href="{{ url_for('corpfin.model_tab', model_id=model.id, tab='assumptions') }}">Cancel</a>
+  </form>
+  {% else %}
+  <div class="flash info">Nothing in this workbook differs from the model's assumptions.</div>
+  <a class="btn secondary" href="{{ url_for('corpfin.model_tab', model_id=model.id, tab='assumptions') }}">Back to the assumptions</a>
+  {% endif %}
+</div>
+
+{% if rep.notes %}
+<div class="card"><h3 style="margin-top:0;">How the workbook was read</h3>
+  <ul>{% for n in rep.notes %}<li>{{ n }}</li>{% endfor %}</ul></div>
+{% endif %}
+{% if rep.unmatched %}
+<div class="card"><h3 style="margin-top:0;">Rows that were not recognised</h3>
+  <p class="cf-sub">These rows carry numbers but did not match any assumption in the model, so they were ignored. Rename the row to the assumption's name, or enter the figure on the Assumptions tab.</p>
+  <ul>{% for n in rep.unmatched %}<li>{{ n }}</li>{% endfor %}</ul></div>
+{% endif %}
+{% endblock %}

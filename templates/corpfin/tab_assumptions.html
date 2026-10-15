@@ -10,6 +10,19 @@
 {% block tab %}
 <div class="cf-banner">Yellow cells are inputs. Everything on the Statements, Loans, Ratios, Scenarios and Valuation tabs is calculated from them. Amounts are in <strong>{{ cur }}</strong>, excluding VAT. Year 1 is forecast monthly; later years are annual.</div>
 
+<div class="card">
+  <strong>Firm-specific assumptions in Excel</strong>
+  <div class="cf-sub">Download the assumptions as a workbook, set them up in Excel (tax, working-capital days, capex, growth, revenue and expense lines, opening balance sheet, loans, covenants), and upload it. You can also upload the firm's own template or last year's model: rows are matched by their labels and the model's line names. You will see every change before it is applied.</div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:8px;">
+    <a class="btn secondary" href="{{ url_for('corpfin.assumptions_excel', model_id=model.id) }}">Assumptions workbook (.xlsx)</a>
+    {% if not model.is_final %}
+    <form method="post" action="{{ url_for('corpfin.assumptions_import_review', model_id=model.id) }}" enctype="multipart/form-data" style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;">
+      <input type="file" name="file" accept=".xlsx,.xlsm" required aria-label="Assumptions workbook">
+      <button class="btn gold" type="submit">Read the workbook and show what changed</button>
+    </form>{% endif %}
+  </div>
+</div>
+
 <form method="post" action="{{ url_for('corpfin.save_assumptions', model_id=model.id) }}">
 <fieldset {{ 'disabled' if model.is_final }}>
 <input type="hidden" name="n_rev" value="{{ base.revenue|length }}">
