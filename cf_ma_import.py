@@ -22,6 +22,7 @@ import cf_ma as M
 import cf_recon as RC
 
 TOL = 0.005
+PARSER_VERSION = 3     # raise when the reader changes what a file produces, so the same file can be imported again
 MAX_BYTES = 12 * 1024 * 1024
 
 BLOCKS = [  # name, title prefix on the Data sheet
@@ -340,14 +341,21 @@ def _read_page(wb, d, meta, raw=None):
                         fc_m[mm] = {k: M.f(ytd0.get(k)) / n_now for k in M.pl_keys(structure)}
             for k, v in changed_f.items():
                 new_cum = sum(M.f((act_m.get(mm) or {}).get(k)) for mm in months[:i + 1])
-                pat_tot = sum(M.f((fc_m.get(mm) or {}).get(k)) for mm in rest)
-                if (v - new_cum) * pat_tot < 0:
-                    notes.append(f"Full-year Forecast for '{M.line_label(structure, k)}' is {v:,.0f}, which is {abs(v - new_cum):,.0f} {'below' if v < new_cum else 'above'} the year-to-date actual of {new_cum:,.0f} "
-                                 f"(the remaining months would be {v - new_cum:,.0f}). Check the full-year figure or the actuals on the page.")
                 for mm, x in _spread({mm: (fc_m.get(mm) or {}).get(k) for mm in rest}, months, rest, v - new_cum).items():
                     fc_m.setdefault(mm, {})[k] = x
             notes.append(f"Full-year Forecast: {len(changed_f)} line(s) changed. The difference from the year-to-date actuals was spread over the remaining months "
                          f"({M.month_label(rest[0], False)} to {M.month_label(rest[-1], False)}) of the forecast.")
+            flagged = []
+            for k, v in changed_f.items():
+                new_cum = sum(M.f((act_m.get(mm) or {}).get(k)) for mm in months[:i + 1])
+                per = (v - new_cum) / len(rest)
+                this = M.f((act_m.get(m) or {}).get(k))
+                if abs(v - new_cum) > 1 and (per < 0 or (abs(this) > 1 and (per > 1.5 * this or per < 0.5 * this))):
+                    flagged.append(f"{M.line_label(structure, k)} (year to date {new_cum:,.0f}, leaving {per:,.0f} a month against {this:,.0f} this month)")
+            if flagged:
+                notes.append("Check the year-to-date actuals behind the full-year Forecast: " + "; ".join(flagged[:8]) + (f"; and {len(flagged) - 8} more" if len(flagged) > 8 else "")
+                             + ". This page has no year-to-date column, so the app's own actuals for the earlier months were used. If they are incomplete, capture them on the Actuals tab "
+                             "(or import the Actuals page, or the year-to-date view of this page) and import this page again.")
         # last year: the full-year column, or the month column (a twelfth of the year)
         new_prior = dict(base_prior)
         fy_p, cur_p = read("fy_p"), read("cur_p")
@@ -455,6 +463,7 @@ def _read_page(wb, d, meta, raw=None):
         if not n_done:
             raise ImportError_("No Actual, Budget or Forecast table was found on this page.")
     base["warnings"] += notes
+    base["page"] = True
     if raw is not None:
         if kind in ("income", "balance"):
             base["warnings"] += _uncached_formulas(raw, wb, lambda sh, r_, c_: r_ > geom["hdr"] and c_ in read_cols)
@@ -915,7 +924,7 @@ def clean_parsed(obj):
     """Rebuild a parsed dict from untrusted JSON (the hidden field on the review page): known keys, floats only."""
     if not isinstance(obj, dict) or not isinstance(obj.get("blocks"), dict):
         raise ImportError_("The upload could not be read back. Please upload the file again.")
-    out = {"blocks": {}, "warnings": [str(w)[:300] for w in (obj.get("warnings") or [])][:30], "report_n": None, "commentary": {}, "statements": {}}
+    out = {"blocks": {}, "warnings": [str(w)[:300] for w in (obj.get("warnings") or [])][:30], "report_n": None, "commentary": {}, "statements": {}, "page": bool(obj.get("page"))}
     for name, _ in BLOCKS:
         b = obj["blocks"].get(name) or {}
         mons = {}

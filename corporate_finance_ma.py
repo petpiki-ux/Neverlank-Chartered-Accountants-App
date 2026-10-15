@@ -1322,11 +1322,14 @@ def pack_import_review(pack_id):
     raw = f.stream.read(IM.MAX_BYTES + 1)
     fhash = hashlib.sha1(raw).hexdigest()
     last = (d.get("import_log") or [{}])[-1]
-    if last.get("hash") == fhash:
-        flash(f"That exact file ({f.filename}) was already imported on {last.get('at', '')} by {last.get('by', '')}. Download the pack again to make further corrections.", "info")
-        return back
+    same_file = last.get("hash") == fhash and last.get("ver") == IM.PARSER_VERSION
     try:
         parsed = IM.read_workbook(raw, d, _meta(pack, d))
+        # A one-page export is compared with what the pack holds now, so importing it again can only change what still differs.
+        # The full pack is not, so the same pack file is never applied twice.
+        if same_file and not parsed.get("page"):
+            flash(f"That exact file ({f.filename}) was already imported on {last.get('at', '')} by {last.get('by', '')}. Download the pack again to make further corrections.", "info")
+            return back
         nd, report = IM.plan_import(d, parsed, f.filename, _stamp())
     except IM.ImportError_ as e:
         flash(str(e), "danger")
@@ -1354,7 +1357,7 @@ def pack_import_apply(pack_id):
     filename = (request.form.get("filename") or "workbook.xlsx")[:120]
     fhash = (request.form.get("filehash") or "")[:40]
     last = (d.get("import_log") or [{}])[-1]
-    if fhash and last.get("hash") == fhash:
+    if fhash and last.get("hash") == fhash and last.get("ver") == IM.PARSER_VERSION and not parsed.get("page"):
         flash("That workbook has already been imported, so nothing was changed.", "info")
         return _back(pack, "actuals")
     accepted = set(request.form.getlist("fix")) if request.form.get("fixes_shown") else None
@@ -1364,7 +1367,7 @@ def pack_import_apply(pack_id):
         return _back(pack, "actuals")
     log = list(d.get("import_log") or [])
     st = _stamp()
-    log.append({"file": filename, "by": st["by"], "at": st["at"], "summary": report["sections"], "n_changes": len(report["changes"]), "hash": fhash})
+    log.append({"file": filename, "by": st["by"], "at": st["at"], "summary": report["sections"], "n_changes": len(report["changes"]), "hash": fhash, "ver": IM.PARSER_VERSION})
     nd["import_log"] = log[-20:]
     for c in report.get("corrections") or []:
         if c["applied"]:
