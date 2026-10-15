@@ -1370,7 +1370,11 @@ def pack_import_apply(pack_id):
         if c["applied"]:
             log[-1].setdefault("corrections", []).append(f"{c['month_label']} {c['label']}: {c['old']:,.0f} to {c['new']:,.0f}")
     nd["import_log"] = log[-20:]
-    msgs = _roll_linked_forecast(pack, nd)
+    if any(x.startswith("Forecast: updated") for x in report["sections"]):
+        msgs = ["The forecast figures in the workbook were imported as they are, so the linked forecast model was not rolled forward automatically "
+                "(that would replace them). Refresh or roll it forward on the Budget & forecast tab if you want the model to take over again."]
+    else:
+        msgs = _roll_linked_forecast(pack, nd)
     _save(pack, nd)
     flash("The workbook is now the pack's final version: " + " ".join(report["sections"]), "success")
     for m_ in msgs:

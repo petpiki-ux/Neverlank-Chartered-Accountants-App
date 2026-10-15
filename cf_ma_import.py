@@ -73,7 +73,7 @@ def read_workbook(raw, d, meta=None):
     except Exception:
         raise ImportError_("That file could not be opened. Upload the .xlsx pack you downloaded from this app (File > Save as .xlsx if you used another program).")
     if "Data" not in wb.sheetnames:
-        return _read_page(wb, d, meta)
+        return _read_page(wb, d, meta, raw)
     ws = wb["Data"]
     structure = M.normalise_structure(d["structure"])
     months = M.fy_months(d)
@@ -124,6 +124,8 @@ def read_workbook(raw, d, meta=None):
     out["report_n"] = int(n) if n and 1 <= n <= 12 else None
     out["commentary"] = _read_commentary(wp) if wp is not None else {}
     out["statements"] = _read_statements(wb, d)
+    out["warnings"] += _typed_into_blank_pack(wb, d, meta)
+    out["warnings"] += _uncached_formulas(raw, wb, lambda sh, r_, c_: sh == "Data" and r_ >= 5, d, meta)
     return out
 
 
@@ -158,8 +160,9 @@ def _page_month(ws, d):
     raise ImportError_("The month this page is for could not be found. Download the page again with 'Excel: this page' and correct the figures without moving the headings.")
 
 
-def _page_rows(ws, value_col_head="Actual"):
-    """Header row, label column and value column of a statement page, and its rows as [(normalised label, value or None)]."""
+def _page_rows(ws, value_col_head="Actual", read_col=None, geom=None):
+    """Rows of a statement page as [(normalised label, value or None, row)], read from the Actual column or from `read_col`.
+    `geom`, if a dict, receives hdr (header row), vcol (Actual column), lcol (label column)."""
     hdr = None
     for r in range(1, min(ws.max_row, 20) + 1):
         for c in range(1, ws.max_column + 1):
@@ -182,9 +185,49 @@ def _page_rows(ws, value_col_head="Actual"):
             continue
         if lab.strip().lower().startswith("values as at export") or "spread evenly" in lab:
             continue
-        v = _num(ws.cell(row=r, column=vcol).value)
+        v = _num(ws.cell(row=r, column=read_col or vcol).value)
         rows.append((_norm(lab), v, r))
+    if isinstance(geom, dict):
+        geom.update(hdr=hdr, vcol=vcol, lcol=lcol)
     return rows
+
+
+def _page_cols(ws, geom, view):
+    """Columns of a statement page that can be imported, found from their headings. Returns {role: column} with roles
+    last, cur_a, cur_f, cur_b, cur_p (this month / year to date) and fy_f, fy_b, fy_p (full year).
+    Headings that start with Var or Change are calculated and skipped; any other heading right of Budget is last year."""
+    hdr, vcol = geom["hdr"], geom["vcol"]
+    out = {"cur_a": vcol}
+    if geom["lcol"] > 1 and isinstance(ws.cell(row=hdr, column=1).value, (str, datetime)) and ws.cell(row=hdr, column=1).value != "":
+        out["last"] = 1
+    seen = {"Forecast": 0, "Budget": 0, "prior": 0}
+    for c in range(vcol + 1, ws.max_column + 1):
+        h = ws.cell(row=hdr, column=c).value
+        if h is None or (isinstance(h, str) and not h.strip()):
+            continue
+        if isinstance(h, str) and h.strip().startswith(("Var", "Change")):
+            continue
+        kind = h.strip() if isinstance(h, str) and h.strip() in ("Forecast", "Budget") else "prior"
+        n = seen[kind]
+        seen[kind] += 1
+        # on the year-to-date view there is no current-month forecast column, so the first Forecast is the full-year one
+        in_year = (n >= 1) or (kind == "Forecast" and view == "ytd")
+        role = {"Forecast": "f", "Budget": "b", "prior": "p"}[kind]
+        out[("fy_" if in_year else "cur_") + role] = c
+    return out
+
+
+def _tol(a, b, tol=0.5):
+    return abs(a - b) <= tol
+
+
+def _spread(cur, months, free, target):
+    """Spread `target` over the months in `free` in the pattern of their present values (evenly when there is none)."""
+    pat = [M.f(cur.get(m)) for m in free]
+    tot = sum(pat)
+    if abs(tot) > 0.5:
+        return {m: v * target / tot for m, v in zip(free, pat)}
+    return {m: target / len(free) for m in free}
 
 
 def _sequence(template, rows):
@@ -205,10 +248,11 @@ def _baseline(d, meta):
     raw = X.build_pack_workbook(meta or {"name": "", "client": "", "number": "", "status": "", "currency": "", "prepared_by": "", "fy_label": M.fy_label(d)}, d)
     base = read_workbook(raw, d)
     base["report_n"], base["commentary"], base["statements"] = None, {}, {}
+    base["warnings"] = []
     return base
 
 
-def _read_page(wb, d, meta):
+def _read_page(wb, d, meta, raw=None):
     names = wb.sheetnames
     if "Pack" in names and "Data" not in names:
         raise ImportError_("There is no 'Data' sheet in this workbook. Do not delete the Data sheet from the Excel pack: it holds the figures that are imported.")
@@ -220,14 +264,34 @@ def _read_page(wb, d, meta):
     base = _baseline(d, meta)
     B = base["blocks"]
     ws = wb[{"income": "Income statement", "balance": "Balance sheet", "actuals": "Actuals", "plan": "Budget and forecast"}[kind]]
+    notes = []
     if kind == "income":
         view, m = _page_month(ws, d)
-        rows = _page_rows(ws)
+        geom = {}
+        rows = _page_rows(ws, geom=geom)
         tmpl = [(t["key"], t["label"]) for t in M._rows_template(structure) if t["kind"] in ("indent", "line", "memo") and t["key"] in M.pl_keys(structure)]
         got = _sequence(tmpl, rows)
         if not got:
             raise ImportError_("No income statement lines were found in the Actual column. Download the page again and correct the figures without renaming the lines.")
+        cols = _page_cols(ws, geom, view)
+        read_cols = set(cols.values())
+        read = lambda role: (_sequence(tmpl, _page_rows(ws, read_col=cols[role])) if role in cols else {})
         i = months.index(m)
+        # what the app holds now, before this page changes anything (the page's full-year and last-year columns are compared with it)
+        try:
+            V0 = M.vectors(d)
+        except Exception:
+            V0 = {}
+        base_outlook = V0.get("outlook") or {}
+        base_prior = M.prior_pl(d) or {}
+        bud_m, fc_m, act_m = B["bud"]["months"], B["fc"]["months"], B["act"]["months"]
+        base_bud_tot = {k: sum(M.f((bud_m.get(mm) or {}).get(k)) for mm in months) for k in M.pl_keys(structure)}
+        # last month's actuals
+        if i > 0 and "last" in cols:
+            lm_vals = read("last")
+            if lm_vals:
+                act_m.setdefault(months[i - 1], {}).update(lm_vals)
+        # this month: actual
         if view == "ytd":
             cum = M.cumulative_actuals(d)
             prev = (cum[i - 1]["cum"] if i > 0 else None) or {}
@@ -235,9 +299,72 @@ def _read_page(wb, d, meta):
             base["warnings"].append(f"This is the year-to-date view: the figures were read as the cumulative position to {M.month_label(m, False)} and {M.month_label(m, False)} itself was adjusted to match.")
         else:
             vals = dict(got)
-        B["act"]["months"].setdefault(m, {}).update(vals)
+        act_m.setdefault(m, {}).update(vals)
+        # this month: forecast and budget (the year-to-date view's Budget is cumulative, so it is not read there)
+        cur_f = read("cur_f") if view != "ytd" else {}
+        cur_b = read("cur_b") if view != "ytd" else {}
+        if cur_f:
+            fc_m.setdefault(m, {}).update(cur_f)
+        if cur_b:
+            bud_m.setdefault(m, {}).update(cur_b)
+        # full-year budget: the difference from what the pack holds is spread over the months that were not typed in this page
+        fy_b = read("fy_b")
+        n_fb = 0
+        for k, v in fy_b.items():
+            if _tol(v, base_bud_tot.get(k, 0.0)):
+                continue
+            explicit = [m] if k in cur_b else []
+            free = [mm for mm in months if mm not in explicit]
+            target = v - sum(M.f((bud_m.get(mm) or {}).get(k)) for mm in explicit)
+            for mm, x in _spread({mm: (bud_m.get(mm) or {}).get(k) for mm in free}, months, free, target).items():
+                bud_m.setdefault(mm, {})[k] = x
+            n_fb += 1
+        if n_fb:
+            notes.append(f"Full-year Budget: {n_fb} line(s) changed. The difference was spread over the months of the budget in the pattern already in the pack"
+                         + (f" (the {M.month_label(m, False)} budget as shown on the page was kept)." if cur_b else "."))
+        # full-year forecast = year to date + the forecast for the remaining months
+        fy_f = read("fy_f")
+        rest = months[i + 1:]
+        changed_f = {k: v for k, v in fy_f.items() if k in base_outlook and not _tol(v, base_outlook.get(k, 0.0))}
+        if changed_f and not rest:
+            notes.append(f"Full-year Forecast was changed on the page, but {M.month_label(m, False)} is the last month of the year, so the full year is the actual figures and the change was ignored.")
+        elif changed_f:
+            fc_complete = all(mm in fc_m for mm in rest)
+            n_now = i + 1
+            for mm in rest:                       # the remaining months start from what the pack's outlook was built on
+                if mm not in fc_m:
+                    if all(mm2 in bud_m for mm2 in rest):
+                        fc_m[mm] = {k: M.f((bud_m.get(mm) or {}).get(k)) for k in M.pl_keys(structure)}
+                    else:
+                        ytd0 = (M.cumulative_actuals(d)[i]["cum"] or {})
+                        fc_m[mm] = {k: M.f(ytd0.get(k)) / n_now for k in M.pl_keys(structure)}
+            for k, v in changed_f.items():
+                new_cum = sum(M.f((act_m.get(mm) or {}).get(k)) for mm in months[:i + 1])
+                pat_tot = sum(M.f((fc_m.get(mm) or {}).get(k)) for mm in rest)
+                if (v - new_cum) * pat_tot < 0:
+                    notes.append(f"Full-year Forecast for '{M.line_label(structure, k)}' is {v:,.0f}, which is {abs(v - new_cum):,.0f} {'below' if v < new_cum else 'above'} the year-to-date actual of {new_cum:,.0f} "
+                                 f"(the remaining months would be {v - new_cum:,.0f}). Check the full-year figure or the actuals on the page.")
+                for mm, x in _spread({mm: (fc_m.get(mm) or {}).get(k) for mm in rest}, months, rest, v - new_cum).items():
+                    fc_m.setdefault(mm, {})[k] = x
+            notes.append(f"Full-year Forecast: {len(changed_f)} line(s) changed. The difference from the year-to-date actuals was spread over the remaining months "
+                         f"({M.month_label(rest[0], False)} to {M.month_label(rest[-1], False)}) of the forecast.")
+        # last year: the full-year column, or the month column (a twelfth of the year)
+        new_prior = dict(base_prior)
+        fy_p, cur_p = read("fy_p"), read("cur_p")
+        factor = 12.0 if view != "ytd" else 12.0 / (i + 1)
+        n_p = 0
+        for k in M.pl_keys(structure):
+            if k in fy_p and not _tol(fy_p[k], M.f(base_prior.get(k))):
+                new_prior[k] = fy_p[k]
+                n_p += 1
+            elif k in cur_p and not _tol(cur_p[k] * factor, M.f(base_prior.get(k))):
+                new_prior[k] = cur_p[k] * factor
+                n_p += 1
+        if n_p:
+            B["pri"]["opening"] = {k: M.f(new_prior.get(k)) for k in M.pl_keys(structure)}
+            notes.append(f"Last year: {n_p} line(s) changed (full year, or the month column multiplied up to a year).")
         # totals typed over on the sheet are not read: say so if they disagree with the lines
-        merged = {k: M.f(B["act"]["months"][m].get(k)) for k in M.pl_keys(structure)}
+        merged = {k: M.f(act_m[m].get(k)) for k in M.pl_keys(structure)}
         if view == "ytd":
             merged = {k: M.f((got.get(k) if k in got else (M.cumulative_actuals(d)[i]["cum"] or {}).get(k))) for k in M.pl_keys(structure)}
         calc = M.pl_vector(structure, merged)
@@ -248,12 +375,46 @@ def _read_page(wb, d, meta):
                     base["warnings"].append(f"'{t['label']}' on the sheet is {shown:,.0f} but its lines add up to {calc[t['key']]:,.0f}. Totals are recalculated and not imported; correct the individual lines.")
     elif kind == "balance":
         view, m = _page_month(ws, d)
-        rows = _page_rows(ws)
+        geom = {}
+        rows = _page_rows(ws, geom=geom)
         order = ["ppe", "inventory", "receivables", "other_assets", "cash", "share_capital", "retained", "borrowings", "overdraft", "payables", "other_liabilities"]
-        got = _sequence([(k, M.BS_LABEL[k]) for k in order], rows)
+        tmpl_b = [(k, M.BS_LABEL[k]) for k in order]
+        got = _sequence(tmpl_b, rows)
         if not got:
             raise ImportError_("No balance sheet lines were found in the Actual column. Download the page again and correct the figures without renaming the lines.")
+        cols = _page_cols(ws, geom, view)
+        read_cols = set(cols.values())
+        read = lambda role: (_sequence(tmpl_b, _page_rows(ws, read_col=cols[role])) if role in cols else {})
+        i = months.index(m)
+        last_m = months[-1]
+        base_pbs = M.prior_bs(d) or {}
+        base_fbs = dict((B["fcbs"]["months"].get(last_m) or {}))
+        base_bbs = dict((B["budbs"]["months"].get(last_m) or {}))
+        if i > 0 and "last" in cols:
+            v_ = read("last")
+            if v_:
+                B["actbs"]["months"].setdefault(months[i - 1], {}).update(v_)
+        # year-end forecast and budget columns first, so that a typed current-month column (the same month at year end) wins
+        for role, blk, base_ in (("fy_f", "fcbs", base_fbs), ("fy_b", "budbs", base_bbs)):
+            v_ = {k: x for k, x in read(role).items() if not _tol(x, M.f(base_.get(k)))}
+            if v_:
+                B[blk]["months"].setdefault(last_m, {}).update(v_)
+                notes.append(f"Full-year (year-end) {'Forecast' if blk == 'fcbs' else 'Budget'} balance sheet: {len(v_)} line(s) changed.")
+        for role, blk in (("cur_f", "fcbs"), ("cur_b", "budbs")):
+            v_ = read(role)
+            if v_:
+                B[blk]["months"].setdefault(m, {}).update(v_)
         B["actbs"]["months"].setdefault(m, {}).update(got)
+        new_pbs = {}
+        for role in ("fy_p", "cur_p"):
+            for k, x in read(role).items():
+                if k not in new_pbs and not _tol(x, M.f(base_pbs.get(k))):
+                    new_pbs[k] = x
+        if new_pbs:
+            op_ = {k: M.f(base_pbs.get(k)) for k in M.BS_KEYS}
+            op_.update(new_pbs)
+            B["actbs"]["opening"] = op_
+            notes.append(f"Last year's balance sheet: {len(new_pbs)} line(s) changed.")
         calc = M.bs_total({**{k: 0.0 for k in M.BS_KEYS}, **{k: M.f(v) for k, v in B["actbs"]["months"][m].items()}})
         for label, key in (("Total assets", "assets"), ("Total equity", "equity"), ("Total liabilities", "liabilities")):
             shown = next((x[1] for x in rows if x[0] == _norm(label) and x[1] is not None), None)
@@ -293,8 +454,131 @@ def _read_page(wb, d, meta):
             n_done += 1
         if not n_done:
             raise ImportError_("No Actual, Budget or Forecast table was found on this page.")
+    base["warnings"] += notes
+    if raw is not None:
+        if kind in ("income", "balance"):
+            base["warnings"] += _uncached_formulas(raw, wb, lambda sh, r_, c_: r_ > geom["hdr"] and c_ in read_cols)
+        else:
+            base["warnings"] += _uncached_formulas(raw, wb, lambda sh, r_, c_: 2 <= c_ <= 13)
+    if kind in ("income", "balance"):
+        hdr_r = geom["hdr"]
+        base["warnings"] += _typed_into_blank_page(ws, d, meta, kind, {"view": "ytd"} if view == "ytd" else {}, lambda r_, c_: c_ in read_cols and r_ > hdr_r, raw)
+    else:
+        base["warnings"] += _typed_into_blank_page(ws, d, meta, "actuals" if kind == "actuals" else "budget", {}, lambda r_, c_: 2 <= c_ <= 13)
     base["warnings"].append("This is a one-page export, so only the figures on this page were read; everything else in the pack is unchanged.")
     return base
+
+
+# --------------------------------------------------------------------------- figures typed where nothing can be imported
+
+def _fmt_cells(cells, limit=8):
+    shown = ", ".join(f"{sh}!{co}" for sh, co, _ in cells[:limit])
+    return shown + (f" and {len(cells) - limit} more" if len(cells) > limit else "")
+
+
+def _uncached_formulas(raw, wb, sheet_filter, d=None, meta=None):
+    """Cells that hold a formula but no calculated value (the file was last saved by something that does not calculate), so they read as blank.
+    sheet_filter(sheet_name, row, col) says which cells matter. Returns a warning list."""
+    try:
+        wf = load_workbook(io.BytesIO(raw), data_only=False)
+    except Exception:
+        return []
+    own = None
+    if d is not None:          # formulas the app itself puts on the sheet (helper rows) are not the user's
+        try:
+            import cf_ma_excel as X
+            own = load_workbook(io.BytesIO(X.build_pack_workbook(meta or {"name": "", "client": "", "number": "", "status": "", "currency": "", "prepared_by": "",
+                                                                          "fy_label": M.fy_label(d)}, d)), data_only=False)
+        except Exception:
+            own = None
+    cells = []
+    for sh in wb.sheetnames:
+        if sh not in wf.sheetnames:
+            continue
+        wsd, wsf = wb[sh], wf[sh]
+        for row in wsf.iter_rows():
+            for c in row:
+                if isinstance(c.value, str) and c.value.startswith("=") and sheet_filter(sh, c.row, c.column) and wsd.cell(row=c.row, column=c.column).value is None:
+                    if own is not None and sh in own.sheetnames:
+                        b = own[sh].cell(row=c.row, column=c.column).value
+                        if isinstance(b, str) and b.startswith("="):
+                            continue
+                    cells.append((sh, c.coordinate, 0.0))
+    if not cells:
+        return []
+    return [f"{len(cells)} cell(s) hold a formula with no calculated result ({_fmt_cells(cells)}), so they were read as blank. This happens when a file is saved by a program that "
+            "does not calculate formulas. Open the file in Excel, let it calculate, save it, and upload it again."]
+
+
+def _typed_into_blank_pack(wb, d, meta):
+    """Figures typed on the statement sheets of the Excel pack, in cells that were blank (or text) in the pack as downloaded.
+    Those sheets are formulas on the Data sheet, so such figures cannot be imported. Returns warnings (usually none)."""
+    try:
+        import cf_ma_excel as X
+        base = load_workbook(io.BytesIO(X.build_pack_workbook(meta or {"name": "", "client": "", "number": "", "status": "", "currency": "", "prepared_by": "",
+                                                                      "fy_label": M.fy_label(d)}, d)), data_only=False)
+    except Exception:
+        return []
+    cells = []
+    for sh in wb.sheetnames:
+        if sh in ("Data", "Pack") or sh not in base.sheetnames:
+            continue
+        ws, bs = wb[sh], base[sh]
+        for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+            for c in row:
+                v = c.value
+                if isinstance(v, (int, float)) and not isinstance(v, bool):
+                    b = bs.cell(row=c.row, column=c.column).value
+                    if b is None or isinstance(b, str) and not b.startswith("="):
+                        cells.append((sh, c.coordinate, float(v)))
+    if not cells:
+        return []
+    sheets = sorted({c[0] for c in cells})
+    return [f"{len(cells)} figure(s) you typed on the {', '.join(sheets)} sheet(s) were NOT imported ({_fmt_cells(cells)}). Those sheets are calculated from the Data sheet, "
+            "so a figure typed into a blank space there has nowhere to go. Put it on the Data sheet (blue cells), in the line and month it belongs to, and upload again."]
+
+
+def _typed_into_blank_page(ws, d, meta, tab, args, imported, raw=None):
+    """Figures typed on a one-page export that are not in the part of it that is imported. imported(row, col) says whether a cell is read."""
+    try:
+        import cf_ma_excel_page as XP
+        best = None
+        for var in ("1", "0"):
+            a = dict(args)
+            a["var"] = var
+            raw = XP.build_page_workbook(meta or {"name": "", "client": "", "number": "", "status": "", "currency": "", "prepared_by": "", "fy_label": M.fy_label(d)}, d, tab, a)
+            base = load_workbook(io.BytesIO(raw), data_only=False)
+            bs = base[ws.title]
+            if bs.max_column == ws.max_column:
+                best = bs
+                break
+        if best is None:
+            return []
+    except Exception:
+        return []
+    cells = []
+    wf = None
+    if raw is not None:
+        try:
+            wf = load_workbook(io.BytesIO(raw), data_only=False)[ws.title]
+        except Exception:
+            wf = None
+    for row in ws.iter_rows(min_row=1, max_row=ws.max_row):
+        for c in row:
+            v = c.value
+            if isinstance(v, (int, float)) and not isinstance(v, bool) and not imported(c.row, c.column):
+                b = best.cell(row=c.row, column=c.column).value
+                if b is None or (isinstance(b, str) and not b.startswith("=")):
+                    cells.append((ws.title, c.coordinate, float(v)))
+                elif isinstance(b, (int, float)) and abs(v - b) > max(0.5, 0.001 * abs(b)) and not (wf is not None and isinstance(wf.cell(row=c.row, column=c.column).value, str)
+                                                                                                  and str(wf.cell(row=c.row, column=c.column).value).startswith("=")):
+                    cells.append((ws.title, c.coordinate, float(v)))      # a calculated figure typed over
+    if not cells:
+        return []
+    return [f"{len(cells)} figure(s) you typed on this page were NOT imported ({_fmt_cells(cells)}). On the Income statement and Balance sheet pages the last month, Actual, Forecast, Budget, "
+            "last-year and full-year columns are imported (the Budget column is not read on the year-to-date view because it is cumulative). Variance columns, "
+            "percentages and total lines are calculated by the app, so a figure typed there has nowhere to go: change the individual lines instead. "
+            "Figures typed on the Actuals and Budget & forecast pages go in the month columns of the line rows."]
 
 
 def CL_(c):
