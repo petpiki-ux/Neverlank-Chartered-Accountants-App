@@ -11,7 +11,10 @@
       &middot; Management accounts &middot; {{ fy }} &middot; {{ cur }}</div>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-    <a class="btn secondary" href="{{ url_for('corpfin.pack_excel', pack_id=pack.id, month=request.args.get('month')) }}">Excel pack</a>
+    {% if tab in ('summary','income','balance','cashflow','kpis','variances','varmodel','reforecast','actuals','budget') %}
+    <a class="btn secondary" href="{{ url_for('corpfin.pack_excel_page', pack_id=pack.id, tab=tab, **request.args.to_dict()) }}" title="Download what this page shows as an Excel workbook">Excel: this page</a>
+    {% endif %}
+    <a class="btn secondary" href="{{ url_for('corpfin.pack_excel', pack_id=pack.id, month=request.args.get('month')) }}" title="The whole pack with live formulas">Excel pack</a>
     <a class="btn secondary" href="{{ url_for('corpfin.pack_pdf', pack_id=pack.id, month=request.args.get('month'), var=request.args.get('var')) }}" target="_blank">PDF pack</a>
     <a class="btn secondary" href="{{ url_for('corpfin.engagement_packs', engagement_id=pack.engagement_id) if pack.engagement_id else url_for('corpfin.dashboard') }}">All packs</a>
   </div>

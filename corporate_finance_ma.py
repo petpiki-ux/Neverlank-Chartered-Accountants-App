@@ -1075,6 +1075,24 @@ def pack_excel(pack_id):
     return Response(data, mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fn}"'})
 
 
+@corpfin_bp.route("/management-accounts/<int:pack_id>/excel/<tab>")
+def pack_excel_page(pack_id, tab):
+    """The page you are looking at, as a one-sheet Excel workbook (values as at export)."""
+    import cf_ma_excel_page as XP
+    pack = _pack_or_404(pack_id)
+    if tab not in XP.PAGES:
+        abort(404)
+    d = _view_data(pack)
+    ctx = None
+    if tab == "varmodel":
+        ctx = _varmodel_ctx(d)
+    elif tab == "reforecast":
+        ctx = _reforecast_ctx(pack, d)
+    data = XP.build_page_workbook(_meta(pack, d), d, tab, request.args, ctx)
+    fn = f"{pack.pack_number}_{_safe_name(pack.name)}_{_safe_name(XP.PAGES[tab])}_{M.report_month(d)}.xlsx"
+    return Response(data, mimetype=XLSX_MIME, headers={"Content-Disposition": f'attachment; filename="{fn}"'})
+
+
 @corpfin_bp.route("/management-accounts/<int:pack_id>/pdf")
 def pack_pdf(pack_id):
     import cf_ma_pdf
