@@ -7749,34 +7749,16 @@ class ClientAcceptance(db.Model):
         return {"label": label, "level": level, "flagged": flagged, "outstanding": outstanding, "total": total}
 
     @property
+    def client_screenings(self):
+        """The client's sanctions / AML vetting list (see ClientSanctionsScreening) - it applies to every engagement."""
+        client = self.engagement.client if self.engagement is not None else None
+        return list(client.sanctions_screenings) if client is not None else []
+
+    @property
     def screening_assessment(self):
-        """A plain-language, advisory-only read of the Sanctions & Adverse
-        Notice Screening list below (see SanctionsScreening) - same pattern
-        as checklist_assessment above: it never sets or overrides the
-        `decision` field, it just surfaces what still needs attention or
-        escalation. A "Confirmed Hit" on even one list, for even one
-        individual, is treated as the most severe outcome regardless of how
-        many others are clear."""
-        individuals = list(self.screenings)
-        total = len(individuals)
-        if total == 0:
-            return {"label": "No key individuals added for sanctions screening yet.", "level": "muted", "hits": 0, "potential": 0, "outstanding": 0, "total": 0}
-        hits = sum(1 for i in individuals if i.overall_status == "Confirmed Hit")
-        potential = sum(1 for i in individuals if i.overall_status == "Potential Match")
-        outstanding = sum(1 for i in individuals if not i.is_screened)
-        if hits:
-            label = f"{hits} of {total} individual{'s' if total != 1 else ''} returned a confirmed hit - escalate to the Partner/MLRO before proceeding."
-            level = "danger"
-        elif potential:
-            label = f"{potential} of {total} individual{'s' if total != 1 else ''} returned a potential match - resolve before proceeding."
-            level = "warning"
-        elif outstanding:
-            label = f"{outstanding} of {total} individual{'s' if total != 1 else ''} not yet screened against all five lists."
-            level = "warning"
-        else:
-            label = f"All {total} individual{'s' if total != 1 else ''} screened clear against the UN, OFAC, EU, RBZ and FIU lists."
-            level = "success"
-        return {"label": label, "level": level, "hits": hits, "potential": potential, "outstanding": outstanding, "total": total}
+        """Advisory-only summary of the client's vetting list, shown on this tab with a link to the client's page, where it is managed.
+        It never sets or overrides the `decision` field, same as checklist_assessment above."""
+        return screening_assessment_for(self.client_screenings)
 
     @property
     def risk_scores(self):
@@ -7851,7 +7833,7 @@ class ClientAcceptance(db.Model):
                 detail = item.item_text + (f" — {item.comment}" if item.comment else "")
                 issues.append({"key": f"checklist:{item.id}", "label": label, "detail": detail})
 
-        for screening in self.screenings:
+        for screening in self.client_screenings:
             if screening.overall_status in ("Confirmed Hit", "Potential Match"):
                 detail = screening.overall_status + (f" ({screening.role_description})" if screening.role_description else "")
                 issues.append({"key": f"screening:{screening.id}", "label": f"Sanctions screening — {screening.individual_name}", "detail": detail})
@@ -8148,9 +8130,8 @@ class ClientAcceptanceChecklistItem(db.Model):
 # ---------- Company documents & key people (directors/shareholders) ----------
 # Lives on the Client itself, not on any one Engagement, so it's filled in
 # once per client and reused by every engagement that client ever has -
-# unlike Sanctions & Adverse Notice Screening below, which is per-engagement
-# (an engagement's own record of who was screened and when for THAT
-# engagement's acceptance decision). See company_documents.py and
+# and so is Sanctions & AML Vetting (ClientSanctionsScreening), which applies to
+# every engagement for the client. See company_documents.py and
 # entity_extraction.py for the upload/AI-extraction routes and logic.
 
 COMPANY_DOCUMENT_TYPES = [
@@ -8437,6 +8418,10 @@ class SanctionsScreening(db.Model):
     screened_at = db.Column(db.DateTime)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Screening now lives on the Client (see ClientSanctionsScreening below) because it
+    # applies to every engagement. Rows here are the old per-engagement records; once one
+    # has been merged into its client's list this is set so the migration never repeats.
+    migrated_to_client = db.Column(db.Boolean, default=False)
 
     client_acceptance = db.relationship(
         "ClientAcceptance",
@@ -8471,6 +8456,82 @@ class SanctionsScreening(db.Model):
 
     def __repr__(self):
         return f"<SanctionsScreening {self.individual_name!r} status={self.overall_status!r}>"
+
+
+class ClientSanctionsScreening(db.Model):
+    """Sanctions, PEP and AML vetting of one key individual (director, beneficial owner,
+    authorised signatory, or - on an Investigative Engagement - a suspect/target/key witness),
+    kept on the CLIENT rather than on an engagement: the vetting applies to every engagement the
+    firm does for the client, so it is done once and shown wherever it matters (the client's
+    page, and as a summary on each engagement's Acceptance tab). Same five lists and the same
+    conservative automatic matching as the old per-engagement SanctionsScreening (which this
+    replaces; its rows were merged into here on upgrade)."""
+    __tablename__ = "client_sanctions_screening"
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    individual_name = db.Column(db.String(200), nullable=False)
+    role_description = db.Column(db.String(150))
+
+    un_result = db.Column(db.String(20), default="Not Checked")
+    ofac_result = db.Column(db.String(20), default="Not Checked")
+    eu_result = db.Column(db.String(20), default="Not Checked")
+    rbz_result = db.Column(db.String(20), default="Not Checked")
+    fiu_result = db.Column(db.String(20), default="Not Checked")
+
+    notes = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+
+    un_auto_notes = db.Column(db.Text)
+    ofac_auto_notes = db.Column(db.Text)
+    eu_auto_notes = db.Column(db.Text)
+    rbz_auto_notes = db.Column(db.Text)
+    fiu_auto_notes = db.Column(db.Text)
+    auto_screened_at = db.Column(db.DateTime)
+    auto_screened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    screened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    screened_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship(
+        "Client",
+        backref=db.backref("sanctions_screenings", lazy=True, cascade="all, delete-orphan", order_by="ClientSanctionsScreening.order"),
+    )
+    screened_by = db.relationship("User", foreign_keys=[screened_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    auto_screened_by = db.relationship("User", foreign_keys=[auto_screened_by_id])
+
+    # identical behaviour to the legacy model
+    auto_notes_for = SanctionsScreening.auto_notes_for
+    is_screened = SanctionsScreening.is_screened
+    overall_status = SanctionsScreening.overall_status
+
+    def __repr__(self):
+        return f"<ClientSanctionsScreening {self.individual_name!r} status={self.overall_status!r}>"
+
+
+def screening_assessment_for(individuals):
+    """Plain-language, advisory-only read of a client's vetting list (see ClientSanctionsScreening).
+    A confirmed hit on even one list, for even one individual, is the most severe outcome."""
+    individuals = list(individuals)
+    total = len(individuals)
+    if total == 0:
+        return {"label": "No key individuals have been added for sanctions and AML vetting on the client's page yet.", "level": "muted", "hits": 0, "potential": 0, "outstanding": 0, "total": 0}
+    hits = sum(1 for i in individuals if i.overall_status == "Confirmed Hit")
+    potential = sum(1 for i in individuals if i.overall_status == "Potential Match")
+    outstanding = sum(1 for i in individuals if not i.is_screened)
+    s = "s" if total != 1 else ""
+    if hits:
+        label, level = f"{hits} of {total} individual{s} returned a confirmed hit - escalate to the Partner/MLRO before proceeding.", "danger"
+    elif potential:
+        label, level = f"{potential} of {total} individual{s} returned a potential match - resolve before proceeding.", "warning"
+    elif outstanding:
+        label, level = f"{outstanding} of {total} individual{s} not yet screened against all five lists.", "warning"
+    else:
+        label, level = f"All {total} individual{s} screened clear against the UN, OFAC, EU, RBZ and FIU lists.", "success"
+    return {"label": label, "level": level, "hits": hits, "potential": potential, "outstanding": outstanding, "total": total}
+
 
 
 class SanctionsWatchlistEntry(db.Model):

@@ -119,6 +119,75 @@ def _rename_consulting_service():
         db.session.commit()
 
 
+def _migrate_screenings_to_client():
+    """One-time (idempotent) move of sanctions / AML vetting from the engagement's Acceptance tab to the client.
+
+    Vetting applies to every engagement for a client, so each old per-engagement screening row is merged into the client's own list
+    (models.ClientSanctionsScreening). The same person screened on several engagements becomes ONE record that keeps the most severe
+    result per list (Confirmed Hit > Potential Match > Clear > Not Checked) and every note. Old rows are flagged, never deleted, and
+    flag reviews recorded on an acceptance for a merged row are re-pointed at the merged record."""
+    from models import SanctionsScreening, ClientSanctionsScreening, AcceptanceFlagReview, SANCTIONS_SCREENING_SOURCES
+    pending = SanctionsScreening.query.filter(
+        db.or_(SanctionsScreening.migrated_to_client.is_(None), SanctionsScreening.migrated_to_client == False)  # noqa: E712
+    ).all()
+    if not pending:
+        return
+    severity = {"Confirmed Hit": 3, "Potential Match": 2, "Clear": 1}
+    groups = {}
+    for row in pending:
+        acc = row.client_acceptance
+        eng = acc.engagement if acc is not None else None
+        if eng is None or eng.client_id is None:
+            row.migrated_to_client = True
+            continue
+        groups.setdefault((eng.client_id, " ".join((row.individual_name or "").lower().split())), []).append(row)
+
+    def stamp(r):
+        return r.screened_at or r.auto_screened_at or r.created_at or datetime.min
+
+    fields = [f for f, _ in SANCTIONS_SCREENING_SOURCES]
+    for (client_id, _name), rows in groups.items():
+        rows.sort(key=stamp, reverse=True)
+        base = rows[0]
+        existing = ClientSanctionsScreening.query.filter_by(client_id=client_id).all()
+        match = next((e for e in existing if " ".join((e.individual_name or "").lower().split()) == _name), None)
+        if match is None:
+            order = max([e.order or 0 for e in existing], default=0) + 1
+            nice = next((r.individual_name for r in rows if r.individual_name and r.individual_name != r.individual_name.lower() and r.individual_name != r.individual_name.upper()), base.individual_name)
+            kwargs = {"client_id": client_id, "individual_name": " ".join((nice or "").split()), "role_description": base.role_description, "order": order,
+                      "created_by_id": base.created_by_id, "created_at": base.created_at}
+            if ClientSanctionsScreening.query.get(base.id) is None:
+                kwargs["id"] = base.id          # keeps any flag review that points at it valid
+            match = ClientSanctionsScreening(**kwargs)
+            db.session.add(match)
+            db.session.flush()
+        for r in rows:
+            for f in fields:
+                if severity.get(getattr(r, f) or "", 0) > severity.get(getattr(match, f) or "", 0):
+                    setattr(match, f, getattr(r, f))
+                notes_f = f.replace("_result", "_auto_notes")
+                if not getattr(match, notes_f) and getattr(r, notes_f):
+                    setattr(match, notes_f, getattr(r, notes_f))
+        notes = []
+        for r in rows:
+            n = (r.notes or "").strip()
+            if n and n not in notes:
+                notes.append(n)
+        if notes and not (match.notes or "").strip():
+            match.notes = " | ".join(notes)
+        for attr in ("screened_at", "screened_by_id", "auto_screened_at", "auto_screened_by_id"):
+            if getattr(match, attr) is None:
+                setattr(match, attr, getattr(base, attr))
+        for r in rows:
+            if r.id != match.id:
+                for fr in AcceptanceFlagReview.query.filter_by(client_acceptance_id=r.client_acceptance_id, flag_key=f"screening:{r.id}").all():
+                    clash = AcceptanceFlagReview.query.filter_by(client_acceptance_id=fr.client_acceptance_id, flag_key=f"screening:{match.id}").first()
+                    if clash is None:
+                        fr.flag_key = f"screening:{match.id}"
+            r.migrated_to_client = True
+    db.session.commit()
+
+
 def _backfill_task_categories():
     """One-time (idempotent) fill for tasks that pre-date task categories:
     an engagement task takes the category implied by its engagement's type, a
@@ -302,6 +371,7 @@ def _add_missing_columns():
             ("fiu_auto_notes", "TEXT"),
             ("auto_screened_at", "DATETIME"),
             ("auto_screened_by_id", "INTEGER"),
+            ("migrated_to_client", "BOOLEAN DEFAULT 0"),
         ],
         "client_key_person": [
             ("number_of_shares", "VARCHAR(50)"),
@@ -830,6 +900,7 @@ def create_app():
         _merge_tax_engagement_types()
         _rename_consulting_service()
         _backfill_task_categories()
+        _migrate_screenings_to_client()
         # First-run convenience: seed an admin login + starter checklist
         # templates automatically so a freshly-installed copy works with zero
         # command-line steps.

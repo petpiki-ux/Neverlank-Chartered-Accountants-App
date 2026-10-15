@@ -2,7 +2,7 @@ import os
 import re
 import uuid
 
-from datetime import date
+from datetime import date, datetime
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, current_app, send_from_directory
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
@@ -13,6 +13,9 @@ from models import (
     client_scope_ids, user_can_access_client,
     COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES, FilingIndexSection,
     TAX_HEADS, FILING_ARCHIVE_SECTIONS, LegislativeUpdate,
+    ClientSanctionsScreening, ClientKeyPerson, screening_assessment_for,
+    SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS, SANCTIONS_AUTO_SOURCES,
+    REGULATORY_NOTICE_SOURCES, RegulatoryNotice, SanctionsListStatus,
 )
 from engagements import sync_substantive_procedures_if_started
 
@@ -210,8 +213,28 @@ def view_client(client_id):
     filing_archive_by_section = {key: [] for key, _ in FILING_ARCHIVE_SECTIONS}
     for doc in client.filing_archive_documents:
         filing_archive_by_section.setdefault(doc.section, []).append(doc)
+    # Sanctions / AML vetting: one list per client, applying to every engagement (see ClientSanctionsScreening).
+    sanctions_list_status = {
+        row.source: row for row in SanctionsListStatus.query.filter(SanctionsListStatus.source.in_(SANCTIONS_AUTO_SOURCES)).all()
+    }
+    regulatory_notice_counts = {}
+    for source in REGULATORY_NOTICE_SOURCES:
+        notices = RegulatoryNotice.query.filter_by(source=source).all()
+        regulatory_notice_counts[source] = {"total": len(notices), "searchable": sum(1 for n in notices if n.extraction_status == "extracted")}
     return render_template(
         "clients/detail.html", client=client, visible_engagements=visible_engagements,
+        vetting_list=list(client.sanctions_screenings),
+        vetting_assessment=screening_assessment_for(client.sanctions_screenings),
+        vetting_key_people=[p for p in confirmed_people if p.full_name not in {s.individual_name for s in client.sanctions_screenings}],
+        can_vet=user_can_access_client(current_user, client),
+        has_investigative=any(e.type == "Investigative Engagement" for e in client.engagements),
+        sanctions_screening_sources=SANCTIONS_SCREENING_SOURCES,
+        sanctions_screening_results=SANCTIONS_SCREENING_RESULTS,
+        sanctions_auto_sources=SANCTIONS_AUTO_SOURCES,
+        sanctions_list_status=sanctions_list_status,
+        can_manage_sanctions_lists=user_has_permission(current_user, "manage_sanctions_lists"),
+        regulatory_notice_sources=REGULATORY_NOTICE_SOURCES,
+        regulatory_notice_counts=regulatory_notice_counts,
         suggested_people=suggested_people, confirmed_people=confirmed_people,
         has_legacy_details=has_legacy_details,
         company_document_types=COMPANY_DOCUMENT_TYPES, person_roles=PERSON_ROLES,
@@ -344,3 +367,120 @@ def delete_client(client_id):
     db.session.commit()
     flash("Client and all its engagements were deleted.", "info")
     return redirect(url_for("clients.list_clients"))
+
+
+# ---------- Sanctions & AML vetting (applies to every engagement for the client) ----------
+# One list of key individuals per client, screened against the UN, OFAC and EU sanctions lists and
+# the RBZ / FIU adverse notices (matching in acceptance.auto_screen_individual). Each engagement's
+# Acceptance tab shows a summary of it and links here. Advisory only: it never blocks anything.
+
+def _vetting_client(client_id):
+    client = Client.query.get_or_404(client_id)
+    if not user_can_access_client(current_user, client):
+        abort(403)
+    return client
+
+
+def _vetting_row(screening_id):
+    row = ClientSanctionsScreening.query.get_or_404(screening_id)
+    if not user_can_access_client(current_user, row.client_id):
+        abort(403)
+    return row
+
+
+def _to_vetting(client_id):
+    return redirect(url_for("clients.view_client", client_id=client_id, _anchor="vetting"))
+
+
+@clients_bp.route("/<int:client_id>/vetting/add", methods=["POST"])
+@login_required
+def add_vetting_individual(client_id):
+    client = _vetting_client(client_id)
+    name = request.form.get("individual_name", "").strip()
+    if not name:
+        flash("Enter the individual's name before adding them for vetting.", "danger")
+        return _to_vetting(client.id)
+    if any(" ".join(s.individual_name.lower().split()) == " ".join(name.lower().split()) for s in client.sanctions_screenings):
+        flash(f"{name} is already on this client's vetting list.", "info")
+        return _to_vetting(client.id)
+    db.session.add(ClientSanctionsScreening(
+        client_id=client.id, individual_name=name, role_description=request.form.get("role_description", "").strip(),
+        order=max([s.order or 0 for s in client.sanctions_screenings], default=0) + 1, created_by_id=current_user.id))
+    db.session.commit()
+    flash(f"{name} added for sanctions and AML vetting.", "success")
+    return _to_vetting(client.id)
+
+
+@clients_bp.route("/<int:client_id>/vetting/add-from-key-person", methods=["POST"])
+@login_required
+def add_vetting_from_key_person(client_id):
+    """Pull a Confirmed Director/Shareholder already on file for the client onto the vetting list (an AI-suggested one has not been checked by a person yet, so it is not offered)."""
+    client = _vetting_client(client_id)
+    person = ClientKeyPerson.query.get_or_404(request.form.get("key_person_id", type=int))
+    if person.client_id != client.id:
+        abort(403)
+    if person.status != "Confirmed":
+        flash(f"{person.full_name} has not been confirmed yet on the Directors & Shareholders list - review and confirm them there first.", "danger")
+        return _to_vetting(client.id)
+    if any(s.individual_name == person.full_name for s in client.sanctions_screenings):
+        flash(f"{person.full_name} is already on the vetting list.", "info")
+        return _to_vetting(client.id)
+    db.session.add(ClientSanctionsScreening(
+        client_id=client.id, individual_name=person.full_name, role_description=person.role,
+        order=max([s.order or 0 for s in client.sanctions_screenings], default=0) + 1, created_by_id=current_user.id))
+    db.session.commit()
+    flash(f"{person.full_name} added for sanctions and AML vetting.", "success")
+    return _to_vetting(client.id)
+
+
+@clients_bp.route("/vetting/<int:screening_id>/update", methods=["POST"])
+@login_required
+def update_vetting(screening_id):
+    row = _vetting_row(screening_id)
+    for field, _label in SANCTIONS_SCREENING_SOURCES:
+        value = request.form.get(field, "Not Checked").strip()
+        setattr(row, field, value if value in SANCTIONS_SCREENING_RESULTS else "Not Checked")
+    row.notes = request.form.get("notes", "").strip()
+    row.role_description = request.form.get("role_description", row.role_description or "").strip()
+    row.screened_by_id = current_user.id
+    row.screened_at = datetime.utcnow()
+    db.session.commit()
+    flash("Vetting result saved.", "success")
+    return _to_vetting(row.client_id)
+
+
+@clients_bp.route("/vetting/<int:screening_id>/delete", methods=["POST"])
+@login_required
+def delete_vetting(screening_id):
+    row = _vetting_row(screening_id)
+    client_id = row.client_id
+    db.session.delete(row)
+    db.session.commit()
+    flash("Vetting record deleted.", "success")
+    return _to_vetting(client_id)
+
+
+@clients_bp.route("/vetting/<int:screening_id>/auto-screen", methods=["POST"])
+@login_required
+def auto_screen_vetting(screening_id):
+    from acceptance import auto_screen_individual
+    row = _vetting_row(screening_id)
+    auto_screen_individual(row)
+    db.session.commit()
+    flash(f"Auto-screened {row.individual_name} against UN/OFAC/EU and the uploaded RBZ/FIU notices - review any Potential Match below.", "success")
+    return _to_vetting(row.client_id)
+
+
+@clients_bp.route("/<int:client_id>/vetting/auto-screen-all", methods=["POST"])
+@login_required
+def auto_screen_all_vetting(client_id):
+    from acceptance import auto_screen_individual
+    client = _vetting_client(client_id)
+    if not client.sanctions_screenings:
+        flash("No key individuals added for vetting yet.", "info")
+        return _to_vetting(client.id)
+    for row in client.sanctions_screenings:
+        auto_screen_individual(row)
+    db.session.commit()
+    flash(f"Auto-screened all {len(client.sanctions_screenings)} individual(s) - review any Potential Match below.", "success")
+    return _to_vetting(client.id)

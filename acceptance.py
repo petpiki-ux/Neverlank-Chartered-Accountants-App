@@ -30,7 +30,6 @@ from models import (
     DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS,
     BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS, SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS,
     RISK_CATEGORIES,
-    SanctionsScreening, SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, RegulatoryNotice,
     ClientKeyPerson, AcceptanceFlagReview, ACCEPTANCE_FLAG_STATUSES,
     REVIEWER_ROLES, PARTNER_SIGNOFF_ROLES, user_can_access_engagement, user_has_permission,
@@ -641,103 +640,10 @@ def delete_acceptance_checklist_item(item_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 
-# ---------- Sanctions & adverse notice screening ----------
-# Screens each key individual (directors, beneficial owners, authorised
-# signatories, and - on an Investigative Engagement - suspects/targets/key
-# witnesses) against the UN, OFAC and EU sanctions lists, and against
-# adverse notices from the RBZ and the FIU. See models.SanctionsScreening
-# and ClientAcceptance.screening_assessment - purely advisory, like the
-# acceptance checklist above, so it never blocks the decision/sign-off
-# workflow on its own; a confirmed hit is surfaced for the Partner to act on.
-
-@acceptance_bp.route("/<int:engagement_id>/acceptance/screening/add", methods=["POST"])
-@login_required
-def add_sanctions_screening(engagement_id):
-    engagement = Engagement.query.get_or_404(engagement_id)
-    _ensure_access(engagement)
-    record = _get_or_create(engagement_id)
-    individual_name = request.form.get("individual_name", "").strip()
-    if not individual_name:
-        flash("Enter the individual's name before adding them for screening.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
-    max_order = max([s.order for s in record.screenings], default=0)
-    db.session.add(SanctionsScreening(
-        client_acceptance_id=record.id,
-        individual_name=individual_name,
-        role_description=request.form.get("role_description", "").strip(),
-        order=max_order + 1,
-        created_by_id=current_user.id,
-    ))
-    db.session.commit()
-    flash("Individual added for sanctions/adverse notice screening.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
-
-
-@acceptance_bp.route("/<int:engagement_id>/acceptance/screening/add-from-key-person", methods=["POST"])
-@login_required
-def add_screening_from_key_person(engagement_id):
-    """Pull a Director/Shareholder/etc already on file for this client (see
-    models.ClientKeyPerson, company_documents.py) into THIS engagement's own
-    Sanctions & Adverse Notice Screening list, instead of retyping their
-    name - the whole point of that list living on the Client rather than
-    the engagement (see models.py's "Company documents & key people"
-    section). Only a Confirmed person can be added this way - an
-    AI-suggested one hasn't been checked by a person yet, so pulling it
-    into a compliance screening list unreviewed would defeat the point of
-    the Suggested/Confirmed distinction."""
-    engagement = Engagement.query.get_or_404(engagement_id)
-    _ensure_access(engagement)
-    person = ClientKeyPerson.query.get_or_404(request.form.get("key_person_id", type=int))
-    if person.client_id != engagement.client_id:
-        abort(403)
-    if person.status != "Confirmed":
-        flash(f"{person.full_name} hasn't been confirmed yet on the client's Directors & Shareholders list - review and confirm them there first.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
-    record = _get_or_create(engagement_id)
-    already = next((s for s in record.screenings if s.individual_name == person.full_name), None)
-    if already:
-        flash(f"{person.full_name} is already on this engagement's screening list.", "info")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
-    max_order = max([s.order for s in record.screenings], default=0)
-    db.session.add(SanctionsScreening(
-        client_acceptance_id=record.id,
-        individual_name=person.full_name,
-        role_description=person.role,
-        order=max_order + 1,
-        created_by_id=current_user.id,
-    ))
-    db.session.commit()
-    flash(f"{person.full_name} added for screening on this engagement.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
-
-
-@acceptance_bp.route("/acceptance/screening/<int:screening_id>/update", methods=["POST"])
-@login_required
-def update_sanctions_screening(screening_id):
-    screening = SanctionsScreening.query.get_or_404(screening_id)
-    _ensure_access(screening.client_acceptance.engagement)
-    for field, _label in SANCTIONS_SCREENING_SOURCES:
-        value = request.form.get(field, "Not Checked").strip()
-        setattr(screening, field, value if value in SANCTIONS_SCREENING_RESULTS else "Not Checked")
-    screening.notes = request.form.get("notes", "").strip()
-    screening.role_description = request.form.get("role_description", screening.role_description or "").strip()
-    screening.screened_by_id = current_user.id
-    screening.screened_at = datetime.utcnow()
-    db.session.commit()
-    flash("Screening result saved.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=screening.client_acceptance.engagement_id, tab="acceptance"))
-
-
-@acceptance_bp.route("/acceptance/screening/<int:screening_id>/delete", methods=["POST"])
-@login_required
-def delete_sanctions_screening(screening_id):
-    screening = SanctionsScreening.query.get_or_404(screening_id)
-    _ensure_access(screening.client_acceptance.engagement)
-    engagement_id = screening.client_acceptance.engagement_id
-    db.session.delete(screening)
-    db.session.commit()
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
-
+# ---------- Sanctions & AML vetting ----------
+# Moved to the CLIENT (clients.py: /clients/<id>/vetting/...; models.ClientSanctionsScreening) because
+# the vetting applies to every engagement, not just one. This tab only shows a summary of it
+# (ClientAcceptance.screening_assessment) with a link to the client's page. The matching itself is below.
 
 # ---------- Automated screening (UN/OFAC/EU cache + RBZ/FIU uploaded notices) ----------
 # See sanctions_data.py for the matching itself. Automated matching here only
@@ -792,33 +698,6 @@ def auto_screen_individual(screening):
 
     screening.auto_screened_at = datetime.utcnow()
     screening.auto_screened_by_id = current_user.id
-
-
-@acceptance_bp.route("/acceptance/screening/<int:screening_id>/auto-screen", methods=["POST"])
-@login_required
-def auto_screen_screening(screening_id):
-    screening = SanctionsScreening.query.get_or_404(screening_id)
-    _ensure_access(screening.client_acceptance.engagement)
-    auto_screen_individual(screening)
-    db.session.commit()
-    flash(f"Auto-screened {screening.individual_name} against UN/OFAC/EU and the uploaded RBZ/FIU notices - review any Potential Match below.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=screening.client_acceptance.engagement_id, tab="acceptance"))
-
-
-@acceptance_bp.route("/<int:engagement_id>/acceptance/screening/auto-screen-all", methods=["POST"])
-@login_required
-def auto_screen_all(engagement_id):
-    engagement = Engagement.query.get_or_404(engagement_id)
-    _ensure_access(engagement)
-    record = _get_or_create(engagement_id)
-    if not record.screenings:
-        flash("No key individuals added for screening yet.", "info")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
-    for screening in record.screenings:
-        auto_screen_individual(screening)
-    db.session.commit()
-    flash(f"Auto-screened all {len(record.screenings)} individual(s) - review any Potential Match below.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 
 @acceptance_bp.route("/acceptance/lists/refresh", methods=["POST"])

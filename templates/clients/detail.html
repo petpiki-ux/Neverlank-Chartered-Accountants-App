@@ -461,8 +461,113 @@
   </form>
   {% endif %}
   <p class="muted" style="font-size:11.5px;margin-top:8px;margin-bottom:0;">
-    A confirmed person here can be pulled straight into any engagement's Sanctions &amp; Adverse Notice Screening list from that engagement's Client Acceptance tab.
+    A confirmed person here can be added straight to the Sanctions &amp; AML Vetting list below.
   </p>
+</div>
+
+<div class="card" id="vetting">
+  <h3 class="mt-0">Sanctions &amp; AML Vetting</h3>
+  <p class="muted" style="font-size:12px;">
+    Applies to every engagement for this client. Screen every key individual - directors, beneficial owners, authorised signatories{% if has_investigative %}, and any suspect, target or key witness on an investigative engagement{% endif %} -
+    against the UN Sanctions List, OFAC (US Treasury), the EU Sanctions List, and adverse notices issued by the Reserve Bank of Zimbabwe (RBZ) or the Financial Intelligence Unit (FIU).
+    Advisory only: a confirmed hit does not block anything automatically - escalate it to the Partner/MLRO. Each engagement's Client Acceptance tab shows a summary of this list.
+  </p>
+
+  <div class="card" style="background:#faf9f6;margin-bottom:14px;">
+    <strong style="font-size:12.5px;">Automated screening status</strong>
+    <table style="font-size:12px;margin-top:6px;margin-bottom:0;">
+      <thead><tr><th>Source</th><th>Cache last refreshed</th><th>Entries cached</th><th></th></tr></thead>
+      <tbody>
+        {% for source in sanctions_auto_sources %}
+        {% set status = sanctions_list_status.get(source) %}
+        <tr>
+          <td><strong>{{ source }}</strong></td>
+          <td class="muted">
+            {% if status and status.last_refreshed_at %}{{ (status.last_refreshed_at|cat).strftime('%d %b %Y %H:%M') }}{% else %}Never refreshed{% endif %}
+            {% if status and status.last_error %}<br><span style="color:#b02a2a;">Last attempt failed: {{ status.last_error[:160] }}</span>{% endif %}
+          </td>
+          <td>{{ status.entry_count if status else 0 }}</td>
+          <td></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if can_manage_sanctions_lists %}
+    <form method="post" action="{{ url_for('acceptance.refresh_sanctions_lists') }}" style="margin-top:8px;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Refresh UN/OFAC/EU lists now</button>
+    </form>
+    {% endif %}
+    <p class="muted" style="font-size:11.5px;margin-top:8px;margin-bottom:0;">
+      RBZ and FIU Zimbabwe don't publish a feed the app can check automatically - instead, matching is against the firm's own
+      <a href="{{ url_for('regulatory_notices.list_notices') }}">Regulatory Notices</a> library:
+      {% for source in regulatory_notice_sources %}{% set c = regulatory_notice_counts.get(source, {'total': 0, 'searchable': 0}) %}{{ source }} {{ c.searchable }}/{{ c.total }} notice(s) searchable{% if not loop.last %}, {% endif %}{% endfor %}.
+    </p>
+  </div>
+
+  <div class="flash {{ vetting_assessment.level }}" style="margin-bottom:10px;">{{ vetting_assessment.label }}</div>
+  {% if vetting_list %}
+  {% if can_vet %}
+  <form method="post" action="{{ url_for('clients.auto_screen_all_vetting', client_id=client.id) }}" style="margin-bottom:8px;">
+    <button type="submit" class="btn small gold">Auto-screen all individuals now</button>
+  </form>
+  {% endif %}
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Individual</th><th>Role</th>{% for field, label in sanctions_screening_sources %}<th>{{ label }}</th>{% endfor %}<th>Notes</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for s in vetting_list %}
+      <form method="post" action="{{ url_for('clients.update_vetting', screening_id=s.id) }}" class="inline">
+      <tr>
+        <td><strong>{{ s.individual_name }}</strong></td>
+        <td><input type="text" name="role_description" value="{{ s.role_description or '' }}" style="width:130px;margin-bottom:0;" placeholder="e.g. Director" {% if not can_vet %}disabled{% endif %}></td>
+        {% for field, label in sanctions_screening_sources %}
+        <td>
+          <select name="{{ field }}" style="margin-bottom:0;min-width:120px;" title="{{ s.auto_notes_for(field) or '' }}" {% if not can_vet %}disabled{% endif %}>
+            {% for r in sanctions_screening_results %}<option value="{{ r }}" {% if s[field]==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+          </select>
+        </td>
+        {% endfor %}
+        <td>
+          <input type="text" name="notes" value="{{ s.notes or '' }}" placeholder="Match details / reference" style="width:150px;margin-bottom:0;" {% if not can_vet %}disabled{% endif %}>
+          {% if s.auto_screened_at %}
+          <div class="muted" style="font-size:10.5px;margin-top:3px;">Auto-screened {{ (s.auto_screened_at|cat).strftime('%d %b %Y') }}{% if s.auto_screened_by %} by {{ s.auto_screened_by.name }}{% endif %} - hover a result for its notes.</div>
+          {% endif %}
+        </td>
+        <td><span class="badge {% if s.overall_status == 'Confirmed Hit' %}risk-High{% elif s.overall_status == 'Potential Match' %}risk-Medium{% elif s.overall_status == 'Clear' %}risk-Low{% endif %}">{{ s.overall_status }}</span></td>
+        <td>
+          {% if can_vet %}
+          <button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" formaction="{{ url_for('clients.auto_screen_vetting', screening_id=s.id) }}" class="btn small secondary">Auto-screen</button>
+          <button type="submit" formaction="{{ url_for('clients.delete_vetting', screening_id=s.id) }}" class="btn small danger" onclick="return confirm('Delete this individual\'s vetting record?')">Delete</button>
+          {% endif %}
+        </td>
+      </tr>
+      </form>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No key individuals added yet - add each director, beneficial owner, authorised signatory{% if has_investigative %}, or investigation target/witness{% endif %} below.</div>
+  {% endif %}
+  {% if can_vet %}
+  {% if vetting_key_people %}
+  <form method="post" action="{{ url_for('clients.add_vetting_from_key_person', client_id=client.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div>
+      <label for="vet_key_person_id">Add from the Directors &amp; Shareholders above</label>
+      <select id="vet_key_person_id" name="key_person_id" style="min-width:260px;">
+        {% for p in vetting_key_people %}<option value="{{ p.id }}">{{ p.full_name }} ({{ p.role }})</option>{% endfor %}
+      </select>
+    </div>
+    <div><button type="submit" class="btn small secondary" style="margin-bottom:0;">Add for vetting</button></div>
+  </form>
+  {% endif %}
+  <form method="post" action="{{ url_for('clients.add_vetting_individual', client_id=client.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div><label for="vetting_name">Or add an individual's name directly</label><input type="text" id="vetting_name" name="individual_name" placeholder="Full name" required></div>
+    <div><label for="vetting_role">Role</label><input type="text" id="vetting_role" name="role_description" placeholder="e.g. Director, Beneficial Owner"></div>
+    <div><button type="submit" class="btn small gold" style="margin-bottom:0;">Add individual</button></div>
+  </form>
+  {% endif %}
 </div>
 
 <div class="card">
