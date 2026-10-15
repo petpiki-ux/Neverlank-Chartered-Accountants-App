@@ -1326,14 +1326,14 @@ def pack_import_review(pack_id):
         flash(f"That exact file ({f.filename}) was already imported on {last.get('at', '')} by {last.get('by', '')}. Download the pack again to make further corrections.", "info")
         return back
     try:
-        parsed = IM.read_workbook(raw, d)
+        parsed = IM.read_workbook(raw, d, _meta(pack, d))
         nd, report = IM.plan_import(d, parsed, f.filename, _stamp())
     except IM.ImportError_ as e:
         flash(str(e), "danger")
         return back
     except Exception:
         current_app.logger.exception("excel pack import failed")
-        flash("That workbook could not be read. Use the file downloaded with 'Excel pack' (not a one-page export) and keep the Data sheet's layout.", "danger")
+        flash("That workbook could not be read. Use the file downloaded with 'Excel pack', or a one-page Income statement, Balance sheet, Actuals or Budget and forecast export, and keep its layout and headings.", "danger")
         return back
     return render_template("corpfin/ma_import.html", **_base_ctx(pack, d, "actuals", report=report, filename=f.filename, filehash=fhash, payload=json.dumps(parsed), log=[]))
 

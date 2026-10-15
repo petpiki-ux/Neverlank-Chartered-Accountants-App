@@ -62,8 +62,10 @@ def _num(v):
 
 # =========================================================================== reading
 
-def read_workbook(raw, d):
-    """Parse an uploaded pack workbook against the pack `d`. Returns a plain dict (JSON-safe) or raises ImportError_."""
+def read_workbook(raw, d, meta=None):
+    """Parse an uploaded workbook against the pack `d`. It is either the full Excel pack (Data sheet) or one of the one-page
+    exports that hold figures to correct (Income statement, Balance sheet, Actuals, Budget and forecast). Returns a plain dict
+    (JSON-safe) or raises ImportError_."""
     if not raw or len(raw) > MAX_BYTES:
         raise ImportError_("The file is empty or larger than 12 MB.")
     try:
@@ -71,8 +73,7 @@ def read_workbook(raw, d):
     except Exception:
         raise ImportError_("That file could not be opened. Upload the .xlsx pack you downloaded from this app (File > Save as .xlsx if you used another program).")
     if "Data" not in wb.sheetnames:
-        raise ImportError_("There is no 'Data' sheet in this workbook. Download the pack with the 'Excel pack' button, correct it, and upload that file. "
-                           "The one-page exports ('Excel: this page') cannot be imported.")
+        return _read_page(wb, d, meta)
     ws = wb["Data"]
     structure = M.normalise_structure(d["structure"])
     months = M.fy_months(d)
@@ -124,6 +125,176 @@ def read_workbook(raw, d):
     out["commentary"] = _read_commentary(wp) if wp is not None else {}
     out["statements"] = _read_statements(wb, d)
     return out
+
+
+
+# --------------------------------------------------------------------------- one-page exports
+
+PAGE_HELP = ("Upload the Excel pack (the 'Excel pack' button), or one of the one-page exports that hold figures you can correct: Income statement, "
+             "Balance sheet, Actuals, or Budget and forecast. The Cash flow, KPIs, Variances and similar pages are calculated from those, so correct the figures on one of them instead.")
+_MONTH_RE = re.compile(r"(Month|Year to date|As at):?\s+([A-Z][a-z]{2} \d{4})")
+
+
+def _sheet_text(ws, rows=10):
+    out = []
+    for row in ws.iter_rows(min_row=1, max_row=min(rows, ws.max_row)):
+        for c in row:
+            if isinstance(c.value, str):
+                out.append(c.value)
+    return out
+
+
+def _page_month(ws, d):
+    """(view, month key) from the subtitle on a statement page: 'Month: Jun 2026', 'Year to date: Jun 2026' or 'As at Jun 2026'."""
+    lab = {M.month_label(m, False): m for m in M.fy_months(d)}
+    for t in _sheet_text(ws):
+        mt = _MONTH_RE.search(t)
+        if mt:
+            view = {"Month": "month", "Year to date": "ytd", "As at": "asat"}[mt.group(1)]
+            if mt.group(2) not in lab:
+                raise ImportError_(f"This page is for {mt.group(2)}, which is outside this pack's financial year ({M.month_label(M.fy_months(d)[0], False)} to "
+                                   f"{M.month_label(M.fy_months(d)[-1], False)}). Download it again from this pack.")
+            return view, lab[mt.group(2)]
+    raise ImportError_("The month this page is for could not be found. Download the page again with 'Excel: this page' and correct the figures without moving the headings.")
+
+
+def _page_rows(ws, value_col_head="Actual"):
+    """Header row, label column and value column of a statement page, and its rows as [(normalised label, value or None)]."""
+    hdr = None
+    for r in range(1, min(ws.max_row, 20) + 1):
+        for c in range(1, ws.max_column + 1):
+            if ws.cell(row=r, column=c).value == value_col_head:
+                hdr, vcol = r, c
+                break
+        if hdr:
+            break
+    if not hdr:
+        raise ImportError_(f"The '{value_col_head}' column was not found. Download the page again with 'Excel: this page' and correct the figures without moving the headings.")
+    best, lcol = -1, 1
+    for c in range(1, vcol):
+        n = sum(1 for r in range(hdr + 1, ws.max_row + 1) if isinstance(ws.cell(row=r, column=c).value, str))
+        if n > best:
+            best, lcol = n, c
+    rows = []
+    for r in range(hdr + 1, ws.max_row + 1):
+        lab = ws.cell(row=r, column=lcol).value
+        if not isinstance(lab, str) or not lab.strip():
+            continue
+        if lab.strip().lower().startswith("values as at export") or "spread evenly" in lab:
+            continue
+        v = _num(ws.cell(row=r, column=vcol).value)
+        rows.append((_norm(lab), v, r))
+    return rows
+
+
+def _sequence(template, rows):
+    """Match template [(key, label)] to the sheet rows in order. Returns {key: value} for the lines that have a number."""
+    out, j = {}, 0
+    for key, label in template:
+        nl = _norm(label)
+        for k in range(j, len(rows)):
+            if rows[k][0] == nl and rows[k][1] is not None:
+                out[key] = rows[k][1]
+                j = k + 1
+                break
+    return out
+
+
+def _baseline(d, meta):
+    import cf_ma_excel as X
+    raw = X.build_pack_workbook(meta or {"name": "", "client": "", "number": "", "status": "", "currency": "", "prepared_by": "", "fy_label": M.fy_label(d)}, d)
+    base = read_workbook(raw, d)
+    base["report_n"], base["commentary"], base["statements"] = None, {}, {}
+    return base
+
+
+def _read_page(wb, d, meta):
+    names = wb.sheetnames
+    if "Pack" in names and "Data" not in names:
+        raise ImportError_("There is no 'Data' sheet in this workbook. Do not delete the Data sheet from the Excel pack: it holds the figures that are imported.")
+    kind = next((k for k, nm in (("income", "Income statement"), ("balance", "Balance sheet"), ("actuals", "Actuals"), ("plan", "Budget and forecast")) if nm in names), None)
+    if kind is None:
+        raise ImportError_("There is no 'Data' sheet in this workbook, and it is not one of the pages that can be imported. " + PAGE_HELP)
+    structure = M.normalise_structure(d["structure"])
+    months = M.fy_months(d)
+    base = _baseline(d, meta)
+    B = base["blocks"]
+    ws = wb[{"income": "Income statement", "balance": "Balance sheet", "actuals": "Actuals", "plan": "Budget and forecast"}[kind]]
+    if kind == "income":
+        view, m = _page_month(ws, d)
+        rows = _page_rows(ws)
+        tmpl = [(t["key"], t["label"]) for t in M._rows_template(structure) if t["kind"] in ("indent", "line", "memo") and t["key"] in M.pl_keys(structure)]
+        got = _sequence(tmpl, rows)
+        if not got:
+            raise ImportError_("No income statement lines were found in the Actual column. Download the page again and correct the figures without renaming the lines.")
+        i = months.index(m)
+        if view == "ytd":
+            cum = M.cumulative_actuals(d)
+            prev = (cum[i - 1]["cum"] if i > 0 else None) or {}
+            vals = {k: v - M.f(prev.get(k)) for k, v in got.items()}
+            base["warnings"].append(f"This is the year-to-date view: the figures were read as the cumulative position to {M.month_label(m, False)} and {M.month_label(m, False)} itself was adjusted to match.")
+        else:
+            vals = dict(got)
+        B["act"]["months"].setdefault(m, {}).update(vals)
+        # totals typed over on the sheet are not read: say so if they disagree with the lines
+        merged = {k: M.f(B["act"]["months"][m].get(k)) for k in M.pl_keys(structure)}
+        if view == "ytd":
+            merged = {k: M.f((got.get(k) if k in got else (M.cumulative_actuals(d)[i]["cum"] or {}).get(k))) for k in M.pl_keys(structure)}
+        calc = M.pl_vector(structure, merged)
+        for t in M._rows_template(structure):
+            if t["kind"] in ("total", "grand") and t["key"] in ("revenue", "gross_profit", "ebitda", "ebit", "pbt", "pat"):
+                shown = next((x[1] for x in rows if x[0] == _norm(t["label"]) and x[1] is not None), None)
+                if shown is not None and abs(shown - calc[t["key"]]) > 1.0:
+                    base["warnings"].append(f"'{t['label']}' on the sheet is {shown:,.0f} but its lines add up to {calc[t['key']]:,.0f}. Totals are recalculated and not imported; correct the individual lines.")
+    elif kind == "balance":
+        view, m = _page_month(ws, d)
+        rows = _page_rows(ws)
+        order = ["ppe", "inventory", "receivables", "other_assets", "cash", "share_capital", "retained", "borrowings", "overdraft", "payables", "other_liabilities"]
+        got = _sequence([(k, M.BS_LABEL[k]) for k in order], rows)
+        if not got:
+            raise ImportError_("No balance sheet lines were found in the Actual column. Download the page again and correct the figures without renaming the lines.")
+        B["actbs"]["months"].setdefault(m, {}).update(got)
+        calc = M.bs_total({**{k: 0.0 for k in M.BS_KEYS}, **{k: M.f(v) for k, v in B["actbs"]["months"][m].items()}})
+        for label, key in (("Total assets", "assets"), ("Total equity", "equity"), ("Total liabilities", "liabilities")):
+            shown = next((x[1] for x in rows if x[0] == _norm(label) and x[1] is not None), None)
+            if shown is not None and abs(shown - calc[key]) > 1.0:
+                base["warnings"].append(f"'{label}' on the sheet is {shown:,.0f} but its lines add up to {calc[key]:,.0f}. Totals are recalculated and not imported; correct the individual lines.")
+    else:
+        lab = {_norm(M.month_label(m)): m for m in months}
+        grids = []
+        for r in range(1, ws.max_row + 1):
+            if ws.cell(row=r, column=1).value == "Line":
+                title = ws.cell(row=r - 1, column=1).value
+                grids.append((r, str(title or "")))
+        if not grids:
+            raise ImportError_("No month-by-month table was found on this page. Download it again with 'Excel: this page'.")
+        wanted = {"Income statement by month": "act", "Budget": "bud", "Forecast": "fc"}
+        defs = [x for x in M.pl_line_defs(structure) if x["key"] != "div"]
+        n_done = 0
+        for r0, title in grids:
+            blk = wanted.get(title.strip())
+            if not blk:
+                continue
+            cols = {}
+            for c in range(2, ws.max_column + 1):
+                h = ws.cell(row=r0, column=c).value
+                if isinstance(h, str) and _norm(h) in lab:
+                    cols[c] = lab[_norm(h)]
+            r, j = r0 + 1, 0
+            for x in defs:
+                got = ws.cell(row=r + j, column=1).value
+                if _norm(got) != _norm(x["label"]):
+                    raise ImportError_(f"Row {r + j} of the {title} table reads '{got}' where this pack has '{x['label']}'. Lines cannot be added, removed or renamed in Excel.")
+                for c, mk in cols.items():
+                    v = _num(ws.cell(row=r + j, column=c).value)
+                    if v is not None:
+                        B[blk]["months"].setdefault(mk, {})[x["key"]] = v
+                j += 1
+            n_done += 1
+        if not n_done:
+            raise ImportError_("No Actual, Budget or Forecast table was found on this page.")
+    base["warnings"].append("This is a one-page export, so only the figures on this page were read; everything else in the pack is unchanged.")
+    return base
 
 
 def CL_(c):
