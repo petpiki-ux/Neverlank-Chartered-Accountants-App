@@ -42,7 +42,7 @@
 
 <h2 class="cf-section">2. Revenue</h2>
 <div class="card">
-  <p class="cf-sub">Year-1 revenue for each stream and the growth rate for each later year. Year-1 revenue is spread across the months using the seasonality below.</p>
+  <p class="cf-sub">Year-1 revenue for each stream and the growth rate for each later year. Year-1 revenue is spread across the months using the revenue distribution below.</p>
   <div class="tbl-scroll"><table class="cf-grid">
     <thead><tr><th>Revenue stream</th><th>Year 1 revenue</th>{% for l in year_labels[1:] %}<th>Growth in {{ l }} %</th>{% endfor %}<th></th></tr></thead>
     <tbody>
@@ -58,13 +58,43 @@
   </table></div>
   <button class="btn small secondary" name="action" value="add_rev" formnovalidate style="margin-top:8px;">+ Add revenue stream</button>
 
-  <details style="margin-top:14px;"><summary style="cursor:pointer;font-weight:600;">Seasonality of year-1 revenue (share of the year by month)</summary>
-    <div class="tbl-scroll"><table class="cf-grid" style="margin-top:8px;">
-      <thead><tr>{% for mth in month_labels %}<th>{{ mth }} %</th>{% endfor %}</tr></thead>
-      <tbody><tr>{% for v in base.seasonality %}<td><input type="number" step="any" min="0" class="narrow" name="season__{{ loop.index0 }}" value="{{ v|cfin(3) }}"></td>{% endfor %}</tr></tbody>
-    </table></div>
-    <div class="cf-sub">The twelve percentages are scaled to total 100% when saved. Leave them equal for an even spread.</div>
-  </details>
+  <h3 style="margin:16px 0 4px;" id="distribution">Revenue distribution during year 1</h3>
+  <p class="cf-sub" style="margin-top:0;">The share of the first year's revenue earned in each month, starting with the model's first month ({{ result.periods[0].label }}). For example 5% in the first month and 0% in the second. Use 0 for a month with no sales. The twelve shares should total 100%; they are scaled to 100% when saved, so the amounts below show what will be used.</p>
+  <div class="tbl-scroll"><table class="cf-grid" id="season-grid" style="margin-top:8px;">
+    <thead><tr><th></th>{% for p_ in result.periods[:12] %}<th>{{ p_.label }}</th>{% endfor %}<th>Total</th></tr></thead>
+    <tbody>
+      <tr><td>Share of year (%)</td>
+        {% for v in base.seasonality %}<td><input type="number" step="any" min="0" class="narrow season-in" name="season__{{ loop.index0 }}" value="{{ v|cfin(3) }}"></td>{% endfor %}
+        <td><strong id="season-total">100</strong>%</td></tr>
+      <tr class="muted"><td>Revenue ({{ cur }})</td>
+        {% for v in base.seasonality %}<td class="n season-amt" style="font-size:12px;">&nbsp;</td>{% endfor %}
+        <td class="n" id="season-amt-total" style="font-size:12px;"></td></tr>
+    </tbody>
+  </table></div>
+  <div style="margin-top:6px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+    <button type="button" class="btn small secondary" id="season-even">Spread evenly</button>
+    <span class="cf-sub" id="season-warn" style="margin:0;"></span>
+  </div>
+  <script>
+  (function () {
+    var ins = document.querySelectorAll('.season-in'), amts = document.querySelectorAll('.season-amt');
+    function y1() { var t = 0; document.querySelectorAll('input[name^="rev_y1_"]').forEach(function (e) { t += parseFloat(e.value) || 0; }); return t; }
+    function fmt(x) { return Math.round(x).toLocaleString('en-US'); }
+    function update() {
+      var tot = 0; ins.forEach(function (e) { tot += Math.max(0, parseFloat(e.value) || 0); });
+      document.getElementById('season-total').textContent = (Math.round(tot * 100) / 100);
+      var base = y1();
+      ins.forEach(function (e, i) { var v = Math.max(0, parseFloat(e.value) || 0); amts[i].textContent = tot > 0 ? fmt(base * v / tot) : ''; });
+      document.getElementById('season-amt-total').textContent = tot > 0 ? fmt(base) : '';
+      var w = document.getElementById('season-warn');
+      w.textContent = tot <= 0 ? 'Enter at least one month above zero.' : (Math.abs(tot - 100) > 0.05 ? 'The shares add up to ' + (Math.round(tot * 100) / 100) + '%, so they will be scaled to 100% when you save.' : '');
+    }
+    ins.forEach(function (e) { e.addEventListener('input', update); });
+    document.querySelectorAll('input[name^="rev_y1_"]').forEach(function (e) { e.addEventListener('input', update); });
+    document.getElementById('season-even').addEventListener('click', function () { ins.forEach(function (e) { e.value = (100 / 12).toFixed(2); }); update(); });
+    update();
+  })();
+  </script>
 </div>
 
 <h2 class="cf-section" id="lines">3. Costs</h2>
