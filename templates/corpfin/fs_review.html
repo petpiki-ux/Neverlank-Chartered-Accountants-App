@@ -14,6 +14,11 @@
   <input type="hidden" name="target" value="{{ target }}">
   <input type="hidden" name="source_name" value="{{ source_name }}">
   <input type="hidden" name="n_periods" value="{{ periods|length }}">
+  <input type="hidden" name="ex_method" value="{{ ex.method }}">
+  <input type="hidden" name="ex_entity" value="{{ ex.entity or '' }}">
+  <input type="hidden" name="ex_currency" value="{{ ex.currency or '' }}">
+  <textarea name="ex_notes" hidden>{{ ex_notes_json }}</textarea>
+  <textarea name="fixlog" hidden>{{ fixlog_json }}</textarea>
   <div class="form-row">
     <div><label>Amounts in the statements are in</label>
       <select name="scale">{% for k, mult in scales.items() %}<option value="{{ k }}" {% if ex.scale == mult %}selected{% endif %}>{{ k }}{% if cur_code %} ({{ cur_code }}){% endif %}</option>{% endfor %}</select></div>
@@ -46,8 +51,37 @@
   <div style="margin-bottom:8px;"><strong>{{ p.label }}</strong>
     <ul class="ma-msgs">{% for c in p.checks %}<li class="{{ 'cf-ok' if ('add up' in c or 'balances' in c) else 'cf-bad' }}">{{ c }}</li>{% else %}<li class="muted">Not enough lines were found to check.</li>{% endfor %}</ul></div>
   {% endfor %}
+  {% for p in periods if p.diag and not p.diag.balanced %}
+  {% set pi = loop.index0 %}
+  <div class="ma-diag" id="diag-{{ p.label|replace(' ', '-') }}">
+    <h4 style="margin-bottom:4px;">Balance sheet does not balance &ndash; {{ p.label }}</h4>
+    <p class="cf-sub" style="margin-top:0;"><strong>{{ p.diag.headline }}</strong></p>
+    {% for n in p.diag.notes %}<p class="cf-sub">{{ n }}</p>{% endfor %}
+    {% if p.diag.suggestions %}
+    <p class="cf-sub">These are the most likely explanations, strongest first. Nothing changes until you press <em>Apply</em>, and each change is recorded in the note saved with the figures.</p>
+    {% for sg in p.diag.suggestions %}
+    <div class="ma-fix {{ 'ma-fix-' ~ sg.confidence }}">
+      <div class="ma-fix-head"><span class="badge {{ 'status-Approved' if sg.confidence == 'high' else '' }}">{{ sg.confidence|capitalize }} likelihood</span> <strong>{{ sg.title }}</strong></div>
+      <div class="muted">{{ sg.detail }}</div>
+      {% if sg.changes %}
+      <table class="cf-table ma-fix-table"><tbody>
+        {% for c in sg.changes %}<tr><td>{{ c.label }}</td><td class="n">{{ c.old|cfn(2) }}</td><td>&rarr;</td><td class="n">{{ c.new|cfn(2) }}</td></tr>{% endfor %}
+        <tr><td colspan="3">Balance sheet difference afterwards</td><td class="n {{ 'cf-ok' if sg.cleared else 'cf-bad' }}">{{ sg.after_gap|cfn(2) }}</td></tr>
+      </tbody></table>
+      <button class="btn small gold" type="submit" formaction="{{ url_for('corpfin.fs_recheck') }}" name="fix" value="{{ pi }}:{{ sg.id }}">Apply this fix</button>
+      {% endif %}
+    </div>
+    {% endfor %}
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if fixlog %}
+  <h4>Corrections accepted on this page</h4>
+  <ul class="ma-msgs">{% for x in fixlog %}<li>{{ x }}</li>{% endfor %}</ul>
+  {% endif %}
   <div class="cf-sticky-actions">
     <button class="btn gold" type="submit">{{ 'Use as the prior year' if kind == 'pack' else 'Load into the historical analysis' }}</button>
+    <button class="btn secondary" type="submit" formaction="{{ url_for('corpfin.fs_recheck') }}" title="Re-run the checks on the figures as they are now">Re-check the figures</button>
     <a class="btn secondary" href="{{ url_for('corpfin.pack_tab', pack_id=obj.id, tab='prior') if kind == 'pack' else url_for('corpfin.model_tab', model_id=obj.id, tab='history') }}">Cancel</a>
   </div>
 </form>

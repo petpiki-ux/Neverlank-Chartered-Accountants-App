@@ -1,0 +1,176 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<div class="card">
+  <h3 style="margin-top:0;">Reforecast &ndash; lock the actuals, change the assumptions, see the year</h3>
+  <p class="cf-sub">Actuals to {{ labels.month }} stay exactly as recorded. The remaining {{ remaining|length }} month(s) are rebuilt from a starting point you choose, with the changes you enter, and the full year is compared with the budget, the prior year and the pack's current outlook. Nothing here changes the pack until you press <em>Use as the pack's forecast</em>.</p>
+  {% if saved %}
+  <div class="ma-chips">
+    <span class="muted">Saved scenarios:</span>
+    {% for s in saved %}<a class="ma-chip {{ 'active' if chosen and chosen.id == s.id }}" href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='reforecast', scenario=s.id, month=request.args.get('month')) }}">{{ s.name }}</a>{% endfor %}
+    <a class="ma-chip {{ 'active' if not chosen and not request.args.get('sc_base') }}" href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='reforecast', month=request.args.get('month')) }}">+ New</a>
+  </div>
+  {% endif %}
+</div>
+
+{% if remaining %}
+<form method="get" id="rf-form" class="card">
+  <input type="hidden" name="month" value="{{ request.args.get('month', '') }}">
+  {% if chosen %}<input type="hidden" name="scenario_id" value="{{ chosen.id }}">{% endif %}
+  <div class="form-row">
+    <div><label>Starting point for the remaining months</label>
+      <select name="sc_base">{% for k, lab in BASE_CHOICES %}<option value="{{ k }}" {% if sc.base == k %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+    <div><label>Run-rate: average of the last (months)</label><input type="number" name="sc_rr_months" min="1" max="12" value="{{ sc.rr_months }}"></div>
+    <div><label>Changes apply from</label>
+      <select name="sc_from_month"><option value="">The first remaining month</option>{% for mo, lab in remaining_labels %}<option value="{{ mo }}" {% if sc.from_month == mo %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+    <div><label>Phase in over (months)</label><input type="number" name="sc_ramp" min="0" max="12" value="{{ sc.ramp }}" title="0 = full effect straight away; 3 = one third in the first month, two thirds in the second, full from the third"></div>
+  </div>
+  <div class="form-row">
+    <div><label>Revenue change (%)</label><input type="number" step="any" name="sc_rev_pct" value="{{ sc.rev_pct|cfin }}" placeholder="0"></div>
+    <div><label>Cost of sales change (%)</label><input type="number" step="any" name="sc_cogs_pct" value="{{ sc.cogs_pct|cfin }}" placeholder="0"></div>
+    <div><label>Operating expenses change (%)</label><input type="number" step="any" name="sc_opex_pct" value="{{ sc.opex_pct|cfin }}" placeholder="0"></div>
+    <div style="align-self:flex-end;"><label class="inline"><input type="checkbox" name="sc_cogs_follows" value="1" {% if sc.cogs_follows %}checked{% endif %}> Cost of sales moves with revenue</label></div>
+  </div>
+  <div class="form-row">
+    <div><label>Income tax</label>
+      <select name="sc_tax_mode"><option value="keep" {% if sc.tax_mode == 'keep' %}selected{% endif %}>Keep the starting point's amounts</option><option value="rate" {% if sc.tax_mode == 'rate' %}selected{% endif %}>Recompute at a rate of profit before tax</option></select></div>
+    <div><label>Tax rate (%)</label><input type="number" step="any" name="sc_tax_rate" value="{{ sc.tax_rate|cfin }}"></div>
+  </div>
+  <details {% if sc.line_adj %}open{% endif %}><summary style="cursor:pointer;margin:6px 0;">Line-by-line changes</summary>
+    <div class="tbl-scroll"><table class="cf-grid">
+      <thead><tr><th>Line</th><th>Change (%)</th><th>Add or take off per month ({{ cur }})</th></tr></thead>
+      {% for x in line_defs if x.key != 'div' %}
+      <tr><td>{{ x.label }}</td>
+        <td><input type="number" step="any" name="adj_pct_{{ x.key }}" value="{{ (sc.line_adj.get(x.key) or {}).get('pct')|cfin }}"></td>
+        <td><input type="number" step="any" name="adj_abs_{{ x.key }}" value="{{ (sc.line_adj.get(x.key) or {}).get('abs')|cfin }}"></td></tr>
+      {% endfor %}
+    </table></div>
+    <p class="cf-sub">A line change stacks on the changes above. A monthly amount is added in each month the change applies; for costs, a positive amount is more cost.</p>
+  </details>
+  <div class="cf-sticky-actions" style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end;">
+    <button class="btn gold" type="submit">Calculate</button>
+    {% if not pack.is_final %}
+    <span><label style="margin:0;">Scenario name</label><input type="text" name="sc_name" maxlength="60" value="{{ sc.name }}" placeholder="e.g. Upside, Downside, Cost cuts" style="width:210px;"></span>
+    <button class="btn secondary" type="submit" formaction="{{ url_for('corpfin.pack_reforecast_save', pack_id=pack.id) }}" formmethod="post">{{ 'Update scenario' if chosen else 'Save scenario' }}</button>
+    <button class="btn secondary" type="submit" formaction="{{ url_for('corpfin.pack_reforecast_apply', pack_id=pack.id) }}" formmethod="post" onclick="return confirm('Replace the pack\'s forecast for the remaining months with this scenario?');">Use as the pack's forecast</button>
+    {% endif %}
+  </div>
+</form>
+{% if chosen and not pack.is_final %}
+<form method="post" action="{{ url_for('corpfin.pack_reforecast_delete', pack_id=pack.id, sid=chosen.id) }}" class="inline" onsubmit="return confirm('Delete this scenario?');"><button class="btn small danger" type="submit">Delete scenario &lsquo;{{ chosen.name }}&rsquo;</button></form>
+{% endif %}
+{% endif %}
+
+{% if res.error %}
+<div class="card"><div class="empty-state">{{ res.error }}</div></div>
+{% else %}
+{% for n in res.notes %}<div class="flash info">{{ n }}</div>{% endfor %}
+<div class="card">
+  <h3 style="margin-top:0;">Full year {{ fy }} &ndash; {{ sc.name or 'this scenario' }}</h3>
+  <p class="cf-sub">Actual {{ res.n }} month(s) to {{ labels.month }} plus {{ res.remaining|length }} month(s) from <strong>{{ res.base_desc }}</strong>{% if res.scenario.rev_pct or res.scenario.cogs_pct or res.scenario.opex_pct or res.scenario.line_adj %} with your changes{% endif %}. Variances are favourable positive.</p>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th></th><th>This scenario</th><th>Pack outlook now</th><th>Var</th><th>Budget</th><th>Var</th><th>{{ prior_label }}</th><th>Var</th></tr></thead>
+    <tbody>
+    {% for t in res.table %}
+      <tr class="{{ 'total' if t.key in ('ebitda', 'pat') }}"><td class="ma-label">{{ t.label }}</td>
+        <td class="n"><strong>{{ t.scenario|cfn }}</strong></td>
+        <td class="n">{{ t.current|cfn }}</td>{{ ma.vc(t.var_current, t.var_current) }}
+        <td class="n">{{ t.budget|cfn }}</td>{{ ma.vc(t.var_budget, t.var_budget) }}
+        <td class="n">{{ t.prior|cfn }}</td>{{ ma.vc(t.var_prior, t.var_prior) }}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if res.required %}
+  {% set rq = res.required %}
+  <div class="ma-need">
+    <strong>What it takes to hit the budget.</strong> To reach the full-year budget the business needs {{ cur }} {{ rq.revenue_needed|cfn }} of revenue over the remaining {{ rq.months }} month(s), which is {{ cur }} {{ rq.revenue_per_month|cfn }} a month,
+    against {{ cur }} {{ rq.ytd_revenue_per_month|cfn }} a month so far and {{ cur }} {{ rq.scenario_revenue_per_month|cfn }} a month in this scenario.
+    Profit after tax needed is {{ cur }} {{ rq.pat_needed|cfn }} ({{ cur }} {{ rq.pat_per_month|cfn }} a month) against {{ cur }} {{ rq.scenario_pat_per_month|cfn }} a month in this scenario.
+  </div>
+  {% endif %}
+</div>
+
+<div class="viz-grid">
+  {{ m.chart('rf_rev', 'Revenue by month', 'actual, then reforecast, against budget') }}
+  {{ m.chart('rf_pat', 'Cumulative profit after tax', 'this scenario against budget') }}
+  {% if chart_rf.cash %}{{ m.chart('rf_cash', 'Cash, net of overdraft', 'indicative projection') }}{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Month by month</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Month</th><th></th><th>Revenue</th><th>Budget</th><th>Var</th><th>EBITDA</th><th>Budget</th><th>Var</th><th>Profit after tax</th><th>Cumulative</th><th>Cumulative budget</th></tr></thead>
+    <tbody>
+    {% for r in res.months %}
+      <tr class="{{ 'ma-rf-row' if r.kind == 'reforecast' }}"><td>{{ r.label }}</td>
+        <td><span class="badge {{ 'status-Approved' if r.kind == 'reforecast' else '' }}">{{ 'Reforecast' if r.kind == 'reforecast' else ('Actual (est.)' if r.est else 'Actual') }}</span></td>
+        <td class="n">{{ r.revenue|cfn }}</td><td class="n">{{ r.b_revenue|cfn }}</td>{{ ma.vc((r.revenue - r.b_revenue) if (r.revenue is not none and r.b_revenue is not none) else none, none) }}
+        <td class="n">{{ r.ebitda|cfn }}</td><td class="n">{{ r.b_ebitda|cfn }}</td>{{ ma.vc((r.ebitda - r.b_ebitda) if (r.ebitda is not none and r.b_ebitda is not none) else none, none) }}
+        <td class="n">{{ r.pat|cfn }}</td><td class="n">{{ r.cum_pat|cfn }}</td><td class="n">{{ r.cum_b_pat|cfn }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+{% if res.cash %}
+<div class="card">
+  <h3 style="margin-top:0;">Cash and funding</h3>
+  <p>Projected year-end cash (net of overdraft) is <strong>{{ cur }} {{ res.cash.year_end|cfn }}</strong>, against {{ cur }} {{ res.cash.current_year_end|cfn }} on the pack's current outlook.
+    {% if res.cash.peak_overdraft > 0.5 %}The projected peak overdraft is <strong>{{ cur }} {{ res.cash.peak_overdraft|cfn }}</strong>{% if res.cash.current_peak_overdraft > 0.5 %} (current outlook: {{ cur }} {{ res.cash.current_peak_overdraft|cfn }}){% endif %}: a funding need to plan for.{% else %}No overdraft is needed in the remaining months.{% endif %}</p>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Month end</th><th>This scenario</th><th>Pack outlook now</th><th>Budget</th></tr></thead>
+    <tbody>{% for x in res.cash.months %}<tr><td>{{ x.label }}</td><td class="n">{{ x.net_cash|cfn }}</td><td class="n">{{ x.current_net_cash|cfn }}</td><td class="n">{{ x.budget_net_cash|cfn }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+  <p class="cf-sub">Indicative. Starting from the closing balance sheet at {{ labels.month }}: receivables, inventory and payables keep their relationship to revenue and costs at that date; fixed assets fall by depreciation; loans and share capital are unchanged; tax is paid as charged; retained earnings roll forward. Capital spending, loan repayments and dividends beyond the P&amp;L are not modelled.</p>
+</div>
+{% elif remaining %}
+<div class="card"><div class="cf-sub">No closing balance sheet exists for {{ labels.month }}, so cash and funding are not projected. Capture or upload the balance sheet for that month to see them.</div></div>
+{% endif %}
+{% endif %}
+
+{% if saved and compare_cols %}
+<div class="card">
+  <h3 style="margin-top:0;">Scenarios side by side</h3>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Full year {{ fy }}</th><th>Pack outlook now</th>{% for c in compare_cols %}<th>{{ c.name }}</th>{% endfor %}<th>Budget</th></tr></thead>
+    <tbody>
+    {% for key, label in [('revenue', 'Revenue'), ('ebitda', 'EBITDA'), ('pat', 'Profit after tax')] %}
+      <tr><td class="ma-label">{{ label }}</td>
+        <td class="n">{{ (V.outlook[key] if V.outlook else none)|cfn }}</td>
+        {% for c in compare_cols %}<td class="n">{% if c.error %}<span class="muted" title="{{ c.error }}">n/a</span>{% else %}{{ c.fy[key]|cfn }}{% endif %}</td>{% endfor %}
+        <td class="n">{{ (V.budget_fy[key] if V.budget_fy else none)|cfn }}</td></tr>
+    {% endfor %}
+      <tr><td class="ma-label">Year-end cash (net of overdraft)</td><td class="n">{{ (current_res.cash.year_end if current_res and current_res.cash else none)|cfn }}</td>
+        {% for c in compare_cols %}<td class="n">{% if c.error %}<span class="muted">n/a</span>{% else %}{{ (c.cash.year_end if c.cash else none)|cfn }}{% endif %}</td>{% endfor %}<td class="n"></td></tr>
+      <tr><td class="ma-label">Peak overdraft</td><td class="n">{{ (current_res.cash.current_peak_overdraft if current_res and current_res.cash else none)|cfn }}</td>
+        {% for c in compare_cols %}<td class="n">{% if c.error %}<span class="muted">n/a</span>{% else %}{{ (c.cash.peak_overdraft if c.cash else none)|cfn }}{% endif %}</td>{% endfor %}<td class="n"></td></tr>
+    </tbody>
+  </table></div>
+  <p class="cf-sub">Saved scenarios are recalculated from the latest actuals every time, so they stay current as new months are captured.</p>
+</div>
+{% endif %}
+
+{% if chart_rf %}
+<script type="application/json" id="cf-data">{{ chart_rf|tojson }}</script>
+{{ m.chart_boot() }}
+<script>
+(function () {
+  var D = JSON.parse(document.getElementById('cf-data').textContent), C = cfColors;
+  var base = { currency: '{{ cur }}', unit: 'money', labels: D.months };
+  function mk(o) { for (var k in base) if (!(k in o)) o[k] = base[k]; return o; }
+  function has(a) { return a && a.some(function (x) { return x !== null; }); }
+  var revS = [cfSeries('Actual and reforecast', C.BLUE, D.rev)];
+  if (has(D.rev_b)) revS.push(cfSeries('Budget', C.ORANGE, D.rev_b));
+  cfGo('rf_rev', mk({ type: 'columns', title: 'Revenue by month', series: revS }));
+  var patS = [cfSeries('This scenario', C.BLUE, D.pat_cum)];
+  if (has(D.pat_cum_b)) patS.push(cfSeries('Budget', C.ORANGE, D.pat_cum_b));
+  cfGo('rf_pat', mk({ type: 'line', title: 'Cumulative profit after tax', series: patS }));
+  if (D.cash) {
+    var cS = [cfSeries('This scenario', C.BLUE, D.cash)];
+    if (has(D.cash_cur)) cS.push(cfSeries('Pack outlook now', C.AQUA, D.cash_cur));
+    if (has(D.cash_b)) cS.push(cfSeries('Budget', C.ORANGE, D.cash_b));
+    cfGo('rf_cash', mk({ type: 'line', title: 'Cash, net of overdraft', series: cS }));
+  }
+})();
+</script>
+{% endif %}
+{% endblock %}

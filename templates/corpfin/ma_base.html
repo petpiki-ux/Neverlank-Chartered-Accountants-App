@@ -31,7 +31,7 @@
   <form method="post" action="{{ url_for('corpfin.pack_reopen', pack_id=pack.id) }}" class="inline" onsubmit="return confirm('Reopen this pack for editing?');"><button class="btn small secondary">Reopen</button></form>{% else %} A Partner can reopen it.{% endif %}</div>
 {% endif %}
 
-{% if tab in ('summary', 'income', 'balance', 'cashflow', 'kpis', 'variances', 'commentary') %}
+{% if tab in ('summary', 'income', 'balance', 'cashflow', 'kpis', 'variances', 'varmodel', 'reforecast', 'commentary') %}
 <form method="get" class="an-filters" style="margin-bottom:12px;">
   {% for k, val in request.args.items() if k != 'month' %}<input type="hidden" name="{{ k }}" value="{{ val }}">{% endfor %}
   <div><label for="month">Reporting month</label>

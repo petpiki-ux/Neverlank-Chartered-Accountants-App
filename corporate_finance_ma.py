@@ -28,6 +28,8 @@ from flask_login import current_user
 import cf_engine as E
 import cf_ma as M
 import cf_fsload as FS
+import cf_recon as RC
+import cf_ma_var as VM
 import cf_tools as T
 from extensions import db
 from financials import suggest_fs_category
@@ -40,7 +42,7 @@ from corporate_finance import (corpfin_bp, _guard, _can_see, _is_signoff_role, _
 
 PACK_TABS = [
     ("summary", "Summary"), ("income", "Income statement"), ("balance", "Balance sheet"), ("cashflow", "Cash flow"),
-    ("kpis", "KPIs"), ("variances", "Variances"), ("commentary", "Commentary"), ("actuals", "Actuals"),
+    ("kpis", "KPIs"), ("variances", "Variances"), ("varmodel", "Variance model"), ("reforecast", "Reforecast"), ("commentary", "Commentary"), ("actuals", "Actuals"),
     ("budget", "Budget & forecast"), ("prior", "Prior year"), ("setup", "Setup"),
 ]
 PLAN_NAMES = {"budget": "Budget", "forecast": "Forecast"}
@@ -248,6 +250,10 @@ def pack_tab(pack_id, tab):
         vl = M.variance_list(d)
         vl.sort(key=lambda x: -abs(x["ytd_var"] or 0))
         ctx.update(vl=vl, V=M.vectors(d))
+    elif tab == "varmodel":
+        ctx.update(_varmodel_ctx(d))
+    elif tab == "reforecast":
+        ctx.update(_reforecast_ctx(pack, d))
     elif tab == "commentary":
         ctx.update(msgs=M.key_messages(d, ""), com=d["commentary"], notes=d["line_notes"], line_defs=M.pl_line_defs(d["structure"]))
     elif tab == "actuals":
@@ -256,8 +262,9 @@ def pack_tab(pack_id, tab):
         ctx.update(plans={n: d.get(n) or {} for n in PLAN_NAMES}, line_defs=M.pl_line_defs(d["structure"]),
                    plan_pl={n: M.budget_months(d, n) for n in PLAN_NAMES}, models=_pack_models(pack))
     elif tab == "prior":
+        pb = M.prior_bs(d)
         ctx.update(prior=d.get("prior") or {}, line_defs=M.pl_line_defs(d["structure"]), bs_lines=M.BS_LINES, **loader_context(pack.client_id, pack.engagement_id),
-                   fs_target=f"pack:{pack.id}")
+                   fs_target=f"pack:{pack.id}", prior_gap=M.bs_total(pb)["check"] if pb else None)
     elif tab == "setup":
         ctx.update(currencies=CURRENCIES, outlooks=OUTLOOKS, months_full=MONTH_NAMES)
     return render_template(f"corpfin/ma_{tab}.html", **ctx)
@@ -516,14 +523,16 @@ def _client_map(client_id):
     return {M.norm_name(m.account_name): m.fs_category for m in COAMapping.query.filter_by(client_id=client_id).all()}
 
 
-def _mapping_page(pack, d, rows, chosen, hows, target, month, filename, label=""):
+def _mapping_page(pack, d, rows, chosen, hows, target, month, filename, label="", diag=None, fixlog=None):
     structure = d["structure"]
+    fixlog = fixlog or []
     return render_template("corpfin/ma_mapping.html", pack=pack, d=d, tab="actuals" if target == "actual" else "prior", cur=pack.currency,
                            engagement=pack.engagement, structure=structure, settings=d["settings"], months=M.fy_months(d), report_month=M.report_month(d),
                            fy=M.fy_label(d), prior_label=M.prior_fy_label(d), warnings=[], status=M.data_status(d), has_prior=bool((d.get("prior") or {}).get("pl")),
                            month_label=M.month_label, rows=rows, chosen=chosen, hows=hows, target=target, month=month, filename=filename,
                            options=M.target_options(structure), rows_json=json.dumps(rows), label=label,
-                           month_name=M.month_label(month, False) if month else "")
+                           month_name=M.month_label(month, False) if month else "", diag=diag, fixlog=fixlog, fixlog_json=json.dumps(fixlog),
+                           target_names=dict((k, lab) for _, opts in M.target_options(structure) for k, lab in opts))
 
 
 @corpfin_bp.route("/management-accounts/<int:pack_id>/tb/upload", methods=["POST"])
@@ -584,15 +593,46 @@ def pack_tb_confirm(pack_id):
     chosen = {str(i): request.form.get(f"map_{i}") for i in range(len(rows)) if request.form.get(f"map_{i}") in valid}
     filename = (request.form.get("filename") or "")[:200]
     label = (request.form.get("label") or "").strip()[:30]
+    fixlog = _parse_fixlog(request.form)
     missing = [r["name"] for i, r in enumerate(rows) if str(i) not in chosen]
     if missing:
         flash(f"{len(missing)} account(s) still need a line (or 'Ignore'): " + ", ".join(missing[:5]) + ("..." if len(missing) > 5 else "") + ".", "danger")
-        return _mapping_page(pack, d, rows, chosen, {}, target, month, filename, label)
+        return _mapping_page(pack, d, rows, chosen, {}, target, month, filename, label, fixlog=fixlog)
+
+    cmap = _client_map(pack.client_id)
+
+    def fallback(i):
+        t, _how = M.suggest_target(rows[i]["name"], d["structure"], d["mapping"], cmap, suggest_fs_category)
+        return t if t and t != "ignore" else None
+
+    fix = request.form.get("fix")
+    if fix:
+        diag = RC.diagnose_tb(rows, chosen, fallback_target=fallback)
+        sug = next((x for x in diag["suggestions"] if x["id"] == fix and not x.get("advisory")), None)
+        if sug:
+            for i, v in (sug.get("row_changes") or {}).items():
+                fixlog.append(f"{rows[int(i)]['name']}: {rows[int(i)]['net_dr']:,.2f} changed to {v:,.2f}")
+                rows[int(i)]["net_dr"] = v
+            for i, t in (sug.get("map_changes") or {}).items():
+                fixlog.append(f"{rows[int(i)]['name']}: no longer ignored, mapped to {t.replace('_', ' ')}")
+                chosen[str(i)] = t
+            flash("Fix applied. Review the mapping below and save when it looks right.", "success")
+        else:
+            flash("That suggestion no longer applies to the figures as they are now. The checks have been re-run.", "warning")
     entry, stats = M.entry_from_tb(rows, chosen, d["structure"])
+    unbalanced = abs(stats["tb_out_by"]) > 0.5 or abs(stats["bs_check"]) > 0.5
+    if unbalanced and request.form.get("force") != "1":
+        diag = RC.diagnose_tb(rows, chosen, fallback_target=fallback)
+        return _mapping_page(pack, d, rows, chosen, {}, target, month, filename, label, diag=diag, fixlog=fixlog)
+    if (request.form.get("recheck") or fix) and not unbalanced:
+        flash("These figures now balance. Press Save to keep them.", "success")
+        return _mapping_page(pack, d, rows, chosen, {}, target, month, filename, label, fixlog=fixlog)
     for i, r in enumerate(rows):
         if len(d["mapping"]) < 5000:
             d["mapping"][M.norm_name(r["name"])] = chosen[str(i)]
-    entry["note"] = f"Trial balance: {filename}" if filename else "Trial balance upload"
+    entry["note"] = (f"Trial balance: {filename}" if filename else "Trial balance upload") + (". Corrections accepted at review: " + "; ".join(fixlog) if fixlog else "")
+    if unbalanced:
+        entry["note"] += ". Saved out of balance"
     entry["saved"] = _stamp()
     if target == "actual":
         d["entries"][month] = entry
@@ -605,10 +645,278 @@ def pack_tb_confirm(pack_id):
     _save(pack, d)
     flash(f"Trial balance loaded for {what}: {stats['mapped']} accounts mapped, profit after tax {stats['pat']:,.0f}.", "success")
     if abs(stats["tb_out_by"]) > 0.5:
-        flash(f"The trial balance itself does not balance (debits less credits = {stats['tb_out_by']:,.2f}). Check the file.", "warning")
+        flash(f"Saved with the trial balance out of balance (debits less credits = {stats['tb_out_by']:,.2f}). The Actuals tab will keep flagging it.", "warning")
     elif abs(stats["bs_check"]) > 0.5:
-        flash(f"The balance sheet built from this mapping is out by {stats['bs_check']:,.2f}: check that every account is on the right line.", "warning")
+        flash(f"Saved with the balance sheet out by {stats['bs_check']:,.2f}. The Actuals tab will keep flagging it.", "warning")
     return back
+
+
+# =========================================================================== variance model
+
+def _pick_view(d, args):
+    """basis / comparator / measure from the query string, falling back to the first combination that has figures."""
+    avail = VM.availability(d)
+    basis = args.get("basis") if args.get("basis") in dict(VM.BASES) else "ytd"
+    against = args.get("against") if args.get("against") in dict(VM.AGAINST) else "budget"
+    measure = args.get("measure") if args.get("measure") in dict(VM.MEASURES) else "pat"
+    if not avail[basis][against]:
+        for b_ in (basis, "ytd", "month", "fy"):
+            for a_ in (against, "budget", "forecast", "prior"):
+                if avail[b_][a_]:
+                    return b_, a_, measure, avail
+    return basis, against, measure, avail
+
+
+def _varmodel_ctx(d):
+    basis, against, measure, avail = _pick_view(d, request.args)
+    b = VM.bridge(d, basis, against, measure)
+    dr = VM.drivers(d, basis, against)
+    structure = d["structure"]
+    cost_lines = [x for x in M.pl_line_defs(structure) if not x["income"] and x["key"] != "div"]
+    return dict(basis=basis, against=against, measure=measure, avail=avail, br=b, svg=VM.waterfall_svg(b), dr=dr, narr=VM.narrative(b, dr, ""),
+                BASES=VM.BASES, AGAINST=VM.AGAINST, MEASURES=VM.MEASURES, TAG_TYPES=VM.TAG_TYPES, DRIVER_COLS=VM.DRIVER_COLS, cost_lines=cost_lines,
+                rev_lines=structure["revenue"], line_defs=[x for x in M.pl_line_defs(structure) if x["key"] != "div"], any_avail=any(v for row in avail.values() for v in row.values()))
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/varmodel/save", methods=["POST"])
+def pack_varmodel_save(pack_id):
+    pack = _pack_or_404(pack_id)
+    basis = request.form.get("basis") if request.form.get("basis") in dict(VM.BASES) else "ytd"
+    against = request.form.get("against") if request.form.get("against") in dict(VM.AGAINST) else "budget"
+    measure = request.form.get("measure") if request.form.get("measure") in dict(VM.MEASURES) else "pat"
+    back = redirect(url_for("corpfin.pack_tab", pack_id=pack.id, tab="varmodel", basis=basis, against=against, measure=measure, month=request.form.get("month") or None))
+    if _plocked(pack):
+        return back
+    d = _data(pack)
+    vm = VM.vm_of(d)
+    vm = {"units": dict(vm.get("units") or {}), "variable_pct": dict(vm.get("variable_pct") or {}), "tags": dict(vm.get("tags") or {})}
+    key = f"{basis}:{against}"
+    units = {}
+    for r in d["structure"]["revenue"]:
+        a_, c_ = M.f(request.form.get(f"u_a_{r['key']}")), M.f(request.form.get(f"u_c_{r['key']}"))
+        if a_ > 0 and c_ > 0:
+            units[r["key"]] = {"a": a_, "c": c_}
+    vm["units"][key] = units
+    for x in M.pl_line_defs(d["structure"]):
+        if not x["income"] and x["key"] != "div":
+            raw = (request.form.get(f"vp_{x['key']}") or "").strip()
+            if raw != "":
+                vm["variable_pct"][x["key"]] = max(0.0, min(100.0, M.f(raw)))
+    valid_lines = {x["key"] for x in M.pl_line_defs(d["structure"]) if x["key"] != "div"}
+    tags = []
+    for i in range(20):
+        line, typ, amt = request.form.get(f"tag_line_{i}"), request.form.get(f"tag_type_{i}"), (request.form.get(f"tag_amount_{i}") or "").strip()
+        if line in valid_lines and typ in dict(VM.TAG_TYPES) and amt != "" and M.f(amt) != 0 and not request.form.get(f"tag_del_{i}"):
+            tags.append({"line": line, "type": typ, "amount": M.f(amt), "note": (request.form.get(f"tag_note_{i}") or "").strip()[:200]})
+    vm["tags"][key] = tags
+    vm["saved"] = _stamp()
+    d["var_model"] = vm
+    _save(pack, d)
+    flash("Variance drivers saved.", "success")
+    return back
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/varmodel/commentary", methods=["POST"])
+def pack_varmodel_commentary(pack_id):
+    pack = _pack_or_404(pack_id)
+    basis = request.form.get("basis") if request.form.get("basis") in dict(VM.BASES) else "ytd"
+    against = request.form.get("against") if request.form.get("against") in dict(VM.AGAINST) else "budget"
+    measure = request.form.get("measure") if request.form.get("measure") in dict(VM.MEASURES) else "pat"
+    if _plocked(pack):
+        return _back(pack, "varmodel")
+    d = _data(pack)
+    b = VM.bridge(d, basis, against, measure)
+    if not b:
+        flash("There is nothing to write up for that comparison yet.", "warning")
+        return _back(pack, "varmodel")
+    text = "\n".join(VM.narrative(b, VM.drivers(d, basis, against), ""))
+    cur = (d["commentary"].get("income") or "").strip()
+    if text in cur:
+        flash("That text is already in the income statement commentary.", "info")
+    else:
+        d["commentary"]["income"] = (cur + "\n\n" if cur else "") + text
+        _save(pack, d)
+        flash("Added to the income statement commentary. Edit it on the Commentary tab.", "success")
+    return redirect(url_for("corpfin.pack_tab", pack_id=pack.id, tab="varmodel", basis=basis, against=against, measure=measure))
+
+
+# =========================================================================== reforecast
+
+def _saved_scenarios(d):
+    sc = d.get("scenarios")
+    return [s for s in sc if isinstance(s, dict) and s.get("id")] if isinstance(sc, list) else []
+
+
+def _reforecast_ctx(pack, d):
+    saved = _saved_scenarios(d)
+    sid = request.args.get("scenario")
+    chosen = next((s for s in saved if str(s["id"]) == sid), None)
+    if request.args.get("sc_base") is not None:
+        sc = VM.scenario_from_form(request.args, d)
+    elif chosen:
+        sc = VM.normalise_scenario(chosen.get("params"), d)
+        sc["name"] = chosen.get("name") or sc["name"]
+    else:
+        sc = VM.normalise_scenario({}, d)
+    res = VM.reforecast(d, sc)
+    V = M.vectors(d)
+    remaining = V["months"][V["n"]:]
+    cols, _first = VM.compare_scenarios(d, saved) if saved else ([], None)
+    base_res = VM.reforecast(d, {"base": "current"}) if not res.get("error") or saved else None
+    return dict(sc=sc, res=res, saved=saved, chosen=chosen, remaining=remaining, remaining_labels=[(m, M.month_label(m, False)) for m in remaining],
+                BASE_CHOICES=VM.BASE_CHOICES, line_defs=M.pl_line_defs(d["structure"]), compare_cols=cols, current_res=base_res,
+                V=V, chart_rf=_rf_chart(res) if res and not res.get("error") else None)
+
+
+def _rf_chart(res):
+    return {"months": [r["label"] for r in res["months"]],
+            "rev": [round(r["revenue"], 2) if r["revenue"] is not None else None for r in res["months"]],
+            "rev_b": [round(r["b_revenue"], 2) if r["b_revenue"] is not None else None for r in res["months"]],
+            "pat_cum": [round(r["cum_pat"], 2) for r in res["months"]],
+            "pat_cum_b": [round(r["cum_b_pat"], 2) if r["cum_b_pat"] is not None else None for r in res["months"]],
+            "kinds": [r["kind"] for r in res["months"]],
+            "cash": ([None] * res["n"]) + [round(x["net_cash"], 2) for x in res["cash"]["months"]] if res.get("cash") else None,
+            "cash_cur": ([None] * res["n"]) + [round(x["current_net_cash"], 2) for x in res["cash"]["months"]] if res.get("cash") else None,
+            "cash_b": ([None] * res["n"]) + [round(x["budget_net_cash"], 2) if x["budget_net_cash"] is not None else None for x in res["cash"]["months"]] if res.get("cash") else None}
+
+
+def _rf_back(pack, **kw):
+    return redirect(url_for("corpfin.pack_tab", pack_id=pack.id, tab="reforecast", **kw))
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/reforecast/save", methods=["POST"])
+def pack_reforecast_save(pack_id):
+    pack = _pack_or_404(pack_id)
+    if _plocked(pack):
+        return _rf_back(pack)
+    d = _data(pack)
+    sc = VM.scenario_from_form(request.form, d)
+    if not sc["name"]:
+        flash("Give the scenario a name so you can find it again.", "danger")
+        return redirect(url_for("corpfin.pack_tab", pack_id=pack.id, tab="reforecast", **{k: v for k, v in request.form.items() if k.startswith(("sc_", "adj_"))}))
+    saved = _saved_scenarios(d)
+    existing = next((s for s in saved if str(s["id"]) == request.form.get("scenario_id")), None)
+    entry = {"id": existing["id"] if existing else (max([s["id"] for s in saved], default=0) + 1), "name": sc["name"], "params": {k: v for k, v in sc.items() if k != "name"},
+             "saved": _stamp()}
+    if existing:
+        saved = [entry if s["id"] == existing["id"] else s for s in saved]
+    else:
+        if len(saved) >= 8:
+            flash("A pack can hold eight scenarios. Delete one first.", "danger")
+            return _rf_back(pack)
+        saved.append(entry)
+    d["scenarios"] = saved
+    _save(pack, d)
+    flash(f"Scenario '{sc['name']}' saved.", "success")
+    return _rf_back(pack, scenario=entry["id"])
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/reforecast/<int:sid>/delete", methods=["POST"])
+def pack_reforecast_delete(pack_id, sid):
+    pack = _pack_or_404(pack_id)
+    if _plocked(pack):
+        return _rf_back(pack)
+    d = _data(pack)
+    saved = _saved_scenarios(d)
+    d["scenarios"] = [s for s in saved if s["id"] != sid]
+    if len(d["scenarios"]) != len(saved):
+        _save(pack, d)
+        flash("Scenario deleted.", "success")
+    return _rf_back(pack)
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/reforecast/apply", methods=["POST"])
+def pack_reforecast_apply(pack_id):
+    """Make a scenario the pack's Forecast for the remaining months (earlier forecast months are kept)."""
+    pack = _pack_or_404(pack_id)
+    if _plocked(pack):
+        return _rf_back(pack)
+    d = _data(pack)
+    sc = VM.scenario_from_form(request.form, d)
+    res = VM.reforecast(d, sc)
+    if res.get("error"):
+        flash(res["error"], "danger")
+        return _rf_back(pack)
+    d["forecast"] = VM.forecast_dataset(d, res, _stamp())
+    msg = f"The forecast for {len(res['remaining'])} remaining month(s) was replaced with this scenario."
+    if d["settings"].get("outlook") in ("budget_remaining", "run_rate"):
+        d["settings"]["outlook"] = "auto"
+        msg += " The full-year outlook setting was changed to Automatic so that it uses the forecast."
+    _save(pack, d)
+    flash(msg + " Review the Budget & forecast tab and the statements.", "success")
+    return _rf_back(pack, **{k: v for k, v in request.form.items() if k.startswith(("sc_", "adj_"))})
+
+
+# =========================================================================== diagnose a saved balance sheet
+
+_BS_SIDES = {k: side for k, _, side in M.BS_LINES}
+
+
+def _base_ctx(pack, d, tab, **extra):
+    ctx = dict(pack=pack, d=d, tab=tab, cur=pack.currency, engagement=pack.engagement, structure=d["structure"], settings=d["settings"],
+               months=M.fy_months(d), report_month=M.report_month(d), fy=M.fy_label(d), prior_label=M.prior_fy_label(d), month_label=M.month_label,
+               warnings=M.warnings(d), status=M.data_status(d), has_prior=bool((d.get("prior") or {}).get("pl")))
+    ctx.update(extra)
+    return ctx
+
+
+def _scope_bs(d, scope):
+    """(balance sheet dict used for the pack, profit to test against, label, holder dict that can be edited) for 'prior' or a month."""
+    structure = d["structure"]
+    if scope == "prior":
+        p = d.get("prior") or {}
+        if not p.get("bs"):
+            return None
+        pat = M.pl_vector(structure, p.get("pl") or {})["pat"] if p.get("pl") else None
+        return dict(M.prior_bs(d)), pat, "the prior year", p["bs"]
+    if scope not in M.fy_months(d):
+        return None
+    e = (d.get("entries") or {}).get(scope)
+    ser = M.bs_series(d)
+    if not e or not e.get("bs") or scope not in ser:
+        return None
+    idx = M.fy_months(d).index(scope)
+    if e.get("kind") == "ytd":
+        cum = M.cumulative_actuals(d)[idx]["cum"]
+        pat = M.pl_vector(structure, cum)["pat"] if cum else None
+    else:
+        vals = M.monthly_actuals(d)[idx]["values"]
+        pat = M.pl_vector(structure, vals)["pat"] if vals else None
+    return {k: v for k, v in ser[scope].items() if k in M.BS_KEYS}, pat, M.month_label(scope, False), e["bs"]
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/diagnose/<scope>", methods=["GET", "POST"])
+def pack_diagnose(pack_id, scope):
+    pack = _pack_or_404(pack_id)
+    d = _data(pack)
+    got = _scope_bs(d, scope)
+    if got is None:
+        flash("There is no balance sheet to check there.", "warning")
+        return _back(pack, "prior" if scope == "prior" else "actuals")
+    bs, pat, label, holder = got
+    diag = RC.diagnose_pack_bs(bs, M.BS_LABEL, _BS_SIDES, pat=pat)
+    if request.method == "POST":
+        if _plocked(pack):
+            return redirect(url_for("corpfin.pack_diagnose", pack_id=pack.id, scope=scope))
+        sug = next((x for x in diag["suggestions"] if x["id"] == request.form.get("fix") and not x.get("advisory")), None)
+        if sug is None:
+            flash("That suggestion no longer applies; the figures have changed. The check has been re-run.", "warning")
+        else:
+            for c in sug["changes"]:
+                holder[c["key"]] = c["new"]
+            note = f"Corrected at review: {sug['title']}"
+            if scope == "prior":
+                d["prior"]["note"] = ((d["prior"].get("note") or "") + ". " + note).strip(". ")
+                d["prior"]["saved"] = _stamp()
+            else:
+                e = d["entries"][scope]
+                e["note"] = ((e.get("note") or "") + ". " + note).strip(". ")
+                e["saved"] = _stamp()
+            _save(pack, d)
+            flash("Fix applied and saved.", "success")
+        return redirect(url_for("corpfin.pack_diagnose", pack_id=pack.id, scope=scope))
+    return render_template("corpfin/ma_diagnose.html", **_base_ctx(pack, d, "prior" if scope == "prior" else "actuals", diag=diag, scope=scope, scope_label=label,
+                                                                   locked=pack.is_final))
 
 
 # =========================================================================== prior year (typed)
@@ -881,21 +1189,25 @@ def fs_read():
     if not periods or not any((p.get("is") or p.get("bs")) for p in periods):
         flash("No financial statement figures could be found in that document. Try the paste option, or enter the figures by hand.", "danger")
         return back
+    return _review_page(kind, obj, ex, periods, name, [])
+
+
+_STD_BS_LABELS = dict(FS.STD_BS)
+
+
+def _review_page(kind, obj, ex, periods, source_name, fixlog, flash_msg=None):
+    """The 'check the figures' page: the figures, the reconciliation checks, and - for any year whose balance sheet does not
+    balance - a diagnosis with fixes the preparer can accept one at a time."""
     for p in periods:
         p["checks"] = FS.period_checks(p)
-    return render_template("corpfin/fs_review.html", kind=kind, obj=obj, ex=ex, periods=periods, source_name=name, STD_IS=FS.STD_IS, STD_BS=FS.STD_BS,
-                           target=f"{kind}:{obj.id}", scales=FS.SCALES, cur_code=ex.get("currency") or getattr(obj, "currency", ""))
+        p["diag"] = RC.diagnose_statement_period(p, _STD_BS_LABELS) if p.get("bs") else None
+    return render_template("corpfin/fs_review.html", kind=kind, obj=obj, ex=ex, periods=periods, source_name=source_name, STD_IS=FS.STD_IS, STD_BS=FS.STD_BS,
+                           target=f"{kind}:{obj.id}", scales=FS.SCALES, cur_code=ex.get("currency") or getattr(obj, "currency", ""),
+                           fixlog=fixlog, fixlog_json=json.dumps(fixlog), ex_notes_json=json.dumps(ex.get("notes") or []))
 
 
-@corpfin_bp.route("/statements/apply", methods=["POST"])
-def fs_apply():
-    kind, obj = _loader_target(request.form.get("target"))
-    back = _target_back(kind, obj)
-    if obj.is_final:
-        flash("This is Final and locked. A Partner can reopen it first.", "danger")
-        return back
-    form = request.form
-    mult = FS.SCALES.get(form.get("scale") or "units", 1)
+def _parse_periods(form):
+    """The editable figures of the review page, read back from the form."""
     try:
         n = min(8, int(form.get("n_periods") or 0))
     except ValueError:
@@ -913,6 +1225,68 @@ def fs_apply():
             if v != "":
                 period["bs"][k] = M.f(v)
         periods.append(period)
+    return periods
+
+
+def _parse_fixlog(form):
+    try:
+        log = json.loads(form.get("fixlog") or "[]")
+        return [str(x)[:300] for x in log][:30] if isinstance(log, list) else []
+    except ValueError:
+        return []
+
+
+@corpfin_bp.route("/statements/recheck", methods=["POST"])
+def fs_recheck():
+    """Re-run the checks on the figures as currently typed, optionally applying one suggested fix first (button value 'period:id')."""
+    kind, obj = _loader_target(request.form.get("target"))
+    back = _target_back(kind, obj)
+    if obj.is_final:
+        flash("This is Final and locked. A Partner can reopen it first.", "danger")
+        return back
+    form = request.form
+    periods = _parse_periods(form)
+    fixlog = _parse_fixlog(form)
+    try:
+        notes = [str(x) for x in json.loads(form.get("ex_notes") or "[]")][:8]
+    except ValueError:
+        notes = []
+    ex = {"method": form.get("ex_method") or "builtin", "entity": (form.get("ex_entity") or "")[:200], "currency": (form.get("ex_currency") or "")[:6] or None,
+          "scale": FS.SCALES.get(form.get("scale") or "units", 1), "notes": notes}
+    fix = form.get("fix") or ""
+    if fix:
+        pi, _, sid = fix.partition(":")
+        try:
+            period = periods[int(pi)]
+        except (ValueError, IndexError):
+            period = None
+        done = False
+        if period is not None:
+            diag = RC.diagnose_statement_period(period, _STD_BS_LABELS)
+            sug = next((x for x in diag["suggestions"] if x["id"] == sid and not x.get("advisory")), None)
+            if sug:
+                for c in sug["changes"]:
+                    period["bs"][c["key"]] = c["new"]
+                fixlog.append(f"{period['label']}: {sug['title']}")
+                done = True
+        if done:
+            flash("Fix applied. Check the figures against the document before saving.", "success")
+        else:
+            flash("That suggestion no longer applies to the figures as they are now. The checks have been re-run.", "warning")
+    return _review_page(kind, obj, ex, periods, (form.get("source_name") or "")[:200], fixlog)
+
+
+@corpfin_bp.route("/statements/apply", methods=["POST"])
+def fs_apply():
+    kind, obj = _loader_target(request.form.get("target"))
+    back = _target_back(kind, obj)
+    if obj.is_final:
+        flash("This is Final and locked. A Partner can reopen it first.", "danger")
+        return back
+    form = request.form
+    mult = FS.SCALES.get(form.get("scale") or "units", 1)
+    periods = _parse_periods(form)
+    fixlog = _parse_fixlog(form)
     src = (form.get("source_name") or "")[:200]
     if kind == "pack":
         try:
@@ -922,10 +1296,15 @@ def fs_apply():
             return back
         d = _data(obj)
         pl, bs = FS.to_pack_prior(pick, d["structure"], mult)
-        d["prior"] = {"label": pick["label"], "source": "statements", "pl": pl, "bs": bs, "note": f"Loaded from {src}" if src else "Loaded from financial statements",
+        d["prior"] = {"label": pick["label"], "source": "statements", "pl": pl, "bs": bs, "note": (f"Loaded from {src}" if src else "Loaded from financial statements") + (". Corrections accepted at review: " + "; ".join(fixlog) if fixlog else ""),
                       "saved": _stamp()}
+        derived = "retained" not in pick["bs"] and "total_equity" not in pick["bs"] and not RC.diagnose_statement_period(pick, _STD_BS_LABELS)["balanced"]
+        if derived:
+            d["prior"]["note"] += ". Retained earnings were not in the statements and were set to the balancing figure"
         _save(obj, d)
         chk = M.bs_total(bs)["check"]
+        if derived:
+            flash(f"Retained earnings and reserves were not in the statements, so they were set to the balancing figure ({bs['retained']:,.0f}). Check it against the document.", "warning")
         flash(f"Prior year ({pick['label']}) loaded from the statements. Revenue and operating expenses sit on the first line of each section: split them on the "
               "Prior year tab if you want the same lines as the pack.", "success")
         if abs(chk) > 0.5:

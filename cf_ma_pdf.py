@@ -241,6 +241,47 @@ def _basis_lines(d, V, status):
     return out
 
 
+def _waterfall_drawing(b, width, height=58 * mm):
+    """Waterfall of a variance bridge as a reportlab drawing (green helped profit, red hurt it, navy totals)."""
+    from reportlab.graphics.shapes import Drawing, Line, Rect, String
+    bars = [("tot", b["start"]["value"], 0.0, b["start"]["value"], "Comparator")]
+    run = b["start"]["value"]
+    for st in b["steps"]:
+        new = run + st["value"]
+        bars.append(("up" if st["value"] >= 0 else "down", st["value"], run, new, st["label"]))
+        run = new
+    bars.append(("tot", b["end"]["value"], 0.0, b["end"]["value"], "Actual"))
+    lo = min(0.0, *[min(x[2], x[3]) for x in bars])
+    hi = max(0.0, *[max(x[2], x[3]) for x in bars])
+    span = (hi - lo) or 1.0
+    top, bottom, left = 8 * mm, 15 * mm, 4 * mm
+    plot_h = height - top - bottom
+    y = lambda v: bottom + (v - lo) / span * plot_h
+    dr = Drawing(width, height)
+    dr.add(Line(left, y(0), width - left, y(0), strokeColor=LINE, strokeWidth=0.6))
+    slot = (width - 2 * left) / len(bars)
+    bw = slot * 0.62
+    for i, (kind, val, a, z, lab) in enumerate(bars):
+        x = left + i * slot + (slot - bw) / 2
+        col = NAVY if kind == "tot" else (GREEN if kind == "up" else RED)
+        y0, y1 = y(min(a, z)), y(max(a, z))
+        dr.add(Rect(x, y0, bw, max(y1 - y0, 0.6), fillColor=col, strokeColor=None))
+        txt = _n(val)
+        dr.add(String(x + bw / 2, (y1 + 1.2 * mm) if val >= 0 or kind == "tot" and val >= 0 else (y0 - 3 * mm), txt, fontName="Helvetica", fontSize=6, textAnchor="middle", fillColor=INK))
+        words, lines_, cur_ = lab.split(), [], ""
+        for w_ in words:
+            if cur_ and len(cur_) + 1 + len(w_) > 13:
+                lines_.append(cur_)
+                cur_ = w_
+            else:
+                cur_ = (cur_ + " " + w_).strip()
+        lines_.append(cur_)
+        lines_ = [ln if len(ln) <= 14 else ln[:13] + "." for ln in lines_[:2]]
+        for j_, ln in enumerate(lines_):
+            dr.add(String(x + bw / 2, 8 * mm - j_ * 2.6 * mm, ln, fontName="Helvetica", fontSize=5.6, textAnchor="middle", fillColor=MUTED))
+    return dr
+
+
 def build_pack_pdf(pack, meta, d, firm, opts=None):
     opts = opts or {}
     var = opts.get("var", True)
@@ -371,6 +412,57 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
                 st.append(("TEXTCOLOR", (7, i), (7, i), col))
         t.setStyle(TableStyle(st))
         story.append(t)
+
+    # ---- variance bridge and scenarios
+    try:
+        import cf_ma_var as VM
+        ex = VM.export_sections(d, "")
+    except Exception:
+        ex = {"bridge": None, "scen": None}
+    b = ex["bridge"]
+    if A is not None and b:
+        lab = b["labels"]
+        story += [PageBreak(), Paragraph(f"Variance bridge - {b['measure_label']}: {lab['comparator']} to {lab['actual']}", _h2)]
+        story.append(_waterfall_drawing(b, WIDTH))
+        story.append(Spacer(1, 2 * mm))
+        run = b["start"]["value"]
+        rows = [["Step", f"Amount ({cur})", "Running total"], [b["start"]["label"], _n(b["start"]["value"]), _n(run)]]
+        for st in b["steps"]:
+            run += st["value"]
+            rows.append([st["label"], _n(st["value"]), _n(run)])
+        rows.append([b["end"]["label"], _n(b["total"]), _n(b["end"]["value"])])
+        t = _simple(rows, [WIDTH - 70 * mm, 35 * mm, 35 * mm], size=7.6)
+        t.setStyle(TableStyle([("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"), ("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")]))
+        story.append(t)
+        story.append(Spacer(1, 1.5 * mm))
+        story += [_p("•  " + x, _base) for x in ex["narr"]]
+        dr = ex["drivers"]
+        if dr:
+            cols = [(c, l) for c, l in VM.DRIVER_COLS if abs(dr["totals"].get(c) or 0) >= 0.5]
+            if cols:
+                story += [PageBreak(), Paragraph("Variance by cause", _h2)]
+                rows = [["Line", "Variance", *[l for _, l in cols]]]
+                for r in dr["rows"]:
+                    if abs(r["total"]) >= 0.5:
+                        rows.append([r["label"], _n(r["total"]), *[_n(r[c]) for c, _ in cols]])
+                rows.append(["Profit after tax", _n(dr["totals"]["total"]), *[_n(dr["totals"][c]) for c, _ in cols]])
+                w = (WIDTH - 52 * mm) / (len(cols) + 1)
+                t = _simple(rows, [52 * mm] + [w] * (len(cols) + 1), size=7.2)
+                t.setStyle(TableStyle([("FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold")]))
+                story.append(t)
+                story.append(_p(f"{cur}. Favourable positive, adverse in brackets. Amounts not assigned to a cause by the units and tags entered in the pack are shown as Unexplained.", _note_style))
+    sc = ex.get("scen")
+    if A is not None and sc:
+        story += [PageBreak(), Paragraph(f"Reforecast scenarios - full year {labels['fy']}", _h2)]
+        head = ["", "Pack outlook", *[c["name"] for c in sc["cols"]], "Budget"]
+        rows = [head]
+        for t_ in sc["table"]:
+            rows.append([t_["label"], _n(t_["current"]), *[_n(c["fy"].get(t_["key"])) for c in sc["cols"]], _n(t_["budget"])])
+        cash_cur = None
+        rows.append(["Year-end cash (net of overdraft)", "-", *[_n((c.get("cash") or {}).get("year_end")) for c in sc["cols"]], "-"])
+        w = (WIDTH - 52 * mm) / (len(head) - 1)
+        story.append(_simple(rows, [52 * mm] + [w] * (len(head) - 1), size=7.4))
+        story.append(_p(f"{cur}. Actual months to {labels['month']} are as recorded; the remaining months are rebuilt from each scenario's starting point and changes. Scenarios are indicative and do not change the forecast in the pack.", _note_style))
 
     # ---- commentary & basis
     more = [(k, lab) for k, lab in (("outlook", "Full-year outlook"), ("actions", "Actions and recommendations")) if com.get(k)]

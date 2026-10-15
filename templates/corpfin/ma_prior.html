@@ -18,7 +18,8 @@
       <table class="cf-grid">{% for x in line_defs %}<tr><td>{{ x.label }}</td><td><input type="number" step="any" name="pl_{{ x.key }}" value="{{ (prior.pl or {}).get(x.key)|cfin }}" {{ 'disabled' if pack.is_final }}></td></tr>{% endfor %}</table></div>
     <div><h4>Balance sheet at the year end</h4>
       <table class="cf-grid">{% for k, label, side in bs_lines %}<tr><td>{{ label }}</td><td><input type="number" step="any" name="bs_{{ k }}" value="{{ (prior.bs or {}).get(k)|cfin }}" {{ 'disabled' if pack.is_final }}></td></tr>{% endfor %}</table>
-      <div class="cf-sub">Leave retained earnings blank to have it worked out so the sheet balances.</div></div>
+      <div class="cf-sub">Leave retained earnings blank to have it worked out so the sheet balances.</div>
+      {% if prior_gap is not none and prior_gap > 0.5 or prior_gap is not none and prior_gap < -0.5 %}<div class="cf-sub"><span class="cf-bad">Out by {{ prior_gap|cfn }}.</span> <a href="{{ url_for('corpfin.pack_diagnose', pack_id=pack.id, scope='prior') }}">Find out why</a></div>{% endif %}</div>
   </div>
   {% if not pack.is_final %}<button class="btn gold" type="submit">Save prior-year accounts</button>{% endif %}
 </form>

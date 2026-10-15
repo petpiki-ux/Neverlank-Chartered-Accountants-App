@@ -1,0 +1,111 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+{% if not any_avail %}
+<div class="card"><div class="empty-state">There is nothing to compare yet. A variance model needs actual figures for the reporting month and a budget, a forecast or the prior year to set them against. Load them on the
+  <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='actuals') }}">Actuals</a>, <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='budget') }}">Budget &amp; forecast</a> and <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='prior') }}">Prior year</a> tabs.</div></div>
+{% else %}
+
+<form method="get" class="card ma-toolbar">
+  {% for k, val in request.args.items() if k not in ('basis', 'against', 'measure') %}<input type="hidden" name="{{ k }}" value="{{ val }}">{% endfor %}
+  <div><label for="vm-basis">Period</label>
+    <select id="vm-basis" name="basis" onchange="this.form.submit()">{% for k, lab in BASES %}<option value="{{ k }}" {% if k == basis %}selected{% endif %}>{{ lab }}{% if k == 'fy' %} (outlook){% endif %}</option>{% endfor %}</select></div>
+  <div><label for="vm-against">Compare with</label>
+    <select id="vm-against" name="against" onchange="this.form.submit()">{% for k, lab in AGAINST %}<option value="{{ k }}" {% if k == against %}selected{% endif %} {% if not avail[basis][k] %}disabled{% endif %}>{{ lab if k != 'prior' else prior_label }}{% if not avail[basis][k] %} (no figures){% endif %}</option>{% endfor %}</select></div>
+  <div><label for="vm-measure">Walk profit measured as</label>
+    <select id="vm-measure" name="measure" onchange="this.form.submit()">{% for k, lab in MEASURES %}<option value="{{ k }}" {% if k == measure %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+  <noscript><button class="btn small" type="submit">Show</button></noscript>
+</form>
+
+{% if br %}
+<div class="card">
+  <h3 style="margin-top:0;">Variance bridge &ndash; {{ br.measure_label }}: {{ br.labels.comparator }} to {{ br.labels.actual }}</h3>
+  <p class="cf-sub">Each bar is one line of the income statement. Green helped profit, red hurt it; costs that came in lower than the comparison are green.</p>
+  <div class="ma-wf">{{ svg|safe }}</div>
+  <div class="tbl-scroll"><table class="cf-table ma-bridge-table">
+    <thead><tr><th>Step</th><th>Amount ({{ cur }})</th><th>Running total</th></tr></thead>
+    <tbody>
+      <tr class="total"><td>{{ br.start.label }}</td><td class="n">{{ br.start.value|cfn }}</td><td class="n">{{ br.start.value|cfn }}</td></tr>
+      {% set run = namespace(v=br.start.value) %}
+      {% for s in br.steps %}{% set run.v = run.v + s.value %}
+      <tr><td class="ma-label">{{ s.label }}</td>{{ ma.vc(s.value, s.value) }}<td class="n">{{ run.v|cfn }}</td></tr>
+      {% endfor %}
+      <tr class="total"><td>{{ br.end.label }}</td>{{ ma.vc(br.total, br.total) }}<td class="n">{{ br.end.value|cfn }}</td></tr>
+    </tbody>
+  </table></div>
+  <ul class="ma-msgs">{% for t in narr %}<li>{{ t }}</li>{% endfor %}</ul>
+  {% if not pack.is_final %}
+  <form method="post" action="{{ url_for('corpfin.pack_varmodel_commentary', pack_id=pack.id) }}" class="inline">
+    <input type="hidden" name="basis" value="{{ basis }}"><input type="hidden" name="against" value="{{ against }}"><input type="hidden" name="measure" value="{{ measure }}">
+    <button class="btn small secondary" type="submit">Add this reading to the income statement commentary</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if dr %}
+<div class="card">
+  <h3 style="margin-top:0;">What drove it &ndash; variance by cause</h3>
+  <p class="cf-sub">Every line's variance to {{ br.labels.comparator }}, split by cause. Volume, mix and price come from the units you enter below; costs are flexed with activity; amounts you tag as timing or one-off are taken out of what is unexplained. Nothing is hidden: whatever is left shows as <em>Unexplained</em>.
+    {{ dr.activity_note }}
+    {% if dr.explained_share is not none %}<strong>{{ (dr.explained_share * 100)|round(0)|int }}% of the variance is explained.</strong>{% endif %}</p>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Line</th><th>{{ br.labels.actual }}</th><th>{{ br.labels.comparator }}</th><th>Variance</th>{% for c, lab in DRIVER_COLS %}<th>{{ lab }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in dr.rows %}
+      {% if r.total|abs >= 0.5 or r.actual|abs >= 0.5 or r.comparator|abs >= 0.5 %}
+      <tr><td class="ma-label">{{ r.label }}{% if r.method %}<div class="muted" style="font-size:11px;">{{ r.method }}</div>{% endif %}</td>
+        <td class="n">{{ r.actual|cfn }}</td><td class="n">{{ r.comparator|cfn }}</td>{{ ma.vc(r.total, r.total) }}
+        {% for c, lab in DRIVER_COLS %}{{ ma.vc(r[c], r[c]) }}{% endfor %}</tr>
+      {% endif %}
+    {% endfor %}
+      <tr class="total"><td>Profit after tax</td><td></td><td></td>{{ ma.vc(dr.totals.total, dr.totals.total) }}{% for c, lab in DRIVER_COLS %}{{ ma.vc(dr.totals[c], dr.totals[c]) }}{% endfor %}</tr>
+    </tbody>
+  </table></div>
+</div>
+
+<form method="post" action="{{ url_for('corpfin.pack_varmodel_save', pack_id=pack.id) }}" class="card">
+  <input type="hidden" name="basis" value="{{ basis }}"><input type="hidden" name="against" value="{{ against }}"><input type="hidden" name="measure" value="{{ measure }}">
+  <input type="hidden" name="month" value="{{ request.args.get('month', '') }}">
+  <h3 style="margin-top:0;">Tell the model what you know</h3>
+  <p class="cf-sub">These inputs are saved for this comparison ({{ br.labels.actual }} against {{ br.labels.comparator }}) and change how the table above is split. All are optional.</p>
+
+  <h4>1. Units sold &ndash; for a price / volume / mix split of revenue</h4>
+  <div class="tbl-scroll"><table class="cf-grid">
+    <thead><tr><th>Revenue line</th><th>Units: {{ br.labels.actual }}</th><th>Units: {{ br.labels.comparator }}</th></tr></thead>
+    {% for r in rev_lines %}
+    <tr><td>{{ r.label }}</td>
+      <td><input type="number" step="any" min="0" name="u_a_{{ r.key }}" value="{{ (dr.units.get(r.key) or {}).get('a')|cfin }}" {{ 'disabled' if pack.is_final }}></td>
+      <td><input type="number" step="any" min="0" name="u_c_{{ r.key }}" value="{{ (dr.units.get(r.key) or {}).get('c')|cfin }}" {{ 'disabled' if pack.is_final }}></td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="cf-sub">Units can be anything you count: tonnes, rooms, billable hours, subscribers. Enter both columns for each line you want split. Lines you leave blank are not split.</p>
+
+  <h4>2. How much of each cost moves with activity</h4>
+  <div class="tbl-scroll"><table class="cf-grid">
+    <thead><tr><th>Cost line</th><th>% variable with activity</th></tr></thead>
+    {% for x in cost_lines %}
+    <tr><td>{{ x.label }}</td><td><input type="number" step="any" min="0" max="100" name="vp_{{ x.key }}" value="{{ dr.variable_pct.get(x.key)|cfin(1) }}" {{ 'disabled' if pack.is_final }}></td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="cf-sub">Cost of sales defaults to 100% (it moves one-for-one with activity); other costs to 0% (fixed). Variable costs are compared with a budget flexed to actual activity, so a cost that rose only because sales rose is shown as volume, not overspending.</p>
+
+  <h4>3. Tag amounts you can explain</h4>
+  <div class="tbl-scroll"><table class="cf-grid">
+    <thead><tr><th>Line</th><th>Cause</th><th>Amount ({{ cur }}, favourable +, adverse &minus;)</th><th>Note</th><th>Remove</th></tr></thead>
+    {% set rows = dr.tags + [{}, {}, {}] %}
+    {% for t in rows %}
+    <tr><td><select name="tag_line_{{ loop.index0 }}" {{ 'disabled' if pack.is_final }}><option value="">-</option>{% for x in line_defs %}<option value="{{ x.key }}" {% if t.get('line') == x.key %}selected{% endif %}>{{ x.label }}</option>{% endfor %}</select></td>
+      <td><select name="tag_type_{{ loop.index0 }}" {{ 'disabled' if pack.is_final }}>{% for k, lab in TAG_TYPES %}<option value="{{ k }}" {% if t.get('type') == k %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></td>
+      <td><input type="number" step="any" name="tag_amount_{{ loop.index0 }}" value="{{ t.get('amount')|cfin }}" {{ 'disabled' if pack.is_final }}></td>
+      <td><input type="text" maxlength="200" name="tag_note_{{ loop.index0 }}" value="{{ t.get('note', '') }}" style="width:260px;" {{ 'disabled' if pack.is_final }}></td>
+      <td>{% if t %}<input type="checkbox" name="tag_del_{{ loop.index0 }}" value="1">{% endif %}</td></tr>
+    {% endfor %}
+  </table></div>
+  <p class="cf-sub">Example: Salaries, Timing, &minus;6,000, "annual leave paid early, reverses in Q4". The amount is taken out of Unexplained for that line, so you can see how much of the variance is still unaccounted for.</p>
+  {% if not pack.is_final %}<button class="btn gold" type="submit">Save and recalculate</button>{% endif %}
+</form>
+{% endif %}
+{% else %}
+<div class="card"><div class="empty-state">There are no figures to compare for that combination. Choose another period or comparison above.</div></div>
+{% endif %}
+{% endif %}
+{% endblock %}

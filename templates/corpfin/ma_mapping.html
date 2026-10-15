@@ -7,6 +7,7 @@
   <input type="hidden" name="month" value="{{ month or '' }}">
   <input type="hidden" name="filename" value="{{ filename }}">
   <textarea name="rows_json" hidden>{{ rows_json }}</textarea>
+  <textarea name="fixlog" hidden>{{ fixlog_json }}</textarea>
   {% if target == 'prior' %}<div class="form-row"><div><label>Label for these accounts</label><input type="text" name="label" maxlength="30" value="{{ label or prior_label }}"></div></div>{% endif %}
   {% set unmapped = namespace(n=0) %}
   <div class="tbl-scroll"><table class="cf-table">
@@ -28,8 +29,33 @@
     </tbody>
   </table></div>
   {% if unmapped.n %}<div class="flash warning">{{ unmapped.n }} account(s) have no suggestion yet. Choose a line for each, or Ignore.</div>{% endif %}
+  {% if diag and diag.headline and (diag.gap or diag.suggestions) %}
+  <div class="ma-diag">
+    <h4 style="margin-bottom:4px;">These figures do not balance</h4>
+    <p class="cf-sub" style="margin-top:0;"><strong>{{ diag.headline }}</strong></p>
+    {% for n in diag.notes %}<p class="cf-sub">{{ n }}</p>{% endfor %}
+    {% if diag.suggestions %}<p class="cf-sub">Most likely explanations, strongest first. Nothing changes until you press <em>Apply</em>; each change is recorded in the note saved with the trial balance.</p>{% endif %}
+    {% for sg in diag.suggestions %}
+    <div class="ma-fix {{ 'ma-fix-' ~ sg.confidence }}">
+      <div class="ma-fix-head"><span class="badge {{ 'status-Approved' if sg.confidence == 'high' else '' }}">{{ sg.confidence|capitalize }} likelihood</span> <strong>{{ sg.title }}</strong></div>
+      <div class="muted">{{ sg.detail }}</div>
+      {% if not sg.advisory %}
+      <button class="btn small gold" type="submit" name="fix" value="{{ sg.id }}">Apply this fix</button>
+      {% if sg.after is not none %}<span class="muted"> Difference afterwards: <span class="{{ 'cf-ok' if sg.cleared else 'cf-bad' }}">{{ sg.after|cfn(2) }}</span></span>{% endif %}
+      {% else %}<span class="muted">Look at this one in the client's ledger; there is nothing to apply here.</span>{% endif %}
+    </div>
+    {% endfor %}
+    <p class="cf-sub">If the figures really are out and you need to proceed (for example the client's ledger is incomplete), save them as they are; the Actuals tab will keep flagging the difference.</p>
+  </div>
+  {% endif %}
+  {% if fixlog %}<h4>Corrections accepted on this page</h4><ul class="ma-msgs">{% for x in fixlog %}<li>{{ x }}</li>{% endfor %}</ul>{% endif %}
   <div class="cf-sticky-actions">
+    {% if diag and (diag.gap or diag.suggestions) %}
+    <button class="btn secondary" type="submit" name="recheck" value="1" title="Re-run the checks with the mapping as it is now">Re-check</button>
+    <button class="btn gold" type="submit" name="force" value="1" onclick="return confirm('Save these figures even though they do not balance?');">Save anyway (out of balance)</button>
+    {% else %}
     <button class="btn gold" type="submit">Save these figures</button>
+    {% endif %}
     <a class="btn secondary" href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab=('prior' if target == 'prior' else 'actuals')) }}">Cancel</a>
   </div>
 </form>

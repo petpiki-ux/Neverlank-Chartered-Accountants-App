@@ -19,7 +19,7 @@
             {% else %}<span class="muted">&ndash;</span>{% endif %}</td>
         <td>{{ 'Yes' if s.has_pl else '-' }}{% if s.kind == 'ytd' %} <span class="muted">(cumulative)</span>{% endif %}</td>
         <td>{{ 'Yes' if s.has_bs else '-' }}</td>
-        <td>{% if s.has_bs %}{% if s.bs_check is not none and (s.bs_check > 0.5 or s.bs_check < -0.5) %}<span class="cf-bad">out by {{ s.bs_check|cfn }}</span>{% else %}<span class="cf-ok">balances</span>{% endif %}{% endif %}</td>
+        <td>{% if s.has_bs %}{% if s.bs_check is not none and (s.bs_check > 0.5 or s.bs_check < -0.5) %}<span class="cf-bad">out by {{ s.bs_check|cfn }}</span> <a href="{{ url_for('corpfin.pack_diagnose', pack_id=pack.id, scope=s.month) }}">Find out why</a>{% else %}<span class="cf-ok">balances</span>{% endif %}{% endif %}</td>
         <td class="muted" style="white-space:normal;max-width:340px;">{{ s.note or '' }}{% if s.saved %} <span class="cf-sub">({{ s.saved.by }}, {{ s.saved.at }})</span>{% endif %}</td>
         <td class="text-right" style="white-space:nowrap;">
           {% if not pack.is_final %}

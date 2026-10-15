@@ -1,0 +1,28 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<div class="card">
+  <h3 style="margin-top:0;">Balance sheet check &ndash; {{ scope_label }}</h3>
+  <p class="cf-sub"><strong>{{ diag.headline }}</strong></p>
+  {% for n in diag.notes %}<p class="cf-sub">{{ n }}</p>{% endfor %}
+  {% if not diag.balanced %}
+  {% if diag.suggestions %}
+  <p class="cf-sub">Most likely explanations, strongest first. Nothing changes until you press <em>Apply</em>; each fix is saved and noted against these figures.</p>
+  {% for sg in diag.suggestions %}
+  <div class="ma-fix {{ 'ma-fix-' ~ sg.confidence }}">
+    <div class="ma-fix-head"><span class="badge {{ 'status-Approved' if sg.confidence == 'high' else '' }}">{{ sg.confidence|capitalize }} likelihood</span> <strong>{{ sg.title }}</strong></div>
+    <div class="muted">{{ sg.detail }}</div>
+    <table class="cf-table ma-fix-table"><tbody>
+      {% for c in sg.changes %}<tr><td>{{ c.label }}</td><td class="n">{{ c.old|cfn(2) }}</td><td>&rarr;</td><td class="n">{{ c.new|cfn(2) }}</td></tr>{% endfor %}
+      <tr><td colspan="3">Balance sheet difference afterwards</td><td class="n {{ 'cf-ok' if sg.cleared else 'cf-bad' }}">{{ sg.after_gap|cfn(2) }}</td></tr>
+    </tbody></table>
+    {% if not locked %}
+    <form method="post" class="inline"><button class="btn small gold" type="submit" name="fix" value="{{ sg.id }}">Apply this fix</button></form>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% endif %}
+  {% endif %}
+  <p><a class="btn secondary" href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab=('prior' if scope == 'prior' else 'actuals')) }}">Back</a>
+    {% if scope != 'prior' %}<a class="btn secondary" href="{{ url_for('corpfin.pack_manual', pack_id=pack.id, month=scope) }}">Edit the figures by hand</a>{% endif %}</p>
+</div>
+{% endblock %}

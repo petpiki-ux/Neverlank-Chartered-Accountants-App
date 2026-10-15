@@ -510,6 +510,102 @@ def _variance_sheet(wb, meta, d, labels):
     return ws
 
 
+def _bridge_sheet(wb, meta, d, ex):
+    """Variance bridge (values as at export; the end total is a formula so the walk can be checked) and the by-cause split."""
+    import cf_ma_var as VM
+    b, dr = ex["bridge"], ex["drivers"]
+    lab = b["labels"]
+    ws = wb.create_sheet("Variance bridge")
+    r = brand.xlsx_title_band(ws, "Variance bridge", [meta.get("client", ""), meta.get("name", ""),
+                              f"{b['measure_label']}: {lab['comparator']} to {lab['actual']} (values as at export; favourable positive)"], ncols=9)
+    brand.xlsx_page_setup(ws)
+    for i, h in enumerate(["Step", "Amount", "Running total"], start=1):
+        c = ws.cell(row=r, column=i, value=h)
+        c.font, c.fill = Font(bold=True), FILL_SUB
+        c.alignment = Alignment(horizontal="left" if i == 1 else "right")
+    ws.column_dimensions["A"].width = 44
+    for col in "BCDEFGHI":
+        ws.column_dimensions[col].width = 14
+    r += 1
+    first = r
+    ws.cell(row=r, column=1, value=b["start"]["label"]).font = Font(bold=True)
+    _put(ws, r, 2, round(b["start"]["value"], 2), bold=True)
+    _put(ws, r, 3, f"=B{r}", bold=True)
+    for st in b["steps"]:
+        r += 1
+        ws.cell(row=r, column=1, value=st["label"])
+        _put(ws, r, 2, round(st["value"], 2), color=GREEN if st["value"] >= 0 else RED)
+        _put(ws, r, 3, f"=C{r - 1}+B{r}")
+    last_step = r
+    r += 1
+    ws.cell(row=r, column=1, value=b["end"]["label"] + " (walk)").font = Font(bold=True)
+    _put(ws, r, 2, f"=SUM(B{first}:B{last_step})", total=True)
+    _put(ws, r, 3, f"=C{last_step}", total=True)
+    r += 1
+    ws.cell(row=r, column=1, value=b["end"]["label"] + " (reported)")
+    _put(ws, r, 3, round(b["end"]["value"], 2))
+    r += 1
+    ws.cell(row=r, column=1, value="Difference (should be nil)")
+    _put(ws, r, 3, f"=C{r - 2}-C{r - 1}")
+    r += 2
+    for t in ex["narr"]:
+        ws.cell(row=r, column=1, value=t).alignment = Alignment(wrap_text=False)
+        r += 1
+    if dr:
+        r += 1
+        cols = [(c, l) for c, l in VM.DRIVER_COLS]
+        ws.cell(row=r, column=1, value="Variance by cause").font = Font(bold=True, size=12, color=NAVY)
+        r += 1
+        for i, h in enumerate(["Line", "Variance", *[l for _, l in cols]], start=1):
+            c = ws.cell(row=r, column=i, value=h)
+            c.font, c.fill = Font(bold=True), FILL_SUB
+            c.alignment = Alignment(horizontal="left" if i == 1 else "right")
+        r0 = r + 1
+        for row in dr["rows"]:
+            if abs(row["total"]) < 0.5:
+                continue
+            r += 1
+            ws.cell(row=r, column=1, value=row["label"])
+            _put(ws, r, 2, round(row["total"], 2))
+            for j, (c, _) in enumerate(cols, start=3):
+                _put(ws, r, j, round(row[c], 2))
+        r += 1
+        ws.cell(row=r, column=1, value="Profit after tax").font = Font(bold=True)
+        for j in range(2, 3 + len(cols)):
+            _put(ws, r, j, f"=SUM({CL(j)}{r0}:{CL(j)}{r - 1})", total=True)
+    ws.freeze_panes = "A5"
+    return ws
+
+
+def _scenario_sheet(wb, meta, d, ex, labels):
+    sc = ex["scen"]
+    ws = wb.create_sheet("Scenarios")
+    r = brand.xlsx_title_band(ws, "Reforecast scenarios", [meta.get("client", ""), meta.get("name", ""),
+                              f"Full year {labels['fy']}: actuals to {labels['month']} plus each scenario for the remaining months (values as at export)"], ncols=8)
+    brand.xlsx_page_setup(ws)
+    head = ["", "Pack outlook", *[c["name"] for c in sc["cols"]], "Budget"]
+    for i, h in enumerate(head, start=1):
+        c = ws.cell(row=r, column=i, value=h)
+        c.font, c.fill = Font(bold=True), FILL_SUB
+        c.alignment = Alignment(horizontal="left" if i == 1 else "right", wrap_text=True)
+        ws.column_dimensions[CL(i)].width = 38 if i == 1 else 16
+    for t in sc["table"]:
+        r += 1
+        ws.cell(row=r, column=1, value=t["label"])
+        _put(ws, r, 2, None if t["current"] is None else round(t["current"], 2))
+        for j, c in enumerate(sc["cols"], start=3):
+            v = c["fy"].get(t["key"])
+            _put(ws, r, j, None if v is None else round(v, 2))
+        _put(ws, r, 3 + len(sc["cols"]), None if t["budget"] is None else round(t["budget"], 2))
+    r += 1
+    ws.cell(row=r, column=1, value="Year-end cash (net of overdraft)")
+    for j, c in enumerate(sc["cols"], start=3):
+        v = (c.get("cash") or {}).get("year_end")
+        _put(ws, r, j, None if v is None else round(v, 2))
+    ws.freeze_panes = "B5"
+    return ws
+
+
 def _pack_sheet(wb, meta, d, labels, V, status, basis_lines, msgs):
     ws = wb["Pack"]
     r = brand.xlsx_title_band(ws, "Management accounts", [meta.get("client", ""), meta.get("name", ""), meta.get("currency", "")], ncols=8)
@@ -599,8 +695,17 @@ def build_pack_workbook(meta, d):
     _kpi_sheet(wb, meta, d, labels)
     if V["has_budget"]:
         _variance_sheet(wb, meta, d, labels)
+    try:
+        import cf_ma_var as VM
+        ex = VM.export_sections(d, "")
+    except Exception:
+        ex = {"bridge": None, "scen": None}
+    if V["actual_ytd"] is not None and ex["bridge"]:
+        _bridge_sheet(wb, meta, d, ex)
+    if V["actual_ytd"] is not None and ex.get("scen"):
+        _scenario_sheet(wb, meta, d, ex, labels)
     _pack_sheet(wb, meta, d, labels, V, status, _basis_lines(d, V, status), M.key_messages(d, ""))
-    order = ["Pack", "Income statement", "Balance sheet", "Cash flow", "KPIs", "Variances", DATA]
+    order = ["Pack", "Income statement", "Balance sheet", "Cash flow", "KPIs", "Variances", "Variance bridge", "Scenarios", DATA]
     wb._sheets = [wb[n] for n in order if n in wb.sheetnames]
     for ws in wb.worksheets:
         ws.sheet_properties.tabColor = NAVY if ws.title == "Pack" else ("0000FF" if ws.title == DATA else GOLD)
