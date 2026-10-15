@@ -29,7 +29,7 @@ Model shape
 Everything here is deterministic and unrounded; presentation rounds.
 """
 import copy
-from datetime import date
+from datetime import date, datetime
 
 MAX_YEARS = 10
 MIN_YEARS = 1
@@ -80,6 +80,26 @@ def clamp_years(value, default=5):
     except (TypeError, ValueError):
         n = default
     return max(MIN_YEARS, min(MAX_YEARS, n))
+
+
+def _ym(value):
+    """A loan date -> 'YYYY-MM-DD' (day kept when given) or '' when blank / not a date. The model works in months."""
+    if isinstance(value, datetime):
+        value = value.date()
+    if isinstance(value, date):
+        return value.isoformat()
+    s = str(value or "").strip()
+    if not s:
+        return ""
+    try:
+        y, m = int(s[:4]), int(s[5:7])
+        dd = int(s[8:10]) if len(s) >= 10 and s[8:10].isdigit() else 1
+        if not (1900 <= y <= 2200 and 1 <= m <= 12):
+            return ""
+        import calendar
+        return date(y, m, max(1, min(dd, calendar.monthrange(y, m)[1]))).isoformat()
+    except (TypeError, ValueError):
+        return ""
 
 
 def parse_start_month(value):
@@ -223,6 +243,8 @@ def normalise(a):
             "repay_years": max(1, min(30, int(f(L.get("repay_years"), 5)))),
             "grace_years": max(0, min(10, int(f(L.get("grace_years"), 0)))),
             "maturity_year": max(1, min(30, int(f(L.get("maturity_year"), years)))),
+            "start_date": _ym(L.get("start_date")), "end_date": _ym(L.get("end_date")),
+            "fee_pct": max(0.0, min(100.0, f(L.get("fee_pct")))), "fee_amount": max(0.0, f(L.get("fee_amount"))),
         })
     out["loans"] = loans
 
@@ -282,12 +304,13 @@ def build_periods(a):
     for m in range(12):
         d = add_months(start, m)
         out.append({"idx": len(out), "label": f"{MONTH_ABBR[d.month - 1]}-{str(d.year)[2:]}", "year_no": 1, "months": 1,
-                    "is_year_start": 1 if m == 0 else 0, "is_year_end": 1 if m == 11 else 0, "share": a["seasonality"][m] / 100.0})
+                    "is_year_start": 1 if m == 0 else 0, "is_year_end": 1 if m == 11 else 0, "share": a["seasonality"][m] / 100.0,
+                    "start_idx": m})
     for y in range(2, a["years"] + 1):
         d = add_months(start, 12 * (y - 1))
         end = add_months(start, 12 * y - 1)
         out.append({"idx": len(out), "label": year_label(a, y), "year_no": y, "months": 12,
-                    "is_year_start": 1, "is_year_end": 1, "share": 1.0})
+                    "is_year_start": 1, "is_year_end": 1, "share": 1.0, "start_idx": 12 * (y - 1)})
     return out
 
 
@@ -322,7 +345,7 @@ def annual_amounts(a):
 
 FLOW_KEYS = [
     "revenue", "cogs", "opex", "creditor_opex", "ebitda", "capex", "dep", "ebit", "int_income", "int_loans", "int_od",
-    "fin_cost", "pbt", "tax", "pat", "dividends", "equity_issue",
+    "loan_fees", "fin_cost", "pbt", "tax", "pat", "dividends", "equity_issue",
     "d_inventory", "d_receivables", "d_payables", "cash_ops", "interest_paid", "interest_received", "tax_paid",
     "cfo", "cfi", "loan_draw", "loan_repay", "cff", "net_cash", "loss_used", "loss_added",
 ]
@@ -341,6 +364,45 @@ def opening_reserves(a):
     assets = (o["ppe_cost"] - o["ppe_accdep"]) + o["inventory"] + o["receivables"] + o["other_assets"] + max(o["cash"], 0.0)
     liabilities = o["payables"] + o["other_liabilities"] + loans + max(-o["cash"], 0.0)
     return assets - liabilities - o["share_capital"]
+
+
+def _month_no(a, text):
+    """Months from the model's first month to the month in `text` (negative when earlier)."""
+    d = parse_start_month(text)
+    s = parse_start_month(a["start_month"])
+    return (d.year - s.year) * 12 + (d.month - s.month)
+
+
+def loan_timing(a, L):
+    """Where a loan sits on the model's month line (month 0 = the first forecast month).
+    draw_idx: month in which a NEW loan is drawn (at the start of that month); first_idx: first month with a principal instalment;
+    end_idx: last month of the loan (a bullet is repaid, or the last instalment is paid, then); term: instalment months.
+    Dates, when entered, replace the year numbers; without dates the year numbers give exactly the same timing as before."""
+    new = L["opening_balance"] == 0 and L["drawdown_amount"] > 0
+    notes = []
+    legacy_draw = (L["drawdown_year"] - 1) * 12
+    draw_idx = legacy_draw
+    if new and L.get("start_date"):
+        draw_idx = _month_no(a, L["start_date"])
+        if draw_idx < 0:
+            notes.append(f"{L['name']}: the start date is before the model's first month, so the loan is treated as drawn in the first month. "
+                         "If it has already been drawn, enter what is outstanding as its opening balance instead.")
+            draw_idx = 0
+    first_idx = (draw_idx if new else 0) + L["grace_years"] * 12
+    if L["repay_type"] == "bullet":
+        end_idx = L["maturity_year"] * 12 - 1
+    else:
+        end_idx = first_idx + L["repay_years"] * 12 - 1
+    if L.get("end_date"):
+        e = _month_no(a, L["end_date"])
+        floor_ = max(first_idx, draw_idx if new else 0)
+        if e < floor_:
+            notes.append(f"{L['name']}: the end date is before the loan can start repaying, so the year numbers were used for the end of the loan.")
+        else:
+            end_idx = e
+    if end_idx < first_idx:
+        end_idx = first_idx
+    return {"draw_idx": draw_idx, "first_idx": first_idx, "end_idx": end_idx, "term": end_idx - first_idx + 1, "new": new, "notes": notes}
 
 
 def run(a):
@@ -362,6 +424,7 @@ def run(a):
     retained = opening_reserves(a)
     loss_bf = op["tax_loss_bf"]
     loan_close = [L["opening_balance"] for L in a["loans"]]
+    timing = [loan_timing(a, L) for L in a["loans"]]
 
     rows = []
     for p in per:
@@ -385,30 +448,35 @@ def run(a):
         dep = min(nbv_open + capex, dep_rate * (gross + capex) * m / 12.0)
         ebit = ebitda - dep
 
-        # --- loans (interest on opening balance plus any drawdown at the start of the year)
-        loan_rows, int_loans, draw_total, repay_total = [], 0.0, 0.0, 0.0
+        # --- loans (interest on the opening balance, plus any drawdown from the month it is drawn)
+        loan_rows, int_loans, draw_total, repay_total, fee_total = [], 0.0, 0.0, 0.0, 0.0
+        s0 = p["start_idx"]
         for k, L in enumerate(a["loans"]):
+            T = timing[k]
             open_k = loan_close[k]
-            draw = L["drawdown_amount"] if (p["is_year_start"] and p["year_no"] == L["drawdown_year"]) else 0.0
-            interest = L["rate"] / 100.0 * (open_k + draw) * m / 12.0
+            draw = L["drawdown_amount"] if (s0 <= T["draw_idx"] < s0 + m) else 0.0
+            months_open = min(m, max(0, T["end_idx"] + 1 - s0))
+            months_draw = max(0, min(s0 + m, T["end_idx"] + 1) - T["draw_idx"]) if draw else 0
+            interest = L["rate"] / 100.0 / 12.0 * (open_k * months_open + draw * months_draw)
+            fee = (draw * L["fee_pct"] / 100.0 + L["fee_amount"]) if draw > 0 else 0.0
             principal0 = L["opening_balance"] + L["drawdown_amount"]
-            first_repay = (L["drawdown_year"] if L["drawdown_amount"] > 0 and L["opening_balance"] == 0 else 1) + L["grace_years"]
             if L["repay_type"] == "bullet":
-                repay = (open_k + draw) if (p["year_no"] == L["maturity_year"] and p["is_year_end"]) else 0.0
+                repay = (open_k + draw) if (s0 <= T["end_idx"] < s0 + m) else 0.0
             else:
-                inst = principal0 / L["repay_years"]
-                repay = 0.0 if p["year_no"] < first_repay else min(open_k + draw, inst * m / 12.0)
+                overlap = max(0, min(s0 + m - 1, T["end_idx"]) - max(s0, T["first_idx"]) + 1)
+                repay = min(open_k + draw, principal0 / T["term"] * overlap)
             close_k = open_k + draw - repay
-            loan_rows.append({"open": open_k, "draw": draw, "repay": repay, "close": close_k, "interest": interest})
+            loan_rows.append({"open": open_k, "draw": draw, "repay": repay, "close": close_k, "interest": interest, "fee": fee})
             loan_close[k] = close_k
             int_loans += interest
             draw_total += draw
             repay_total += repay
+            fee_total += fee
 
         cash_open = cash
         int_income = max(cash_open, 0.0) * a["deposit_rate"] / 100.0 * m / 12.0
         int_od = max(-cash_open, 0.0) * a["overdraft_rate"] / 100.0 * m / 12.0
-        fin_cost = int_loans + int_od - int_income
+        fin_cost = int_loans + int_od - int_income + fee_total
         pbt = ebit - fin_cost
 
         # --- tax with assessed-loss carry forward
@@ -432,7 +500,7 @@ def run(a):
         cash_ops = ebitda + d_inv + d_rec + d_pay
         interest_paid = int_loans + int_od
         interest_received = int_income
-        cfo = cash_ops - interest_paid + interest_received - tax
+        cfo = cash_ops - interest_paid - fee_total + interest_received - tax
         cfi = -capex
         cff = draw_total - repay_total + equity_issue - dividends
         net_cash = cfo + cfi + cff
@@ -452,7 +520,7 @@ def run(a):
         r.update({
             "streams": streams, "revenue": revenue, "cogs": cogs, "gross_profit": revenue - cogs,
             "opex_lines": opex_lines, "opex": opex, "creditor_opex": creditor_opex, "ebitda": ebitda,
-            "capex": capex, "dep": dep, "ebit": ebit, "int_income": int_income, "int_loans": int_loans, "int_od": int_od,
+            "capex": capex, "dep": dep, "ebit": ebit, "int_income": int_income, "int_loans": int_loans, "int_od": int_od, "loan_fees": fee_total,
             "fin_cost": fin_cost, "pbt": pbt, "tax": tax, "pat": pat, "dividends": dividends, "equity_issue": equity_issue,
             "loss_used": loss_used, "loss_added": loss_added, "loss_close": loss_bf,
             "d_inventory": d_inv, "d_receivables": d_rec, "d_payables": d_pay, "cash_ops": cash_ops,
@@ -477,6 +545,8 @@ def run(a):
         first = next(r for r in rows if r["cash"] < -_TOL)
         warnings.append(f"Cash goes negative from {first['label']}: the model shows an overdraft of {abs(first['cash']):,.0f}. "
                         "Add funding (loan, equity) or slow the spending.")
+    for k_, L_ in enumerate(a["loans"]):
+        warnings.extend(loan_timing(a, L_)["notes"])
     if opening_reserves(a) < -_TOL:
         warnings.append("Opening liabilities exceed opening assets plus share capital, so opening reserves are negative "
                         f"({opening_reserves(a):,.0f}). Check the opening balance sheet.")
@@ -500,7 +570,8 @@ def aggregate_annual(a, rows):
         d["cash_open"] = first["cash_open"]
         d["loans"] = [{"open": first["loans"][k]["open"], "draw": sum(r["loans"][k]["draw"] for r in rs),
                        "repay": sum(r["loans"][k]["repay"] for r in rs), "close": last["loans"][k]["close"],
-                       "interest": sum(r["loans"][k]["interest"] for r in rs)} for k in range(len(first["loans"]))]
+                       "interest": sum(r["loans"][k]["interest"] for r in rs), "fee": sum(r["loans"][k]["fee"] for r in rs)}
+                      for k in range(len(first["loans"]))]
         # the opening balances this year was measured against
         prev = out[-1] if out else None
         d["open_inventory"] = prev["inventory"] if prev else a["opening"]["inventory"]
@@ -528,7 +599,7 @@ def ratios(result):
         debt = d["borrowings"] + d["overdraft"]
         net_debt = debt - d["cash_positive"]
         capital = d["total_equity"] + d["borrowings"]
-        service = d["interest_paid"] + d["loan_repay"]
+        service = d["interest_paid"] + d["loan_fees"] + d["loan_repay"]
         out.append({
             "label": d["label"],
             "current_ratio": _div(cur_assets, cur_liab),

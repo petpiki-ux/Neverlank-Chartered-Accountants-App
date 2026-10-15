@@ -236,21 +236,28 @@ def _assumptions_sheet(wb, a, meta):
     row += 1
     loan_open_cells = []
     for k, L in enumerate(a["loans"]):
-        ws.cell(row=row, column=1, value=f"{L['name']}  ({'bullet - repaid at maturity' if L['repay_type'] == 'bullet' else 'equal annual principal instalments'})").font = Font(bold=True)
+        T = E.loan_timing(a, L)
+        kind_txt = "bullet - repaid at the end date" if L["repay_type"] == "bullet" else "equal monthly principal instalments to the end date"
+        dates_txt = ""
+        if L.get("start_date") or L.get("end_date"):
+            dates_txt = f"; dates {L.get('start_date') or '-'} to {L.get('end_date') or '-'}"
+        ws.cell(row=row, column=1, value=f"{L['name']}  ({kind_txt}{dates_txt})").font = Font(bold=True)
         row += 1
         refs = {}
         for label, key, val, fmt in (("   Balance at start", "open", L["opening_balance"], NUM), ("   New drawdown", "draw", L["drawdown_amount"], NUM),
-                                     ("   Drawdown in year no.", "draw_year", L["drawdown_year"], "0"), ("   Interest rate (% p.a.)", "rate", L["rate"], PCT_IN),
-                                     ("   Repayment period (years, straight-line)", "repay_years", L["repay_years"], "0"),
-                                     ("   Grace period (years with no repayment)", "grace", L["grace_years"], "0"),
-                                     ("   Maturity year no. (bullet)", "maturity", L["maturity_year"], "0")):
+                                     ("   Interest rate (% p.a.)", "rate", L["rate"], PCT_IN),
+                                     ("   Establishment fee (% of the amount drawn, on top of interest)", "fee_pct", L["fee_pct"], PCT_IN),
+                                     ("   Establishment fee (fixed amount, on top of interest)", "fee_amt", L["fee_amount"], NUM),
+                                     ("   Drawdown month no. (1 = first forecast month)", "draw_m", T["draw_idx"] + 1, "0"),
+                                     ("   First principal instalment month no.", "first_m", T["first_idx"] + 1, "0"),
+                                     ("   Last month no. of the loan (end date)", "end_m", T["end_idx"] + 1, "0")):
             ws.cell(row=row, column=1, value=label)
             _inp(ws.cell(row=row, column=3), val, fmt)
             refs[key] = f"Assumptions!$C${row}"
             row += 1
-        ws.cell(row=row, column=1, value="   First repayment year (calculated)")
-        ws.cell(row=row, column=3, value=f"=IF(AND({refs['draw']}>0,{refs['open']}=0),{refs['draw_year']},1)+{refs['grace']}")
-        refs["first_repay"] = f"Assumptions!$C${row}"
+        ws.cell(row=row, column=1, value="   Instalment months (calculated)")
+        ws.cell(row=row, column=3, value=f"=MAX(1,{refs['end_m']}-{refs['first_m']}+1)")
+        refs["term"] = f"Assumptions!$C${row}"
         row += 1
         ws.cell(row=row, column=1, value="   Principal repaid over the term (calculated)")
         ws.cell(row=row, column=3, value=f"={refs['open']}+{refs['draw']}").number_format = NUM
@@ -299,6 +306,7 @@ def _calc_sheet(wb, a, R, meta, periods):
     line("label", "Period", None)
     line("year_no", "Forecast year", "0")
     line("months", "Months in period", "0")
+    line("pstart", "Months from the model start to this period (0 = first month)", "0")
     line("year_start", "First period of the year (1/0)", "0")
     line("year_end", "Last period of the year (1/0)", "0")
     line("share", "Share of annual revenue / pattern", "0.0000")
@@ -322,9 +330,11 @@ def _calc_sheet(wb, a, R, meta, periods):
         line(f"ln{k}_open", f"{L['name']} - opening")
         line(f"ln{k}_draw", f"{L['name']} - drawdown")
         line(f"ln{k}_int", f"{L['name']} - interest")
+        line(f"ln{k}_fee", f"{L['name']} - establishment fee")
         line(f"ln{k}_repay", f"{L['name']} - repayment")
         line(f"ln{k}_close", f"{L['name']} - closing")
     line("int_loans", "Loan interest")
+    line("loan_fees", "Loan establishment fees")
     line("loan_draw", "Loan drawdowns")
     line("loan_repay", "Loan repayments")
     line("borrowings", "Borrowings - closing")
@@ -419,6 +429,7 @@ def _calc_sheet(wb, a, R, meta, periods):
         ws.cell(row=rw["label"], column=col).alignment = Alignment(horizontal="center")
         put("year_no", p["year_no"])
         put("months", p["months"])
+        put("pstart", p["start_idx"])
         put("year_start", p["is_year_start"])
         put("year_end", p["is_year_end"])
         put("share", f"={R['season'][i]}/100" if p["year_no"] == 1 else 1)
@@ -446,14 +457,19 @@ def _calc_sheet(wb, a, R, meta, periods):
         for k, L in enumerate(a["loans"]):
             ref = R["loan"][k]
             put(f"ln{k}_open", f"={ref['open']}" if i == 0 else f"={Pv(f'ln{k}_close')}")
-            put(f"ln{k}_draw", f"=IF(AND({X('year_start')}=1,{X('year_no')}={ref['draw_year']}),{ref['draw']},0)")
-            put(f"ln{k}_int", f"={ref['rate']}/100*({X(f'ln{k}_open')}+{X(f'ln{k}_draw')})*{X('months')}/12")
+            ps, mo = X("pstart"), X("months")
+            put(f"ln{k}_draw", f"=IF(AND({ps}<={ref['draw_m']}-1,{ref['draw_m']}-1<{ps}+{mo}),{ref['draw']},0)")
+            put(f"ln{k}_int", f"={ref['rate']}/100/12*({X(f'ln{k}_open')}*MIN({mo},MAX(0,{ref['end_m']}-{ps}))"
+                              f"+{X(f'ln{k}_draw')}*MAX(0,MIN({ps}+{mo},{ref['end_m']})-({ref['draw_m']}-1)))")
+            put(f"ln{k}_fee", f"=IF({X(f'ln{k}_draw')}>0,{X(f'ln{k}_draw')}*{ref['fee_pct']}/100+{ref['fee_amt']},0)")
             if L["repay_type"] == "bullet":
-                put(f"ln{k}_repay", f"=IF(AND({X('year_no')}={ref['maturity']},{X('year_end')}=1),{X(f'ln{k}_open')}+{X(f'ln{k}_draw')},0)")
+                put(f"ln{k}_repay", f"=IF(AND({ps}<={ref['end_m']}-1,{ref['end_m']}-1<{ps}+{mo}),{X(f'ln{k}_open')}+{X(f'ln{k}_draw')},0)")
             else:
-                put(f"ln{k}_repay", f"=IF({X('year_no')}<{ref['first_repay']},0,MIN({X(f'ln{k}_open')}+{X(f'ln{k}_draw')},{ref['principal0']}/{ref['repay_years']}*{X('months')}/12))")
+                put(f"ln{k}_repay", f"=MIN({X(f'ln{k}_open')}+{X(f'ln{k}_draw')},{ref['principal0']}/{ref['term']}"
+                                    f"*MAX(0,MIN({ps}+{mo}-1,{ref['end_m']}-1)-MAX({ps},{ref['first_m']}-1)+1))")
             put(f"ln{k}_close", f"={X(f'ln{k}_open')}+{X(f'ln{k}_draw')}-{X(f'ln{k}_repay')}")
         put("int_loans", "=" + ("+".join(X(f"ln{k}_int") for k in range(nloans)) if nloans else "0"))
+        put("loan_fees", "=" + ("+".join(X(f"ln{k}_fee") for k in range(nloans)) if nloans else "0"))
         put("loan_draw", "=" + ("+".join(X(f"ln{k}_draw") for k in range(nloans)) if nloans else "0"))
         put("loan_repay", "=" + ("+".join(X(f"ln{k}_repay") for k in range(nloans)) if nloans else "0"))
         put("borrowings", "=" + ("+".join(X(f"ln{k}_close") for k in range(nloans)) if nloans else "0"))
@@ -461,7 +477,7 @@ def _calc_sheet(wb, a, R, meta, periods):
         put("cash_open", f"={R['op']['cash']}" if i == 0 else f"={Pv('cash')}")
         put("int_income", f"=MAX({X('cash_open')},0)*{R['deposit']}/100*{X('months')}/12")
         put("int_od", f"=MAX(-{X('cash_open')},0)*{R['overdraft']}/100*{X('months')}/12")
-        put("fin_cost", f"={X('int_loans')}+{X('int_od')}-{X('int_income')}")
+        put("fin_cost", f"={X('int_loans')}+{X('int_od')}-{X('int_income')}+{X('loan_fees')}")
         put("pbt", f"={X('ebit')}-{X('fin_cost')}")
         put("loss_open", f"={R['op']['tax_loss_bf']}" if i == 0 else f"={Pv('loss_close')}")
         put("loss_used", f"=MIN({X('loss_open')},MAX({X('pbt')},0))")
@@ -484,7 +500,7 @@ def _calc_sheet(wb, a, R, meta, periods):
         put("interest_paid", f"={X('int_loans')}+{X('int_od')}")
         put("interest_received", f"={X('int_income')}")
         put("tax_paid", f"={X('tax')}")
-        put("cfo", f"={X('cash_ops')}-{X('interest_paid')}+{X('interest_received')}-{X('tax_paid')}")
+        put("cfo", f"={X('cash_ops')}-{X('interest_paid')}-{X('loan_fees')}+{X('interest_received')}-{X('tax_paid')}")
         put("cfi", f"=-{X('capex')}")
         put("cff", f"={X('loan_draw')}-{X('loan_repay')}+{X('equity_issue')}-{X('dividends')}")
         put("net_cash", f"={X('cfo')}+{X('cfi')}+{X('cff')}")
@@ -582,7 +598,7 @@ def _annual_sheet(wb, a, R, meta, result):
     put_row("dep", "Depreciation", F("dep"))
     put_row("ebit", "Operating profit (EBIT)", lambda c, i: f"={c}{A['ebitda']}-{c}{A['dep']}", bold=True)
     put_row("int_income", "Interest income", F("int_income"))
-    put_row("fin_exp", "Finance costs (loans and overdraft)", lambda c, i: f"=SUMIF({yrs},{c}$8,{R['calc_rng']('int_loans')})+SUMIF({yrs},{c}$8,{R['calc_rng']('int_od')})")
+    put_row("fin_exp", "Finance costs (loan interest, fees and overdraft)", lambda c, i: f"=SUMIF({yrs},{c}$8,{R['calc_rng']('int_loans')})+SUMIF({yrs},{c}$8,{R['calc_rng']('int_od')})+SUMIF({yrs},{c}$8,{R['calc_rng']('loan_fees')})")
     put_row("pbt", "Profit before tax", lambda c, i: f"={c}{A['ebit']}+{c}{A['int_income']}-{c}{A['fin_exp']}", bold=True)
     put_row("tax", "Income tax", F("tax"))
     put_row("pat", "Profit after tax", lambda c, i: f"={c}{A['pbt']}-{c}{A['tax']}", bold=True, total=True)
@@ -596,9 +612,10 @@ def _annual_sheet(wb, a, R, meta, result):
     put_row("d_payables", "Increase/(decrease) in payables", F("d_payables"))
     put_row("cash_ops", "Cash generated from operations", F("cash_ops"), bold=True)
     put_row("interest_paid", "Interest paid", lambda c, i: f"=-SUMIF({yrs},{c}$8,{R['calc_rng']('interest_paid')})")
+    put_row("fees_paid", "Loan establishment fees paid", lambda c, i: f"=-SUMIF({yrs},{c}$8,{R['calc_rng']('loan_fees')})")
     put_row("interest_received", "Interest received", F("interest_received"))
     put_row("tax_paid", "Tax paid", lambda c, i: f"=-SUMIF({yrs},{c}$8,{R['calc_rng']('tax_paid')})")
-    put_row("cfo", "Net cash from operating activities", lambda c, i: f"={c}{A['cash_ops']}+{c}{A['interest_paid']}+{c}{A['interest_received']}+{c}{A['tax_paid']}", bold=True, total=True)
+    put_row("cfo", "Net cash from operating activities", lambda c, i: f"={c}{A['cash_ops']}+{c}{A['interest_paid']}+{c}{A['fees_paid']}+{c}{A['interest_received']}+{c}{A['tax_paid']}", bold=True, total=True)
     put_row("capex", "Purchase of property, plant and equipment", lambda c, i: f"=-SUMIF({yrs},{c}$8,{R['calc_rng']('capex')})")
     put_row("cfi", "Net cash from investing activities", lambda c, i: f"={c}{A['capex']}", bold=True, total=True)
     put_row("loan_draw", "Loan drawdowns", F("loan_draw"))
@@ -641,7 +658,7 @@ def _annual_sheet(wb, a, R, meta, result):
     put_row("current_assets", "  Current assets", lambda c, i: f"={c}{A['inventory']}+{c}{A['receivables']}+{c}{A['other_assets']}+{c}{A['cash_pos']}")
     put_row("current_liab", "  Current liabilities", lambda c, i: f"={c}{A['payables']}+{c}{A['other_liab']}+{c}{A['overdraft']}+{c}{A['cur_portion']}")
     put_row("net_debt", "  Net debt", lambda c, i: f"={c}{A['borrowings']}+{c}{A['overdraft']}-{c}{A['cash_pos']}")
-    put_row("debt_service", "  Debt service (interest paid + principal repaid)", lambda c, i: f"=-{c}{A['interest_paid']}-{c}{A['loan_repay']}")
+    put_row("debt_service", "  Debt service (interest paid + principal repaid)", lambda c, i: f"=-{c}{A['interest_paid']}-{c}{A['fees_paid']}-{c}{A['loan_repay']}")
     put_row("r_current", "Current ratio", lambda c, i: f'=IFERROR({c}{A["current_assets"]}/{c}{A["current_liab"]},"n/a")', MULT)
     put_row("r_quick", "Quick ratio", lambda c, i: f'=IFERROR(({c}{A["receivables"]}+{c}{A["cash_pos"]})/{c}{A["current_liab"]},"n/a")', MULT)
     put_row("r_gm", "Gross margin", lambda c, i: f'=IFERROR({c}{A["gross_profit"]}/{c}{A["revenue"]},"n/a")', PCT)
@@ -651,7 +668,7 @@ def _annual_sheet(wb, a, R, meta, result):
     put_row("r_roce", "Return on capital employed", lambda c, i: f'=IFERROR({c}{A["ebit"]}/({c}{A["total_equity"]}+{c}{A["borrowings"]}),"n/a")', PCT)
     put_row("r_de", "Gearing (debt / equity)", lambda c, i: f'=IFERROR(({c}{A["borrowings"]}+{c}{A["overdraft"]})/{c}{A["total_equity"]},"n/a")', MULT)
     put_row("r_nd", "Net debt / EBITDA", lambda c, i: f'=IF({c}{A["ebitda"]}>0,{c}{A["net_debt"]}/{c}{A["ebitda"]},"n/a")', MULT)
-    put_row("r_ic", "Interest cover (EBIT / interest)", lambda c, i: f'=IFERROR({c}{A["ebit"]}/{c}{A["fin_exp"]},"n/a")', MULT)
+    put_row("r_ic", "Interest cover (EBIT / interest)", lambda c, i: f'=IFERROR({c}{A["ebit"]}/({c}{A["fin_exp"]}-SUMIF({yrs},{c}$8,{R["calc_rng"]("loan_fees")})),"n/a")', MULT)
     put_row("r_dscr", "Debt service cover ((EBITDA - tax) / debt service)", lambda c, i: f'=IFERROR(({c}{A["ebitda"]}-{c}{A["tax"]})/{c}{A["debt_service"]},"n/a")', MULT)
     put_row("r_rec", "Receivable days", lambda c, i: f'=IFERROR({c}{A["receivables"]}*365/{c}{A["revenue"]},"n/a")', DAYS)
     put_row("r_inv", "Inventory days", lambda c, i: f'=IFERROR({c}{A["inventory"]}*365/{c}{A["cogs"]},"n/a")', DAYS)
@@ -720,6 +737,168 @@ def _monthly_sheet(wb, a, R, meta):
         _fmt(total, NUM, bold=True)
         r += 1
     ws.freeze_panes = "C9"
+    return ws
+
+
+
+# --------------------------------------------------------------------------- Cashflow forecast sheet
+
+def _cashflow_forecast_sheet(wb, a, R, meta):
+    """The firm's cash flow forecast layout with live formulas: year 1 by month, a Year 1 column and the later years. Every
+    line reads the Calc sheet, and the closing cash is reconciled to the cash flow statement and the balance sheet cash."""
+    ws = wb.create_sheet("Cashflow forecast")
+    rw = R["calc_rw"]
+    years = a["years"]
+    ncol = 12 + 1 + (years - 1)
+    brand.xlsx_title_band(ws, "Cash flow forecast", _meta_lines(meta) + ["Year 1 by month, then annual - reconciled to the cash flow statement"], ncols=min(ncol + 2, 30))
+    brand.xlsx_page_setup(ws)
+    _setw(ws, {"A": 50, "B": 3})
+    for i in range(ncol):
+        ws.column_dimensions[CL(3 + i)].width = 12.5
+    # column kinds: ('m', calc_col) for months, ('y1', None), ('y', calc_col) for later years
+    cols = [("m", CL(FIRST_PERIOD_COL + m)) for m in range(12)] + [("y1", None)] + [("y", CL(FIRST_PERIOD_COL + 12 + (y - 2))) for y in range(2, years + 1)]
+    r = 8
+    _head(ws, r, ["", ""] + [f"=Calc!{c}{rw['label']}" if k != "y1" else "Year 1" for k, c in cols])
+    r += 1
+    first_col, last_col = CL(3), CL(14)
+    rows = {}
+
+    def put(label, key, build, kind="flow", style="line", fmt=NUM, bold=False):
+        """build(calc_col_letter) -> formula text without '='. kind: flow (sum for Year 1) | open | close | none."""
+        nonlocal r
+        ws.cell(row=r, column=1, value=("    " if style == "indent" else "") + label)
+        for i, (k, c) in enumerate(cols):
+            cell = ws.cell(row=r, column=3 + i)
+            if k == "y1":
+                if kind == "flow":
+                    cell.value = f"=SUM({first_col}{r}:{last_col}{r})"
+                elif kind == "open":
+                    cell.value = f"={first_col}{r}"
+                elif kind == "close":
+                    cell.value = f"={last_col}{r}"
+                else:
+                    continue
+            else:
+                f = build(c)
+                if f is None:
+                    continue
+                cell.value = "=" + f
+            _fmt(cell, fmt, bold=bold or style in ("total", "grand"), total=style in ("total", "grand"))
+        if bold or style in ("total", "grand"):
+            ws.cell(row=r, column=1).font = Font(bold=True)
+        if key:
+            rows[key] = r
+        r += 1
+        return r - 1
+
+    def calc(k):
+        return lambda c: f"Calc!{c}{rw[k]}"
+
+    def neg(k):
+        return lambda c: f"-Calc!{c}{rw[k]}"
+
+    def gap():
+        nonlocal r
+        r += 1
+
+    sums = []   # rows whose Year-1-or-period values add up to the net movement
+    put("Opening cash balance", "open", calc("cash_open"), "open", "total")
+    gap()
+    if a["loans"]:
+        sums.append(put("Loan finance", "loan", calc("loan_draw"), "flow", "total"))
+        for k, L in enumerate(a["loans"]):
+            put(L["name"], None, calc(f"ln{k}_draw"), "flow", "indent")
+        gap()
+    ws.cell(row=r, column=1, value="Revenue distribution during year 1").font = Font(italic=True, color=MUTED)
+    for i, (k, c) in enumerate(cols):
+        if k == "m":
+            cell = ws.cell(row=r, column=3 + i, value=f"=Calc!{c}{rw['share']}")
+            _fmt(cell, PCT)
+        elif k == "y1":
+            cell = ws.cell(row=r, column=3 + i, value=f"=SUM({first_col}{r}:{last_col}{r})")
+            _fmt(cell, PCT)
+    r += 1
+    sums.append(put("Revenue", "rev", calc("revenue"), "flow", "total"))
+    for i, st in enumerate(a["revenue"]):
+        put(st["name"], None, calc(f"rev{i}"), "flow", "indent")
+    gap()
+    sums.append(put("Cost of sales", "cogs", neg("cogs"), "flow", "total"))
+    gap()
+    sums.append(put("Operating expenditure", "opex", neg("opex"), "flow", "total"))
+    for j, o in enumerate(a["opex"]):
+        put(o["name"], None, neg(f"opex{j}"), "flow", "indent")
+    gap()
+    sums.append(put("Working capital movements", "wc", lambda c: f"Calc!{c}{rw['d_inventory']}+Calc!{c}{rw['d_receivables']}+Calc!{c}{rw['d_payables']}", "flow", "total"))
+    put("Change in inventory", None, calc("d_inventory"), "flow", "indent")
+    put("Change in receivables", None, calc("d_receivables"), "flow", "indent")
+    put("Change in payables", None, calc("d_payables"), "flow", "indent")
+    gap()
+    sums.append(put("Finance charges", "fin", lambda c: f"-Calc!{c}{rw['loan_fees']}-Calc!{c}{rw['loan_repay']}-Calc!{c}{rw['int_loans']}-Calc!{c}{rw['int_od']}+Calc!{c}{rw['int_income']}", "flow", "total"))
+    for k, L in enumerate(a["loans"]):
+        fee_txt = []
+        if L["fee_pct"] > 0:
+            fee_txt.append(f"{L['fee_pct']:g}%")
+        if L["fee_amount"] > 0:
+            fee_txt.append(f"{L['fee_amount']:,.0f} fixed")
+        put(f"Establishment fee @ {' + '.join(fee_txt) or '0%'} - {L['name']}", None, neg(f"ln{k}_fee"), "flow", "indent")
+    for k, L in enumerate(a["loans"]):
+        put(f"Loan repayment - principal - {L['name']}", None, neg(f"ln{k}_repay"), "flow", "indent")
+    for k, L in enumerate(a["loans"]):
+        put(f"Loan repayment - interest @ {L['rate']:g}% - {L['name']}", None, neg(f"ln{k}_int"), "flow", "indent")
+    put("Overdraft interest", None, neg("int_od"), "flow", "indent")
+    put("Interest received", None, calc("int_income"), "flow", "indent")
+    gap()
+    sums.append(put("Taxation", "tax", neg("tax"), "flow", "total"))
+    gap()
+    sums.append(put("Capital expenditure", "capex", neg("capex"), "flow", "total"))
+    gap()
+    sums.append(put("Shareholders", "own", lambda c: f"Calc!{c}{rw['equity_issue']}-Calc!{c}{rw['dividends']}", "flow", "total"))
+    put("Share capital issued", None, calc("equity_issue"), "flow", "indent")
+    put("Dividends paid", None, neg("dividends"), "flow", "indent")
+    gap()
+
+    def net_formula(c):
+        return None
+
+    # net movement = sum of the section totals on this sheet
+    net_r = r
+    ws.cell(row=net_r, column=1, value="Net cash movement").font = Font(bold=True)
+    for i, (k, c) in enumerate(cols):
+        col = CL(3 + i)
+        cell = ws.cell(row=net_r, column=3 + i, value="=" + "+".join(f"{col}{x}" for x in sums))
+        _fmt(cell, NUM, bold=True, total=True)
+    r += 1
+    close_r = r
+    ws.cell(row=close_r, column=1, value="Closing cash balance").font = Font(bold=True)
+    for i, (k, c) in enumerate(cols):
+        col = CL(3 + i)
+        cell = ws.cell(row=close_r, column=3 + i, value=f"={col}{rows['open']}+{col}{net_r}")
+        _fmt(cell, NUM, bold=True, total=True)
+    r += 2
+    _section(ws, r, "Reconciliation to the cash flow statement and balance sheet", ncol + 2)
+    r += 1
+    stmt = {}
+    for label, key in (("Net cash from operating activities", "cfo"), ("Net cash from investing activities", "cfi"), ("Net cash from financing activities", "cff")):
+        stmt[key] = put(label, None, calc(key), "flow", "indent")
+    sn = put("Net change in cash per the cash flow statement", None, calc("net_cash"), "flow", "total")
+    dn = put("Difference: forecast less cash flow statement (nil)", None, lambda c: None, "none", "line")
+    for i, (k, c) in enumerate(cols):
+        col = CL(3 + i)
+        _fmt(ws.cell(row=dn, column=3 + i, value=f"=ROUND({col}{net_r}-{col}{sn},2)"), NUM)
+    sc = put("Closing cash per the balance sheet (cash less overdraft)", None, calc("cash"), "close", "total")
+    dc = put("Difference: closing cash less balance sheet (nil)", None, lambda c: None, "none", "line")
+    for i, (k, c) in enumerate(cols):
+        col = CL(3 + i)
+        _fmt(ws.cell(row=dc, column=3 + i, value=f"=ROUND({col}{close_r}-{col}{sc},2)"), NUM)
+    r += 1
+    last = CL(2 + ncol)
+    ws.cell(row=r, column=1, value="Reconciliation status").font = Font(bold=True)
+    c = ws.cell(row=r, column=3, value=f'=IF(AND(SUMPRODUCT(ABS({first_col}{dn}:{last}{dn}))<0.01,SUMPRODUCT(ABS({first_col}{dc}:{last}{dc}))<0.01),"Reconciles","DOES NOT RECONCILE")')
+    c.font = Font(bold=True)
+    rows["status"] = r
+    rows["net"], rows["close"], rows["diff_net"], rows["diff_close"] = net_r, close_r, dn, dc
+    ws.freeze_panes = "C9"
+    R["cff_rows"] = rows
     return ws
 
 
@@ -1039,7 +1218,7 @@ def _cover_sheet(wb, a, meta, R, A):
     ws.cell(row=r, column=1, value="Sheets").font = Font(bold=True, color=NAVY)
     r += 1
     for name, text in (("Assumptions", "All inputs (blue on yellow)"), ("Annual Summary", "Income statement, cash flow, balance sheet, ratios, covenants"),
-                       ("Monthly Year 1", "Year 1 month by month"), ("Calc", "The calculation engine (monthly year 1, annual after)"),
+                       ("Monthly Year 1", "Year 1 month by month"), ("Cashflow forecast", "Cash flow forecast in the firm layout, reconciled to the statement"), ("Calc", "The calculation engine (monthly year 1, annual after)"),
                        ("Valuation", "WACC, DCF, sensitivity and trading multiples"), ("Scenarios", "Scenario comparison and sensitivity snapshots")):
         ws.cell(row=r, column=1, value=name)
         ws.cell(row=r, column=2, value=text)
@@ -1069,13 +1248,14 @@ def build_model_workbook(meta, a, valuation=None, scenarios=None, sensitivity=No
     ws_c, rw = _calc_sheet(wb, a, R, meta, periods)
     ws_s, A = _annual_sheet(wb, a, R, meta, result)
     _monthly_sheet(wb, a, R, meta)
+    _cashflow_forecast_sheet(wb, a, R, meta)
     _valuation_sheet(wb, a, R, A, meta, result, valuation)
     if scenarios or sensitivity:
         _snapshot_sheet(wb, a, meta, scenarios, sensitivity)
     if actuals:
         _bva_sheet(wb, a, meta, result, actuals)
     _cover_sheet(wb, a, meta, R, A)
-    order = ["Cover", "Assumptions", "Annual Summary", "Monthly Year 1", "Valuation", "Scenarios", "Budget vs Actual", "Calc"]
+    order = ["Cover", "Assumptions", "Annual Summary", "Monthly Year 1", "Cashflow forecast", "Valuation", "Scenarios", "Budget vs Actual", "Calc"]
     wb._sheets = [wb[n] for n in order if n in wb.sheetnames]
     for ws in wb.worksheets:
         ws.sheet_properties.tabColor = NAVY if ws.title in ("Cover", "Assumptions") else GOLD
@@ -1084,7 +1264,71 @@ def build_model_workbook(meta, a, valuation=None, scenarios=None, sensitivity=No
     wb.properties.title = meta.get("name") or "Financial forecast model"
     buf = io.BytesIO()
     wb.save(buf)
-    return buf.getvalue(), {"calc_rw": rw, "annual_rows": A, "valuation_cells": R.get("valuation_cells"), "calc_P": R["calc_P"]}
+    return buf.getvalue(), {"calc_rw": rw, "annual_rows": A, "valuation_cells": R.get("valuation_cells"), "cff_rows": R.get("cff_rows"), "calc_P": R["calc_P"]}
+
+
+def build_statements_workbook(meta, result):
+    """Plain-values workbook of the statements (annual, then year 1 by month) and the cash flow forecast, for circulating or
+    pasting into other documents. The live-formula model workbook is a separate download."""
+    import cf_report as RP
+    wb = Workbook()
+    wb.remove(wb.active)
+
+    def write(ws, r, columns, lines, ncols):
+        _head(ws, r, [""] + list(columns))
+        r += 1
+        for ln in lines:
+            kind = ln["kind"]
+            if kind == "gap":
+                r += 1
+                continue
+            if kind == "head":
+                _section(ws, r, ln["label"], ncols)
+                r += 1
+                continue
+            ws.cell(row=r, column=1, value=("    " if kind == "indent" else "") + ln["label"])
+            fmt = {"pct": PCT, "x": '0.00"x"', "days": "0"}.get(ln.get("fmt", "money"), NUM)
+            for i, v in enumerate(ln["values"]):
+                if v is None:
+                    continue
+                _fmt(ws.cell(row=r, column=2 + i, value=v), fmt, bold=kind in ("total", "grand"), total=kind in ("total", "grand"))
+            if kind in ("total", "grand"):
+                ws.cell(row=r, column=1).font = Font(bold=True)
+            if kind == "memo":
+                ws.cell(row=r, column=1).font = Font(italic=True, color=MUTED)
+            r += 1
+        return r + 1
+
+    def sheet(title, heading, blocks, ncols):
+        ws = wb.create_sheet(title)
+        r = brand.xlsx_title_band(ws, heading, _meta_lines(meta) + ["Values as at export - the live-formula model is a separate download"], ncols=max(ncols + 1, 8))
+        brand.xlsx_page_setup(ws)
+        _setw(ws, {"A": 50})
+        for i in range(ncols):
+            ws.column_dimensions[CL(2 + i)].width = 13
+        r = max(r, 8)
+        for name, columns, lines in blocks:
+            if name:
+                _section(ws, r, name, ncols + 1)
+                r += 1
+            r = write(ws, r, columns, lines, ncols + 1)
+        ws.freeze_panes = "B9"
+        ws.sheet_properties.tabColor = GOLD
+        return ws
+
+    ann = RP.statement_tables(result, "annual")
+    mon = RP.statement_tables(result, "monthly")
+    cff = RP.cashflow_forecast(result)
+    sheet("Annual statements", "Financial statements - annual", [(t, ann["columns"], ln) for t, ln in ann["statements"]], len(ann["columns"]))
+    sheet("Monthly year 1", "Financial statements - year 1 by month", [(t, mon["columns"], ln) for t, ln in mon["statements"]], len(mon["columns"]))
+    ws = sheet("Cashflow forecast", "Cash flow forecast", [(None, cff["columns"], cff["lines"])], len(cff["columns"]))
+    ws.cell(row=ws.max_row + 1, column=1, value="Reconciles to the cash flow statement" if cff["ok"] else "DOES NOT RECONCILE to the cash flow statement").font = Font(bold=True)
+    wb.properties.creator = "Neverlank Chartered Accountants"
+    wb.properties.title = meta.get("name") or "Financial statements"
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
 
 
 def build_project_workbook(meta, p, narrative=None):
