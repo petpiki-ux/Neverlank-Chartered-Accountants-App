@@ -17,6 +17,7 @@ This file only holds the web layer; the arithmetic is in cf_ma.py and the statem
 It is imported at the bottom of corporate_finance.py so its routes join the same blueprint (same permission gate).
 """
 import copy
+import hashlib
 import json
 import os
 import tempfile
@@ -30,14 +31,15 @@ import cf_ma as M
 import cf_fsload as FS
 import cf_recon as RC
 import cf_ma_var as VM
+import cf_ma_link as LK
 import cf_tools as T
 from extensions import db
 from financials import suggest_fs_category
 from invoicing import FIRM_LETTERHEAD, next_sequence_number
-from models import (Client, Engagement, CFModel, CFMgmtPack, COAMapping, Document, user_can_access_client,
+from models import (Client, Engagement, CFModel, CFScenario, CFMgmtPack, COAMapping, Document, user_can_access_client,
                     user_can_access_engagement, visible_clients)
 from corporate_finance import (corpfin_bp, _guard, _can_see, _is_signoff_role, _engagement_choices, _valid_engagement,
-                               _commit_with_number, _touch, _advisory_engagement_or_404, _acceptance_open, _run,
+                               _commit_with_number, _touch, _advisory_engagement_or_404, _acceptance_open, _run, _next_model_number, _base_scenario,
                                _pick_scenario, _safe_name, CURRENCIES, XLSX_MIME)
 
 PACK_TABS = [
@@ -235,7 +237,7 @@ def pack_tab(pack_id, tab):
     ctx = dict(pack=pack, d=d, tab=tab, labels=labels, cur=cur, engagement=pack.engagement, structure=d["structure"], settings=d["settings"],
                months=M.fy_months(d), report_month=M.report_month(d), fy=M.fy_label(d), prior_label=M.prior_fy_label(d),
                month_label=M.month_label, warnings=M.warnings(d), status=M.data_status(d), has_prior=bool((d.get("prior") or {}).get("pl")),
-               engagements=_engagement_choices([pack.client]) if tab == "setup" else [])
+               engagements=_engagement_choices([pack.client]) if tab == "setup" else [], link_status=LK.link_status(_data(pack)))
     if tab == "summary":
         ctx.update(V=M.vectors(d), msgs=M.key_messages(d, ""), kpis=M.kpi_table(d), charts=_chart_payload(d))
     elif tab == "income":
@@ -261,6 +263,7 @@ def pack_tab(pack_id, tab):
     elif tab == "budget":
         ctx.update(plans={n: d.get(n) or {} for n in PLAN_NAMES}, line_defs=M.pl_line_defs(d["structure"]),
                    plan_pl={n: M.budget_months(d, n) for n in PLAN_NAMES}, models=_pack_models(pack))
+        ctx.update(_continuation_ctx(pack, d))
     elif tab == "prior":
         pb = M.prior_bs(d)
         ctx.update(prior=d.get("prior") or {}, line_defs=M.pl_line_defs(d["structure"]), bs_lines=M.BS_LINES, **loader_context(pack.client_id, pack.engagement_id),
@@ -847,6 +850,194 @@ def pack_reforecast_apply(pack_id):
     return _rf_back(pack, **{k: v for k, v in request.form.items() if k.startswith(("sc_", "adj_"))})
 
 
+# =========================================================================== forecast continuation (pack <-> forecast model)
+
+def _continuation_ctx(pack, d):
+    """What the Budget & forecast tab needs to offer 'continue the actuals as a forecast'."""
+    status = LK.link_status(d)
+    link = d.get("forecast_link") or {}
+    params = LK.normalise_params(link.get("params"))
+    model = None
+    if link.get("model_id"):
+        model = CFModel.query.get(link["model_id"])
+        if model is not None and (model.client_id != pack.client_id or not _can_see(model)):
+            model = None
+    preview, error = None, None
+    try:
+        a, info = LK.continuation_assumptions(d, params, pack.currency)
+        n = M.report_index(d) + 1
+        preview = dict(info, remaining=max(0, 12 - n), years=a["years"], first_label=M.month_label(a["start_month"], False))
+    except LK.LinkError as e:
+        error = str(e)
+    return dict(link=link, link_status=status, link_params=params, link_model=model, link_preview=preview, link_error=error,
+                basis_labels=LK.BASIS_LABELS, report_label=M.month_label(M.report_month(d), False),
+                link_scenarios=list(model.scenarios) if model is not None else [])
+
+
+def _params_from_form(form, d):
+    raw = {k: form.get(k) for k in ("years", "basis", "season", "rev_adj", "cost_adj", "growth", "opex_growth", "capex", "tax_rate", "payout", "repay_years")}
+    raw["keep_forward"] = bool(form.get("keep_forward"))
+    return LK.normalise_params(raw)
+
+
+def _apply_model_to_pack(pack, d, model, scenario, built_for, params, fingerprint):
+    """Run the model and put its remaining-month results into the pack's Forecast. Returns (plan, result, link, notes)."""
+    result = _run(model, scenario)
+    a = result["a"]
+    structure = d["structure"]
+    n = M.report_index(d) + 1
+    has_oth = any(s["name"].strip().lower() == "other income" for s in a["revenue"]) and len(a["revenue"]) > len(structure["revenue"])
+    if len(a["revenue"]) < len(structure["revenue"]) or len(a["opex"]) < len(structure["opex"]):
+        raise LK.LinkError("The linked model has fewer revenue or expense lines than the pack. Rebuild the continuation from the actuals.")
+    plan = LK.plan_from_result(structure, result, a, M.fy_months(d), n, has_oth)
+    link = {"model_id": model.id, "model_number": model.model_number, "model_name": model.name, "scenario": scenario.name,
+            "built_for": built_for, "start_month": a["start_month"], "params": params, "fingerprint": fingerprint,
+            "refreshed": _stamp(), "months": plan["months"]}
+    d["forecast"] = LK.forecast_dataset(d, plan, link, _stamp())
+    d["forecast_link"] = link
+    notes = []
+    if d["settings"].get("outlook") in ("budget_remaining", "run_rate"):
+        d["settings"]["outlook"] = "auto"
+        notes.append("The full-year outlook setting was changed to Automatic so that it uses the forecast.")
+    expected = M.shift_month(M.report_month(d), 1)
+    if a["start_month"] != expected:
+        notes.append(f"The model starts in {M.month_label(a['start_month'], False)} but the actuals end in {M.month_label(M.report_month(d), False)}. "
+                     "Roll the forecast forward so that the two join up.")
+    elif plan["months"] and len(plan["months"]) < 12 - n:
+        notes.append("The model does not cover every remaining month of this financial year.")
+    return plan, result, link, notes
+
+
+def _continue_core(pack, d, params, mode):
+    """Create / roll forward / rebuild the continuation model and put its remaining months in d["forecast"].
+    Returns (model, plan, link, notes, verb). Raises LK.LinkError with a message for the user."""
+    a, info = LK.continuation_assumptions(d, params, pack.currency)
+    old = d.get("forecast_link") or {}
+    notes = []
+    model = CFModel.query.get(old["model_id"]) if (old.get("model_id") and mode != "new") else None
+    if model is not None and (model.client_id != pack.client_id or not _can_see(model)):
+        model = None
+    if model is not None and model.is_final:
+        notes.append(f"{model.model_number} is Final and locked, so a new model was created for the rolled-forward forecast.")
+        model = None
+    if model is not None and mode == "roll" and params["keep_forward"]:
+        a = LK.overlay_forward(a, model.assumptions)
+    month_txt = M.month_label(M.report_month(d), False)
+    purpose = f"Continues the actuals in Management Accounts {pack.pack_number} from {month_txt}. The opening balance sheet is the actual balance sheet."
+    if model is None:
+        def make():
+            return CFModel(model_number=_next_model_number(), client_id=pack.client_id, engagement_id=pack.engagement_id,
+                           name=f"{pack.name} - forecast from {month_txt}"[:200], purpose=purpose,
+                           status="Draft", assumptions_json=None, created_by_id=current_user.id, updated_by_id=current_user.id)
+        model = _commit_with_number(make)
+        model.set_json("assumptions", a)
+        model.set_json("historical", {})
+        model.set_json("actuals", {})
+        db.session.add(CFScenario(model_id=model.id, name="Base case", is_base=True, sort_order=0, shocks_json="{}"))
+        db.session.commit()
+        verb = "created"
+    else:
+        model.set_json("assumptions", a)
+        model.purpose = purpose
+        _touch(model)
+        db.session.commit()
+        verb = "rolled forward" if mode == "roll" else "rebuilt from the actuals"
+    plan, result, link, more = _apply_model_to_pack(pack, d, model, _base_scenario(model), M.report_month(d), params, LK.fingerprint(d))
+    return model, plan, link, notes + more + info["notes"], verb
+
+
+def _roll_linked_forecast(pack, d):
+    """After the actuals changed (a corrected Excel pack was imported), roll a linked forecast forward from them so that it does not
+    carry the old opening position. Returns messages for the user; never raises."""
+    link = d.get("forecast_link")
+    if not isinstance(link, dict) or not link.get("model_id"):
+        return []
+    st = LK.link_status(d)
+    if not st or not st["stale"]:
+        return []
+    try:
+        model, plan, new_link, notes, verb = _continue_core(pack, d, LK.normalise_params(link.get("params")), "roll")
+    except LK.LinkError as e:
+        return [f"The forecast could not be rolled forward from the corrected actuals: {e}"]
+    except Exception:
+        current_app.logger.exception("auto roll forward failed")
+        return ["The forecast was not rolled forward automatically. Open Budget & forecast and roll it forward."]
+    msg = f"The forecast model {model.model_number} was {verb} from the corrected actuals (it now opens from the {M.month_label(M.report_month(d), False)} balance sheet)"
+    if plan["months"]:
+        msg += f" and covers {M.month_label(plan['months'][0], False)} to {M.month_label(plan['months'][-1], False)}"
+    return [msg + "."]
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/continuation/build", methods=["POST"])
+def pack_continuation_build(pack_id):
+    """Create (or roll forward) the forecast model that continues the pack's actuals, and make it the pack's forecast."""
+    pack = _pack_or_404(pack_id)
+    if _plocked(pack):
+        return _back(pack, "budget")
+    d = _data(pack)
+    params = _params_from_form(request.form, d)
+    mode = request.form.get("mode") if request.form.get("mode") in ("roll", "rebuild", "new") else "roll"
+    try:
+        model, plan, link, notes, verb = _continue_core(pack, d, params, mode)
+    except LK.LinkError as e:
+        flash(str(e), "danger")
+        return _back(pack, "budget")
+    _save(pack, d)
+    month_txt = M.month_label(M.report_month(d), False)
+    if plan["months"]:
+        flash(f"Model {model.model_number} {verb}: it opens from the actual balance sheet at {month_txt} and runs from "
+              f"{M.month_label(link['start_month'], False)}. The pack's forecast now covers {M.month_label(plan['months'][0], False)} to {M.month_label(plan['months'][-1], False)}.", "success")
+    else:
+        flash(f"Model {model.model_number} {verb} and opens from the actual balance sheet at {month_txt}. The actuals already reach the end of the financial year, "
+              "so there are no remaining months to forecast in this pack.", "success")
+    for n_ in notes:
+        flash(n_, "warning")
+    return _back(pack, "budget")
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/continuation/refresh", methods=["POST"])
+def pack_continuation_refresh(pack_id):
+    """Re-read the linked model (after its assumptions were edited) and update the pack's forecast from it."""
+    pack = _pack_or_404(pack_id)
+    back_model = request.form.get("back") == "model"
+    d = _data(pack)
+    link = d.get("forecast_link") or {}
+
+    def back():
+        if back_model and link.get("model_id"):
+            return redirect(url_for("corpfin.model_tab", model_id=link["model_id"], tab=request.form.get("tab") or "overview"))
+        return _back(pack, "budget")
+    if _plocked(pack):
+        return back()
+    model = CFModel.query.get(link.get("model_id")) if link.get("model_id") else None
+    if model is None or model.client_id != pack.client_id or not _can_see(model):
+        flash("The linked forecast model is no longer available. Build the continuation again.", "danger")
+        return _back(pack, "budget")
+    scen = _pick_scenario(model, request.form.get("scenario"))
+    try:
+        plan, result, new_link, notes = _apply_model_to_pack(pack, d, model, scen, link.get("built_for"), link.get("params"), link.get("fingerprint"))
+    except LK.LinkError as e:
+        flash(str(e), "danger")
+        return back()
+    _save(pack, d)
+    flash(f"The pack's forecast was refreshed from {model.model_number} ({scen.name}) for {len(plan['months'])} remaining month(s).", "success")
+    for n_ in notes:
+        flash(n_, "warning")
+    return back()
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/continuation/unlink", methods=["POST"])
+def pack_continuation_unlink(pack_id):
+    pack = _pack_or_404(pack_id)
+    if _plocked(pack):
+        return _back(pack, "budget")
+    d = _data(pack)
+    if d.pop("forecast_link", None):
+        _save(pack, d)
+        flash("The forecast is no longer linked to the model. The forecast figures stay as they are.", "success")
+    return _back(pack, "budget")
+
+
 # =========================================================================== diagnose a saved balance sheet
 
 _BS_SIDES = {k: side for k, _, side in M.BS_LINES}
@@ -855,7 +1046,7 @@ _BS_SIDES = {k: side for k, _, side in M.BS_LINES}
 def _base_ctx(pack, d, tab, **extra):
     ctx = dict(pack=pack, d=d, tab=tab, cur=pack.currency, engagement=pack.engagement, structure=d["structure"], settings=d["settings"],
                months=M.fy_months(d), report_month=M.report_month(d), fy=M.fy_label(d), prior_label=M.prior_fy_label(d), month_label=M.month_label,
-               warnings=M.warnings(d), status=M.data_status(d), has_prior=bool((d.get("prior") or {}).get("pl")))
+               warnings=M.warnings(d), status=M.data_status(d), has_prior=bool((d.get("prior") or {}).get("pl")), link_status=LK.link_status(d))
     ctx.update(extra)
     return ctx
 
@@ -1102,6 +1293,91 @@ def pack_pdf(pack_id):
     data = cf_ma_pdf.build_pack_pdf(pack, _meta(pack, d), d, FIRM_LETTERHEAD, opts)
     fn = f"{pack.pack_number}_{_safe_name(pack.name)}_{M.report_month(d)}.pdf"
     return Response(data, mimetype="application/pdf", headers={"Content-Disposition": f'inline; filename="{fn}"'})
+
+
+# =========================================================================== import a corrected Excel pack
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/import")
+def pack_import(pack_id):
+    pack = _pack_or_404(pack_id)
+    d = _data(pack)
+    return render_template("corpfin/ma_import.html", **_base_ctx(pack, d, "actuals", report=None, log=(d.get("import_log") or [])[-5:][::-1]))
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/import/review", methods=["POST"])
+def pack_import_review(pack_id):
+    import cf_ma_import as IM
+    pack = _pack_or_404(pack_id)
+    back = redirect(url_for("corpfin.pack_import", pack_id=pack.id))
+    if _plocked(pack):
+        return back
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("Choose the Excel pack you downloaded and corrected (.xlsx).", "danger")
+        return back
+    if not f.filename.lower().endswith((".xlsx", ".xlsm")):
+        flash("Upload an .xlsx file: the Excel pack downloaded from this page.", "danger")
+        return back
+    d = _data(pack)
+    raw = f.stream.read(IM.MAX_BYTES + 1)
+    fhash = hashlib.sha1(raw).hexdigest()
+    last = (d.get("import_log") or [{}])[-1]
+    if last.get("hash") == fhash:
+        flash(f"That exact file ({f.filename}) was already imported on {last.get('at', '')} by {last.get('by', '')}. Download the pack again to make further corrections.", "info")
+        return back
+    try:
+        parsed = IM.read_workbook(raw, d)
+        nd, report = IM.plan_import(d, parsed, f.filename, _stamp())
+    except IM.ImportError_ as e:
+        flash(str(e), "danger")
+        return back
+    except Exception:
+        current_app.logger.exception("excel pack import failed")
+        flash("That workbook could not be read. Use the file downloaded with 'Excel pack' (not a one-page export) and keep the Data sheet's layout.", "danger")
+        return back
+    return render_template("corpfin/ma_import.html", **_base_ctx(pack, d, "actuals", report=report, filename=f.filename, filehash=fhash, payload=json.dumps(parsed), log=[]))
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/import/apply", methods=["POST"])
+def pack_import_apply(pack_id):
+    import cf_ma_import as IM
+    pack = _pack_or_404(pack_id)
+    back = redirect(url_for("corpfin.pack_import", pack_id=pack.id))
+    if _plocked(pack):
+        return back
+    d = _data(pack)
+    try:
+        parsed = IM.clean_parsed(json.loads(request.form.get("payload") or ""))
+    except (ValueError, IM.ImportError_):
+        flash("The upload could not be read back. Please upload the file again.", "danger")
+        return back
+    filename = (request.form.get("filename") or "workbook.xlsx")[:120]
+    fhash = (request.form.get("filehash") or "")[:40]
+    last = (d.get("import_log") or [{}])[-1]
+    if fhash and last.get("hash") == fhash:
+        flash("That workbook has already been imported, so nothing was changed.", "info")
+        return _back(pack, "actuals")
+    accepted = set(request.form.getlist("fix")) if request.form.get("fixes_shown") else None
+    nd, report = IM.plan_import(d, parsed, filename, _stamp(), accepted=accepted)
+    if report["unchanged"]:
+        flash("Nothing in that workbook differs from the pack, so nothing was changed.", "info")
+        return _back(pack, "actuals")
+    log = list(d.get("import_log") or [])
+    st = _stamp()
+    log.append({"file": filename, "by": st["by"], "at": st["at"], "summary": report["sections"], "n_changes": len(report["changes"]), "hash": fhash})
+    nd["import_log"] = log[-20:]
+    for c in report.get("corrections") or []:
+        if c["applied"]:
+            log[-1].setdefault("corrections", []).append(f"{c['month_label']} {c['label']}: {c['old']:,.0f} to {c['new']:,.0f}")
+    nd["import_log"] = log[-20:]
+    msgs = _roll_linked_forecast(pack, nd)
+    _save(pack, nd)
+    flash("The workbook is now the pack's final version: " + " ".join(report["sections"]), "success")
+    for m_ in msgs:
+        flash(m_, "success")
+    for w in report["warnings"][:6]:
+        flash(w, "warning")
+    return _back(pack, "actuals")
 
 
 # =========================================================================== load existing financial statements

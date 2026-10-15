@@ -41,6 +41,15 @@
 <div class="cf-banner">This model is <strong>Final</strong> and locked{% if model.finalised_by %} (finalised by {{ model.finalised_by.name }}{% if model.finalised_at %} on {{ model.finalised_at.strftime('%d %b %Y') }}{% endif %}){% endif %}.{% if user_is_signoff %}
   <form method="post" action="{{ url_for('corpfin.reopen_model', model_id=model.id) }}" class="inline" onsubmit="return confirm('Reopen this model for editing?');"><button class="btn small secondary">Reopen</button></form>{% else %} A Partner can reopen it.{% endif %}</div>
 {% endif %}
+{% for pl in pack_links %}
+<div class="cf-banner">This model <strong>continues the actuals</strong> in Management Accounts <a href="{{ url_for('corpfin.pack_tab', pack_id=pl.pack.id, tab='budget') }}">{{ pl.pack.pack_number }}</a>:
+  it opens from the actual balance sheet and starts the month after the reporting month (starts {{ pl.status.start_label }}; built for actuals to {{ pl.status.built_label }}). Its year-1 months feed that pack's forecast.
+  {% if pl.status.stale %}<br><strong>{{ pl.status.message }}</strong>{% else %}{% if pl.status.message %}<br>{{ pl.status.message }}{% endif %}{% endif %}
+  {% if not pl.pack.is_final %}<form method="post" action="{{ url_for('corpfin.pack_continuation_refresh', pack_id=pl.pack.id) }}" class="inline" style="margin-left:6px;">
+    <input type="hidden" name="back" value="model"><input type="hidden" name="tab" value="{{ tab }}"><input type="hidden" name="scenario" value="{{ scenario.id }}">
+    <button class="btn small gold" type="submit">Update the pack's forecast from this model ({{ scenario.name }})</button></form>{% endif %}
+</div>
+{% endfor %}
 {% for w in result.warnings %}<div class="flash warning">{{ w }}</div>{% endfor %}
 {% if not result.checks.balance_ok %}<div class="flash danger">The balance sheet is out by {{ result.checks.max_imbalance|cfn(2) }}. Please report this.</div>{% endif %}
 

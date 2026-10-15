@@ -458,6 +458,17 @@ def _chart_payload(result):
     }
 
 
+def _pack_links(model):
+    """Management Accounts packs whose forecast is linked to this model (for the banner on the model pages)."""
+    try:
+        import cf_ma_link as LK
+        from models import CFMgmtPack
+        packs = CFMgmtPack.query.filter_by(client_id=model.client_id).all()
+        return [x for x in LK.links_for_model(model.id, packs) if _can_see(x["pack"])]
+    except Exception:
+        return []
+
+
 @corpfin_bp.route("/models/<int:model_id>/<tab>")
 def model_tab(model_id, tab):
     model = _model_or_404(model_id)
@@ -468,6 +479,7 @@ def model_tab(model_id, tab):
     a = result["a"]
     ctx = dict(model=model, tab=tab, scenario=scenario, scenarios=model.scenarios, result=result, a=a,
                cur=a["currency"], engagement=model.engagement)
+    ctx["pack_links"] = _pack_links(model)
     if tab == "overview":
         ctx.update(head=R.headline(result), charts=_chart_payload(result), ratio_rows=E.ratios(result))
         ctx["engagements"] = _engagement_choices([model.client])

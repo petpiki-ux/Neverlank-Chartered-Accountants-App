@@ -1,5 +1,6 @@
 {% extends "corpfin/ma_base.html" %}
 {% block tab %}
+{% if not pack.is_final %}<div class="cf-banner">Corrected the Excel pack? <a href="{{ url_for('corpfin.pack_import', pack_id=pack.id) }}">Import it here</a> so the app holds your final version.</div>{% endif %}
 {% if not prior_ok %}
 <div class="cf-banner">Load the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='prior') }}">prior year's accounts</a> first if you want comparatives, an opening balance sheet for the cash flow, or modelled months.</div>
 {% endif %}

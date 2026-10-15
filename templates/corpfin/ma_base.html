@@ -15,6 +15,7 @@
     <a class="btn secondary" href="{{ url_for('corpfin.pack_excel_page', pack_id=pack.id, tab=tab, **request.args.to_dict()) }}" title="Download what this page shows as an Excel workbook">Excel: this page</a>
     {% endif %}
     <a class="btn secondary" href="{{ url_for('corpfin.pack_excel', pack_id=pack.id, month=request.args.get('month')) }}" title="The whole pack with live formulas">Excel pack</a>
+    {% if not pack.is_final %}<a class="btn secondary" href="{{ url_for('corpfin.pack_import', pack_id=pack.id) }}" title="Upload the Excel pack after you have corrected it, so the app holds the final version">Import Excel</a>{% endif %}
     <a class="btn secondary" href="{{ url_for('corpfin.pack_pdf', pack_id=pack.id, month=request.args.get('month'), var=request.args.get('var')) }}" target="_blank">PDF pack</a>
     <a class="btn secondary" href="{{ url_for('corpfin.engagement_packs', engagement_id=pack.engagement_id) if pack.engagement_id else url_for('corpfin.dashboard') }}">All packs</a>
   </div>
@@ -47,6 +48,7 @@
 </form>
 {% endif %}
 
+{% if link_status and link_status.stale and tab != 'budget' %}<div class="flash warning">{{ link_status.message }} <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='budget') }}">Open Budget &amp; forecast</a></div>{% endif %}
 {% for w in warnings %}<div class="flash warning">{{ w }}</div>{% endfor %}
 {% block tab %}{% endblock %}
 {% endblock %}

@@ -1,0 +1,73 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+<div class="card">
+  <h3 style="margin-top:0;">Import a corrected Excel pack</h3>
+  <p class="cf-sub">Download the pack with <strong>Excel pack</strong>, correct or update it in Excel, then upload it here and the app will hold that version. Make your changes on the
+    <strong>Data</strong> sheet (the blue cells): the statements are formulas on top of it. You can correct any month's income statement or balance sheet, the budget, the forecast, the prior year and the
+    commentary, and change the reporting month on the Pack sheet. You will see exactly what differs from the pack, and nothing changes until you confirm.</p>
+  {% if pack.is_final %}
+  <div class="flash warning">This pack is Final and locked. A Partner can reopen it before you import.</div>
+  {% else %}
+  <form method="post" action="{{ url_for('corpfin.pack_import_review', pack_id=pack.id) }}" enctype="multipart/form-data">
+    <label for="imp-file">Excel pack (.xlsx)</label>
+    <input id="imp-file" type="file" name="file" accept=".xlsx,.xlsm" required>
+    <button class="btn gold" type="submit">Read the workbook and show what changed</button>
+    <a class="btn secondary" href="{{ url_for('corpfin.pack_excel', pack_id=pack.id, month=request.args.get('month')) }}">Download the current Excel pack</a>
+  </form>
+  <p class="cf-sub">Lines cannot be added, removed or renamed in Excel; do that in the pack's Setup tab and download again. The one-page exports (&ldquo;Excel: this page&rdquo;) are for reading, not importing.</p>
+  {% endif %}
+</div>
+
+{% if report %}
+<div class="card">
+  <h3 style="margin-top:0;">What the workbook changes &ndash; {{ filename }}</h3>
+  <ul class="ma-msgs">{% for s in report.sections %}<li>{{ s }}</li>{% endfor %}</ul>
+  {% for w in report.warnings %}<div class="flash warning">{{ w }}</div>{% endfor %}
+  {% if report.unchanged %}
+  <div class="flash info">Nothing in this workbook differs from the pack as it stands.</div>
+  {% endif %}
+  {% if report.changes %}
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Where</th><th>Line</th><th>Pack now</th><th>Workbook</th><th>Change</th></tr></thead>
+    <tbody>
+    {% for c in report.changes[:80] %}
+      <tr><td>{{ c.where }}</td><td class="ma-label">{{ c.line }}</td>
+        {% if c.note %}<td colspan="3" class="muted">{{ c.note }}</td>
+        {% else %}<td class="n">{{ c.old|cfn }}</td><td class="n">{{ c.new|cfn }}</td>{{ ma.vc(c.new - c.old, c.new - c.old) }}{% endif %}</tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% if report.changes|length > 80 %}<p class="cf-sub">Showing the first 80 of {{ report.changes|length }} changes.</p>{% endif %}
+  {% endif %}
+  {% if not report.unchanged and not pack.is_final %}
+  <form method="post" action="{{ url_for('corpfin.pack_import_apply', pack_id=pack.id) }}">
+    {% if report.corrections %}
+    <h4 style="margin:6px 0;">Knock-on corrections the app will make</h4>
+    <p class="cf-sub">Your changes to the profit and loss also change equity and what the profit is owed in. These balance sheet lines are adjusted so the sheets still balance. Untick any you do not want; those are then left as you uploaded them (the balance sheet may then be out).</p>
+    <input type="hidden" name="fixes_shown" value="1">
+    <div class="tbl-scroll"><table class="cf-table">
+      <thead><tr><th></th><th>Month</th><th>Line</th><th>Now</th><th>Corrected to</th><th>Why</th></tr></thead>
+      <tbody>{% for c in report.corrections %}
+        <tr><td><input type="checkbox" name="fix" value="{{ c.id }}" {% if c.applied %}checked{% endif %}></td><td>{{ c.month_label }}</td><td class="ma-label">{{ c.label }}</td>
+          <td class="n">{{ c.old|cfn }}</td><td class="n">{{ c.new|cfn }}</td><td class="muted" style="font-size:12px;">{{ c.reason }}</td></tr>
+      {% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+    <textarea name="payload" hidden>{{ payload }}</textarea>
+    <input type="hidden" name="filename" value="{{ filename }}">
+    <input type="hidden" name="filehash" value="{{ filehash }}">
+    <button class="btn gold" type="submit" onclick="return confirm('Replace the pack\'s figures with this workbook? The workbook becomes the final version held in the app.');">Make this workbook the pack's final version</button>
+    <a class="btn secondary" href="{{ url_for('corpfin.pack_import', pack_id=pack.id) }}">Cancel</a>
+  </form>
+  <p class="cf-sub">Months you did not change keep their trial balance source and notes. Changed months are stored as your Excel figures (shown as <em>Manual</em> on the Actuals tab). Retained earnings that were only the roll-forward keep rolling from the corrected profit, and a linked forecast is rolled forward from the corrected actuals.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if log %}
+<div class="card">
+  <h3 style="margin-top:0;">Earlier imports</h3>
+  <ul class="ma-msgs">{% for x in log %}<li><strong>{{ x.file }}</strong> &ndash; {{ x.by }}, {{ x.at }}. {{ x.summary|join(' ') }}</li>{% endfor %}</ul>
+</div>
+{% endif %}
+{% endblock %}

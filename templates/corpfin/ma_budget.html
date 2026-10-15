@@ -2,6 +2,74 @@
 {% block tab %}
 <div class="cf-banner">The <strong>budget</strong> is the approved plan for the year. The <strong>forecast</strong> is the latest view (usually the budget revised for what has happened). Both can come from a forecast model, be typed as annual figures phased over the months, or be adjusted month by month. Model snapshots also bring a balance sheet, so the balance sheet and cash flow can be compared too.</div>
 
+{# ===== forecast continuation ===== #}
+<div class="card" id="continuation">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+    <h3 style="margin:0;">Forecast as a continuation of the actuals</h3>
+    {% if link_status %}<span class="badge {{ 'status-Draft' if link_status.stale else 'status-Approved' }}">{{ 'Needs rolling forward' if link_status.stale else 'Linked and up to date' }}</span>{% else %}<span class="badge">Not linked</span>{% endif %}
+  </div>
+  <p class="cf-sub">The forecast starts the month after the reporting month ({{ report_label }}) and opens from the <strong>actual balance sheet</strong>, so the pack reads
+    <em>actual to date + forecast for the remaining months</em>. Revenue, costs, working-capital days, depreciation, interest and tax come from the run-rate in your actuals; you adjust them below.
+    Re-import a corrected Excel pack, then roll the forecast forward and it opens from the corrected figures.</p>
+
+  {% if link_status %}
+    <div class="{{ 'flash warning' if link_status.stale or link_status.message else 'cf-banner' }}">
+      Linked to <a href="{{ url_for('corpfin.model_tab', model_id=link_status.model_id, tab='assumptions') }}">{{ link_status.model_number }}{% if link_model %} - {{ link_model.name }}{% endif %}</a>
+      ({{ link_status.scenario }}); built for actuals to {{ month_label(link_status.built_for, False) }}{% if link_status.refreshed %}, last updated {{ link_status.refreshed.by }}, {{ link_status.refreshed.at }}{% endif %}.
+      {% if link_status.message %}<br><strong>{{ link_status.message }}</strong>{% endif %}
+    </div>
+  {% endif %}
+
+  {% if link_error %}
+    <div class="flash danger">{{ link_error }}</div>
+  {% elif link_preview %}
+    <div class="viz-grid" style="grid-template-columns:repeat(auto-fit,minmax(210px,1fr));margin:10px 0;">
+      {{ m.kpi('Forecast starts', link_preview.first_label, link_preview.remaining ~ ' month(s) left in ' ~ fy) }}
+      {{ m.kpi('Opens from the balance sheet at', month_label(link_preview.bs_month, False), 'reserves ' ~ (link_preview.opening_reserves|cfn)) }}
+      {{ m.kpi('Run-rate revenue (12 months)', cur ~ ' ' ~ (link_preview.annual_revenue_runrate|cfn), 'from ' ~ link_preview.months_used ~ ' actual month(s)' ~ (', budget seasonality' if link_preview.season_from_budget else '')) }}
+    </div>
+    {% if link_preview.notes %}<details><summary style="cursor:pointer;">How the starting figures are worked out ({{ link_preview.notes|length }})</summary><ul class="cf-sub">{% for n in link_preview.notes %}<li>{{ n }}</li>{% endfor %}</ul></details>{% endif %}
+  {% endif %}
+
+  {% if not pack.is_final and not link_error %}
+  <form method="post" action="{{ url_for('corpfin.pack_continuation_build', pack_id=pack.id) }}" style="margin-top:10px;">
+    <div class="viz-grid" style="grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:10px;">
+      <div><label>Run-rate taken from</label><select name="basis">{% for k, lab in basis_labels.items() %}<option value="{{ k }}" {% if link_params.basis == k %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+      <div><label>Seasonality</label><select name="season"><option value="auto" {% if link_params.season == 'auto' %}selected{% endif %}>Follow the budget (if it covers the year)</option><option value="flat" {% if link_params.season == 'flat' %}selected{% endif %}>Even over the year</option></select></div>
+      <div><label>Years in the model</label><input type="number" min="1" max="10" name="years" value="{{ link_params.years }}"></div>
+      <div><label>Revenue vs run-rate (%)</label><input type="number" step="any" name="rev_adj" value="{{ link_params.rev_adj|cfin }}"></div>
+      <div><label>Operating costs vs run-rate (%)</label><input type="number" step="any" name="cost_adj" value="{{ link_params.cost_adj|cfin }}"></div>
+      <div><label>Revenue growth, later years (%)</label><input type="number" step="any" name="growth" value="{{ link_params.growth|cfin if link_params.growth is not none else '' }}" placeholder="from the actuals"></div>
+      <div><label>Cost growth, later years (%)</label><input type="number" step="any" name="opex_growth" value="{{ link_params.opex_growth|cfin }}"></div>
+      <div><label>Capex per year ({{ cur }})</label><input type="number" step="any" name="capex" value="{{ link_params.capex|cfin if link_params.capex is not none else '' }}" placeholder="= depreciation"></div>
+      <div><label>Tax rate (%)</label><input type="number" step="any" name="tax_rate" value="{{ link_params.tax_rate|cfin if link_params.tax_rate is not none else '' }}" placeholder="from the actuals"></div>
+      <div><label>Dividend payout (% of profit)</label><input type="number" step="any" name="payout" value="{{ link_params.payout|cfin if link_params.payout is not none else '' }}" placeholder="from the actuals"></div>
+      <div><label>Repay borrowings over (years)</label><input type="number" min="1" max="30" name="repay_years" value="{{ link_params.repay_years }}"></div>
+    </div>
+    <label style="display:block;margin-top:8px;"><input type="checkbox" name="keep_forward" value="1" {% if link_params.keep_forward %}checked{% endif %}> When rolling forward, keep the growth, capex, loan terms and dividends I have set in the model</label>
+    <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+      {% if link_status and link_model %}
+        <button class="btn gold" type="submit" name="mode" value="roll">Roll the forecast forward from the latest actuals</button>
+        <button class="btn secondary" type="submit" name="mode" value="rebuild" onclick="return confirm('Rebuild replaces the model\'s assumptions with figures derived from the actuals, including growth, capex and loan terms. Continue?');">Rebuild from the actuals (reset my model edits)</button>
+        <button class="btn secondary" type="submit" name="mode" value="new">Create a separate new model</button>
+      {% else %}
+        <button class="btn gold" type="submit" name="mode" value="new" {% if plan_pl.forecast %}onclick="return confirm('The forecast for the remaining months will be replaced. Continue?');"{% endif %}>Continue the actuals as a forecast</button>
+      {% endif %}
+    </div>
+  </form>
+  {% if link_status and link_model %}
+  <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <form method="post" action="{{ url_for('corpfin.pack_continuation_refresh', pack_id=pack.id) }}" class="inline">
+      <select name="scenario">{% for s in link_scenarios %}<option value="{{ s.id }}" {% if s.name == link_status.scenario %}selected{% endif %}>{{ s.name }}</option>{% endfor %}</select>
+      <button class="btn secondary" type="submit">Refresh the pack's forecast from the model</button></form>
+    <a class="btn secondary" href="{{ url_for('corpfin.model_tab', model_id=link_model.id, tab='assumptions') }}">Edit the model's assumptions</a>
+    <form method="post" action="{{ url_for('corpfin.pack_continuation_unlink', pack_id=pack.id) }}" class="inline" onsubmit="return confirm('Unlink the forecast from the model? The forecast figures stay as they are.');"><button class="btn danger" type="submit">Unlink</button></form>
+  </div>
+  <div class="cf-sub">Edit the model's growth, capex, loans or scenarios, then refresh the pack's forecast from it. The model's balance sheet and cash flow carry through to the pack's balance sheet and cash flow.</div>
+  {% endif %}
+  {% endif %}
+</div>
+
 {% for name in ['budget', 'forecast'] %}
 {% set plan = plans[name] %}
 {% set pl = plan_pl[name] %}
@@ -12,6 +80,7 @@
   </div>
   {% if plan %}<div class="cf-sub" style="margin-top:6px;">
     {% if plan.source == 'model' %}From forecast model {{ plan.model_number }} ({{ plan.model_name }}{% if plan.scenario %}, {{ plan.scenario }}{% endif %}){% if plan.edited %}, then edited{% endif %}
+    {% elif plan.source == 'continuation' %}Continuation of the actuals: model {{ plan.model_number }}{% if plan.scenario %} ({{ plan.scenario }}){% endif %}
     {% elif plan.copied_from %}Copied from the {{ plan.copied_from }}
     {% else %}Typed in{% endif %}{% if plan.saved %} &middot; {{ plan.saved.by }}, {{ plan.saved.at }}{% endif %}
     {% if plan.bs %} &middot; includes a balance sheet{% endif %}</div>{% endif %}
