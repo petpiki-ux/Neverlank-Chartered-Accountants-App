@@ -893,6 +893,10 @@ def _apply_model_to_pack(pack, d, model, scenario, built_for, params, fingerprin
     link = {"model_id": model.id, "model_number": model.model_number, "model_name": model.name, "scenario": scenario.name,
             "built_for": built_for, "start_month": a["start_month"], "params": params, "fingerprint": fingerprint,
             "refreshed": _stamp(), "months": plan["months"]}
+    old_fc = d.get("forecast") or {}
+    if old_fc.get("source") != "continuation" and (old_fc.get("pl") or old_fc.get("bs")):
+        # the preparer's own forecast (typed, imported from Excel, a model snapshot...) is kept so that it can be restored
+        d["forecast_prev"] = dict(old_fc, replaced=_stamp(), replaced_by=model.model_number)
     d["forecast"] = LK.forecast_dataset(d, plan, link, _stamp())
     d["forecast_link"] = link
     notes = []
@@ -1030,6 +1034,26 @@ def pack_continuation_refresh(pack_id):
     return back()
 
 
+@corpfin_bp.route("/management-accounts/<int:pack_id>/continuation/restore", methods=["POST"])
+def pack_forecast_restore(pack_id):
+    """Put back the forecast the pack had before a model's figures replaced it."""
+    pack = _pack_or_404(pack_id)
+    if _plocked(pack):
+        return _back(pack, "budget")
+    d = _data(pack)
+    prev = d.get("forecast_prev")
+    if not isinstance(prev, dict):
+        flash("There is no earlier forecast to restore.", "info")
+        return _back(pack, "budget")
+    prev = {k: v for k, v in prev.items() if k not in ("replaced", "replaced_by")}
+    d["forecast"] = prev
+    d.pop("forecast_prev", None)
+    d.pop("forecast_link", None)
+    _save(pack, d)
+    flash("The forecast the pack had before was restored, and the pack is no longer linked to a model.", "success")
+    return _back(pack, "budget")
+
+
 @corpfin_bp.route("/management-accounts/<int:pack_id>/continuation/unlink", methods=["POST"])
 def pack_continuation_unlink(pack_id):
     pack = _pack_or_404(pack_id)
@@ -1101,8 +1125,10 @@ def model_update_from_pack(model_id):
     params = LK.normalise_params(link.get("params") if link.get("model_id") == model.id else None)
     params["years"] = E.normalise(model.assumptions)["years"]
     month_txt = M.month_label(M.report_month(d), False)
-    if pack.is_final:
-        # A Final pack cannot be changed, so only the model is brought up to date; the pack's forecast is left alone.
+    linked_here = link.get("model_id") == model.id
+    model_only = pack.is_final or not (linked_here or request.form.get("set_forecast"))
+    if model_only:
+        # Only the model is brought up to date; the pack's own forecast is left exactly as it is unless it already follows this model.
         try:
             a, info = LK.continuation_assumptions(d, params, pack.currency)
         except LK.LinkError as e:
@@ -1115,8 +1141,9 @@ def model_update_from_pack(model_id):
                          "The opening balance sheet is the actual balance sheet.")
         _touch(model)
         db.session.commit()
-        flash(f"Model {model.model_number} was updated from {pack.pack_number} (Final): it opens from the actual balance sheet at {month_txt} and starts in "
-              f"{M.month_label(a['start_month'], False)}. The pack is Final, so its own forecast was not changed.", "success")
+        flash(f"Model {model.model_number} was updated from {pack.pack_number}: it opens from the actual balance sheet at {month_txt} and starts in "
+              f"{M.month_label(a['start_month'], False)}. " + ("The pack is Final, so its own forecast was not changed." if pack.is_final else
+              "The pack's forecast was left as it is (tick 'Also replace the pack's forecast' to make the pack follow this model)."), "success")
         for n_ in info["notes"]:
             flash(n_, "warning")
         return back

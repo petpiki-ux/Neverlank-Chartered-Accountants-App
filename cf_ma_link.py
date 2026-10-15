@@ -135,6 +135,24 @@ def _budget_weights(d, structure):
 
 # --------------------------------------------------------------------------- assumptions from the actuals
 
+def captured_months(d):
+    """Indices (within the financial year, up to the reporting month) of the months whose actuals really are in the pack.
+    A year-to-date trial balance covers every month up to its own; a month entry covers just that month. Months with
+    nothing are not part of the cumulative figures, so a run-rate must not divide by them."""
+    months = M.fy_months(d)
+    idx = M.report_index(d)
+    got = set()
+    for i, m in enumerate(months[:idx + 1]):
+        e = (d.get("entries") or {}).get(m)
+        if not e:
+            continue
+        if e.get("kind") == "ytd":
+            got.update(range(0, i + 1))
+        elif e.get("kind") == "month":
+            got.add(i)
+    return sorted(got) or list(range(0, idx + 1))
+
+
 def continuation_assumptions(d, params=None, currency="USD"):
     """(assumptions, info). info carries the notes, figures and basis shown to the preparer."""
     p = normalise_params(params)
@@ -144,10 +162,15 @@ def continuation_assumptions(d, params=None, currency="USD"):
 
     # which actual months the run-rate is taken from
     mon = M.monthly_actuals(d)
-    window = list(range(0, n))
+    covered = captured_months(d)
+    window = list(covered)
     if p["basis"] == "recent3" and n > 3:
-        window = [i for i in range(n - 3, n) if mon[i]["values"] is not None] or list(range(0, n))
-    use_ytd = window == list(range(0, n))
+        window = [i for i in covered if i >= n - 3 and mon[i]["values"] is not None] or list(covered)
+    use_ytd = window == list(covered)
+    if len(covered) < n:
+        gaps = [M.month_label(months[i], False) for i in range(n) if i not in covered]
+        notes.append(f"Actuals have only been captured for {len(covered)} of the {n} months so far (missing: {', '.join(gaps)}), so the run-rate is taken from "
+                     f"those {len(covered)} month(s) only. Capture the other months on the Actuals tab (or load a year-to-date trial balance) and roll the forecast forward for a better projection.")
     keys = M.pl_keys(structure)
     if use_ytd:
         tot = {k: f(A["cum"].get(k)) for k in keys}
@@ -165,6 +188,12 @@ def continuation_assumptions(d, params=None, currency="USD"):
     if share <= 0:
         share = nw / 12.0
         w = None
+    if w and not (0.5 <= share / (nw / 12.0) <= 2.0):
+        # A budget whose months are very uneven (or only partly filled in) would gross a few months of actuals up to a wildly wrong year.
+        notes.append(f"The budget puts only {100 * share:.1f}% of the year's revenue in the {nw} month(s) that have actuals, where an even spread would be {100 * nw / 12.0:.1f}%. "
+                     "Following that shape would multiply the run-rate by " + f"{1 / share:.1f}" + ", so the forecast is spread evenly over the months instead (check the budget phasing on this tab).")
+        w = None
+        share = nw / 12.0
     season = [100.0 * w[(n + i) % 12] for i in range(12)] if w else [100.0 / 12] * 12
     if w:
         notes.append("Seasonality follows the shape of the budget's revenue across the year.")

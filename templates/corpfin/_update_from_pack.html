@@ -4,13 +4,14 @@
   <span class="muted" style="font-size:12px;">Final - reopen to update</span>
 {% elif ok_opts %}
 <form method="post" action="{{ url_for('corpfin.model_update_from_pack', model_id=model.id) }}" class="inline" style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;"
-      onsubmit="return confirm('Update {{ model.model_number }} from the Management Accounts?\n\nThe model will open from the actual balance sheet and take its year-1 run-rates from the actuals. Growth, capex, dividends, tax and loan terms already set in the model are kept.');">
+      onsubmit="return confirm('Update {{ model.model_number }} from the Management Accounts?\n\nThe model will open from the actual balance sheet and take its year-1 run-rates from the actuals. Growth, capex, dividends, tax and loan terms already set in the model are kept. The pack's own forecast is only replaced if you tick the box (unless the pack already follows this model).');">
   <input type="hidden" name="next" value="{{ next_page }}">
   {% if ok_opts|length > 1 %}
   <select name="pack_id" aria-label="Management Accounts pack" style="max-width:240px;">
     {% for o in ok_opts %}<option value="{{ o.pack.id }}" {% if o.linked_model_id == model.id %}selected{% endif %}>{{ o.pack.pack_number }} - actuals to {{ o.month }}</option>{% endfor %}
   </select>
   {% else %}<input type="hidden" name="pack_id" value="{{ ok_opts[0].pack.id }}">{% endif %}
+  <label style="font-size:12px;display:inline-flex;gap:4px;align-items:center;"><input type="checkbox" name="set_forecast" value="1"> Also replace the pack's forecast</label>
   <button class="btn small gold" type="submit">Update from Management Accounts{% if ok_opts|length == 1 %} ({{ ok_opts[0].month }}){% endif %}</button>
 </form>
 {% elif pack_opts %}

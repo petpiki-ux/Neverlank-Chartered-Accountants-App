@@ -20,6 +20,10 @@
     </div>
   {% endif %}
 
+  {% if d.forecast_prev %}
+    <div class="flash warning">The forecast this pack had before ({{ d.forecast_prev.replaced.at if d.forecast_prev.replaced else '' }}{% if d.forecast_prev.replaced_by %}, replaced by {{ d.forecast_prev.replaced_by }}{% endif %}) was kept.
+      {% if not pack.is_final %}<form method="post" action="{{ url_for('corpfin.pack_forecast_restore', pack_id=pack.id) }}" class="inline" onsubmit="return confirm('Put back the earlier forecast? The current forecast figures will be replaced and the link to the model removed.');"><button class="btn small gold" type="submit">Restore the earlier forecast</button></form>{% endif %}</div>
+  {% endif %}
   {% if link_error %}
     <div class="flash danger">{{ link_error }}</div>
   {% elif link_preview %}
