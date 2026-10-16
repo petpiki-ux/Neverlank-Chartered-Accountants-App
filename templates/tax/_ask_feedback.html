@@ -1,0 +1,13 @@
+{# Was this answer right? Helpful answers can be put forward as the firm's verified answer; a wrong one is dropped. Nothing is verified until a Partner approves it. #}
+<form method="post" action="{{ url_for('tax.ask_legislative_feedback') }}" style="margin-top:10px;border-top:1px solid #e6e1d4;padding-top:8px;">
+  <input type="hidden" name="question" value="{{ ask_question or '' }}">
+  {% if ask_cache_id %}<input type="hidden" name="cache_id" value="{{ ask_cache_id }}">{% endif %}
+  {% if ask_lesson %}<input type="hidden" name="lesson_id" value="{{ ask_lesson.id }}">{% endif %}
+  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;font-size:12px;">
+    <span class="muted">Was this right?</span>
+    <button class="btn small secondary" name="verdict" value="helpful" type="submit">Yes, helpful</button>
+    {% if ask_cache_id and ask_status == 'done' %}<button class="btn small secondary" name="verdict" value="verify" type="submit" title="A Partner reviews it before the firm uses it as its answer">Put forward as the firm's answer</button>{% endif %}
+    <button class="btn small secondary" name="verdict" value="not_right" type="submit">Not right</button>
+  </div>
+  <input type="text" name="correction" maxlength="2000" placeholder="If it is not right, say what the correct answer is (optional - goes to the Partners to approve)" style="margin-top:6px;font-size:12px;">
+</form>

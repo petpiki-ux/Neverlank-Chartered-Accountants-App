@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ lesson.title }} - Firm Learning{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1 style="font-size:20px;">{{ lesson.title }}</h1>
+    <div class="subtitle">{{ lesson.area_label }} &middot; {{ lesson.kind }} &middot; <strong>{{ lesson.status }}</strong>{% if lesson.is_due_for_review %} &middot; <span class="badge overdue">review due - not in use</span>{% endif %}</div>
+  </div>
+  <div><a href="{{ url_for('learning.index') }}" class="btn secondary small">Back to Firm Learning</a></div>
+</div>
+
+<div class="card">
+  <div style="white-space:pre-wrap;">{{ lesson.content }}</div>
+  <div class="muted" style="font-size:12px;margin-top:10px;">
+    {% if lesson.tags %}Applies when: {% for k, v in lesson.tags.items() %}{{ k }} = {{ v|join(' or ') }}{% if not loop.last %}; {% endif %}{% endfor %}.{% else %}Applies everywhere in its area.{% endif %}
+    Suggested by {{ lesson.proposed_by.name if lesson.proposed_by else '-' }} on {{ lesson.proposed_at.strftime('%d %b %Y') if lesson.proposed_at else '-' }}{% if lesson.source_kind %} ({{ lesson.source_kind|replace('_', ' ') }}){% endif %}.
+    {% if lesson.decided_by %}Decided by {{ lesson.decided_by.name }} on {{ lesson.decided_at.strftime('%d %b %Y') }}{% if lesson.decision_note %}: {{ lesson.decision_note }}{% endif %}.{% endif %}
+    {% if lesson.review_due %}Review by {{ lesson.review_due.strftime('%d %b %Y') }}.{% endif %}
+    Used {{ lesson.times_used or 0 }} time(s); {{ lesson.helpful_count or 0 }} found it helpful, {{ lesson.unhelpful_count or 0 }} not.
+  </div>
+  {% if lesson.status == 'Approved' %}
+  <form method="post" action="{{ url_for('learning.feedback', lesson_id=lesson.id) }}" style="margin-top:8px;display:flex;gap:6px;">
+    <button class="btn small secondary" name="verdict" value="helpful">This helped</button>
+    <button class="btn small secondary" name="verdict" value="unhelpful">This did not help</button>
+  </form>
+  {% endif %}
+</div>
+
+{% if lesson.evidence %}
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">What it came from (anonymised)</h3>
+  <div style="white-space:pre-wrap;font-size:12.5px;">{{ lesson.evidence }}</div>
+</div>
+{% endif %}
+
+{% if is_senior %}
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">{% if lesson.status == 'Proposed' %}Decide{% else %}Edit or change status{% endif %}</h3>
+  <form method="post" action="{{ url_for('learning.edit', lesson_id=lesson.id) }}">
+    <div class="form-row">
+      <div style="flex:1;"><label for="e_title">Title</label><input id="e_title" name="title" value="{{ lesson.title }}" maxlength="250" required></div>
+      <div><label for="e_kind">Kind</label><select id="e_kind" name="kind">{% for k in kinds %}<option value="{{ k }}" {% if lesson.kind==k %}selected{% endif %}>{{ k }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row"><div style="flex:1;"><label for="e_content">Lesson</label><textarea id="e_content" name="content" rows="4" maxlength="2000" required>{{ lesson.content }}</textarea></div></div>
+    <div class="form-row">
+      <div style="flex:1;"><label for="e_tags">When it applies</label><input id="e_tags" name="tags" value="{{ tags_text }}" placeholder="template_key=objection; tax_head=VAT"></div>
+      <div><label for="e_rev">Review again in (months)</label><input id="e_rev" name="review_months" type="number" min="1" max="60" style="width:110px;" placeholder="{{ 'keep' if lesson.review_due else 'none' }}"></div>
+    </div>
+    <div class="form-row"><div style="flex:1;"><label for="e_note">Note <span class="muted" style="font-weight:normal;">(required to reject or retire)</span></label><input id="e_note" name="note"></div></div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;">
+      <button class="btn small secondary" type="submit">Save changes</button>
+      {% if lesson.status != 'Approved' %}<button class="btn small gold" type="submit" formaction="{{ url_for('learning.approve', lesson_id=lesson.id) }}">Approve{% if lesson.status != 'Proposed' %} again{% endif %}</button>{% endif %}
+      {% if lesson.status == 'Proposed' %}<button class="btn small secondary" type="submit" formaction="{{ url_for('learning.reject', lesson_id=lesson.id) }}">Reject</button>{% endif %}
+      {% if lesson.status == 'Approved' %}<button class="btn small secondary" type="submit" formaction="{{ url_for('learning.retire', lesson_id=lesson.id) }}">Retire</button>{% endif %}
+    </div>
+  </form>
+</div>
+{% else %}
+<div class="card muted" style="font-size:12.5px;">A Partner or Admin decides whether a lesson is approved.</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">History</h3>
+  <table><tbody>
+    {% for e in lesson.history|reverse %}<tr><td style="white-space:nowrap;">{{ e.at }}</td><td>{{ e.by }}</td><td>{{ e.what }}{% if e.note %} - {{ e.note }}{% endif %}</td></tr>{% endfor %}
+  </tbody></table>
+</div>
+{% endblock %}

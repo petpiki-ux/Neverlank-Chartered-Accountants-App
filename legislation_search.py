@@ -300,7 +300,7 @@ def _row_to_payload(row):
 def _store_cache(question, status, answer, citation_ids=None, candidate_ids=None, asked_by_id=None):
     normalized = _normalize_question(question)
     if not normalized:
-        return
+        return None
     row = LegislativeAskCache(
         question_normalized=normalized,
         question_original=question[:500],
@@ -313,6 +313,7 @@ def _store_cache(question, status, answer, citation_ids=None, candidate_ids=None
     )
     db.session.add(row)
     db.session.commit()
+    return row
 
 
 def ask(question, asked_by_id=None):
@@ -329,6 +330,8 @@ def ask(question, asked_by_id=None):
         {"answer": str, "candidates": [...], "from_cache": bool[, "cache_hit_count": int]}.
       - "done": payload is
         {"answer": str, "citations": [LegislativeUpdate, ...], "from_cache": bool[, "cache_hit_count": int]}.
+      - "verified": the firm has a Partner-approved answer to this very question (a FirmLesson); payload is
+        {"answer": str, "lesson": FirmLesson, "from_cache": False}. Served without searching or calling the AI.
       - "error": payload is a short error message string.
     A "done"/"no_answer" result is saved to the fast-recall cache
     (models.LegislativeAskCache) and reused verbatim - always visibly
@@ -338,9 +341,20 @@ def ask(question, asked_by_id=None):
     if not question:
         return "error", "Please enter a question."
 
+    # A Partner-approved "verified answer" (see learning.py) beats everything else: it is served as the firm's own
+    # answer, with no search and no AI call, until its review date.
+    import learning
+    verified = learning.verified_answer(question)
+    if verified is not None:
+        learning.mark_used([verified.id])
+        db.session.commit()
+        return "verified", {"answer": verified.content, "lesson": verified, "from_cache": False}
+
     cached = _cache_lookup(question)
     if cached is not None:
-        return cached.status, _row_to_payload(cached)
+        payload = _row_to_payload(cached)
+        payload["cache_id"] = cached.id
+        return cached.status, payload
 
     if os.environ.get("ANTHROPIC_API_KEY") is None:
         return "not_configured", None
@@ -386,6 +400,6 @@ def ask(question, asked_by_id=None):
                 return "no_answer", {"answer": answer, "candidates": distinct_candidates, "from_cache": False}
             cited_ids = {int(i) for i in (data.get("citation_ids") or []) if str(i).isdigit()}
             citations = [u for u in distinct_candidates if u.id in cited_ids] or distinct_candidates[:1]
-            _store_cache(question, "done", answer, citation_ids=[u.id for u in citations], asked_by_id=asked_by_id)
-            return "done", {"answer": answer, "citations": citations, "from_cache": False}
+            row = _store_cache(question, "done", answer, citation_ids=[u.id for u in citations], asked_by_id=asked_by_id)
+            return "done", {"answer": answer, "citations": citations, "from_cache": False, "cache_id": row.id if row else None}
     return "error", "The model didn't return a structured result - try rephrasing the question."

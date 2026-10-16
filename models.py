@@ -6710,11 +6710,106 @@ class LegislativeAskCache(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     hit_count = db.Column(db.Integer, default=1)  # how many times this cached answer has been reused (starts at 1 for the original answer)
     last_hit_at = db.Column(db.DateTime)
+    helpful_count = db.Column(db.Integer, default=0)    # "Helpful" clicks from the people it was shown to
+    unhelpful_count = db.Column(db.Integer, default=0)  # "Not right" clicks - see learning.py
 
     asked_by = db.relationship("User", foreign_keys=[asked_by_id])
 
     def __repr__(self):
         return f"<LegislativeAskCache {self.question_original!r} ({self.status})>"
+
+
+# ---------- Firm learning (approved lessons the app's AI features and defaults draw on) ----------
+
+LESSON_AREAS = [
+    ("zimra_letters", "ZIMRA letters"),
+    ("library", "Library answers"),
+    ("fees", "Fees and time"),
+    ("collections", "Collections"),
+    ("audit_risk", "Audit risks and procedures"),
+    ("corpfin", "Corporate finance models"),
+]
+LESSON_AREA_LABELS = dict(LESSON_AREAS)
+LESSON_KINDS = ["Wording", "Position", "Avoid", "Verified answer", "Benchmark", "Pattern"]
+LESSON_STATUSES = ["Proposed", "Approved", "Rejected", "Retired"]
+
+
+class FirmLesson(db.Model):
+    """One thing the firm has learned and a Partner/Admin has approved as its standard: a clause that works, a position
+    to take or avoid, a verified answer to a legislation question, a fee benchmark, a recurring risk. Lessons are
+    ANONYMISED (no client names, TINs or contacts) so they can serve every engagement. A lesson is only ever a
+    suggestion made by a person or by an analysis; nothing changes how the app or its AI behaves until a Partner or
+    Admin approves it, and an approved lesson can be retired at any time. Lessons never carry facts about a client or
+    law - law still comes only from the filed library. See learning.py."""
+    __tablename__ = "firm_lesson"
+    id = db.Column(db.Integer, primary_key=True)
+    area = db.Column(db.String(30), nullable=False)
+    kind = db.Column(db.String(30), nullable=False, default="Wording")
+    title = db.Column(db.String(250), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    tags_json = db.Column(db.Text)       # {"template_key": ["objection"], "tax_head": ["VAT"]} - when the lesson applies
+    evidence = db.Column(db.Text)        # anonymised before/after or data summary the lesson came from
+    source_kind = db.Column(db.String(30))  # zimra_reply | library_answer | manual | analysis
+    source_id = db.Column(db.Integer)
+    status = db.Column(db.String(20), nullable=False, default="Proposed")
+    proposed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    proposed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    decided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    decided_at = db.Column(db.DateTime)
+    decision_note = db.Column(db.Text)
+    review_due = db.Column(db.Date)      # a lesson that depends on current law is not served after this date
+    times_used = db.Column(db.Integer, default=0)
+    last_used_at = db.Column(db.DateTime)
+    helpful_count = db.Column(db.Integer, default=0)
+    unhelpful_count = db.Column(db.Integer, default=0)
+    events = db.Column(db.Text)          # JSON list of {at, by, what, note}
+
+    proposed_by = db.relationship("User", foreign_keys=[proposed_by_id])
+    decided_by = db.relationship("User", foreign_keys=[decided_by_id])
+
+    @property
+    def tags(self):
+        import json as _json
+        try:
+            data = _json.loads(self.tags_json) if self.tags_json else {}
+        except ValueError:
+            data = {}
+        return data if isinstance(data, dict) else {}
+
+    @property
+    def history(self):
+        import json as _json
+        try:
+            return _json.loads(self.events) if self.events else []
+        except ValueError:
+            return []
+
+    def log(self, user, what, note=None):
+        import json as _json
+        items = self.history
+        items.append({"at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"), "by": getattr(user, "name", None) or "-",
+                      "what": what, "note": note or ""})
+        self.events = _json.dumps(items)
+
+    @property
+    def area_label(self):
+        return LESSON_AREA_LABELS.get(self.area, self.area)
+
+    @property
+    def is_due_for_review(self):
+        return bool(self.status == "Approved" and self.review_due and self.review_due < date.today())
+
+    @property
+    def is_servable(self):
+        return self.status == "Approved" and not self.is_due_for_review
+
+    @property
+    def helpful_rate(self):
+        total = (self.helpful_count or 0) + (self.unhelpful_count or 0)
+        return None if total == 0 else (self.helpful_count or 0) / total
+
+    def __repr__(self):
+        return f"<FirmLesson {self.id} {self.area} {self.status}>"
 
 
 class TaxChecklistItem(db.Model):

@@ -100,7 +100,10 @@ SYSTEM_PROMPT = (
     "5. STYLE: formal, courteous, plain English, concise. Answer what ZIMRA actually asked, in the order it asked. Follow "
     "the structure of the TEMPLATE SKELETON, improving it with the facts, and keep a placeholder from it where the "
     "information is still missing. Write only the body: no date, addressee, salutation, subject, closing or signature.\n"
-    "6. Return everything through the compose_zimra_reply tool."
+    "6. FIRM STANDARDS, if supplied, are approved house guidance from the firm's Partners. Follow them where they fit "
+    "this letter, for wording, tone and approach. They never supply facts, amounts, dates or law, and they never override "
+    "rules 1 to 4; if one does not fit this matter, ignore it.\n"
+    "7. Return everything through the compose_zimra_reply tool."
 )
 
 
@@ -256,7 +259,7 @@ def library_excerpts(query):
         return []
 
 
-def build_user_message(reply, instructions, letter, pairs, client, template_body):
+def build_user_message(reply, instructions, letter, pairs, client, template_body, lessons_block=""):
     case, incoming = reply.case, reply.in_reply_to
     red = lambda t: redact(t, client, case.zimra_officer)
     parts = ["CASE FACTS\n" + red(case_facts(case))]
@@ -280,6 +283,9 @@ def build_user_message(reply, instructions, letter, pairs, client, template_body
                      "\n\n---\n\n".join(_candidate_block(u, c) for u, c in pairs))
     else:
         parts.append("LIBRARY EXCERPTS\n(No filed material matched this matter. State no law; use [CONFIRM: legal basis ...] where law is needed.)")
+    if lessons_block:
+        parts.append("FIRM STANDARDS (lessons the firm's Partners have approved from past letters - guidance on wording, "
+                     "position and tone only; they are not facts of this case and not law)\n" + lessons_block)
     parts.append("TEMPLATE SKELETON (structure to follow; its [CONFIRM] parts are still missing information)\n" + red(template_body))
     parts.append(f"Today's date: {_d(date.today())}. Write the body of the letter now.")
     return "\n\n=====\n\n".join(parts)
@@ -418,6 +424,19 @@ def build_sources(citations, pairs):
 
 # --------------------------------------------------------------- the entry
 
+def _firm_lessons(reply):
+    """Approved, in-date firm lessons that fit this letter (template, tax head, case type)."""
+    import learning as LS
+    case = reply.case
+    return LS.applicable("zimra_letters", {"template_key": reply.template_key, "tax_head": case.tax_head, "case_type": case.case_type})
+
+
+def LS_SHOWN(lessons):
+    """How many of `lessons` fit in the prompt (render_block drops the rest) - so what we record is what the model saw."""
+    import learning as LS
+    return len([ln for ln in LS.render_block(lessons).split("\n") if ln.strip()])
+
+
 def generate(reply, instructions, user, files_dir):
     """Draft the body of `reply`. Returns (status, payload):
       "not_configured" - no ANTHROPIC_API_KEY (payload None)
@@ -433,7 +452,9 @@ def generate(reply, instructions, user, files_dir):
     pairs = library_excerpts(library_query(case, incoming, letter, instructions))
     template = ZL.TEMPLATE_BY_KEY.get(reply.template_key) or ZL.TEMPLATE_BY_KEY["general"]
     skeleton = template["body"].replace("{", "<").replace("}", ">")
-    message = build_user_message(reply, instructions, letter, pairs, client, skeleton)
+    lessons = _firm_lessons(reply)
+    import learning as LS
+    message = build_user_message(reply, instructions, letter, pairs, client, skeleton, LS.render_block(lessons))
     data, error = _call_model(SYSTEM_PROMPT, message)
     if error:
         return "error", error
@@ -460,5 +481,7 @@ def generate(reply, instructions, user, files_dir):
         "positions": clean_list(data.get("positions_taken")), "sources": sources, "considered": considered,
         "missing": clean_list(data.get("missing_information")), "notes": clean_list(data.get("reviewer_notes")),
         "flags": flags, "checked_by": None, "checked_at": None,
+        "lessons_used": [{"id": l.id, "title": l.title, "kind": l.kind} for l in lessons[:LS_SHOWN(lessons)]],
+        "generated_body": body,
     }
     return "done", {"body": body, "meta": meta}

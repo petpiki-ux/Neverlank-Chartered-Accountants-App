@@ -30,6 +30,36 @@
   <div style="font-size:12.5px;margin-bottom:0;"><strong>Notes for the reviewing Partner</strong>
     <ul style="margin:4px 0 0;padding-left:18px;">{% for x in ai.notes %}<li>{{ x }}</li>{% endfor %}</ul></div>
   {% endif %}
+  {% if ai.lessons_used %}
+  <div style="font-size:12.5px;margin-top:8px;"><strong>Firm standards applied</strong> <span class="muted">(approved lessons from past letters; guidance on wording only)</span>
+    <ul style="margin:4px 0 0;padding-left:18px;">
+    {% for l in ai.lessons_used %}<li><a href="{{ url_for('learning.view', lesson_id=l.id) }}">{{ l.title }}</a> <span class="muted">({{ l.kind }})</span>
+      <form method="post" action="{{ url_for('learning.feedback', lesson_id=l.id) }}" class="inline" style="display:inline;margin-left:6px;">
+        <input type="hidden" name="next" value="{{ request.path }}">
+        <button class="btn small secondary" name="verdict" value="helpful" style="padding:0 6px;font-size:11px;">helped</button>
+        <button class="btn small secondary" name="verdict" value="unhelpful" style="padding:0 6px;font-size:11px;">did not help</button></form></li>{% endfor %}
+    </ul></div>
+  {% endif %}
+  {% if reply.status in ('Approved', 'Sent') %}
+  <div style="font-size:12.5px;margin-top:10px;border-top:1px solid #eee;padding-top:8px;">
+    {% if ai.similarity is defined and ai.similarity is not none %}<div class="muted">{{ (ai.similarity * 100)|round|int }}% of the AI wording was kept in the approved letter.</div>{% endif %}
+    {% if is_senior %}
+      {% if ai.learned_at %}<div class="muted">Lessons suggested from this letter on {{ ai.learned_at }} ({{ ai.learned_count or 0 }} new). <a href="{{ url_for('learning.index', status='Proposed') }}">Firm Learning</a></div>
+      {% else %}<form method="post" action="{{ url_for('zimra.learn_from_reply', reply_id=reply.id) }}" style="margin:4px 0;"><button class="btn small secondary" type="submit">Suggest lessons from the changes made</button>
+        <span class="muted" style="font-size:11px;">The changes, with client details removed, are sent to the AI service to propose general lessons. A Partner still approves each one.</span></form>{% endif %}
+    {% endif %}
+    <details style="margin-top:6px;"><summary style="cursor:pointer;">Suggest a firm standard from this letter</summary>
+      <form method="post" action="{{ url_for('learning.propose_route') }}" style="margin-top:6px;">
+        <input type="hidden" name="next" value="{{ request.path }}"><input type="hidden" name="area" value="zimra_letters">
+        <input type="hidden" name="source_kind" value="zimra_reply"><input type="hidden" name="source_id" value="{{ reply.id }}">
+        <input type="hidden" name="tags" value="template_key={{ reply.template_key }}">
+        <select name="kind"><option>Wording</option><option>Position</option><option>Avoid</option></select>
+        <input name="title" placeholder="Short title" maxlength="250" required style="margin-top:4px;">
+        <textarea name="content" rows="2" maxlength="2000" placeholder="What should future letters of this type do (or avoid)? Keep it general." required style="margin-top:4px;"></textarea>
+        <button class="btn small" type="submit" style="margin-top:4px;">Suggest to the Partners</button></form>
+    </details>
+  </div>
+  {% endif %}
   {% if ai.considered %}<div class="muted" style="font-size:11px;margin-top:8px;">Library items the AI was shown: {{ ai.considered|map(attribute='title')|join('; ') }}</div>{% endif %}
 </div>
 {% endif %}

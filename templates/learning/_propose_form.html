@@ -1,0 +1,20 @@
+{# Anyone can suggest a lesson. It changes nothing until a Partner or Admin approves it. Expects: areas, kinds; optional: next, source_kind, source_id, default_area, default_kind, default_tags #}
+<form method="post" action="{{ url_for('learning.propose_route') }}">
+  <input type="hidden" name="next" value="{{ next or url_for('learning.index') }}">
+  <input type="hidden" name="source_kind" value="{{ source_kind or 'manual' }}">
+  {% if source_id %}<input type="hidden" name="source_id" value="{{ source_id }}">{% endif %}
+  <div class="form-row">
+    <div><label for="pf_area">About</label>
+      <select id="pf_area" name="area" required>{% for k, label in areas %}<option value="{{ k }}" {% if default_area==k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></div>
+    <div><label for="pf_kind">Kind</label>
+      <select id="pf_kind" name="kind" required>{% for k in kinds %}<option value="{{ k }}" {% if default_kind==k %}selected{% endif %}>{{ k }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="form-row"><div style="flex:1;"><label for="pf_title">Title <span class="muted" style="font-weight:normal;">(for a Verified answer: the question)</span></label>
+    <input id="pf_title" name="title" maxlength="250" required></div></div>
+  <div class="form-row"><div style="flex:1;"><label for="pf_content">What the firm has learned</label>
+    <textarea id="pf_content" name="content" rows="3" maxlength="2000" required></textarea>
+    <div class="muted" style="font-size:11px;">Keep it general. Client names, TINs, e-mails and phone numbers are removed automatically. Do not state law here - law comes from the Library.</div></div></div>
+  <div class="form-row"><div style="flex:1;"><label for="pf_tags">When it applies <span class="muted" style="font-weight:normal;">(optional)</span></label>
+    <input id="pf_tags" name="tags" value="{{ default_tags or '' }}" placeholder="e.g. template_key=objection; tax_head=VAT"></div></div>
+  <button class="btn small" type="submit">Suggest to the Partners</button>
+</form>

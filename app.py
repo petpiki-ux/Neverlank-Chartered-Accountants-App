@@ -281,6 +281,8 @@ def _add_missing_columns():
         "receipt": [("advance_application_id", "INTEGER")],
         # ai_meta - the record of an AI first draft on a reply to ZIMRA (zimra_ai.py)
         "zimra_reply": [("ai_meta", "TEXT")],
+        # helpful/unhelpful feedback on cached "Ask the library" answers (learning.py)
+        "legislative_ask_cache": [("helpful_count", "INTEGER DEFAULT 0"), ("unhelpful_count", "INTEGER DEFAULT 0")],
         # doc_type/related_reference/customs_duty - see models.VAT_DOC_TYPES:
         # credit notes, Bills of Entry and export sales. Existing rows
         # default to a plain 'Invoice', exactly what they were.
@@ -725,6 +727,7 @@ def create_app():
     from recurring import recurring_bp
     from receipts import receipts_bp
     from advances import advances_bp
+    from learning import learning_bp
     from credit_notes import credit_notes_bp
     from corporate_finance import corpfin_bp
     from statements import statements_bp
@@ -760,6 +763,7 @@ def create_app():
     app.register_blueprint(recurring_bp)
     app.register_blueprint(receipts_bp)
     app.register_blueprint(advances_bp)
+    app.register_blueprint(learning_bp)
     app.register_blueprint(credit_notes_bp)
     app.register_blueprint(corpfin_bp)
     app.register_blueprint(statements_bp)
@@ -874,6 +878,7 @@ def create_app():
         recurring_review_count = 0
         zimra_overdue_count = 0
         zimra_approval_count = 0
+        learning_pending_count = 0
         invoice_reminder_count = 0
         if current_user.is_authenticated:
             from models import Invoice
@@ -882,6 +887,9 @@ def create_app():
             from zimra import overdue_response_count, awaiting_approval_count
             zimra_overdue_count = overdue_response_count()
             zimra_approval_count = awaiting_approval_count()
+            if current_user.role in ("partner", "admin"):
+                from models import FirmLesson
+                learning_pending_count = FirmLesson.query.filter_by(status="Proposed").count()
             # draft invoices raised by recurring schedules, waiting for review
             recurring_review_count = Invoice.query.filter(Invoice.status == "Draft", Invoice.recurring_invoice_id.isnot(None)).count()
             open_tasks = (
@@ -901,6 +909,7 @@ def create_app():
             "recurring_review_count": recurring_review_count,
             "zimra_overdue_count": zimra_overdue_count,
             "zimra_approval_count": zimra_approval_count,
+            "learning_pending_count": learning_pending_count,
             "invoice_reminder_count": invoice_reminder_count,
         }
 

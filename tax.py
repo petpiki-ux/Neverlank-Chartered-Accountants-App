@@ -1805,7 +1805,7 @@ def _render_legislative_updates(**extra):
         areas=LEGISLATIVE_UPDATE_AREAS, clients=visible_clients(current_user),
         case_authority_statuses=CASE_AUTHORITY_STATUSES, case_authority_labels=CASE_AUTHORITY_LABELS,
         ask_question=None, ask_status=None, ask_answer=None, ask_citations=None, ask_candidates=None,
-        ask_from_cache=False, ask_cache_hit_count=None,
+        ask_from_cache=False, ask_cache_hit_count=None, ask_cache_id=None, ask_lesson=None,
     )
     context.update(extra)
     return render_template("tax/legislative_updates.html", **context)
@@ -1982,6 +1982,9 @@ def ask_legislative_updates():
         return _render_legislative_updates(ask_question=question, ask_status=status)
     if status == "no_candidates":
         return _render_legislative_updates(ask_question=question, ask_status=status)
+    if status == "verified":
+        return _render_legislative_updates(ask_question=question, ask_status=status, ask_answer=payload["answer"],
+                                           ask_lesson=payload["lesson"])
     if status == "no_answer":
         return _render_legislative_updates(
             ask_question=question, ask_status=status,
@@ -1996,7 +1999,67 @@ def ask_legislative_updates():
         ask_question=question, ask_status=status,
         ask_answer=payload["answer"], ask_citations=payload["citations"],
         ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
+        ask_cache_id=payload.get("cache_id"),
     )
+
+
+@tax_bp.route("/legislative-updates/ask/feedback", methods=["POST"])
+@login_required
+def ask_legislative_feedback():
+    """Tell the app whether an "Ask the library" answer was right. Helpful answers can be put forward as the firm's
+    verified answer; a wrong answer is dropped from the recall cache so it is never reused, and the person's correction
+    (if given) is put forward as a lesson. Nothing becomes the firm's verified answer until a Partner or Admin approves
+    it under Firm Learning (see learning.py)."""
+    import learning
+    from models import LegislativeAskCache, FirmLesson
+    f = request.form
+    verdict = f.get("verdict")
+    question = f.get("question", "").strip()
+    correction = f.get("correction", "").strip()
+    row = LegislativeAskCache.query.get(f.get("cache_id", type=int)) if f.get("cache_id", type=int) else None
+    lesson = FirmLesson.query.get(f.get("lesson_id", type=int)) if f.get("lesson_id", type=int) else None
+    back = redirect(url_for("tax.list_legislative_updates"))
+
+    if verdict == "helpful":
+        if row is not None:
+            row.helpful_count = (row.helpful_count or 0) + 1
+        if lesson is not None and lesson.status == "Approved":
+            lesson.helpful_count = (lesson.helpful_count or 0) + 1
+        db.session.commit()
+        flash("Thanks - noted.", "success")
+    elif verdict == "verify":
+        if row is None or row.status != "done":
+            flash("Only a library answer that cites filed material can be put forward.", "danger")
+            return back
+        cited = [u.title for u in legislation_search._row_to_payload(row).get("citations", [])]
+        new, err = learning.propose("library", "Verified answer", row.question_original, row.answer, current_user,
+                                    evidence="Answer drawn from: " + "; ".join(cited) if cited else None,
+                                    source_kind="library_answer", source_id=row.id)
+        if new is None:
+            flash(err, "danger")
+        elif err == "duplicate":
+            flash("That answer is already with the Partners or approved.", "info")
+        else:
+            db.session.commit()
+            flash("Put forward as the firm's verified answer. A Partner will review it; until then nothing changes.", "success")
+    elif verdict == "not_right":
+        if row is not None:
+            row.unhelpful_count = (row.unhelpful_count or 0) + 1
+            db.session.delete(row)     # a wrong answer is never recalled again
+        if lesson is not None and lesson.status == "Approved":
+            lesson.unhelpful_count = (lesson.unhelpful_count or 0) + 1
+        made = False
+        if correction and question:
+            new, err = learning.propose("library", "Verified answer", question, correction, current_user,
+                                        evidence="Put forward as the correction to an answer the app gave.",
+                                        source_kind="library_answer", source_id=row.id if row is not None else None)
+            made = new is not None and err != "duplicate"
+        db.session.commit()
+        flash("Thanks - that answer will not be reused." + (" Your correction has gone to the Partners to approve." if made else ""),
+              "success")
+    else:
+        flash("Nothing to record.", "info")
+    return back
 
 
 @tax_bp.route("/legislative-updates/add", methods=["POST"])

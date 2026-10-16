@@ -39,6 +39,7 @@ from models import (
 from invoicing import next_sequence_number
 import zimra_letters as ZL
 import zimra_ai as ZAI
+import learning as LS
 
 zimra_bp = Blueprint("zimra", __name__, url_prefix="/zimra")
 
@@ -673,6 +674,11 @@ def approve_reply(reply_id):
         notes.append("Approved by the same person who submitted it")
     if reply.ai is not None:
         notes.append("AI-assisted draft")
+        ai = reply.ai
+        if ai.get("generated_body"):
+            ai["similarity"] = LS.similarity(ai["generated_body"], reply.body)
+            reply.set_ai(ai)
+            notes.append(f"{round(ai['similarity'] * 100)}% of the AI wording kept")
     reply.log(current_user, "Approved", "; ".join(notes) or None)
     db.session.commit()
     flash("Approved. Download the letter, send it, then mark it as sent here.", "success")
@@ -802,13 +808,47 @@ def ai_draft_reply(reply_id):
     meta["prev_body"] = reply.body
     reply.body = payload["body"]
     reply.set_ai(meta)
+    LS.mark_used([x["id"] for x in meta.get("lessons_used") or []])
     reply.log(current_user, "AI first draft written",
               f"{meta['model']}; {len(meta['considered'])} library item(s) considered, {len(meta['sources'])} relied on; "
-              f"{len(meta['flags'])} point(s) flagged for checking; {len(ZL.unresolved(reply.body))} placeholder(s)")
+              f"{len(meta['flags'])} point(s) flagged for checking; {len(ZL.unresolved(reply.body))} placeholder(s)"
+              + (f"; {len(meta['lessons_used'])} firm standard(s) applied" if meta.get("lessons_used") else ""))
     db.session.commit()
     flash("AI first draft written below. It is a draft only: check every fact, figure and legal reference, complete the "
           "[CONFIRM: ...] parts, then submit it for approval.", "success")
     return back
+
+
+@zimra_bp.route("/replies/<int:reply_id>/learn", methods=["POST"])
+@login_required
+def learn_from_reply(reply_id):
+    """Partner/Admin: look at how this approved AI-drafted letter was changed and suggest lessons (each still needs approval)."""
+    reply = _get_reply(reply_id)
+    _require_senior("suggest lessons from a letter")
+    if reply.status not in ("Approved", "Sent"):
+        flash("Lessons are suggested from a letter once it has been approved.", "info")
+        return _back_to_reply(reply)
+    ai = reply.ai
+    if ai and ai.get("learned_at"):
+        flash("Lessons were already suggested from this letter.", "info")
+        return _back_to_reply(reply)
+    status, payload = LS.learn_from_zimra_reply(reply, current_user)
+    if status == "not_ai":
+        flash("This letter was not drafted with AI, so there is nothing to compare.", "info")
+    elif status == "no_change":
+        flash("The approved letter is almost identical to the AI draft - nothing to learn from it.", "info")
+    elif status == "not_configured":
+        flash("The ANTHROPIC_API_KEY setting is missing on the server, so lessons cannot be suggested.", "danger")
+    elif status == "error":
+        flash(f"Lessons could not be suggested: {payload}", "danger")
+    else:
+        reply.log(current_user, "Lessons suggested", f"{len(payload)} new lesson(s) for the Partners to decide")
+        db.session.commit()
+        if payload:
+            flash(f"{len(payload)} lesson(s) suggested. They change nothing until approved under Firm Learning.", "success")
+            return redirect(url_for("learning.index", status="Proposed"))
+        flash("No general lesson came out of the changes made to this letter.", "info")
+    return _back_to_reply(reply)
 
 
 @zimra_bp.route("/replies/<int:reply_id>/ai-restore", methods=["POST"])
