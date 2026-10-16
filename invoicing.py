@@ -205,7 +205,8 @@ def view_invoice(invoice_id):
     ready_tasks = (ready_to_bill_tasks(invoice.engagement, include_internal=show_internal)
                    if invoice.engagement and invoice.status in ("Draft", "Sent") else [])
     from invoice_send import send_context
-    return render_template("invoicing/detail.html", **send_context(invoice), invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES), today_iso=date.today().isoformat(), methods=PAYMENT_METHODS, ready_tasks=ready_tasks, show_internal=show_internal)
+    from advances import available_for_invoice
+    return render_template("invoicing/detail.html", **send_context(invoice), advances_available=available_for_invoice(invoice), invoice=invoice, statuses=INVOICE_STATUSES, frequencies=list(RECURRING_FREQUENCIES), today_iso=date.today().isoformat(), methods=PAYMENT_METHODS, ready_tasks=ready_tasks, show_internal=show_internal)
 
 
 @invoicing_bp.route("/<int:invoice_id>/print")

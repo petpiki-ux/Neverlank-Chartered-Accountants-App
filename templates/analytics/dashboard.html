@@ -124,6 +124,13 @@
   {{ card('ageing', 'Debtors ageing', 'What clients owe now, by how long past the due date (incl. VAT).') }}
 </div>
 
+{% if k.advances_held > 0.005 %}
+<div class="card" style="border-left:4px solid #b8934a;">
+  <strong>{{ cur }} {{ '{:,.2f}'.format(k.advances_held) }} held for clients in advance.</strong>
+  <span class="muted">Received before invoicing &mdash; a liability, not revenue, until it is applied to an invoice. <a href="{{ url_for('advances.list_advances', state='open') }}">View advances</a></span>
+</div>
+{% endif %}
+
 <div class="card">
   <h3 style="margin-top:0;">Overdue invoices</h3>
   {% if r.overdue_list %}

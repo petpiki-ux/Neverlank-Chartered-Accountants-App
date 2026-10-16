@@ -9341,9 +9341,20 @@ class Receipt(db.Model):
     issued_by = db.relationship("User", foreign_keys=[issued_by_id])
     voided_by = db.relationship("User", foreign_keys=[voided_by_id])
 
+    # Set when this receipt was created by applying a customer advance to the
+    # invoice (see ClientAdvanceApplication). The cash came in when the advance
+    # was received, so such a receipt is NOT new money.
+    advance_application_id = db.Column(db.Integer, db.ForeignKey("client_advance_application.id"))
+    advance_application = db.relationship("ClientAdvanceApplication", foreign_keys=[advance_application_id],
+                                          backref=db.backref("receipt", uselist=False))
+
     @property
     def is_void(self):
         return self.voided_at is not None
+
+    @property
+    def from_advance(self):
+        return self.advance_application_id is not None
 
     @property
     def client(self):
@@ -9442,6 +9453,138 @@ class CreditNoteLine(db.Model):
     @property
     def line_total(self):
         return (self.quantity or 0) * (self.unit_price or 0)
+
+
+# ---------- Customer advances (money received BEFORE it is invoiced) ----------
+
+class ClientAdvance(db.Model):
+    """Money a client has paid in advance - a deposit or payment on account -
+    before any invoice exists for it. Numbered ADV-YYYY-NNNN and receipted at
+    once. Until it is applied to an invoice it is a LIABILITY of the firm (the
+    client's credit), not income, and it shows on the client's statement as a
+    credit. It is later applied - in full or in part, to one or several
+    invoices of the same currency - or refunded. Like receipts it is never
+    deleted: one recorded in error is voided (only while nothing has been
+    applied or refunded), kept on file with who/when/why."""
+    id = db.Column(db.Integer, primary_key=True)
+    advance_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))  # optional: what it was paid for
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    amount = db.Column(db.Float, nullable=False)  # as received, VAT-inclusive
+    received_on = db.Column(db.Date, nullable=False, default=date.today)
+    method = db.Column(db.String(30), default="Bank transfer")
+    reference = db.Column(db.String(120))  # bank / EcoCash / cheque reference
+    purpose = db.Column(db.String(300))
+    notes = db.Column(db.Text)
+
+    issued_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    issued_at = db.Column(db.DateTime, default=datetime.utcnow)
+    voided_at = db.Column(db.DateTime)
+    voided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    void_reason = db.Column(db.Text)
+
+    client = db.relationship("Client", backref=db.backref(
+        "advances", lazy=True, cascade="all, delete-orphan", order_by="ClientAdvance.received_on.desc(), ClientAdvance.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("advances", lazy=True))
+    issued_by = db.relationship("User", foreign_keys=[issued_by_id])
+    voided_by = db.relationship("User", foreign_keys=[voided_by_id])
+    applications = db.relationship("ClientAdvanceApplication", backref="advance", lazy=True,
+                                   cascade="all, delete-orphan", order_by="ClientAdvanceApplication.id")
+    refunds = db.relationship("ClientAdvanceRefund", backref="advance", lazy=True,
+                              cascade="all, delete-orphan", order_by="ClientAdvanceRefund.id")
+
+    @property
+    def is_void(self):
+        return self.voided_at is not None
+
+    @property
+    def bill_to(self):
+        c = self.client
+        return c.name + (f"\n{c.address}" if getattr(c, "address", None) else "")
+
+    @property
+    def active_applications(self):
+        return [a for a in self.applications if a.is_active]
+
+    @property
+    def active_refunds(self):
+        return [r for r in self.refunds if not r.is_void]
+
+    @property
+    def applied_total(self):
+        return round(sum(a.amount or 0 for a in self.active_applications), 2)
+
+    @property
+    def refunded_total(self):
+        return round(sum(r.amount or 0 for r in self.active_refunds), 2)
+
+    @property
+    def balance(self):
+        """Still held on the client's behalf (received less applied less refunded). Zero once void."""
+        if self.is_void:
+            return 0.0
+        return max(round((self.amount or 0) - self.applied_total - self.refunded_total, 2), 0.0)
+
+    @property
+    def state(self):
+        if self.is_void:
+            return "Void"
+        if self.balance <= 0.005:
+            return "Refunded" if self.refunded_total > 0.005 and self.applied_total <= 0.005 else "Fully applied"
+        if self.applied_total > 0.005 or self.refunded_total > 0.005:
+            return "Part applied"
+        return "Unapplied"
+
+    def __repr__(self):
+        return f"<ClientAdvance {self.advance_number} {self.amount}>"
+
+
+class ClientAdvanceApplication(db.Model):
+    """An advance set against an invoice. Creating one also creates a Receipt on
+    the invoice (Receipt.advance_application_id), so the invoice's balance,
+    status and ageing follow the normal receipt logic. It is reversed by
+    voiding that receipt (which returns the money to the advance's balance)."""
+    id = db.Column(db.Integer, primary_key=True)
+    advance_id = db.Column(db.Integer, db.ForeignKey("client_advance.id"), nullable=False)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    applied_on = db.Column(db.Date, nullable=False, default=date.today)
+    applied_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    applied_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    invoice = db.relationship("Invoice", backref=db.backref(
+        "advance_applications", lazy=True, cascade="all, delete-orphan"))
+    applied_by = db.relationship("User", foreign_keys=[applied_by_id])
+
+    @property
+    def is_active(self):
+        r = self.receipt
+        return r is not None and not r.is_void
+
+
+class ClientAdvanceRefund(db.Model):
+    """Part or all of an unapplied advance paid back to the client."""
+    id = db.Column(db.Integer, primary_key=True)
+    advance_id = db.Column(db.Integer, db.ForeignKey("client_advance.id"), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    refunded_on = db.Column(db.Date, nullable=False, default=date.today)
+    method = db.Column(db.String(30), default="Bank transfer")
+    reference = db.Column(db.String(120))
+    notes = db.Column(db.Text)
+
+    refunded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    refunded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    voided_at = db.Column(db.DateTime)
+    voided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    void_reason = db.Column(db.Text)
+
+    refunded_by = db.relationship("User", foreign_keys=[refunded_by_id])
+    voided_by = db.relationship("User", foreign_keys=[voided_by_id])
+
+    @property
+    def is_void(self):
+        return self.voided_at is not None
 
 
 # ---------- Quotations (convert to Invoices) ----------

@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Record an advance - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Record an advance from a client</h1></div>
+<div class="card" style="max-width:700px;">
+  <p class="muted" style="font-size:12.5px;margin-top:0;">Use this when money arrives <em>before</em> an invoice is raised. An advance receipt is issued straight away; the money is then held for the client and applied to an invoice later.</p>
+  <form method="post">
+    <div class="form-row">
+      <div><label for="client_id">Client *</label>
+        <select id="client_id" name="client_id" required onchange="filterEngagements()">
+          <option value="">Select client...</option>
+          {% for c in clients %}<option value="{{ c.id }}" {% if preselect_client_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+        </select></div>
+      <div><label for="engagement_id">Engagement (optional)</label>
+        <select id="engagement_id" name="engagement_id">
+          <option value="">None - a general advance on account</option>
+          {% for e in engagements %}<option value="{{ e.id }}" data-client="{{ e.client_id }}">{{ e.title }}</option>{% endfor %}
+        </select></div>
+    </div>
+    <div class="form-row">
+      <div><label for="currency">Currency *</label>
+        <select id="currency" name="currency">{% for c in currencies %}<option value="{{ c }}">{{ c }}</option>{% endfor %}</select></div>
+      <div><label for="amount">Amount received (incl. VAT) *</label>
+        <input type="number" step="0.01" min="0.01" id="amount" name="amount" required></div>
+      <div><label for="received_on">Date received *</label>
+        <input type="date" id="received_on" name="received_on" value="{{ today }}" max="{{ today }}" required></div>
+    </div>
+    <div class="form-row">
+      <div><label for="method">Paid by *</label>
+        <select id="method" name="method" required>{% for m in methods %}<option value="{{ m }}" {% if m == 'Bank transfer' %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+      <div><label for="reference">Payment reference</label>
+        <input type="text" id="reference" name="reference" maxlength="120" placeholder="Bank / EcoCash / cheque no."></div>
+    </div>
+    <div><label for="purpose">What is it for?</label>
+      <input type="text" id="purpose" name="purpose" maxlength="300" placeholder="e.g. Deposit for FY2026 audit"></div>
+    <div><label for="notes">Notes</label><textarea id="notes" name="notes" rows="2"></textarea></div>
+    <div style="margin-top:14px;"><button type="submit" class="btn gold">Record advance &amp; issue receipt</button>
+      <a href="{{ url_for('advances.list_advances') }}" class="btn secondary">Cancel</a></div>
+  </form>
+</div>
+<script>
+  function filterEngagements() {
+    var clientId = document.getElementById('client_id').value;
+    var select = document.getElementById('engagement_id');
+    for (var i = 0; i < select.options.length; i++) {
+      var opt = select.options[i];
+      if (!opt.value) { opt.hidden = false; continue; }
+      var matches = (opt.getAttribute('data-client') === clientId);
+      opt.hidden = !matches;
+      if (!matches && opt.selected) { select.value = ''; }
+    }
+  }
+  filterEngagements();
+</script>
+{% endblock %}

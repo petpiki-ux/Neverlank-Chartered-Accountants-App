@@ -186,7 +186,7 @@ def list_receipts():
     receipts = [r for r in q.order_by(Receipt.paid_on.desc(), Receipt.id.desc()).all() if _can_see(r.invoice)]
     totals = {}
     for r in receipts:
-        if not r.is_void:
+        if not r.is_void and not r.from_advance:  # money applied from an advance was counted when the advance came in
             totals[r.currency] = totals.get(r.currency, 0.0) + (r.amount or 0)
     return render_template(
         "receipts/list.html", receipts=receipts, totals=totals,
@@ -246,6 +246,8 @@ def void_receipt(receipt_id):
     db.session.refresh(invoice)
     settle_invoice(invoice)
     db.session.commit()
+    extra = (f" {receipt.amount:,.2f} is back in advance {receipt.advance_application.advance.advance_number}."
+             if receipt.from_advance else "")
     flash(f"Receipt {receipt.receipt_number} voided. Invoice {invoice.invoice_number} now shows "
-          f"{invoice.currency} {invoice.balance:,.2f} owing.", "info")
+          f"{invoice.currency} {invoice.balance:,.2f} owing.{extra}", "info")
     return redirect(url_for("receipts.view_receipt", receipt_id=receipt.id))

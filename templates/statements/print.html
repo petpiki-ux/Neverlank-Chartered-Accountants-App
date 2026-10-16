@@ -46,7 +46,7 @@
     <div class="totals">
       <div class="row"><span>Balance brought forward</span><span>{{ currency }} {{ '{:,.2f}'.format(s.opening) }}</span></div>
       <div class="row"><span>Charges in period</span><span>{{ currency }} {{ '{:,.2f}'.format(s.debits) }}</span></div>
-      <div class="row"><span>Payments &amp; credit notes in period</span><span>({{ currency }} {{ '{:,.2f}'.format(s.credits) }})</span></div>
+      <div class="row"><span>Payments, advances &amp; credit notes in period</span><span>({{ currency }} {{ '{:,.2f}'.format(s.credits) }})</span></div>
       <div class="row grand"><span>{{ 'Balance due' if s.closing > 0.005 else ('In credit' if s.closing < -0.005 else 'Balance') }}</span><span>{{ currency }} {{ '{:,.2f}'.format(s.closing|abs if s.closing < -0.005 else s.closing) }}</span></div>
     </div>
   </div>
@@ -55,6 +55,9 @@
       <tr>{% for key, label in buckets %}<th class="r" style="background:#e9eef4;color:var(--navy);">{{ label }}</th>{% endfor %}<th class="r" style="background:#e9eef4;color:var(--navy);">Total</th></tr></thead>
     <tbody><tr>{% for key, label in buckets %}<td class="r">{{ '{:,.2f}'.format(s.ageing.buckets[key]) }}</td>{% endfor %}<td class="r"><strong>{{ '{:,.2f}'.format(s.ageing.total) }}</strong></td></tr></tbody>
   </table>
+  {% if s.held > 0.005 %}
+  <p style="margin:8px 0 0;font-size:12px;color:#1e5a3a;">Includes <strong>{{ currency }} {{ '{:,.2f}'.format(s.held) }}</strong> received from you in advance and not yet set against an invoice; it will be applied to your invoices as they are issued, or refunded on request.</p>
+  {% endif %}
   {% if s.ageing.overdue > 0.005 %}
   <p style="margin:8px 0 0;font-size:12px;color:#7f1d1d;"><strong>{{ currency }} {{ '{:,.2f}'.format(s.ageing.overdue) }} is past its due date.</strong> Please arrange payment.</p>
   {% endif %}

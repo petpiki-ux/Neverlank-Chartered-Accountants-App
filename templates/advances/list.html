@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Customer advances - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Customer advances</h1>
+    <div class="subtitle">{{ advances|length }} advance(s){% for cur, amt in received.items() %} &middot; {{ cur }} {{ '{:,.2f}'.format(amt) }} received{% endfor %}{% for cur, amt in held.items() %} &middot; <strong>{{ cur }} {{ '{:,.2f}'.format(amt) }} still held</strong>{% endfor %}</div>
+  </div>
+  <div><a href="{{ url_for('advances.new_advance') }}" class="btn gold">Record an advance</a></div>
+</div>
+
+<div class="card">
+  <p class="muted" style="font-size:12.5px;margin-top:0;">An advance is money a client pays <em>before</em> it is invoiced (a deposit or payment on account). It is held as the client's credit &mdash; not income &mdash; until you apply it to an invoice from the advance or from the invoice itself. Any part not used can be refunded by a Partner or Admin.</p>
+  <form method="get" class="form-row" style="align-items:flex-end;margin-bottom:0;">
+    <div><label for="client_id">Client</label>
+      <select id="client_id" name="client_id" onchange="this.form.submit()"><option value="">All</option>
+        {% for c in clients %}<option value="{{ c.id }}" {% if client_filter==c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+    <div><label for="state">Show</label>
+      <select id="state" name="state" onchange="this.form.submit()">
+        <option value="">All advances</option>
+        <option value="open" {% if state_filter=='open' %}selected{% endif %}>Only those with money still held</option></select></div>
+    <div><label style="font-weight:normal;"><input type="checkbox" name="void" value="1" style="width:auto;" {% if show_void %}checked{% endif %} onchange="this.form.submit()"> Show voided</label></div>
+  </form>
+</div>
+
+<div class="card">
+  {% if advances %}
+  <table>
+    <thead><tr><th>Advance #</th><th>Date received</th><th>Client</th><th>For</th><th>Paid by</th><th class="text-right">Received</th><th class="text-right">Still held</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+      {% for a in advances %}
+      <tr{% if a.is_void %} style="opacity:.55;"{% endif %}>
+        <td><a href="{{ url_for('advances.view_advance', advance_id=a.id) }}">{{ a.advance_number }}</a></td>
+        <td>{{ a.received_on.strftime('%d %b %Y') }}</td>
+        <td>{{ a.client.name }}</td>
+        <td>{{ a.purpose or (a.engagement.title if a.engagement else '—') }}</td>
+        <td>{{ a.method or '—' }}</td>
+        <td class="text-right">{{ a.currency }} {{ '{:,.2f}'.format(a.amount) }}</td>
+        <td class="text-right">{{ a.currency }} {{ '{:,.2f}'.format(a.balance) }}</td>
+        <td><span class="badge {{ 'overdue' if a.is_void else ('status-Sent' if a.balance > 0.005 else 'status-Paid') }}">{{ a.state }}</span></td>
+        <td class="text-right"><a href="{{ url_for('advances.view_advance', advance_id=a.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No advances recorded yet. Use <strong>Record an advance</strong> when a client pays before an invoice is raised.</div>
+  {% endif %}
+</div>
+{% endblock %}

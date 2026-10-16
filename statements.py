@@ -13,6 +13,12 @@ What counts:
   reduce the balance like a payment but are labelled as credit notes).
 * An invoice marked Paid before receipting existed (no receipt on file) is
   shown as settled by a "Marked paid" credit, so the ledger still balances.
+* Customer advances (advances.py): an advance is a credit on the day it was
+  RECEIVED, and a refund of it a debit. When an advance is later applied to an
+  invoice the invoice receipt it creates is NOT a second credit (the money was
+  already credited) - it appears as a memo line with no amount, and it reduces
+  the invoice for ageing. So the closing balance = amount owing on invoices
+  less the advances still held; a negative closing balance reads "In credit".
 
 Because a statement is a complete financial record, it is only produced for a
 person who can see EVERY issued invoice of the client (some invoices are
@@ -65,6 +71,32 @@ def credit_events(invoice):
     return events
 
 
+def is_from_advance(item):
+    return item is not None and getattr(item, "advance_application_id", None) is not None
+
+
+def advance_visible(advance):
+    if not user_can_access_client(current_user, advance.client_id):
+        return False
+    return not advance.engagement_id or user_can_access_engagement(current_user, advance.engagement)
+
+
+def client_advance_list(client):
+    """(advances of this client the user can see, number hidden from them)."""
+    every = list(client.advances)
+    shown = [a for a in every if advance_visible(a)]
+    return shown, len(every) - len(shown)
+
+
+def held_on(advance, as_at):
+    """Money from this advance still held (not applied, not refunded) at the end of `as_at`."""
+    if advance.is_void or advance.received_on > as_at:
+        return 0.0
+    applied = sum(a.amount or 0 for a in advance.active_applications if a.applied_on <= as_at)
+    refunded = sum(r.amount or 0 for r in advance.active_refunds if r.refunded_on <= as_at)
+    return max(round((advance.amount or 0) - applied - refunded, 2), 0.0)
+
+
 def outstanding_on(invoice, as_at):
     """What was still owed on `invoice` at the end of `as_at` (0 if not yet issued)."""
     if not is_issued(invoice) or invoice_date(invoice) > as_at:
@@ -104,10 +136,11 @@ def ageing(invoices, as_at):
     return out
 
 
-def build_statement(invoices, date_from, date_to):
-    """Statement data per currency for the (already complete) list of `invoices`."""
+def build_statement(invoices, date_from, date_to, advances=()):
+    """Statement data per currency for the (already complete) lists of `invoices` and `advances`."""
     issued = [i for i in invoices if is_issued(i)]
-    currencies = sorted({i.currency for i in issued})
+    advances = [a for a in advances if not a.is_void]
+    currencies = sorted({i.currency for i in issued} | {a.currency for a in advances})
     aged = ageing(issued, date_to)
     result = OrderedDict()
     for currency in currencies:
@@ -128,6 +161,16 @@ def build_statement(invoices, date_from, date_to):
             for cdate, amount, text, receipt in credit_events(inv):
                 if cdate > date_to:
                     continue
+                if is_from_advance(receipt):
+                    # settled out of an advance already credited on the day it came in: memo line only
+                    if cdate >= date_from:
+                        adv = receipt.advance_application.advance
+                        rows.append({"date": cdate, "order": 2, "id": receipt.id, "kind": "Advance applied",
+                                     "ref": receipt.receipt_number,
+                                     "description": f"Advance {adv.advance_number} applied to {inv.invoice_number}",
+                                     "debit": 0.0, "credit": 0.0, "due": None, "invoice": inv, "receipt": receipt,
+                                     "memo": True})
+                    continue
                 if cdate < date_from:
                     opening -= amount
                 else:
@@ -143,6 +186,27 @@ def build_statement(invoices, date_from, date_to):
                                  "debit": 0.0, "credit": amount, "due": None, "invoice": inv,
                                  "receipt": None if is_credit_note else receipt,
                                  "credit_note": receipt if is_credit_note else None})
+        for adv in (a for a in advances if a.currency == currency):
+            label = f"Advance received - {adv.advance_number}" + (f" ({adv.purpose})" if adv.purpose else "") \
+                + (f" ({adv.method})" if adv.method else "")
+            if adv.received_on <= date_to:
+                if adv.received_on < date_from:
+                    opening -= round(adv.amount or 0, 2)
+                else:
+                    rows.append({"date": adv.received_on, "order": 1, "id": adv.id, "kind": "Advance received",
+                                 "ref": adv.advance_number, "description": label, "debit": 0.0,
+                                 "credit": round(adv.amount or 0, 2), "due": None, "invoice": None, "receipt": None,
+                                 "advance": adv})
+            for rf in adv.active_refunds:
+                if rf.refunded_on > date_to:
+                    continue
+                if rf.refunded_on < date_from:
+                    opening += round(rf.amount or 0, 2)
+                else:
+                    rows.append({"date": rf.refunded_on, "order": 1, "id": rf.id, "kind": "Advance refund",
+                                 "ref": adv.advance_number, "description": f"Advance refunded - {adv.advance_number}",
+                                 "debit": round(rf.amount or 0, 2), "credit": 0.0, "due": None, "invoice": None,
+                                 "receipt": None, "advance": adv})
         rows.sort(key=lambda r: (r["date"], r["order"], r["id"]))
         opening = round(opening, 2)
         running = opening
@@ -154,6 +218,7 @@ def build_statement(invoices, date_from, date_to):
             "currency": currency, "opening": opening, "rows": rows,
             "debits": round(sum(r["debit"] for r in rows), 2), "credits": round(sum(r["credit"] for r in rows), 2),
             "closing": running, "ageing": a,
+            "held": round(sum(held_on(x, date_to) for x in advances if x.currency == currency), 2),
         }
     return result
 
@@ -214,12 +279,22 @@ def index():
     as_at = _parse_date(request.args.get("as_at"), date.today())
     clients = visible_clients(current_user)
     rows, restricted = [], 0
+    held_rows, held_totals = [], {}
     totals = OrderedDict()
     for client in clients:
         shown, hidden = client_invoices(client)
-        if hidden:
+        shown_adv, hidden_adv = client_advance_list(client)
+        if hidden or hidden_adv:
             restricted += 1
             continue
+        held = {}
+        for adv in shown_adv:
+            h = held_on(adv, as_at)
+            if h > TOLERANCE:
+                held[adv.currency] = round(held.get(adv.currency, 0.0) + h, 2)
+        for currency, amount in held.items():
+            held_rows.append({"client": client, "currency": currency, "held": amount})
+            held_totals[currency] = round(held_totals.get(currency, 0.0) + amount, 2)
         for currency, block in ageing(shown, as_at).items():
             rows.append({"client": client, "currency": currency, **block})
             t = totals.setdefault(currency, {"buckets": {k: 0.0 for k in BUCKET_KEYS}, "total": 0.0, "overdue": 0.0, "clients": 0})
@@ -229,10 +304,12 @@ def index():
             t["overdue"] = round(t["overdue"] + block["overdue"], 2)
             t["clients"] += 1
     rows.sort(key=lambda r: (r["currency"], -r["total"], r["client"].name.lower()))
+    held_rows.sort(key=lambda r: (r["currency"], -r["held"], r["client"].name.lower()))
     date_from, date_to = default_period()
     return render_template(
         "statements/index.html", rows=rows, totals=totals, restricted=restricted, as_of=as_at, buckets=AGEING_BUCKETS,
         clients=clients, date_from=date_from, date_to=date_to,
+        held_rows=held_rows, held_totals=held_totals,
     )
 
 
@@ -256,7 +333,8 @@ def client_statement(client_id):
     if not user_can_access_client(current_user, client.id):
         abort(403)
     shown, hidden = client_invoices(client)
-    if hidden:
+    shown_adv, hidden_adv = client_advance_list(client)
+    if hidden or hidden_adv:
         abort(403, description=INCOMPLETE)
     default_from, default_to = default_period()
     date_to = _parse_date(request.args.get("date_to"), default_to)
@@ -264,7 +342,7 @@ def client_statement(client_id):
     if date_from > date_to:
         flash("The 'from' date was after the 'to' date, so the dates were swapped.", "info")
         date_from, date_to = date_to, date_from
-    sections = build_statement(shown, date_from, date_to)
+    sections = build_statement(shown, date_from, date_to, shown_adv)
     currencies = " · ".join(sections.keys()) if sections else "—"
     bill_to = client.name + (f"\n{client.address}" if client.address else "")
     doc = SimpleNamespace(currency=currencies, client=client, bill_to=bill_to)

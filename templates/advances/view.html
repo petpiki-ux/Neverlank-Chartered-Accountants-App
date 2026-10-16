@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+{% block title %}{{ advance.advance_number }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ advance.advance_number }}
+      <span class="badge {{ 'overdue' if advance.is_void else ('status-Sent' if advance.balance > 0.005 else 'status-Paid') }}">{{ advance.state }}</span></h1>
+    <div class="subtitle"><a href="{{ url_for('clients.view_client', client_id=advance.client_id) }}">{{ advance.client.name }}</a>
+      &middot; received {{ advance.received_on.strftime('%d %b %Y') }} by {{ advance.method or '—' }}{% if advance.reference %} ({{ advance.reference }}){% endif %}</div>
+  </div>
+  <div>
+    <a href="{{ url_for('advances.print_advance', advance_id=advance.id) }}" class="btn gold">View / print receipt</a>
+    <a href="{{ url_for('advances.list_advances') }}" class="btn secondary">All advances</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="form-row">
+    <div><strong>Received:</strong> {{ advance.currency }} {{ '{:,.2f}'.format(advance.amount) }}</div>
+    <div><strong>Applied to invoices:</strong> {{ advance.currency }} {{ '{:,.2f}'.format(advance.applied_total) }}</div>
+    <div><strong>Refunded:</strong> {{ advance.currency }} {{ '{:,.2f}'.format(advance.refunded_total) }}</div>
+    <div><strong>Still held for the client:</strong> {{ advance.currency }} {{ '{:,.2f}'.format(advance.balance) }}</div>
+  </div>
+  {% if advance.purpose or advance.engagement %}<p style="margin:6px 0 0;"><strong>For:</strong> {{ advance.purpose or '' }}{% if advance.engagement %}{% if advance.purpose %} &middot; {% endif %}{{ advance.engagement.title }}{% endif %}</p>{% endif %}
+  {% if advance.notes %}<p class="muted" style="margin:6px 0 0;white-space:pre-line;">{{ advance.notes }}</p>{% endif %}
+  {% if advance.is_void %}<p style="color:#c0392b;margin:8px 0 0;"><strong>Voided</strong> {{ (advance.voided_at|cat).strftime('%d %b %Y') }}{% if advance.voided_by %} by {{ advance.voided_by.name }}{% endif %}. Reason: {{ advance.void_reason }}</p>{% endif %}
+</div>
+
+{% if not advance.is_void and advance.balance > 0.005 %}
+<div class="card" id="apply">
+  <h3 class="mt-0">Apply to an invoice</h3>
+  {% if open_invoices %}
+  <table>
+    <thead><tr><th>Invoice</th><th>Due</th><th class="text-right">Still owing</th><th>Apply</th></tr></thead>
+    <tbody>
+      {% for inv in open_invoices %}
+      {% set suggest = [advance.balance, inv.receiptable_balance]|min %}
+      <tr>
+        <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a>{% if inv.engagement %} <span class="muted">{{ inv.engagement.title }}</span>{% endif %}</td>
+        <td>{{ inv.due_date.strftime('%d %b %Y') if inv.due_date else '—' }}</td>
+        <td class="text-right">{{ inv.currency }} {{ '{:,.2f}'.format(inv.receiptable_balance) }}</td>
+        <td>
+          <form method="post" action="{{ url_for('advances.apply', advance_id=advance.id) }}" class="form-row" style="align-items:flex-end;margin:0;">
+            <input type="hidden" name="invoice_id" value="{{ inv.id }}">
+            <input type="number" step="0.01" min="0.01" max="{{ '%.2f'|format(suggest) }}" name="amount" value="{{ '%.2f'|format(suggest) }}" style="width:120px;" required>
+            <input type="date" name="applied_on" value="{{ today }}" min="{{ advance.received_on.isoformat() }}" max="{{ today }}" required>
+            <button type="submit" class="btn small gold">Apply</button>
+          </form></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:11.5px;">Applying issues an ordinary receipt on the invoice (method &ldquo;Advance applied&rdquo;), so its balance and Paid status update automatically.</p>
+  {% else %}
+  <p class="muted" style="font-size:12.5px;margin:0;">This client has no sent invoice in {{ advance.currency }} with an amount owing. The money stays held and can be applied as soon as one is issued.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Applied to invoices</h3>
+  {% if advance.applications %}
+  <table>
+    <thead><tr><th>Date</th><th>Invoice</th><th>Receipt</th><th class="text-right">Amount</th><th>By</th><th></th></tr></thead>
+    <tbody>
+      {% for ap in advance.applications %}
+      <tr{% if not ap.is_active %} style="opacity:.55;text-decoration:line-through;"{% endif %}>
+        <td>{{ ap.applied_on.strftime('%d %b %Y') }}</td>
+        <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=ap.invoice_id) }}">{{ ap.invoice.invoice_number }}</a></td>
+        <td>{% if ap.receipt %}<a href="{{ url_for('receipts.view_receipt', receipt_id=ap.receipt.id) }}">{{ ap.receipt.receipt_number }}</a>{% endif %}{% if not ap.is_active %} <span class="badge overdue" style="text-decoration:none;">Reversed</span>{% endif %}</td>
+        <td class="text-right">{{ advance.currency }} {{ '{:,.2f}'.format(ap.amount) }}</td>
+        <td>{{ ap.applied_by.name if ap.applied_by else '—' }}</td>
+        <td class="text-right">{% if is_senior and ap.is_active %}
+          <form method="post" action="{{ url_for('advances.reverse_application', application_id=ap.id) }}" style="display:inline;" onsubmit="var r = prompt('Why is this application being reversed?'); if (!r) { return false; } this.reason.value = r; return true;">
+            <input type="hidden" name="reason" value=""><button type="submit" class="btn small secondary">Reverse</button></form>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="font-size:12.5px;margin:0;">Not applied to any invoice yet.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Refunds</h3>
+  {% if advance.refunds %}
+  <table>
+    <thead><tr><th>Date</th><th>Paid by</th><th>Reference</th><th class="text-right">Amount</th><th></th></tr></thead>
+    <tbody>
+      {% for r in advance.refunds %}
+      <tr{% if r.is_void %} style="opacity:.55;text-decoration:line-through;"{% endif %}>
+        <td>{{ r.refunded_on.strftime('%d %b %Y') }}</td><td>{{ r.method or '—' }}</td><td>{{ r.reference or '—' }}</td>
+        <td class="text-right">{{ advance.currency }} {{ '{:,.2f}'.format(r.amount) }}{% if r.is_void %} <span class="badge overdue" style="text-decoration:none;">Void</span>{% endif %}</td>
+        <td class="text-right">{% if is_senior and not r.is_void %}
+          <form method="post" action="{{ url_for('advances.void_refund', refund_id=r.id) }}" style="display:inline;" onsubmit="var x = prompt('Why is this refund being voided?'); if (!x) { return false; } this.reason.value = x; return true;">
+            <input type="hidden" name="reason" value=""><button type="submit" class="btn small secondary">Void</button></form>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="font-size:12.5px;margin:0 0 8px;">Nothing refunded.</p>{% endif %}
+
+  {% if is_senior and not advance.is_void and advance.balance > 0.005 %}
+  <form method="post" action="{{ url_for('advances.refund', advance_id=advance.id) }}" class="form-row" style="align-items:flex-end;margin-top:12px;">
+    <div><label for="r_amount">Refund ({{ advance.currency }})</label>
+      <input type="number" step="0.01" min="0.01" max="{{ '%.2f'|format(advance.balance) }}" id="r_amount" name="amount" value="{{ '%.2f'|format(advance.balance) }}" required></div>
+    <div><label for="r_date">Date refunded</label><input type="date" id="r_date" name="refunded_on" value="{{ today }}" min="{{ advance.received_on.isoformat() }}" max="{{ today }}" required></div>
+    <div><label for="r_method">Paid by</label><select id="r_method" name="method" required>{% for m in methods %}<option value="{{ m }}" {% if m == 'Bank transfer' %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+    <div><label for="r_ref">Reference</label><input type="text" id="r_ref" name="reference" maxlength="120"></div>
+    <div><button type="submit" class="btn secondary" style="margin-bottom:14px;" onclick="return confirm('Record this refund to the client?');">Record refund</button></div>
+  </form>
+  {% elif not is_senior and not advance.is_void and advance.balance > 0.005 %}
+  <p class="muted" style="font-size:11.5px;">Only a Partner or Admin can refund an advance.</p>
+  {% endif %}
+</div>
+
+{% if is_senior and not advance.is_void and not advance.active_applications and not advance.active_refunds %}
+<div class="card">
+  <h3 class="mt-0">Recorded in error?</h3>
+  <form method="post" action="{{ url_for('advances.void_advance', advance_id=advance.id) }}" onsubmit="var r = prompt('Why is this advance being voided?'); if (!r) { return false; } this.reason.value = r; return true;">
+    <input type="hidden" name="reason" value="">
+    <button type="submit" class="btn small" style="background:#c0392b;color:#fff;">Void this advance</button>
+    <span class="muted" style="font-size:11.5px;">It stays on file with your reason and its number is not reused.</span>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

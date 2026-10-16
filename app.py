@@ -276,6 +276,9 @@ def _add_missing_columns():
             ("billing_waived", "BOOLEAN DEFAULT 0"),
         ] + partner_signoff_cols,
         "personal_task": [("category", "VARCHAR(60)")],
+        # advance_application_id - a receipt created by applying a customer advance
+        # (models.ClientAdvanceApplication); null for ordinary receipts.
+        "receipt": [("advance_application_id", "INTEGER")],
         # doc_type/related_reference/customs_duty - see models.VAT_DOC_TYPES:
         # credit notes, Bills of Entry and export sales. Existing rows
         # default to a plain 'Invoice', exactly what they were.
@@ -719,6 +722,7 @@ def create_app():
     from quotations import quotations_bp
     from recurring import recurring_bp
     from receipts import receipts_bp
+    from advances import advances_bp
     from credit_notes import credit_notes_bp
     from corporate_finance import corpfin_bp
     from statements import statements_bp
@@ -753,6 +757,7 @@ def create_app():
     app.register_blueprint(quotations_bp)
     app.register_blueprint(recurring_bp)
     app.register_blueprint(receipts_bp)
+    app.register_blueprint(advances_bp)
     app.register_blueprint(credit_notes_bp)
     app.register_blueprint(corpfin_bp)
     app.register_blueprint(statements_bp)

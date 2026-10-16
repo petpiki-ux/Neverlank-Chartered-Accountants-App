@@ -1,0 +1,39 @@
+{% extends "invoicing/print_base.html" %}
+{% set doc_number = advance.advance_number %}
+{% block doc_title %}Advance receipt{% endblock %}
+{% block back_link %}<a class="secondary" href="{{ url_for('advances.view_advance', advance_id=advance.id) }}">Back to advance</a>{% endblock %}
+{% block doc_label %}Receipt{% endblock %}
+{% block doc_sub %}{% if advance.is_void %}VOID{% else %}Advance payment{% endif %}{% endblock %}
+{% block stamp %}{% if advance.is_void %}<div class="stamp cancelled">Void</div>{% else %}<div class="stamp paid">Received</div>{% endif %}{% endblock %}
+{% block meta %}
+  <div><div class="k">Receipt no.</div><div class="v">{{ advance.advance_number }}</div></div>
+  <div><div class="k">Date received</div><div class="v">{{ advance.received_on.strftime('%d %b %Y') }}</div></div>
+  <div><div class="k">Paid by</div><div class="v">{{ advance.method or '—' }}{% if advance.reference %} &middot; {{ advance.reference }}{% endif %}</div></div>
+  <div><div class="k">Currency</div><div class="v">{{ advance.currency }}</div></div>
+{% endblock %}
+{% block party_label %}Received from{% endblock %}
+{% block party_re %}
+  <div class="re"><b>Advance payment (payment on account)</b>{% if advance.purpose %} &mdash; {{ advance.purpose }}{% endif %}{% if advance.engagement %}  &middot;  <b>Re:</b> {{ advance.engagement.title }}{% endif %}</div>
+{% endblock %}
+{% block items_section %}
+      <div class="words"><div class="k">Amount received</div>
+        <div class="v">{{ advance.currency }} {{ '{:,.2f}'.format(advance.amount) }}</div>
+        <div style="font-size:12px;color:#3b4652;margin-top:2px;">{{ words }}</div></div>
+      <div class="totals-wrap">
+        <div class="totals">
+          <div class="row"><span>Advance received</span><span>{{ advance.currency }} {{ '{:,.2f}'.format(advance.amount) }}</span></div>
+          <div class="row"><span>Applied to invoices</span><span>{{ advance.currency }} {{ '{:,.2f}'.format(advance.applied_total) }}</span></div>
+          {% if advance.refunded_total > 0.005 %}<div class="row"><span>Refunded</span><span>{{ advance.currency }} {{ '{:,.2f}'.format(advance.refunded_total) }}</span></div>{% endif %}
+          <div class="row grand"><span>Held on your account</span><span>{{ advance.currency }} {{ '{:,.2f}'.format(advance.balance) }}</span></div>
+        </div>
+      </div>
+{% endblock %}
+{% block extras %}
+  <div class="block"><h4>How this advance is used</h4><div class="txt">This amount is held on your account and will be set against our invoice(s) to you as they are issued. A tax invoice will be issued for the services provided. Any part not used can be refunded on request.</div></div>
+  {% if advance.is_void %}
+  <div class="block"><h4>This receipt has been voided</h4><div class="txt">Voided {{ (advance.voided_at|cat).strftime('%d %b %Y') }}{% if advance.voided_by %} by {{ advance.voided_by.name }}{% endif %}.{% if advance.void_reason %} Reason: {{ advance.void_reason }}{% endif %} It is not valid as proof of payment.</div></div>
+  {% endif %}
+  <div class="accept"><div class="sig">Received by{% if advance.issued_by %}: {{ advance.issued_by.name }}{% endif %}<br>For {{ firm.name }}</div><div></div></div>
+{% endblock %}
+{% block bank_block %}{% endblock %}
+{% block thanks %}Thank you for your payment.{% endblock %}

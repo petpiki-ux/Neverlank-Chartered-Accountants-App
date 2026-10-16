@@ -13,13 +13,14 @@
 {% block stamp %}{% if receipt.is_void %}<div class="stamp cancelled">Void</div>{% else %}<div class="stamp paid">{{ 'Paid in full' if receipt.balance_after <= 0.005 else 'Received' }}</div>{% endif %}{% endblock %}
 {% block meta %}
   <div><div class="k">Receipt no.</div><div class="v">{{ receipt.receipt_number }}</div></div>
-  <div><div class="k">Date received</div><div class="v">{{ receipt.paid_on.strftime('%d %b %Y') }}</div></div>
+  <div><div class="k">{{ 'Date applied' if receipt.from_advance else 'Date received' }}</div><div class="v">{{ receipt.paid_on.strftime('%d %b %Y') }}</div></div>
   <div><div class="k">Paid by</div><div class="v">{{ receipt.method or '—' }}</div></div>
   <div><div class="k">Currency</div><div class="v">{{ receipt.currency }}</div></div>
 {% endblock %}
 {% block party_label %}Received from{% endblock %}
 {% block party_re %}
   <div class="re"><b>In payment of invoice:</b> {{ invoice.invoice_number }}{% if invoice.engagement %}  &middot;  <b>Re:</b> {{ invoice.engagement.title }}{% endif %}</div>
+  {% if receipt.advance_application %}<div class="re"><b>Settled from your advance payment</b> {{ receipt.advance_application.advance.advance_number }} (received {{ receipt.advance_application.advance.received_on.strftime('%d %b %Y') }}).</div>{% endif %}
 {% endblock %}
 {% block items_section %}
       <div class="words"><div class="k">Amount received</div>

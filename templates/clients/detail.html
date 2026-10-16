@@ -655,6 +655,31 @@
   {% endif %}
 </div>
 
+<div class="card">
+  <div class="page-header" style="margin-bottom:10px;">
+    <h3 class="mt-0">Advances received</h3>
+    <a href="{{ url_for('advances.new_advance', client_id=client.id) }}" class="btn small gold">+ Record an advance</a>
+  </div>
+  {% if visible_advances %}
+  <table>
+    <thead><tr><th>Advance #</th><th>Received</th><th>For</th><th class="text-right">Amount</th><th class="text-right">Still held</th></tr></thead>
+    <tbody>
+      {% for a in visible_advances %}
+      <tr>
+        <td><a href="{{ url_for('advances.view_advance', advance_id=a.id) }}">{{ a.advance_number }}</a></td>
+        <td>{{ a.received_on.strftime('%d %b %Y') }}</td>
+        <td>{{ a.purpose or (a.engagement.title if a.engagement else '—') }}</td>
+        <td class="text-right">{{ a.currency }} {{ '{:,.2f}'.format(a.amount) }}</td>
+        <td class="text-right">{{ a.currency }} {{ '{:,.2f}'.format(a.balance) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No advances from this client. Record one when the client pays before an invoice is raised.</div>
+  {% endif %}
+</div>
+
 {% if user_has_permission(current_user, 'delete_clients') %}
 <form method="post" action="{{ url_for('clients.delete_client', client_id=client.id) }}" onsubmit="return confirm('Delete this client and ALL its engagements? This cannot be undone.');">
   <button type="submit" class="btn danger small">Delete client</button>

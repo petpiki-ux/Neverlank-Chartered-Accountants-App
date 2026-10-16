@@ -249,6 +249,7 @@ def view_client(client_id):
         legislative_updates_for_tagging=LegislativeUpdate.query.order_by(LegislativeUpdate.created_at.desc()).all(),
         zimra_cases=_visible_zimra_cases(client.zimra_cases),
         visible_invoices=[i for i in client.invoices if _invoice_visible(i)],
+        visible_advances=[a for a in client.advances if not a.is_void and (not a.engagement_id or user_can_access_engagement(current_user, a.engagement))],
     )
 
 

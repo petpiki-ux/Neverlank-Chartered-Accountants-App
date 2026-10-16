@@ -62,6 +62,27 @@
   {% else %}
   <div class="empty-state">Nothing is owing at this date.</div>
   {% endif %}
+  {% if held_rows %}
+  <h3 style="margin:18px 0 6px;">Advances held at {{ as_of.strftime('%d %b %Y') }}
+    <span class="muted" style="font-size:12px;font-weight:400;">&mdash; received from clients and not yet applied to an invoice (the firm's liability, not income)</span></h3>
+  <div style="display:flex;gap:12px;flex-wrap:wrap;margin:8px 0;">
+    {% for currency, amt in held_totals.items() %}
+    <div style="border:1px solid var(--border);border-radius:8px;padding:8px 14px;min-width:180px;">
+      <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;">Held in {{ currency }}</div>
+      <div style="font-size:18px;font-weight:700;">{{ '{:,.2f}'.format(amt) }}</div></div>
+    {% endfor %}
+  </div>
+  <table>
+    <thead><tr><th>Client</th><th>Currency</th><th style="text-align:right;">Held</th><th></th></tr></thead>
+    <tbody>
+      {% for r in held_rows %}
+      <tr><td><a href="{{ url_for('clients.view_client', client_id=r.client.id) }}">{{ r.client.name }}</a></td><td>{{ r.currency }}</td>
+        <td style="text-align:right;"><strong>{{ '{:,.2f}'.format(r.held) }}</strong></td>
+        <td><a class="btn small secondary" href="{{ url_for('advances.list_advances', client_id=r.client.id, state='open') }}">Advances</a></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
   {% if restricted %}
   <p class="muted" style="font-size:12px;margin-bottom:0;">{{ restricted }} client{{ '' if restricted == 1 else 's' }} left out: they have invoices on engagements you are not on, so a complete balance cannot be shown to you.</p>
   {% endif %}

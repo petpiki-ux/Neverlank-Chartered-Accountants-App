@@ -20,6 +20,11 @@ How the numbers are defined (shown in plain words on the page too):
   still sitting unpaid" - lower is better. Each month's point on the trend
   chart uses what was owed at that month-end, so history is honest even
   though invoices are only ever marked paid once.
+* Customer advances (money received before invoicing) are a liability, not
+  income: they are NOT in Revenue. Applying an advance to an invoice creates
+  an ordinary receipt, which counts as collected on the day it is applied
+  (so it is scaled ex-VAT like any receipt). Advances not yet applied are
+  shown separately as "held for clients" (advances_held).
 * Expenses are measured by the bill date, in the currency they were paid in.
 * USD and ZWG are NEVER added together: every figure is for one currency.
 
@@ -30,7 +35,7 @@ import calendar
 from collections import defaultdict
 from datetime import date, timedelta
 
-from models import Invoice, Expense, INVOICE_CURRENCIES
+from models import Invoice, Expense, ClientAdvance, INVOICE_CURRENCIES
 from timeutil import to_cat
 
 DSO_WINDOW_DAYS = 90
@@ -235,6 +240,18 @@ def _shares(items):
     return [{"label": k, "value": round(v, 2), "share": (v / total * 100 if total else 0)} for k, v in items]
 
 
+def advances_held(currency, as_at):
+    """Money received from clients in advance and still unapplied/unrefunded at the end of `as_at`."""
+    total = 0.0
+    for a in ClientAdvance.query.filter_by(currency=currency).filter(ClientAdvance.voided_at.is_(None)).all():
+        if a.received_on > as_at:
+            continue
+        applied = sum(x.amount or 0 for x in a.active_applications if x.applied_on <= as_at)
+        refunded = sum(x.amount or 0 for x in a.active_refunds if x.refunded_on <= as_at)
+        total += max((a.amount or 0) - applied - refunded, 0.0)
+    return round(total, 2)
+
+
 def _pct_change(now, before):
     if before in (None, 0) or now is None:
         return None
@@ -365,6 +382,7 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
             "expenses": expenses, "expenses_change": _pct_change(expenses, expenses_prev),
             "profit": profit, "profit_prev": profit_prev,
             "margin": (profit / revenue * 100) if revenue else None,
+            "advances_held": advances_held(currency, end_for_balances),
             "owed": owed_total, "owed_count": len(owed_now),
             "overdue": overdue_total, "overdue_count": len(overdue_rows),
             "overdue_pct": (overdue_total / owed_total * 100) if owed_total else None,
