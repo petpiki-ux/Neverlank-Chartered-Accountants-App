@@ -4380,6 +4380,7 @@ class IncomeTaxAdjustmentLine(db.Model):
     description = db.Column(db.String(200), nullable=False)
     amount = db.Column(db.Float, default=0.0)
     order = db.Column(db.Integer, default=0)
+    source = db.Column(db.String(30))  # "s16_engine" for lines posted from the Prohibited Deductions schedule (prohibited_deductions.py); null = preparer-entered
 
     def __repr__(self):
         return f"<IncomeTaxAdjustmentLine computation={self.computation_id}>"
@@ -6919,6 +6920,7 @@ class GLAccount(db.Model):
     opening_balance = db.Column(db.Float, default=0.0)
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     order = db.Column(db.Integer, default=0)
+    tax_expense_type = db.Column(db.String(60))  # the Prohibited Deductions rule code this expense account maps to (prohibited_deductions.py)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -10751,3 +10753,85 @@ class CFMgmtPack(db.Model):
 
     def set_data(self, value):
         self.data_json = json.dumps(value)
+
+
+
+# ---------- Section 16(1) prohibited deductions engine (prohibited_deductions.py) ----------
+
+TAX_DEDUCTIBILITY_STATUSES = ["ALLOWABLE", "PROHIBITED_SECTION_16", "PARTIALLY_PROHIBITED", "REVIEW_REQUIRED"]
+
+
+class ProhibitedDeductionRule(db.Model):
+    """One expense type and how the Income Tax Act's section 16(1) treats it. The clause reference and the treatment
+    are DATA, not code: the Act is amended by almost every Finance Act and published summaries disagree on lettering,
+    so a Partner can correct a clause label or switch a treatment here, and must mark a rule verified against the
+    current Act. Until then every schedule line that relies on the rule is flagged as unverified."""
+    __tablename__ = "prohibited_deduction_rule"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(60), nullable=False, unique=True)
+    name = db.Column(db.String(200), nullable=False)
+    group = db.Column(db.String(60))
+    clause_label = db.Column(db.String(60))      # e.g. "16(1)(m)" - editable
+    treatment = db.Column(db.String(30), nullable=False, default="full")  # see prohibited_deductions.TREATMENTS
+    note = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    verified_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    verified_at = db.Column(db.DateTime)
+    verified_note = db.Column(db.String(300))     # e.g. "Checked to Income Tax Act as amended by Finance Act 2026"
+    verified_by = db.relationship("User", foreign_keys=[verified_by_id])
+
+    @property
+    def is_verified(self):
+        return self.verified_at is not None
+
+
+class ProhibitedDeductionSetup(db.Model):
+    """Engagement-level inputs the rules need: the passenger-motor-vehicle cap, the thin-capitalisation figures, whether
+    the entity is a local mining operation of a foreign parent, and the other lines of the tax computation."""
+    __tablename__ = "prohibited_deduction_setup"
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    pmv_cap = db.Column(db.Float)                 # leave blank until entered; the Act's figure is amended from time to time
+    mining_foreign_parent = db.Column(db.Boolean, default=False)
+    thin_cap_ratio = db.Column(db.Float)          # debt : equity limit (3 under the rule as published) - entered, not assumed
+    related_debt = db.Column(db.Float, default=0.0)        # debt advanced or guaranteed by an associate or foreign parent
+    qualifying_equity = db.Column(db.Float, default=0.0)
+    related_interest = db.Column(db.Float, default=0.0)    # interest charged to profit or loss on that debt
+    net_profit_override = db.Column(db.Float)     # used only when there is no trial balance to take profit before tax from
+    notes = db.Column(db.Text)
+    engagement = db.relationship("Engagement", backref=db.backref("prohibited_setup", uselist=False, cascade="all, delete-orphan"))
+
+
+class ProhibitedDeductionItem(db.Model):
+    """One expense (a ledger line or a manual entry) tested against section 16(1). status/clause/addback are stored
+    each time the item, the rule or the setup changes, so every expense carries its own tax_deductibility_status."""
+    __tablename__ = "prohibited_deduction_item"
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    entry_date = db.Column(db.Date)
+    voucher_ref = db.Column(db.String(100))
+    description = db.Column(db.String(250), nullable=False)
+    gl_account_id = db.Column(db.Integer, db.ForeignKey("gl_account.id"))
+    journal_line_id = db.Column(db.Integer, db.ForeignKey("journal_entry_line.id"))
+    expense_type = db.Column(db.String(60), nullable=False, default="ordinary_business_expense")
+    amount = db.Column(db.Float, default=0.0)               # as charged to profit or loss
+    charged_to_pl = db.Column(db.Boolean, default=True, nullable=False)
+    is_insured = db.Column(db.Boolean, default=False)
+    reimbursed_amount = db.Column(db.Float, default=0.0)
+    business_necessity = db.Column(db.Boolean, default=False)     # travel between two trades
+    linked_to_exempt = db.Column(db.Boolean, default=False)
+    prohibited_percent = db.Column(db.Float)                      # apportionment, where the rule allows part
+    vehicle_cost = db.Column(db.Float)
+    source = db.Column(db.String(20), default="Manual")           # Manual | Ledger | Import
+    status = db.Column(db.String(30), default="ALLOWABLE")
+    clause_label = db.Column(db.String(60))
+    addback_amount = db.Column(db.Float, default=0.0)
+    disallowed_amount = db.Column(db.Float, default=0.0)
+    eval_note = db.Column(db.String(400))
+    rule_verified = db.Column(db.Boolean, default=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("prohibited_items", lazy=True, cascade="all, delete-orphan", order_by="ProhibitedDeductionItem.id"))
+    gl_account = db.relationship("GLAccount")
+    created_by = db.relationship("User", foreign_keys=[created_by_id])

@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Section 16(1) Prohibited Deductions - {{ engagement.client.name }}{% endblock %}
+{% macro badge(status) -%}
+  <span class="badge" style="color:#fff;background:{{ {'ALLOWABLE':'#2e7d4f','PROHIBITED_SECTION_16':'#b03a2e','PARTIALLY_PROHIBITED':'#b8923a','REVIEW_REQUIRED':'#6b4fa0'}.get(status,'#777') }};">{{ status.replace('_',' ')|title if status != 'PROHIBITED_SECTION_16' else 'Prohibited s16' }}</span>
+{%- endmacro %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Section 16(1) Prohibited Deductions</h1>
+    <div class="subtitle">{{ engagement.client.name }} &middot; {{ engagement.type }}{% if engagement.period_end %} &middot; period ended {{ engagement.period_end.strftime('%d %b %Y') }}{% endif %}</div>
+  </div>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;">
+    <a class="btn secondary small" href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a>
+    <a class="btn secondary small" href="{{ url_for('prohibited.rules_page') }}">Rules</a>
+    <a class="btn secondary small" href="{{ url_for('prohibited.export_xlsx', engagement_id=engagement.id) }}">Export Excel</a>
+    <a class="btn secondary small" href="{{ url_for('prohibited.print_schedule', engagement_id=engagement.id) }}" target="_blank">Print schedule</a>
+  </div>
+</div>
+
+<div class="card" style="font-size:12.5px;">
+  Every expense is tested against the rules on the <a href="{{ url_for('prohibited.rules_page') }}">Rules</a> page and carries a deductibility status and clause. Only amounts <strong>charged to profit or loss</strong> are added back. The computation of tax itself stays in the Income Tax Computation, which receives these add-backs when you post them.
+</div>
+
+{% if sched.unverified_rules or sched.thin_unverified %}
+<div class="flash danger" style="font-size:12.5px;"><strong>Clause references not yet verified.</strong> These rules have not been checked against the current Act by a Partner: {{ (sched.unverified_rules + (['Thin capitalisation'] if sched.thin_unverified else []))|join('; ') }}. The treatment is applied, but confirm before relying on the schedule. <a href="{{ url_for('prohibited.rules_page') }}">Open Rules</a></div>
+{% endif %}
+{% if sched.review_items %}<div class="flash" style="font-size:12.5px;background:#f1ebfa;"><strong>{{ sched.review_items|length }} line(s) need a Partner decision</strong> (added back meanwhile): {% for i in sched.review_items %}{{ i.description }}{% if not loop.last %}; {% endif %}{% endfor %}.</div>{% endif %}
+{% if sched.needs_input %}<div class="flash" style="font-size:12.5px;background:#fff7e0;"><strong>{{ sched.needs_input|length }} line(s) cannot be fully tested yet</strong> - enter the missing cap or vehicle cost: {% for i in sched.needs_input %}{{ i.description }}{% if not loop.last %}; {% endif %}{% endfor %}.</div>{% endif %}
+
+<div class="form-row" style="flex-wrap:wrap;">
+  <div class="card" style="flex:1;min-width:150px;padding:12px;"><div class="muted" style="font-size:11px;">Expenses tested</div><div style="font-size:22px;font-weight:600;">{{ sched['items']|length }}</div></div>
+  <div class="card" style="flex:1;min-width:150px;padding:12px;"><div class="muted" style="font-size:11px;">Prohibited / partly / review</div><div style="font-size:22px;font-weight:600;">{{ sched.counts.PROHIBITED_SECTION_16 }} / {{ sched.counts.PARTIALLY_PROHIBITED }} / {{ sched.counts.REVIEW_REQUIRED }}</div></div>
+  <div class="card" style="flex:1;min-width:150px;padding:12px;border-left:4px solid #b03a2e;"><div class="muted" style="font-size:11px;">Total add-back</div><div style="font-size:22px;font-weight:600;">{{ '{:,.2f}'.format(sched.total_addback) }}</div></div>
+  <div class="card" style="flex:1;min-width:150px;padding:12px;"><div class="muted" style="font-size:11px;">Posted to Income Tax Computation</div><div style="font-size:22px;font-weight:600;">{{ '{:,.2f}'.format(posted_total) }}</div>{% if stale %}<div style="font-size:11px;color:#b03a2e;">differs from the schedule - post again</div>{% endif %}</div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">Setup for this engagement</h3>
+  <form method="post" action="{{ url_for('prohibited.save_setup', engagement_id=engagement.id) }}">
+    <div class="form-row">
+      <div><label>Passenger motor vehicle cap</label><input name="pmv_cap" type="number" step="0.01" value="{{ setup.pmv_cap if setup and setup.pmv_cap is not none else '' }}" placeholder="from the current Act" style="width:150px;"></div>
+      <div><label>Thin-cap limit (debt : equity)</label><input name="thin_cap_ratio" type="number" step="0.01" value="{{ setup.thin_cap_ratio if setup and setup.thin_cap_ratio is not none else '' }}" placeholder="from the current Act" style="width:150px;"></div>
+      <div><label>Related-party debt</label><input name="related_debt" type="number" step="0.01" value="{{ setup.related_debt if setup else '' }}" style="width:150px;"></div>
+      <div><label>Qualifying equity</label><input name="qualifying_equity" type="number" step="0.01" value="{{ setup.qualifying_equity if setup else '' }}" style="width:150px;"></div>
+      <div><label>Interest on that debt (in P&amp;L)</label><input name="related_interest" type="number" step="0.01" value="{{ setup.related_interest if setup else '' }}" style="width:150px;"></div>
+    </div>
+    <div class="form-row">
+      <div><label>Profit before tax <span class="muted" style="font-weight:normal;">(only if there is no trial balance)</span></label><input name="net_profit_override" type="number" step="0.01" value="{{ setup.net_profit_override if setup and setup.net_profit_override is not none else '' }}" style="width:190px;"></div>
+      <div style="align-self:flex-end;"><label style="font-weight:normal;"><input type="checkbox" name="mining_foreign_parent" value="1" style="width:auto;" {% if setup and setup.mining_foreign_parent %}checked{% endif %}> Local mining operation of a foreign parent</label></div>
+    </div>
+    <div class="form-row"><div style="flex:1;"><label>Notes</label><input name="notes" value="{{ setup.notes or '' if setup else '' }}"></div></div>
+    <p class="muted" style="font-size:11.5px;margin:0 0 6px;">The cap and the limit are entered, not assumed, because the Act's figures are amended from time to time. Related-party debt means debt advanced or guaranteed by an associate or foreign parent.</p>
+    <button class="btn small" type="submit">Save setup and re-test</button>
+  </form>
+  {% if sched.thin %}
+  <div style="font-size:12.5px;margin-top:8px;background:#f7f5ef;border-radius:6px;padding:8px 10px;"><strong>Thin capitalisation:</strong> {{ sched.thin.note or '-' }}.
+    {% if sched.thin.ratio is not none %}Debt {{ '{:,.2f}'.format(sched.thin.debt) }} on equity {{ '{:,.2f}'.format(sched.thin.equity) }}.{% endif %}
+    Interest disallowed: <strong>{{ '{:,.2f}'.format(sched.thin.disallowed) }}</strong> of {{ '{:,.2f}'.format(sched.thin.interest) }}.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">Add an expense</h3>
+  <form method="post" action="{{ url_for('prohibited.add_item', engagement_id=engagement.id) }}">
+    {% set it = none %}{% include "prohibited/_item_fields.html" %}
+    <button class="btn small gold" type="submit">Test and add</button>
+  </form>
+  <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:12px;border-top:1px solid #eee;padding-top:10px;">
+    <form method="post" action="{{ url_for('prohibited.import_items', engagement_id=engagement.id) }}" enctype="multipart/form-data" style="font-size:12.5px;">
+      <label>Import from CSV</label>
+      <input type="file" name="file" accept=".csv" style="width:auto;">
+      <button class="btn small secondary" type="submit">Import</button>
+      <div class="muted" style="font-size:11px;">Columns: date, voucher_ref, description, expense_type, amount, charged_to_pl, is_insured, reimbursed_amount, business_necessity, linked_to_exempt, prohibited_percent, vehicle_cost</div>
+    </form>
+  </div>
+</div>
+
+{% if accounts %}
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">Ledger expense accounts</h3>
+  <p class="muted" style="font-size:12px;margin-top:0;">Map each expense account to the tax treatment of what it holds, then pull its journal lines in. Accounts left unmapped are not tested ({{ accounts|rejectattr('tax_expense_type')|list|length }} unmapped).</p>
+  <form method="post" action="{{ url_for('prohibited.save_mapping', engagement_id=engagement.id) }}">
+    <table><thead><tr><th>Account</th><th>Tax treatment</th></tr></thead><tbody>
+    {% for a in accounts %}
+      <tr><td>{{ a.code }} {{ a.name }}</td><td><select name="map_{{ a.id }}"><option value="">- not tested -</option>
+        {% for grp, rs in grouped_rules.items() %}<optgroup label="{{ grp }}">{% for r in rs %}<option value="{{ r.code }}" {% if a.tax_expense_type == r.code %}selected{% endif %}>{{ r.name }}</option>{% endfor %}</optgroup>{% endfor %}</select></td></tr>
+    {% endfor %}
+    </tbody></table>
+    <button class="btn small secondary" type="submit" style="margin-top:6px;">Save mapping</button>
+    <button class="btn small" type="submit" formaction="{{ url_for('prohibited.pull', engagement_id=engagement.id) }}">Pull journal lines for mapped accounts</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">Schedule of add-backs by clause</h3>
+  {% if sched.groups or sched.thin_addback %}
+  <table>
+    <thead><tr><th>Voucher</th><th>Description</th><th>Status</th><th class="text-right">Charged</th><th class="text-right">Add-back</th></tr></thead>
+    <tbody>
+    {% for g in sched.groups %}
+      <tr style="background:#f7f5ef;"><td colspan="3"><strong>Section {{ g.clause }}</strong> - {{ g.title }}</td><td class="text-right">{{ '{:,.2f}'.format(g.amount) }}</td><td class="text-right"><strong>{{ '{:,.2f}'.format(g.addback) }}</strong></td></tr>
+      {% for i in g['items'] %}<tr><td>{{ i.voucher_ref or '-' }}</td><td>{{ i.description }}{% if i.eval_note %}<div class="muted" style="font-size:11px;">{{ i.eval_note }}</div>{% endif %}</td><td>{{ badge(i.status) }}</td><td class="text-right">{{ '{:,.2f}'.format(i.amount) }}</td><td class="text-right">{{ '{:,.2f}'.format(i.addback_amount) }}</td></tr>{% endfor %}
+    {% endfor %}
+    {% if sched.thin and sched.thin_addback %}<tr style="background:#f7f5ef;"><td colspan="3"><strong>Section {{ sched.thin.clause }}</strong> - thin capitalisation</td><td class="text-right">{{ '{:,.2f}'.format(sched.thin.interest) }}</td><td class="text-right"><strong>{{ '{:,.2f}'.format(sched.thin_addback) }}</strong></td></tr>{% endif %}
+    <tr><td colspan="4"><strong>Total add-backs</strong></td><td class="text-right"><strong>{{ '{:,.2f}'.format(sched.total_addback) }}</strong></td></tr>
+    </tbody>
+  </table>
+  {% else %}<div class="empty-state">Nothing is disallowed yet. Add expenses above or pull them from the ledger.</div>{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">Tax computation statement</h3>
+  {% if statement %}
+  <table style="max-width:680px;"><tbody>
+    <tr><td>Profit before tax <span class="muted">({{ basis }})</span></td><td class="text-right">{{ '{:,.2f}'.format(statement.profit_before_tax) }}</td></tr>
+    {% for l in statement.addbacks %}<tr><td style="padding-left:24px;">Add: {{ l.description }}</td><td class="text-right">{{ '{:,.2f}'.format(l.amount) }}</td></tr>{% endfor %}
+    <tr><td><strong>Total add-backs</strong></td><td class="text-right"><strong>{{ '{:,.2f}'.format(statement.total_addbacks) }}</strong></td></tr>
+    {% for l in statement.deductions %}<tr><td style="padding-left:24px;">Less: {{ l.description }}</td><td class="text-right">({{ '{:,.2f}'.format(l.amount) }})</td></tr>{% endfor %}
+    <tr><td><strong>Taxable income before assessed loss</strong></td><td class="text-right"><strong>{{ '{:,.2f}'.format(statement.taxable_income_before_losses) }}</strong></td></tr>
+    <tr><td>Less: assessed loss utilised</td><td class="text-right">({{ '{:,.2f}'.format(statement.loss_utilised) }})</td></tr>
+    <tr><td><strong>Taxable income</strong></td><td class="text-right"><strong>{{ '{:,.2f}'.format(statement.taxable_income) }}</strong></td></tr>
+  </tbody></table>
+  <p class="muted" style="font-size:11.5px;">Deductions, capital allowances and exempt income are the lines already entered in the Income Tax Computation; add any that are missing there. Rates are entered there too.</p>
+  {% else %}<div class="empty-state">Profit before tax isn't available: complete the Trial Balance tab or enter it in the setup above.</div>{% endif %}
+  <form method="post" action="{{ url_for('prohibited.post', engagement_id=engagement.id) }}" style="margin-top:8px;" onsubmit="return confirm('This replaces the section 16 lines previously posted to the Income Tax Computation and resets its review and sign-off. Continue?');">
+    <button class="btn gold" type="submit">Post add-backs to the Income Tax Computation</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">All expenses tested ({{ sched['items']|length }})</h3>
+  {% if sched['items'] %}
+  <table style="font-size:12.5px;">
+    <thead><tr><th>Voucher</th><th>Expense</th><th>Type</th><th>Status</th><th>Clause</th><th class="text-right">Amount</th><th class="text-right">Add-back</th><th></th></tr></thead>
+    <tbody>
+    {% for i in sched['items'] %}
+      <tr>
+        <td>{{ i.voucher_ref or '-' }}{% if i.source != 'Manual' %}<div class="muted" style="font-size:10.5px;">{{ i.source }}</div>{% endif %}</td>
+        <td>{{ i.description }}{% if i.eval_note %}<div class="muted" style="font-size:11px;">{{ i.eval_note }}</div>{% endif %}</td>
+        <td>{{ rules[i.expense_type].name if i.expense_type in rules else i.expense_type }}</td>
+        <td>{{ badge(i.status) }}{% if not i.rule_verified and i.disallowed_amount %}<div class="muted" style="font-size:10.5px;">unverified rule</div>{% endif %}</td>
+        <td>{{ i.clause_label or '-' }}</td>
+        <td class="text-right">{{ '{:,.2f}'.format(i.amount) }}</td><td class="text-right">{{ '{:,.2f}'.format(i.addback_amount) }}</td>
+        <td><details><summary style="cursor:pointer;">Edit</summary>
+          <form method="post" action="{{ url_for('prohibited.update_item', item_id=i.id) }}" style="min-width:560px;">
+            {% set it = i %}{% include "prohibited/_item_fields.html" %}
+            <button class="btn small" type="submit">Save</button>
+            <button class="btn small danger" type="submit" formaction="{{ url_for('prohibited.delete_item', item_id=i.id) }}" onclick="return confirm('Remove this line?')">Remove</button>
+          </form></details></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="empty-state">No expenses yet.</div>{% endif %}
+</div>
+{% endblock %}

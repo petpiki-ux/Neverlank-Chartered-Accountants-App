@@ -281,6 +281,10 @@ def _add_missing_columns():
         "receipt": [("advance_application_id", "INTEGER")],
         # ai_meta - the record of an AI first draft on a reply to ZIMRA (zimra_ai.py)
         "zimra_reply": [("ai_meta", "TEXT")],
+        # tax_expense_type - which Prohibited Deductions rule a ledger expense account maps to; source - marks income
+        # tax computation lines posted from that schedule so a re-post replaces only them (prohibited_deductions.py)
+        "gl_account": [("tax_expense_type", "VARCHAR(60)")],
+        "income_tax_adjustment_line": [("source", "VARCHAR(30)")],
         # helpful/unhelpful feedback on cached "Ask the library" answers (learning.py)
         "legislative_ask_cache": [("helpful_count", "INTEGER DEFAULT 0"), ("unhelpful_count", "INTEGER DEFAULT 0")],
         # doc_type/related_reference/customs_duty - see models.VAT_DOC_TYPES:
@@ -727,6 +731,7 @@ def create_app():
     from recurring import recurring_bp
     from receipts import receipts_bp
     from advances import advances_bp
+    from prohibited_deductions import prohibited_bp
     from learning import learning_bp
     from credit_notes import credit_notes_bp
     from corporate_finance import corpfin_bp
@@ -764,6 +769,7 @@ def create_app():
     app.register_blueprint(receipts_bp)
     app.register_blueprint(advances_bp)
     app.register_blueprint(learning_bp)
+    app.register_blueprint(prohibited_bp)
     app.register_blueprint(credit_notes_bp)
     app.register_blueprint(corpfin_bp)
     app.register_blueprint(statements_bp)

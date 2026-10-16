@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Section 16 rules - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Section 16(1) rules</h1>
+  <div class="subtitle">How each expense type is treated. Clause letters and treatments are held here as data because the Act is amended often and published summaries disagree on lettering.</div></div></div>
+<div class="card" style="font-size:12.5px;">
+  A Partner or Admin must check each rule against the current Income Tax Act [Chapter 23:06] and mark it <strong>verified</strong>. Changing a clause, treatment or the on/off switch removes the verification. Until a rule is verified, every schedule line that relies on it is flagged. The cap on passenger motor vehicles and the thin-capitalisation ratio are not here: they are entered on each engagement.
+  <br><span class="muted">Starting values follow ZIMRA's published summary of section 16 and the common description of the thin capitalisation rule; they are a starting point, not legal advice.</span>
+</div>
+{% for grp, rs in grouped.items() %}
+<div class="card">
+  <h3 class="mt-0" style="font-size:14px;">{{ grp }}</h3>
+  <table style="font-size:12.5px;">
+    <thead><tr><th>Expense type</th><th>Clause</th><th>Treatment</th><th>On</th><th>Verified</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rs %}
+      <tr>
+        <td><form id="rf{{ r.id }}" method="post" action="{{ url_for('prohibited.save_rule', rule_id=r.id) }}"></form><strong>{{ r.name }}</strong><div class="muted" style="font-size:11px;">{{ r.code }}</div>
+          {% if is_senior %}<input form="rf{{ r.id }}" name="note" value="{{ r.note or '' }}" placeholder="Note" style="font-size:11.5px;margin-top:2px;">{% elif r.note %}<div class="muted" style="font-size:11px;">{{ r.note }}</div>{% endif %}</td>
+        {% if is_senior %}
+        <td><input form="rf{{ r.id }}" name="clause_label" value="{{ r.clause_label or '' }}" style="width:90px;"></td>
+        <td><select form="rf{{ r.id }}" name="treatment">{% for k, label in treatments.items() %}<option value="{{ k }}" {% if r.treatment==k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+        <td><input form="rf{{ r.id }}" type="checkbox" name="is_active" value="1" style="width:auto;" {% if r.is_active %}checked{% endif %}></td>
+        <td>{% if r.is_verified %}Verified {{ r.verified_at.strftime('%d %b %Y') }} by {{ r.verified_by.name if r.verified_by else '-' }}{% if r.verified_note %}<div class="muted" style="font-size:11px;">{{ r.verified_note }}</div>{% endif %}{% else %}<span style="color:#b03a2e;">Not verified</span>{% endif %}
+          <input form="rf{{ r.id }}" name="verified_note" placeholder="Checked against ..." style="font-size:11.5px;margin-top:2px;"></td>
+        <td style="white-space:nowrap;"><button form="rf{{ r.id }}" class="btn small secondary" type="submit">Save</button> <button form="rf{{ r.id }}" class="btn small gold" type="submit" name="verify" value="1">Save and mark verified</button></td>
+        {% else %}
+        <td>{{ r.clause_label or '-' }}</td><td>{{ treatments.get(r.treatment, r.treatment) }}</td><td>{{ 'Yes' if r.is_active else 'No' }}</td>
+        <td>{% if r.is_verified %}Verified {{ r.verified_at.strftime('%d %b %Y') }}{% else %}<span style="color:#b03a2e;">Not verified</span>{% endif %}</td><td></td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endfor %}
+{% endblock %}
