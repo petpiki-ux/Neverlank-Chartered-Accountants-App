@@ -1,0 +1,35 @@
+{# Read-only summary of an AI first draft: what it committed the client to, what it relied on, and what must be checked. #}
+{% set ai = reply.ai %}
+{% if ai %}
+<div class="card" style="border-left:4px solid #6b4fa0;">
+  <h3 class="mt-0" style="font-size:14px;">AI-assisted draft <span class="badge" style="background:#6b4fa0;color:#fff;">check every point</span></h3>
+  <p class="muted" style="font-size:12px;margin-top:0;">First written by AI ({{ ai.model }}) at {{ ai.at }} for {{ ai.by }}. It can be wrong. Nothing in it is approved until a Partner approves the letter.
+    {% if ai.checked_by %}<br><strong>Checked by {{ ai.checked_by }}</strong> at {{ ai.checked_at }}.{% endif %}
+    {% if not ai.letter_read %}<br>The text of the ZIMRA letter could not be read, so the draft relied on its subject and your notes.{% endif %}</p>
+
+  {% if ai.instructions %}<div style="font-size:12.5px;margin-bottom:8px;"><strong>Instructions given:</strong> {{ ai.instructions }}</div>{% endif %}
+
+  {% if ai.flags %}
+  <div style="font-size:12.5px;margin-bottom:8px;background:#fff7e0;border-radius:6px;padding:8px 10px;"><strong>Flagged for checking</strong>
+    <ul style="margin:4px 0 0;padding-left:18px;">{% for f in ai.flags %}<li>{{ f }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  {% if ai.positions %}
+  <div style="font-size:12.5px;margin-bottom:8px;"><strong>Positions this letter takes for the client</strong>
+    <ul style="margin:4px 0 0;padding-left:18px;">{% for x in ai.positions %}<li>{{ x }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  <div style="font-size:12.5px;margin-bottom:8px;"><strong>Law relied on (from your filed library)</strong>
+    {% if ai.sources %}
+    <ul style="margin:4px 0 0;padding-left:18px;">{% for s in ai.sources %}<li>{{ s.title }} <span class="muted">({{ s.type }}{% if s.ref %}, {{ s.ref }}{% endif %})</span>{% if s.used_for %} - {{ s.used_for }}{% endif %}</li>{% endfor %}</ul>
+    {% else %}<div class="muted">None - the draft states no law.</div>{% endif %}
+  </div>
+  {% if ai.missing %}
+  <div style="font-size:12.5px;margin-bottom:8px;"><strong>Information still needed</strong>
+    <ul style="margin:4px 0 0;padding-left:18px;">{% for x in ai.missing %}<li>{{ x }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  {% if ai.notes %}
+  <div style="font-size:12.5px;margin-bottom:0;"><strong>Notes for the reviewing Partner</strong>
+    <ul style="margin:4px 0 0;padding-left:18px;">{% for x in ai.notes %}<li>{{ x }}</li>{% endfor %}</ul></div>
+  {% endif %}
+  {% if ai.considered %}<div class="muted" style="font-size:11px;margin-top:8px;">Library items the AI was shown: {{ ai.considered|map(attribute='title')|join('; ') }}</div>{% endif %}
+</div>
+{% endif %}

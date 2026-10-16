@@ -17,6 +17,27 @@
 </div>
 {% endif %}
 
+<details class="card" {% if not reply.ai %}open{% endif %} style="border-left:4px solid #6b4fa0;">
+  <summary style="cursor:pointer;font-weight:600;">Draft with AI {% if reply.ai %}<span class="muted" style="font-weight:400;">- an AI draft is in the letter below</span>{% endif %}</summary>
+  {% if not ai_ready %}
+  <p class="muted" style="margin:10px 0 0;">AI drafting is not set up on this server yet (the ANTHROPIC_API_KEY setting is missing). You can still write the letter by hand.</p>
+  {% else %}
+  <form method="post" action="{{ url_for('zimra.ai_draft_reply', reply_id=reply.id) }}" style="margin-top:10px;">
+    <label for="instructions">What should the letter say? <span class="muted" style="font-weight:400;">The client's position, what to ask for, facts to rely on. The AI will not decide the client's position for you.</span></label>
+    <textarea id="instructions" name="instructions" rows="5" maxlength="4000" placeholder="e.g. Ask for 14 more days because the records are with the client's bookkeeper in Bulawayo. Do not admit the penalties. Disagree with finding 2 because the input tax was supported by invoices we are enclosing.">{{ reply.ai.instructions if reply.ai else '' }}</textarea>
+    <p class="muted" style="font-size:11.5px;margin:6px 0;">It reads this case's facts, the ZIMRA letter, the correspondence log and the best-matching items from your filed Legislative Update Control library. It writes the body of the letter only, and anything it cannot support becomes a <code>[CONFIRM: ...]</code> placeholder.
+      <strong>Sent to the AI service:</strong> that text, with the client's name, TIN, VAT number, e-mail addresses, phone numbers and the ZIMRA officer's name replaced by tokens. Nothing is filed or sent to ZIMRA.</p>
+    <label style="font-weight:normal;"><input type="checkbox" name="confirm" value="1" style="width:auto;" required> I understand what is sent{% if reply.body %}, and that this replaces the letter text below (the old text is kept so I can restore it){% endif %}.</label>
+    <div style="margin-top:8px;"><button type="submit" class="btn gold">{{ 'Draft again with AI' if reply.ai else 'Draft with AI' }}</button></div>
+  </form>
+  {% endif %}
+  {% if reply.ai %}
+  <form method="post" action="{{ url_for('zimra.ai_restore_reply', reply_id=reply.id) }}" style="margin-top:8px;" onsubmit="return confirm('Discard the AI draft and restore the previous text?');">
+    <button type="submit" class="btn small secondary">Discard AI draft and restore previous text</button>
+  </form>
+  {% endif %}
+</details>
+
 <form method="post" action="{{ url_for('zimra.edit_reply', reply_id=reply.id) }}">
   <div class="form-row" style="flex-wrap:wrap;align-items:flex-start;">
     <div style="flex:3;min-width:340px;">
@@ -39,6 +60,9 @@
           <div><label for="signatory_title">Title / firm line</label><input type="text" id="signatory_title" name="signatory_title" maxlength="200" value="{{ request.form.get('signatory_title', reply.signatory_title or '') }}"></div>
         </div>
       </div>
+      {% if reply.ai %}
+      <label style="display:block;margin-bottom:8px;font-weight:normal;"><input type="checkbox" name="ai_checked" value="1" style="width:auto;"> I have checked every fact, figure and legal reference in this AI-assisted letter against the case file and the sources. <span class="muted">(Needed to submit.)</span></label>
+      {% endif %}
       <div style="display:flex;gap:8px;flex-wrap:wrap;">
         <button type="submit" name="action" value="save" class="btn secondary">Save draft</button>
         <button type="submit" name="action" value="submit" class="btn gold" onclick="return confirm('Submit this letter for a Partner\'s approval?');">Save &amp; submit for approval</button>
@@ -71,6 +95,7 @@
         </table>
         <p class="muted" style="font-size:11.5px;margin-bottom:0;">Figures come from the case. If something here is wrong, fix it under <a href="{{ url_for('zimra.edit_case', case_id=case.id) }}">Edit case</a> rather than only in the letter.</p>
       </div>
+      {% include "zimra/_ai_panel.html" %}
       {% if left %}
       <div class="card">
         <h3 class="mt-0" style="font-size:14px;">Still to complete</h3>

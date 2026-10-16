@@ -38,6 +38,7 @@ from models import (
 )
 from invoicing import next_sequence_number
 import zimra_letters as ZL
+import zimra_ai as ZAI
 
 zimra_bp = Blueprint("zimra", __name__, url_prefix="/zimra")
 
@@ -603,15 +604,29 @@ def edit_reply(reply_id):
             return redirect(url_for("zimra.edit_reply", reply_id=reply.id))
         db.session.rollback()
     return render_template("zimra/reply_edit.html", reply=reply, case=reply.case, error=error, left=_reply_unresolved(reply),
-                           template=ZL.TEMPLATE_BY_KEY.get(reply.template_key))
+                           template=ZL.TEMPLATE_BY_KEY.get(reply.template_key), ai_ready=ZAI.is_configured())
 
 
 def _submit(reply):
+    ai = reply.ai
+    if ai is not None and not request.form.get("ai_checked"):
+        db.session.commit()  # keep what was typed; only the submission is held back
+        flash("Draft saved, but not submitted: this letter was first drafted by AI. Tick the box to confirm you have "
+              "checked every fact, figure and legal reference against the case file, then submit.", "danger")
+        return redirect(url_for("zimra.edit_reply", reply_id=reply.id))
     left = _reply_unresolved(reply)
+    if ai is not None:
+        ai["checked_by"], ai["checked_at"] = current_user.name, datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+        reply.set_ai(ai)
     reply.status = "Awaiting approval"
     reply.submitted_by_id, reply.submitted_at = current_user.id, datetime.utcnow()
     reply.returned_note = None
-    reply.log(current_user, "Submitted for approval", f"{len(left)} placeholder(s) unresolved" if left else None)
+    notes = []
+    if left:
+        notes.append(f"{len(left)} placeholder(s) unresolved")
+    if ai is not None:
+        notes.append("AI-assisted draft - drafter confirmed the facts and citations were checked")
+    reply.log(current_user, "Submitted for approval", "; ".join(notes) or None)
     db.session.commit()
     if left:
         flash(f"Submitted, but {len(left)} [CONFIRM: ...] placeholder(s) are still in the letter. It cannot be approved until they are completed.", "warning")
@@ -653,8 +668,12 @@ def approve_reply(reply_id):
         return _back_to_reply(reply)
     reply.status = "Approved"
     reply.approved_by_id, reply.approved_at = current_user.id, datetime.utcnow()
-    note = "Approved by the same person who submitted it" if reply.submitted_by_id == current_user.id else None
-    reply.log(current_user, "Approved", note)
+    notes = []
+    if reply.submitted_by_id == current_user.id:
+        notes.append("Approved by the same person who submitted it")
+    if reply.ai is not None:
+        notes.append("AI-assisted draft")
+    reply.log(current_user, "Approved", "; ".join(notes) or None)
     db.session.commit()
     flash("Approved. Download the letter, send it, then mark it as sent here.", "success")
     return _back_to_reply(reply)
@@ -757,6 +776,56 @@ def send_reply(reply_id):
     db.session.commit()
     flash(msg, "success")
     return _back_to_reply(reply)
+
+
+@zimra_bp.route("/replies/<int:reply_id>/ai-draft", methods=["POST"])
+@login_required
+def ai_draft_reply(reply_id):
+    """Write a first draft of the letter with AI. Replaces the text (the old text is kept so it can be restored)."""
+    reply = _get_reply(reply_id)
+    back = redirect(url_for("zimra.edit_reply", reply_id=reply.id))
+    if not reply.is_editable:
+        flash("Only a draft can be redrafted. Withdraw it from approval first.", "danger")
+        return _back_to_reply(reply)
+    if not request.form.get("confirm"):
+        flash("Tick the box to confirm what is sent to the AI service.", "danger")
+        return back
+    if not ZAI.is_configured():
+        flash("AI drafting is not set up yet: the ANTHROPIC_API_KEY setting is missing on the server.", "danger")
+        return back
+    instructions = request.form.get("instructions", "").strip()
+    status, payload = ZAI.generate(reply, instructions, current_user, _files_dir())
+    if status != "done":
+        flash(f"The AI draft could not be made: {payload}" if status == "error" else "AI drafting is not set up yet.", "danger")
+        return back
+    meta = payload["meta"]
+    meta["prev_body"] = reply.body
+    reply.body = payload["body"]
+    reply.set_ai(meta)
+    reply.log(current_user, "AI first draft written",
+              f"{meta['model']}; {len(meta['considered'])} library item(s) considered, {len(meta['sources'])} relied on; "
+              f"{len(meta['flags'])} point(s) flagged for checking; {len(ZL.unresolved(reply.body))} placeholder(s)")
+    db.session.commit()
+    flash("AI first draft written below. It is a draft only: check every fact, figure and legal reference, complete the "
+          "[CONFIRM: ...] parts, then submit it for approval.", "success")
+    return back
+
+
+@zimra_bp.route("/replies/<int:reply_id>/ai-restore", methods=["POST"])
+@login_required
+def ai_restore_reply(reply_id):
+    """Throw the AI draft away and go back to the text that was there before."""
+    reply = _get_reply(reply_id)
+    ai = reply.ai
+    if not reply.is_editable or ai is None:
+        flash("There is no AI draft to discard on this letter.", "info")
+        return _back_to_reply(reply)
+    reply.body = ai.get("prev_body") or reply.body
+    reply.set_ai(None)
+    reply.log(current_user, "AI draft discarded", "Previous text restored")
+    db.session.commit()
+    flash("AI draft discarded and the previous text restored.", "info")
+    return redirect(url_for("zimra.edit_reply", reply_id=reply.id))
 
 
 @zimra_bp.route("/replies/<int:reply_id>/delete", methods=["POST"])

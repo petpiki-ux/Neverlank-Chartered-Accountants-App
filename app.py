@@ -279,6 +279,8 @@ def _add_missing_columns():
         # advance_application_id - a receipt created by applying a customer advance
         # (models.ClientAdvanceApplication); null for ordinary receipts.
         "receipt": [("advance_application_id", "INTEGER")],
+        # ai_meta - the record of an AI first draft on a reply to ZIMRA (zimra_ai.py)
+        "zimra_reply": [("ai_meta", "TEXT")],
         # doc_type/related_reference/customs_duty - see models.VAT_DOC_TYPES:
         # credit notes, Bills of Entry and export sales. Existing rows
         # default to a plain 'Invoice', exactly what they were.

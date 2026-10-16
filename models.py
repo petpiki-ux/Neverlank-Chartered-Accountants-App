@@ -6315,6 +6315,9 @@ class ZimraReply(db.Model):
     signatory_title = db.Column(db.String(200))
     status = db.Column(db.String(20), nullable=False, default="Draft")
     events = db.Column(db.Text)  # JSON list of {at, by, what, note}
+    # JSON, set when the text was first drafted by AI (see zimra_ai.py): model, who/when, the drafter's instructions,
+    # positions taken, sources, reviewer notes, checks flagged, the text it replaced (prev_body) and who checked it.
+    ai_meta = db.Column(db.Text)
     returned_note = db.Column(db.Text)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -6343,6 +6346,19 @@ class ZimraReply(db.Model):
             return _json.loads(self.events) if self.events else []
         except ValueError:
             return []
+
+    @property
+    def ai(self):
+        """The AI-draft record (a dict) or None when the letter was written by a person."""
+        import json as _json
+        try:
+            return _json.loads(self.ai_meta) if self.ai_meta else None
+        except ValueError:
+            return None
+
+    def set_ai(self, data):
+        import json as _json
+        self.ai_meta = _json.dumps(data) if data else None
 
     def log(self, user, what, note=None):
         import json as _json

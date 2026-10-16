@@ -47,7 +47,9 @@
       {% if reply.status == 'Draft' %}
         <p class="muted" style="margin-top:0;">Complete the letter, then submit it for a Partner's approval.</p>
         <a href="{{ url_for('zimra.edit_reply', reply_id=reply.id) }}" class="btn gold">Edit letter</a>
-        <form method="post" action="{{ url_for('zimra.submit_reply', reply_id=reply.id) }}" class="inline" onsubmit="return confirm('Submit this letter for a Partner\'s approval?');"><button type="submit" class="btn secondary">Submit for approval</button></form>
+        <form method="post" action="{{ url_for('zimra.submit_reply', reply_id=reply.id) }}" onsubmit="return confirm('Submit this letter for a Partner\'s approval?');">
+          {% if reply.ai %}<label style="display:block;margin:8px 0;font-weight:normal;font-size:12.5px;"><input type="checkbox" name="ai_checked" value="1" style="width:auto;"> I have checked every fact, figure and legal reference in this AI-assisted letter.</label>{% endif %}
+          <button type="submit" class="btn secondary">Submit for approval</button></form>
       {% elif reply.status == 'Awaiting approval' %}
         <p class="muted" style="margin-top:0;">Submitted by {{ reply.submitted_by.name if reply.submitted_by else '—' }}{% if reply.submitted_at %} on {{ reply.submitted_at.strftime('%d %b %Y %H:%M') }}{% endif %}.</p>
         {% if is_senior %}
@@ -82,6 +84,7 @@
       <form method="post" action="{{ url_for('zimra.delete_reply', reply_id=reply.id) }}" class="inline" style="margin-top:10px;" onsubmit="return confirm('Delete this letter?');"><button type="submit" class="btn small danger">Delete</button></form>
       {% endif %}
     </div>
+    {% include "zimra/_ai_panel.html" %}
     {% if reply.in_reply_to %}
     <div class="card">
       <div class="muted" style="font-size:11px;">Replying to</div>
