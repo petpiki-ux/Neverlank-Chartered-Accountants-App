@@ -6291,6 +6291,75 @@ class ZimraInstalment(db.Model):
         return bool(not self.paid_on and self.due_date < date.today() and not self.case.is_closed)
 
 
+ZIMRA_REPLY_STATUSES = ["Draft", "Awaiting approval", "Approved", "Sent"]
+ZIMRA_SEND_METHODS = ["Hand delivery", "Email", "ZIMRA online portal", "Courier / post", "Other"]
+
+
+class ZimraReply(db.Model):
+    """A letter to ZIMRA drafted in the app: usually the reply to a letter logged on the case. It is written from a
+    template, submitted for a Partner's approval, downloaded on the firm letterhead and, once it has gone, marked as
+    sent - which logs it as an outgoing letter on the case and clears the deadline of the letter it answers."""
+    __tablename__ = "zimra_reply"
+    id = db.Column(db.Integer, primary_key=True)
+    case_id = db.Column(db.Integer, db.ForeignKey("zimra_case.id"), nullable=False)
+    in_reply_to_id = db.Column(db.Integer, db.ForeignKey("zimra_correspondence.id"))   # the ZIMRA letter being answered
+    correspondence_id = db.Column(db.Integer, db.ForeignKey("zimra_correspondence.id"))  # the outgoing entry created when sent
+    template_key = db.Column(db.String(40))
+    letter_date = db.Column(db.Date)
+    our_reference = db.Column(db.String(100))
+    addressee = db.Column(db.Text)
+    salutation = db.Column(db.String(100), default="Dear Sir/Madam")
+    subject = db.Column(db.String(300), nullable=False, default="")
+    body = db.Column(db.Text, nullable=False, default="")
+    signatory = db.Column(db.String(150))
+    signatory_title = db.Column(db.String(200))
+    status = db.Column(db.String(20), nullable=False, default="Draft")
+    events = db.Column(db.Text)  # JSON list of {at, by, what, note}
+    returned_note = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    submitted_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    submitted_at = db.Column(db.DateTime)
+    approved_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    approved_at = db.Column(db.DateTime)
+    sent_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    sent_on = db.Column(db.Date)
+    sent_method = db.Column(db.String(40))
+
+    case = db.relationship("ZimraCase", backref=db.backref(
+        "replies", cascade="all, delete-orphan", order_by="ZimraReply.created_at.desc(), ZimraReply.id.desc()"))
+    in_reply_to = db.relationship("ZimraCorrespondence", foreign_keys=[in_reply_to_id])
+    correspondence = db.relationship("ZimraCorrespondence", foreign_keys=[correspondence_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    submitted_by = db.relationship("User", foreign_keys=[submitted_by_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_id])
+    sent_by = db.relationship("User", foreign_keys=[sent_by_id])
+
+    @property
+    def history(self):
+        import json as _json
+        try:
+            return _json.loads(self.events) if self.events else []
+        except ValueError:
+            return []
+
+    def log(self, user, what, note=None):
+        import json as _json
+        items = self.history
+        items.append({"at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"), "by": getattr(user, "name", None) or "-",
+                      "what": what, "note": note or ""})
+        self.events = _json.dumps(items)
+
+    @property
+    def is_editable(self):
+        return self.status == "Draft"
+
+    @property
+    def is_locked(self):
+        return self.status in ("Approved", "Sent")
+
+
 # The kinds of instrument that can now be FILED (as an actual document,
 # rather than just logged as a text entry) against a LegislativeUpdate - see
 # the "filing" fields added to that model below. Existing rows logged before

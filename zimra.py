@@ -11,13 +11,17 @@ instalments and Tax Clearance Certificate (TCC) status.
   Partner or Admin can delete a case, a letter or an instalment.
 * Incoming letters can carry a response deadline; they stay on the deadline list
   (and in the sidebar badge) until marked as responded to.
+* Replies to ZIMRA are drafted here from templates (zimra_letters.py): Draft -> Awaiting approval -> Approved -> Sent.
+  Anyone on the case can draft and submit; only a Partner or Admin can approve or return a draft, and a letter with an
+  unresolved [CONFIRM: ...] placeholder can be neither approved nor sent. Marking a reply as sent logs it as an outgoing
+  letter on the case (with the file) and clears the deadline of the letter it answers.
 """
 import os
 import uuid
 from datetime import datetime, date, timedelta
 
 from flask import (
-    Blueprint, render_template, redirect, url_for, request, flash, abort, send_from_directory,
+    Blueprint, render_template, redirect, url_for, request, flash, abort, send_from_directory, Response,
 )
 from flask_login import login_required, current_user
 from sqlalchemy.exc import IntegrityError
@@ -27,12 +31,13 @@ from config import Config
 from extensions import db
 from models import visible_clients, user_can_access_client
 from models import (
-    Client, Engagement, ZimraCase, ZimraCorrespondence, ZimraInstalment,
+    Client, Engagement, ZimraCase, ZimraCorrespondence, ZimraInstalment, ZimraReply, ZIMRA_REPLY_STATUSES, ZIMRA_SEND_METHODS,
     ZIMRA_CASE_TYPES, ZIMRA_CASE_STATUSES, ZIMRA_CORRESPONDENCE_KINDS, ZIMRA_DIRECTIONS,
     ZIMRA_PLAN_STATUSES, ZIMRA_TCC_STATUSES, ZIMRA_CURRENCIES, TAX_HEADS,
     user_can_access_engagement,
 )
 from invoicing import next_sequence_number
+import zimra_letters as ZL
 
 zimra_bp = Blueprint("zimra", __name__, url_prefix="/zimra")
 
@@ -114,6 +119,16 @@ def overdue_response_count():
              .filter(ZimraCorrespondence.response_due.isnot(None), ZimraCorrespondence.response_due < today,
                      ZimraCorrespondence.responded_on.is_(None), ZimraCase.status != "Closed").all())
     return sum(1 for c in items if _can_see(c.case))
+
+
+def awaiting_approval_count():
+    """Replies waiting for a Partner's approval on cases the current user can see - only counted for Partners and Admins
+    (the people who can act on them): the sidebar badge."""
+    if not _is_senior():
+        return 0
+    items = (ZimraReply.query.join(ZimraCase, ZimraReply.case_id == ZimraCase.id)
+             .filter(ZimraReply.status == "Awaiting approval", ZimraCase.status != "Closed").all())
+    return sum(1 for r in items if _can_see(r.case))
 
 
 def _back_to_case(case_id):
@@ -206,6 +221,8 @@ def list_cases():
         cases = [c for c in cases if c.overdue_deadlines or c.overdue_instalments]
     elif flag == "due_soon":
         cases = [c for c in cases if c.next_deadline and c.next_deadline.response_due <= soon]
+    elif flag == "approval":
+        cases = [c for c in cases if any(r.status == "Awaiting approval" for r in c.replies)]
     # most urgent first: overdue, then nearest deadline, then newest
     cases.sort(key=lambda c: (not (c.overdue_deadlines or c.overdue_instalments),
                               c.next_deadline.response_due if c.next_deadline else date.max))
@@ -215,6 +232,7 @@ def list_cases():
         "overdue": sum(1 for c in everything if c.overdue_deadlines or c.overdue_instalments),
         "due_soon": sum(1 for c in everything if c.next_deadline and not c.next_deadline.is_overdue
                         and c.next_deadline.response_due <= soon),
+        "approval": sum(1 for c in everything for r in c.replies if r.status == "Awaiting approval"),
     }
     return render_template(
         "zimra/list.html", cases=cases, stats=stats, statuses=ZIMRA_CASE_STATUSES, case_types=ZIMRA_CASE_TYPES,
@@ -265,6 +283,8 @@ def view_case(case_id):
     return render_template(
         "zimra/detail.html", case=case, statuses=ZIMRA_CASE_STATUSES, kinds=ZIMRA_CORRESPONDENCE_KINDS,
         directions=ZIMRA_DIRECTIONS, is_senior=_is_senior(), today=date.today(), due_soon_days=DUE_SOON_DAYS,
+        reply_templates=ZL.TEMPLATES,
+        replies_by_letter={i.id: [r for r in case.replies if r.in_reply_to_id == i.id] for i in case.correspondence},
     )
 
 
@@ -408,6 +428,11 @@ def delete_correspondence(item_id):
     _require_senior("delete a logged letter")
     case_id = item.case_id
     _remove_file(item.stored_filename)
+    for r in ZimraReply.query.filter((ZimraReply.in_reply_to_id == item.id) | (ZimraReply.correspondence_id == item.id)).all():
+        if r.in_reply_to_id == item.id:
+            r.in_reply_to_id = None
+        if r.correspondence_id == item.id:
+            r.correspondence_id = None
     db.session.delete(item)
     db.session.commit()
     flash("Entry deleted.", "info")
@@ -483,3 +508,285 @@ def delete_instalment(inst_id):
     db.session.commit()
     flash("Instalment deleted.", "info")
     return _back_to_case(case.id)
+
+
+# ------------------------------------------------------------------ replies to ZIMRA (draft -> approve -> send)
+
+def _get_reply(reply_id):
+    reply = ZimraReply.query.get_or_404(reply_id)
+    _ensure_access(reply.case)
+    return reply
+
+
+def _back_to_reply(reply):
+    return redirect(url_for("zimra.view_reply", reply_id=reply.id))
+
+
+def _incoming_letter(case, raw):
+    if str(raw or "").isdigit():
+        item = ZimraCorrespondence.query.get(int(raw))
+        if item is not None and item.case_id == case.id and item.direction.startswith("Incoming"):
+            return item
+    return None
+
+
+def _apply_reply_form(reply, form):
+    """Copy the posted letter fields onto the draft. Returns an error string or None."""
+    letter_date = _parse_date(form.get("letter_date"))
+    subject = form.get("subject", "").strip()
+    body = form.get("body", "").replace("\r\n", "\n").strip()
+    if not letter_date:
+        return "Enter the date of the letter."
+    if not subject:
+        return "Give the letter a subject line."
+    if not body:
+        return "The letter has no text."
+    reply.letter_date = letter_date
+    reply.subject = subject[:300]
+    reply.body = body
+    reply.our_reference = form.get("our_reference", "").strip()[:100] or None
+    reply.addressee = form.get("addressee", "").replace("\r\n", "\n").strip() or ZL.DEFAULT_ADDRESSEE
+    reply.salutation = form.get("salutation", "").strip()[:100] or ZL.DEFAULT_SALUTATION
+    reply.signatory = form.get("signatory", "").strip()[:150] or None
+    reply.signatory_title = form.get("signatory_title", "").strip()[:200] or None
+    return None
+
+
+def _reply_unresolved(reply):
+    return ZL.unresolved(reply.subject, reply.body, reply.addressee, reply.salutation, reply.signatory, reply.signatory_title)
+
+
+@zimra_bp.route("/<int:case_id>/replies/new", methods=["GET", "POST"])
+@login_required
+def new_reply(case_id):
+    case = ZimraCase.query.get_or_404(case_id)
+    _ensure_access(case)
+    incoming = _incoming_letter(case, request.values.get("in_reply_to"))
+    if case.is_closed:
+        flash("This case is closed. Change its status first if you need to write to ZIMRA on it.", "danger")
+        return _back_to_case(case_id)
+    if request.method == "POST":
+        key = request.form.get("template", "")
+        if key not in ZL.TEMPLATE_BY_KEY:
+            flash("Choose a letter template.", "danger")
+            return redirect(url_for("zimra.new_reply", case_id=case.id, in_reply_to=incoming.id if incoming else None))
+        fields = ZL.new_draft(key, case, incoming, current_user, seq=len(case.replies) + 1)
+        reply = ZimraReply(case_id=case.id, in_reply_to_id=incoming.id if incoming else None, status="Draft",
+                           created_by_id=current_user.id, **fields)
+        reply.log(current_user, "Draft created", f"From the template '{ZL.TEMPLATE_BY_KEY[key]['label']}'")
+        db.session.add(reply)
+        db.session.commit()
+        flash("Draft created. Complete the highlighted [CONFIRM: ...] parts, then submit it for approval.", "success")
+        return redirect(url_for("zimra.edit_reply", reply_id=reply.id))
+    return render_template("zimra/reply_new.html", case=case, incoming=incoming, templates=ZL.TEMPLATES,
+                           suggested=ZL.suggested_template(incoming, case))
+
+
+@zimra_bp.route("/replies/<int:reply_id>/edit", methods=["GET", "POST"])
+@login_required
+def edit_reply(reply_id):
+    reply = _get_reply(reply_id)
+    if not reply.is_editable:
+        flash("Only a draft can be edited. Withdraw it from approval first if you need to change it.", "danger")
+        return _back_to_reply(reply)
+    error = None
+    if request.method == "POST":
+        error = _apply_reply_form(reply, request.form)
+        if not error:
+            action = request.form.get("action", "save")
+            if action == "submit":
+                return _submit(reply)
+            reply.log(current_user, "Draft saved")
+            db.session.commit()
+            left = _reply_unresolved(reply)
+            flash("Draft saved." + (f" {len(left)} [CONFIRM: ...] placeholder(s) still to complete." if left else ""), "success")
+            return redirect(url_for("zimra.edit_reply", reply_id=reply.id))
+        db.session.rollback()
+    return render_template("zimra/reply_edit.html", reply=reply, case=reply.case, error=error, left=_reply_unresolved(reply),
+                           template=ZL.TEMPLATE_BY_KEY.get(reply.template_key))
+
+
+def _submit(reply):
+    left = _reply_unresolved(reply)
+    reply.status = "Awaiting approval"
+    reply.submitted_by_id, reply.submitted_at = current_user.id, datetime.utcnow()
+    reply.returned_note = None
+    reply.log(current_user, "Submitted for approval", f"{len(left)} placeholder(s) unresolved" if left else None)
+    db.session.commit()
+    if left:
+        flash(f"Submitted, but {len(left)} [CONFIRM: ...] placeholder(s) are still in the letter. It cannot be approved until they are completed.", "warning")
+    else:
+        flash("Submitted for a Partner's approval.", "success")
+    return _back_to_reply(reply)
+
+
+@zimra_bp.route("/replies/<int:reply_id>")
+@login_required
+def view_reply(reply_id):
+    reply = _get_reply(reply_id)
+    return render_template("zimra/reply_view.html", reply=reply, case=reply.case, left=_reply_unresolved(reply),
+                           blocks=ZL.paragraphs(reply.body), is_senior=_is_senior(), today=date.today(),
+                           methods=ZIMRA_SEND_METHODS, template=ZL.TEMPLATE_BY_KEY.get(reply.template_key))
+
+
+@zimra_bp.route("/replies/<int:reply_id>/submit", methods=["POST"])
+@login_required
+def submit_reply(reply_id):
+    reply = _get_reply(reply_id)
+    if reply.status != "Draft":
+        flash("Only a draft can be submitted for approval.", "danger")
+        return _back_to_reply(reply)
+    return _submit(reply)
+
+
+@zimra_bp.route("/replies/<int:reply_id>/approve", methods=["POST"])
+@login_required
+def approve_reply(reply_id):
+    reply = _get_reply(reply_id)
+    _require_senior("approve a letter to ZIMRA")
+    if reply.status != "Awaiting approval":
+        flash("This letter is not waiting for approval.", "danger")
+        return _back_to_reply(reply)
+    left = _reply_unresolved(reply)
+    if left:
+        flash(f"Cannot approve: {len(left)} [CONFIRM: ...] placeholder(s) are still in the letter. Return it for completion.", "danger")
+        return _back_to_reply(reply)
+    reply.status = "Approved"
+    reply.approved_by_id, reply.approved_at = current_user.id, datetime.utcnow()
+    note = "Approved by the same person who submitted it" if reply.submitted_by_id == current_user.id else None
+    reply.log(current_user, "Approved", note)
+    db.session.commit()
+    flash("Approved. Download the letter, send it, then mark it as sent here.", "success")
+    return _back_to_reply(reply)
+
+
+@zimra_bp.route("/replies/<int:reply_id>/return", methods=["POST"])
+@login_required
+def return_reply(reply_id):
+    reply = _get_reply(reply_id)
+    _require_senior("return a letter to ZIMRA for changes")
+    if reply.status != "Awaiting approval":
+        flash("This letter is not waiting for approval.", "danger")
+        return _back_to_reply(reply)
+    note = request.form.get("note", "").strip()
+    if not note:
+        flash("Say what needs to change so the drafter knows.", "danger")
+        return _back_to_reply(reply)
+    reply.status = "Draft"
+    reply.returned_note = note
+    reply.log(current_user, "Returned for changes", note)
+    db.session.commit()
+    flash("Returned to the drafter with your note.", "info")
+    return _back_to_reply(reply)
+
+
+@zimra_bp.route("/replies/<int:reply_id>/reopen", methods=["POST"])
+@login_required
+def reopen_reply(reply_id):
+    """Take a letter back to Draft (withdraws any approval) so it can be changed."""
+    reply = _get_reply(reply_id)
+    if reply.status not in ("Awaiting approval", "Approved"):
+        flash("Only a letter waiting for, or given, approval can be taken back to draft.", "danger")
+        return _back_to_reply(reply)
+    was = reply.status
+    reply.status = "Draft"
+    reply.approved_by_id = reply.approved_at = None
+    reply.log(current_user, "Taken back to draft", "Approval withdrawn" if was == "Approved" else "Withdrawn from approval")
+    db.session.commit()
+    flash("Back to draft. It needs approval again after any change.", "info")
+    return redirect(url_for("zimra.edit_reply", reply_id=reply.id))
+
+
+@zimra_bp.route("/replies/<int:reply_id>/send", methods=["POST"])
+@login_required
+def send_reply(reply_id):
+    reply = _get_reply(reply_id)
+    case = reply.case
+    if reply.status != "Approved":
+        flash("Only an approved letter can be marked as sent.", "danger")
+        return _back_to_reply(reply)
+    left = _reply_unresolved(reply)
+    if left:
+        flash("The letter still has [CONFIRM: ...] placeholders. Take it back to draft and complete them.", "danger")
+        return _back_to_reply(reply)
+    sent_on = _parse_date(request.form.get("sent_on")) or date.today()
+    if sent_on > date.today():
+        flash("The date sent cannot be in the future.", "danger")
+        return _back_to_reply(reply)
+    if reply.in_reply_to is not None and sent_on < reply.in_reply_to.corr_date:
+        flash("The date sent is before the date of the letter it answers.", "danger")
+        return _back_to_reply(reply)
+    method = _choice(request.form.get("method"), ZIMRA_SEND_METHODS, "Other")
+    upload = request.files.get("file")
+    original = stored = None
+    if upload and upload.filename:
+        original = secure_filename(upload.filename)
+        ext = original.rsplit(".", 1)[-1].lower() if "." in original else ""
+        if ext not in Config.ALLOWED_EXTENSIONS:
+            flash("That file type is not accepted (PDF, Word, Excel, images, text, zip or PowerPoint).", "danger")
+            return _back_to_reply(reply)
+    template = ZL.TEMPLATE_BY_KEY.get(reply.template_key) or {}
+    item = ZimraCorrespondence(
+        case_id=case.id, corr_date=sent_on, direction="Outgoing to ZIMRA", kind=template.get("kind") or "Response / submission",
+        subject=(reply.subject or "Letter to ZIMRA")[:250], reference=reply.our_reference,
+        notes=f"Sent by {method}. Approved by {reply.approved_by.name if reply.approved_by else 'a Partner'}.",
+        uploaded_by_id=current_user.id)
+    db.session.add(item)
+    db.session.flush()
+    if original:
+        stored = f"zc{case.id}_{item.id}_{uuid.uuid4().hex[:8]}_{original}"
+        upload.save(os.path.join(_files_dir(), stored))
+    else:  # no signed scan supplied: keep the approved letter itself as the record
+        original = ZL.letter_filename(reply, "pdf")
+        stored = f"zc{case.id}_{item.id}_{uuid.uuid4().hex[:8]}_{original}"
+        with open(os.path.join(_files_dir(), stored), "wb") as fh:
+            fh.write(ZL.build_pdf(reply))
+    item.original_filename, item.stored_filename = original, stored
+    reply.correspondence_id = item.id
+    reply.status = "Sent"
+    reply.sent_on, reply.sent_method, reply.sent_by_id = sent_on, method, current_user.id
+    msg = "Marked as sent and logged on the case."
+    answered = reply.in_reply_to
+    if answered is not None and not answered.responded_on:
+        answered.responded_on = sent_on
+        msg += " The letter it answers is marked as responded to."
+    if case.status in ("Open", "Awaiting client"):
+        _set_status(case, "Awaiting ZIMRA")
+        msg += " Case status is now Awaiting ZIMRA."
+    reply.log(current_user, "Marked as sent", f"{method}, {sent_on.strftime('%d %b %Y')}")
+    db.session.commit()
+    flash(msg, "success")
+    return _back_to_reply(reply)
+
+
+@zimra_bp.route("/replies/<int:reply_id>/delete", methods=["POST"])
+@login_required
+def delete_reply(reply_id):
+    reply = _get_reply(reply_id)
+    case_id = reply.case_id
+    if reply.status == "Sent":
+        flash("A sent letter is part of the case record. A Partner can delete its logged entry under Correspondence.", "danger")
+        return _back_to_reply(reply)
+    if not (_is_senior() or reply.created_by_id == current_user.id):
+        abort(403, description="Only the person who drafted a letter, or a Partner or Admin, can delete it.")
+    db.session.delete(reply)
+    db.session.commit()
+    flash("Draft deleted.", "info")
+    return _back_to_case(case_id)
+
+
+@zimra_bp.route("/replies/<int:reply_id>/download/<fmt>")
+@login_required
+def download_reply(reply_id, fmt):
+    reply = _get_reply(reply_id)
+    if fmt == "docx":
+        data = ZL.build_docx(reply)
+        mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    elif fmt == "pdf":
+        data = ZL.build_pdf(reply)
+        mime = "application/pdf"
+    else:
+        abort(404)
+    reply.log(current_user, f"Downloaded as {fmt.upper()}")
+    db.session.commit()
+    return Response(data, mimetype=mime, headers={"Content-Disposition": f'attachment; filename="{ZL.letter_filename(reply, fmt)}"'})

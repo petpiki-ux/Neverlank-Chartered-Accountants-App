@@ -10,6 +10,7 @@
   </div>
   <div>
     <a href="{{ url_for('zimra.list_cases') }}" class="btn secondary">All cases</a>
+    <a href="{{ url_for('zimra.new_reply', case_id=case.id) }}" class="btn gold">Write to ZIMRA</a>
     <a href="{{ url_for('zimra.edit_case', case_id=case.id) }}" class="btn secondary">Edit</a>
     {% if is_senior %}<form method="post" action="{{ url_for('zimra.delete_case', case_id=case.id) }}" class="inline" onsubmit="return confirm('Delete this case and every letter filed on it? This cannot be undone.');"><button type="submit" class="btn danger">Delete</button></form>{% endif %}
   </div>
@@ -99,6 +100,29 @@
 </div>
 
 <div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+    <h3 class="mt-0" style="margin-bottom:0;">Letters to ZIMRA <span class="muted" style="font-size:13px;font-weight:400;">&middot; drafts, approvals and sent</span></h3>
+    <a href="{{ url_for('zimra.new_reply', case_id=case.id) }}" class="btn small gold">Write to ZIMRA</a>
+  </div>
+  {% if case.replies %}
+  <table style="margin-top:8px;">
+    <thead><tr><th>Letter</th><th>Answers</th><th>Status</th><th>Updated</th></tr></thead>
+    <tbody>
+      {% for r in case.replies %}
+      <tr>
+        <td><a href="{{ url_for('zimra.view_reply', reply_id=r.id) }}"><strong>{{ r.subject or 'Untitled letter' }}</strong></a>
+          <div class="muted" style="font-size:11.5px;">{{ r.our_reference or '' }}</div></td>
+        <td>{% if r.in_reply_to %}{{ r.in_reply_to.subject }} <span class="muted" style="font-size:11px;">({{ r.in_reply_to.corr_date.strftime('%d %b %Y') }})</span>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td><span class="badge" style="background:{{ {'Draft': '#6b6b6b', 'Awaiting approval': '#b8923a', 'Approved': '#1f6f4a', 'Sent': '#1f5f8b'}[r.status] }};color:#fff;">{{ r.status }}</span></td>
+        <td>{{ r.updated_at.strftime('%d %b %Y') if r.updated_at else '' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="margin:8px 0 0;">No letters drafted yet. Use <strong>Draft reply</strong> on a letter from ZIMRA, or <strong>Write to ZIMRA</strong> for a new one. Each is approved by a Partner before it is sent.</p>{% endif %}
+</div>
+
+<div class="card">
   <h3 class="mt-0">Reply deadlines</h3>
   {% if case.open_deadlines %}
   <table>
@@ -108,8 +132,10 @@
       <tr>
         <td>{{ c.response_due.strftime('%d %b %Y') }}
           {% if c.is_overdue %}<span class="badge overdue">{{ -c.days_left }} day(s) overdue</span>{% elif c.days_left <= due_soon_days %}<span class="badge" style="background:#b8923a;color:#fff;">{{ c.days_left }} day(s) left</span>{% endif %}</td>
-        <td>{{ c.subject }} <span class="muted" style="font-size:11px;">({{ c.corr_date.strftime('%d %b %Y') }})</span></td>
+        <td>{{ c.subject }} <span class="muted" style="font-size:11px;">({{ c.corr_date.strftime('%d %b %Y') }})</span>
+          {% for r in replies_by_letter.get(c.id, []) %}<div style="font-size:12px;"><a href="{{ url_for('zimra.view_reply', reply_id=r.id) }}">Reply: {{ r.status }}</a></div>{% endfor %}</td>
         <td class="text-right">
+          <a href="{{ url_for('zimra.new_reply', case_id=case.id, in_reply_to=c.id) }}" class="btn small gold">Draft reply</a>
           <form method="post" action="{{ url_for('zimra.mark_responded', item_id=c.id) }}" class="inline" style="display:inline-flex;gap:4px;align-items:center;">
             <input type="date" name="responded_on" max="{{ today.isoformat() }}" value="{{ today.isoformat() }}" aria-label="Date replied" style="width:auto;">
             <button type="submit" class="btn small secondary">Mark responded</button>
@@ -158,7 +184,9 @@
           {% endif %}
         </td>
         <td>{% if c.stored_filename %}<a href="{{ url_for('zimra.download_correspondence', item_id=c.id) }}">{{ c.original_filename }}</a>{% else %}<span class="muted">—</span>{% endif %}</td>
-        <td class="text-right">{% if is_senior %}<form method="post" action="{{ url_for('zimra.delete_correspondence', item_id=c.id) }}" class="inline" onsubmit="return confirm('Delete this entry and its file?');"><button type="submit" class="btn small danger">Delete</button></form>{% endif %}</td>
+        <td class="text-right">
+          {% if c.direction.startswith('Incoming') and not case.is_closed %}<a href="{{ url_for('zimra.new_reply', case_id=case.id, in_reply_to=c.id) }}" class="btn small gold">Draft reply</a>{% endif %}
+          {% if is_senior %}<form method="post" action="{{ url_for('zimra.delete_correspondence', item_id=c.id) }}" class="inline" onsubmit="return confirm('Delete this entry and its file?');"><button type="submit" class="btn small danger">Delete</button></form>{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

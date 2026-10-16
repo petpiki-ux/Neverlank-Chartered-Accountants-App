@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Letter to ZIMRA - {{ case.case_number }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set badge_bg = {'Draft': '#6b6b6b', 'Awaiting approval': '#b8923a', 'Approved': '#1f6f4a', 'Sent': '#1f5f8b'} %}
+<div class="page-header">
+  <div>
+    <h1>Letter to ZIMRA <span class="badge" style="background:{{ badge_bg[reply.status] }};color:#fff;vertical-align:middle;">{{ reply.status }}</span></h1>
+    <div class="subtitle"><a href="{{ url_for('zimra.view_case', case_id=case.id) }}">{{ case.case_number }} &middot; {{ case.title }}</a> &middot; {{ case.client.name }}
+      {% if template %}&middot; {{ template.label }}{% endif %}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a href="{{ url_for('zimra.download_reply', reply_id=reply.id, fmt='docx') }}" class="btn secondary">Word</a>
+    <a href="{{ url_for('zimra.download_reply', reply_id=reply.id, fmt='pdf') }}" class="btn secondary">PDF</a>
+    <a href="{{ url_for('zimra.view_case', case_id=case.id) }}" class="btn secondary">Back to case</a>
+  </div>
+</div>
+
+{% if reply.returned_note and reply.status == 'Draft' %}<div class="flash danger"><strong>Returned for changes:</strong> {{ reply.returned_note }}</div>{% endif %}
+{% if left and reply.status != 'Sent' %}
+<div class="flash" style="background:#fff7e0;border-left:4px solid #b8923a;color:#5a4410;">
+  <strong>{{ left|length }} [CONFIRM: ...] placeholder(s) still in the letter</strong> - it cannot be approved or sent until they are completed.
+</div>
+{% endif %}
+
+<div class="form-row" style="flex-wrap:wrap;align-items:flex-start;">
+  <div style="flex:3;min-width:340px;">
+    <div class="card" style="font-family:Calibri,Arial,sans-serif;font-size:14px;line-height:1.55;">
+      <div class="muted" style="font-size:12px;">{% if reply.our_reference %}Our ref: {{ reply.our_reference }}{% endif %}
+        {% if reply.in_reply_to and reply.in_reply_to.reference %} | Your ref: {{ reply.in_reply_to.reference }}{% elif case.zimra_reference %} | Your ref: {{ case.zimra_reference }}{% endif %}</div>
+      <p>{{ reply.letter_date.strftime('%d %B %Y').lstrip('0') if reply.letter_date else '' }}</p>
+      <p>{% for ln in (reply.addressee or '').split('\n') %}{{ ln }}{% if not loop.last %}<br>{% endif %}{% endfor %}</p>
+      <p>{{ reply.salutation }}</p>
+      <p><strong>{{ (reply.subject or '')|upper }}</strong></p>
+      {% for kind, text in blocks %}
+        {% if kind == 'b' %}<div style="padding-left:18px;">&bull; {{ text }}</div>
+        {% elif kind == 'n' %}<div style="padding-left:18px;text-indent:-18px;margin-left:0;">{{ text }}</div>
+        {% else %}<p>{{ text }}</p>{% endif %}
+      {% endfor %}
+      <p style="margin-top:18px;">Yours faithfully</p>
+      <p style="margin-top:34px;margin-bottom:0;"><strong>{{ reply.signatory or '' }}</strong><br>{{ reply.signatory_title or '' }}</p>
+    </div>
+  </div>
+
+  <div style="flex:1;min-width:280px;">
+    <div class="card">
+      <h3 class="mt-0" style="font-size:14px;">What happens next</h3>
+      {% if reply.status == 'Draft' %}
+        <p class="muted" style="margin-top:0;">Complete the letter, then submit it for a Partner's approval.</p>
+        <a href="{{ url_for('zimra.edit_reply', reply_id=reply.id) }}" class="btn gold">Edit letter</a>
+        <form method="post" action="{{ url_for('zimra.submit_reply', reply_id=reply.id) }}" class="inline" onsubmit="return confirm('Submit this letter for a Partner\'s approval?');"><button type="submit" class="btn secondary">Submit for approval</button></form>
+      {% elif reply.status == 'Awaiting approval' %}
+        <p class="muted" style="margin-top:0;">Submitted by {{ reply.submitted_by.name if reply.submitted_by else '—' }}{% if reply.submitted_at %} on {{ reply.submitted_at.strftime('%d %b %Y %H:%M') }}{% endif %}.</p>
+        {% if is_senior %}
+          <form method="post" action="{{ url_for('zimra.approve_reply', reply_id=reply.id) }}" class="inline"><button type="submit" class="btn gold" {% if left %}disabled title="Complete the placeholders first"{% endif %}>Approve</button></form>
+          <form method="post" action="{{ url_for('zimra.return_reply', reply_id=reply.id) }}" style="margin-top:10px;">
+            <label for="note">Return for changes - what needs to change? *</label>
+            <textarea id="note" name="note" rows="3" required></textarea>
+            <button type="submit" class="btn secondary" style="margin-top:6px;">Return to drafter</button>
+          </form>
+        {% else %}
+          <p style="margin-bottom:8px;">Waiting for a Partner or Admin to approve it.</p>
+        {% endif %}
+        <form method="post" action="{{ url_for('zimra.reopen_reply', reply_id=reply.id) }}" class="inline" style="margin-top:8px;"><button type="submit" class="btn small secondary">Withdraw to edit</button></form>
+      {% elif reply.status == 'Approved' %}
+        <p class="muted" style="margin-top:0;">Approved by {{ reply.approved_by.name if reply.approved_by else '—' }}{% if reply.approved_at %} on {{ reply.approved_at.strftime('%d %b %Y %H:%M') }}{% endif %}. Download the letter, send it, then record that it has gone:</p>
+        <form method="post" action="{{ url_for('zimra.send_reply', reply_id=reply.id) }}" enctype="multipart/form-data">
+          <div class="form-row">
+            <div><label for="sent_on">Date sent *</label><input type="date" id="sent_on" name="sent_on" required max="{{ today.isoformat() }}" value="{{ today.isoformat() }}"></div>
+            <div><label for="method">How *</label><select id="method" name="method">{% for m in methods %}<option value="{{ m }}">{{ m }}</option>{% endfor %}</select></div>
+          </div>
+          <label for="file">Signed / stamped copy <span class="muted" style="font-size:11px;">(optional - otherwise the approved letter PDF is filed)</span></label>
+          <input type="file" id="file" name="file">
+          <button type="submit" class="btn gold" style="margin-top:8px;">Mark as sent &amp; log it</button>
+        </form>
+        <form method="post" action="{{ url_for('zimra.reopen_reply', reply_id=reply.id) }}" class="inline" style="margin-top:8px;" onsubmit="return confirm('This withdraws the approval. Continue?');"><button type="submit" class="btn small secondary">Withdraw approval to edit</button></form>
+      {% else %}
+        <p style="margin-top:0;">Sent {{ reply.sent_on.strftime('%d %b %Y') if reply.sent_on }} by {{ reply.sent_method or '—' }}{% if reply.sent_by %} ({{ reply.sent_by.name }}){% endif %}.</p>
+        {% if reply.correspondence and reply.correspondence.stored_filename %}<p>Filed copy: <a href="{{ url_for('zimra.download_correspondence', item_id=reply.correspondence.id) }}">{{ reply.correspondence.original_filename }}</a></p>{% endif %}
+        <p class="muted" style="font-size:12px;margin-bottom:0;">Logged under Correspondence on the case.</p>
+      {% endif %}
+      {% if reply.status != 'Sent' and (is_senior or reply.created_by_id == current_user.id) %}
+      <form method="post" action="{{ url_for('zimra.delete_reply', reply_id=reply.id) }}" class="inline" style="margin-top:10px;" onsubmit="return confirm('Delete this letter?');"><button type="submit" class="btn small danger">Delete</button></form>
+      {% endif %}
+    </div>
+    {% if reply.in_reply_to %}
+    <div class="card">
+      <div class="muted" style="font-size:11px;">Replying to</div>
+      <strong>{{ reply.in_reply_to.subject }}</strong>
+      <div class="muted" style="font-size:12px;">{{ reply.in_reply_to.corr_date.strftime('%d %b %Y') }}{% if reply.in_reply_to.response_due %} &middot; reply due {{ reply.in_reply_to.response_due.strftime('%d %b %Y') }}{% endif %}</div>
+    </div>
+    {% endif %}
+    <div class="card">
+      <h3 class="mt-0" style="font-size:14px;">History</h3>
+      <table style="font-size:12px;"><tbody>
+        {% for e in reply.history|reverse %}
+        <tr><td class="muted" style="white-space:nowrap;">{{ e.at }}</td><td>{{ e.what }} <span class="muted">- {{ e.by }}</span>{% if e.note %}<div class="muted">{{ e.note }}</div>{% endif %}</td></tr>
+        {% endfor %}
+      </tbody></table>
+    </div>
+  </div>
+</div>
+{% endblock %}

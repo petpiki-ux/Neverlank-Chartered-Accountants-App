@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}ZIMRA Audits &amp; Correspondence - {{ firm_name }}{% endblock %}
+{% block title %}ZIMRA Matters - {{ firm_name }}{% endblock %}
 {% block content %}
 <div class="page-header">
   <div>
-    <h1>ZIMRA Audits &amp; Correspondence</h1>
-    <div class="subtitle">Audits, queries, assessments, objections and payment plans, with the letters and deadlines for each</div>
+    <h1>ZIMRA Matters</h1>
+    <div class="subtitle">Audits, queries, assessments, objections, payment plans and tax clearance, with the letters, replies and deadlines for each</div>
   </div>
   <div><a href="{{ url_for('zimra.new_case', client_id=client_filter) if client_filter else url_for('zimra.new_case') }}" class="btn gold">+ New ZIMRA case</a></div>
 </div>
@@ -16,6 +16,8 @@
     <div class="muted" style="font-size:11px;">Overdue (reply or instalment)</div><div style="font-size:22px;font-weight:600;">{{ stats.overdue }}</div></a>
   <a href="{{ url_for('zimra.list_cases', flag='due_soon') }}" class="card" style="flex:1;min-width:150px;padding:12px;text-decoration:none;color:inherit;">
     <div class="muted" style="font-size:11px;">Reply due in {{ due_soon_days }} days</div><div style="font-size:22px;font-weight:600;">{{ stats.due_soon }}</div></a>
+  <a href="{{ url_for('zimra.list_cases', flag='approval') }}" class="card" style="flex:1;min-width:150px;padding:12px;text-decoration:none;color:inherit;{% if stats.approval %}border-left:4px solid #b8923a;{% endif %}">
+    <div class="muted" style="font-size:11px;">Replies awaiting approval</div><div style="font-size:22px;font-weight:600;">{{ stats.approval }}</div></a>
 </div>
 
 <div class="card">
@@ -30,7 +32,7 @@
       <select id="status" name="status" onchange="this.form.submit()"><option value="">All open</option>
         {% for s in statuses %}<option value="{{ s }}" {% if status_filter==s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
     <div><label style="font-weight:normal;"><input type="checkbox" name="closed" value="1" style="width:auto;" {% if show_closed %}checked{% endif %} onchange="this.form.submit()"> Include closed</label></div>
-    {% if flag %}<input type="hidden" name="flag" value="{{ flag }}"><div><a href="{{ url_for('zimra.list_cases') }}" class="btn small secondary">Clear {{ 'overdue' if flag == 'overdue' else 'due soon' }} filter</a></div>{% endif %}
+    {% if flag %}<input type="hidden" name="flag" value="{{ flag }}"><div><a href="{{ url_for('zimra.list_cases') }}" class="btn small secondary">Clear {{ {'overdue': 'overdue', 'due_soon': 'due soon', 'approval': 'awaiting approval'}.get(flag, flag) }} filter</a></div>{% endif %}
   </form>
 </div>
 

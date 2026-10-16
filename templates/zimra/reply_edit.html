@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block title %}Edit letter - {{ case.case_number }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Edit letter to ZIMRA</h1>
+    <div class="subtitle"><a href="{{ url_for('zimra.view_case', case_id=case.id) }}">{{ case.case_number }} &middot; {{ case.title }}</a> &middot; {{ case.client.name }}
+      {% if template %}&middot; {{ template.label }}{% endif %}</div>
+  </div>
+  <div><a href="{{ url_for('zimra.view_reply', reply_id=reply.id) }}" class="btn secondary">Preview</a></div>
+</div>
+{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}
+{% if reply.returned_note %}<div class="flash danger"><strong>Returned for changes:</strong> {{ reply.returned_note }}</div>{% endif %}
+{% if left %}
+<div class="flash" style="background:#fff7e0;border-left:4px solid #b8923a;color:#5a4410;">
+  <strong>{{ left|length }} placeholder(s) to complete.</strong> The letter cannot be approved or sent while any <code>[CONFIRM: ...]</code> text remains. Replace each one with the facts (or delete the line if it does not apply).
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('zimra.edit_reply', reply_id=reply.id) }}">
+  <div class="form-row" style="flex-wrap:wrap;align-items:flex-start;">
+    <div style="flex:3;min-width:340px;">
+      <div class="card">
+        <div class="form-row">
+          <div><label for="letter_date">Date of letter *</label><input type="date" id="letter_date" name="letter_date" required value="{{ request.form.get('letter_date', reply.letter_date.isoformat() if reply.letter_date else '') }}"></div>
+          <div><label for="our_reference">Our reference</label><input type="text" id="our_reference" name="our_reference" maxlength="100" value="{{ request.form.get('our_reference', reply.our_reference or '') }}"></div>
+        </div>
+        <label for="addressee">Addressee</label>
+        <textarea id="addressee" name="addressee" rows="4">{{ request.form.get('addressee', reply.addressee or '') }}</textarea>
+        <div class="form-row">
+          <div><label for="salutation">Salutation</label><input type="text" id="salutation" name="salutation" maxlength="100" value="{{ request.form.get('salutation', reply.salutation or '') }}"></div>
+          <div style="flex:3;"><label for="subject">Subject line *</label><input type="text" id="subject" name="subject" required maxlength="300" value="{{ request.form.get('subject', reply.subject or '') }}"></div>
+        </div>
+        <label for="body">Letter *</label>
+        <textarea id="body" name="body" rows="22" required style="font-family:Calibri,Arial,sans-serif;line-height:1.5;">{{ request.form.get('body', reply.body or '') }}</textarea>
+        <p class="muted" style="font-size:11.5px;margin-bottom:0;">Leave a blank line between paragraphs. Start lines with <code>- </code> for bullets, or <code>1. </code> for numbered points. "Yours faithfully" and the signature block are added automatically.</p>
+        <div class="form-row" style="margin-top:10px;">
+          <div><label for="signatory">Signed by</label><input type="text" id="signatory" name="signatory" maxlength="150" value="{{ request.form.get('signatory', reply.signatory or '') }}"></div>
+          <div><label for="signatory_title">Title / firm line</label><input type="text" id="signatory_title" name="signatory_title" maxlength="200" value="{{ request.form.get('signatory_title', reply.signatory_title or '') }}"></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;">
+        <button type="submit" name="action" value="save" class="btn secondary">Save draft</button>
+        <button type="submit" name="action" value="submit" class="btn gold" onclick="return confirm('Submit this letter for a Partner\'s approval?');">Save &amp; submit for approval</button>
+        <a href="{{ url_for('zimra.view_case', case_id=case.id) }}" class="btn secondary">Back to case</a>
+      </div>
+    </div>
+    <div style="flex:1;min-width:260px;">
+      {% if reply.in_reply_to %}
+      <div class="card">
+        <div class="muted" style="font-size:11px;">Replying to</div>
+        <strong>{{ reply.in_reply_to.subject }}</strong>
+        <div class="muted" style="font-size:12px;">{{ reply.in_reply_to.kind or 'Letter' }} &middot; {{ reply.in_reply_to.corr_date.strftime('%d %b %Y') }}{% if reply.in_reply_to.reference %} &middot; ref {{ reply.in_reply_to.reference }}{% endif %}{% if reply.in_reply_to.response_due %}<br>Reply due {{ reply.in_reply_to.response_due.strftime('%d %b %Y') }}{% endif %}</div>
+        {% if reply.in_reply_to.notes %}<div style="font-size:12.5px;margin-top:6px;">{{ reply.in_reply_to.notes }}</div>{% endif %}
+        {% if reply.in_reply_to.stored_filename %}<div style="margin-top:6px;"><a href="{{ url_for('zimra.download_correspondence', item_id=reply.in_reply_to.id) }}">{{ reply.in_reply_to.original_filename }}</a></div>{% endif %}
+      </div>
+      {% endif %}
+      <div class="card">
+        <h3 class="mt-0" style="font-size:14px;">Case facts</h3>
+        <table style="font-size:12.5px;">
+          <tbody>
+            <tr><td class="muted">Client TIN</td><td>{{ case.client.tin_number or '— not on the client record' }}</td></tr>
+            <tr><td class="muted">ZIMRA ref</td><td>{{ case.zimra_reference or '—' }}</td></tr>
+            <tr><td class="muted">Officer</td><td>{{ case.zimra_officer or '—' }}</td></tr>
+            <tr><td class="muted">Tax head</td><td>{{ case.tax_head or '—' }}</td></tr>
+            <tr><td class="muted">Period</td><td>{{ case.period_label or '—' }}</td></tr>
+            <tr><td class="muted">Assessed</td><td>{{ case.currency }} {{ '{:,.2f}'.format(case.amount_assessed) if case.amount_assessed is not none else '—' }}</td></tr>
+            <tr><td class="muted">Penalties &amp; interest</td><td>{{ '{:,.2f}'.format(case.penalties_interest) if case.penalties_interest is not none else '—' }}</td></tr>
+            <tr><td class="muted">Balance</td><td>{{ '{:,.2f}'.format(case.balance) if case.balance is not none else '—' }}</td></tr>
+          </tbody>
+        </table>
+        <p class="muted" style="font-size:11.5px;margin-bottom:0;">Figures come from the case. If something here is wrong, fix it under <a href="{{ url_for('zimra.edit_case', case_id=case.id) }}">Edit case</a> rather than only in the letter.</p>
+      </div>
+      {% if left %}
+      <div class="card">
+        <h3 class="mt-0" style="font-size:14px;">Still to complete</h3>
+        <ul style="margin:0;padding-left:18px;font-size:12.5px;">{% for x in left %}<li>{{ x }}</li>{% endfor %}</ul>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</form>
+{% endblock %}

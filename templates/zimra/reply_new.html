@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}New letter to ZIMRA - {{ case.case_number }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>New letter to ZIMRA</h1>
+    <div class="subtitle"><a href="{{ url_for('zimra.view_case', case_id=case.id) }}">{{ case.case_number }} &middot; {{ case.title }}</a> &middot; {{ case.client.name }}</div>
+  </div>
+</div>
+
+{% if incoming %}
+<div class="card">
+  <div class="muted" style="font-size:11px;">Replying to</div>
+  <strong>{{ incoming.subject }}</strong>
+  <div class="muted" style="font-size:12px;">{{ incoming.kind or 'Letter' }} &middot; dated {{ incoming.corr_date.strftime('%d %b %Y') }}{% if incoming.reference %} &middot; ref {{ incoming.reference }}{% endif %}{% if incoming.response_due %} &middot; reply due {{ incoming.response_due.strftime('%d %b %Y') }}{% endif %}</div>
+  {% if incoming.notes %}<div style="font-size:12.5px;margin-top:4px;">{{ incoming.notes }}</div>{% endif %}
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('zimra.new_reply', case_id=case.id) }}">
+  {% if incoming %}<input type="hidden" name="in_reply_to" value="{{ incoming.id }}">{% endif %}
+  <div class="card">
+    <h3 class="mt-0">Choose a starting point</h3>
+    <p class="muted" style="margin-top:0;">The template fills in the client, TIN, case, ZIMRA reference, period and amounts. Anything the app cannot know is left as a highlighted <strong>[CONFIRM: ...]</strong> placeholder that you must complete before the letter can be approved.</p>
+    {% for t in templates %}
+    <label style="display:flex;gap:10px;align-items:flex-start;padding:10px 0;border-top:1px solid #e3e8ee;font-weight:normal;cursor:pointer;">
+      <input type="radio" name="template" value="{{ t.key }}" style="width:auto;margin-top:4px;" {% if t.key == suggested %}checked{% endif %} required>
+      <span><strong>{{ t.label }}</strong>{% if t.key == suggested %} <span class="badge" style="background:#b8923a;color:#fff;">suggested</span>{% endif %}
+        <span class="muted" style="display:block;font-size:12px;">{{ t.about }}</span></span>
+    </label>
+    {% endfor %}
+    <div style="margin-top:12px;"><button type="submit" class="btn gold">Create draft</button>
+      <a href="{{ url_for('zimra.view_case', case_id=case.id) }}" class="btn secondary">Cancel</a></div>
+  </div>
+</form>
+{% endblock %}

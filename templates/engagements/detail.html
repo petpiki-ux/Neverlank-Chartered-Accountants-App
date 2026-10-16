@@ -2726,7 +2726,7 @@
   <!-- ---------- ZIMRA audits & correspondence (firm-wide module, linked here) ---------- -->
   <div class="card">
     <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
-      <h3 class="mt-0" style="margin-bottom:0;">ZIMRA Audits &amp; Correspondence</h3>
+      <h3 class="mt-0" style="margin-bottom:0;">ZIMRA Matters &amp; Correspondence</h3>
       <a href="{{ url_for('zimra.new_case', client_id=engagement.client_id, engagement_id=engagement.id) }}" class="btn small gold">+ New ZIMRA case</a>
     </div>
     {% if zimra_cases %}
@@ -2745,7 +2745,7 @@
       </tbody>
     </table>
     {% else %}
-    <p class="muted" style="margin-bottom:0;">No ZIMRA audits, queries or assessments linked to this engagement. Cases for the whole firm are under <a href="{{ url_for('zimra.list_cases') }}">ZIMRA Audits</a> in the sidebar.</p>
+    <p class="muted" style="margin-bottom:0;">No ZIMRA audits, queries or assessments linked to this engagement. Cases for the whole firm are under <a href="{{ url_for('zimra.list_cases') }}">ZIMRA Matters</a> in the sidebar.</p>
     {% endif %}
   </div>
 

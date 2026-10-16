@@ -866,13 +866,15 @@ def create_app():
         open_check_in = None
         recurring_review_count = 0
         zimra_overdue_count = 0
+        zimra_approval_count = 0
         invoice_reminder_count = 0
         if current_user.is_authenticated:
             from models import Invoice
             from invoice_send import due_reminder_count
             invoice_reminder_count = due_reminder_count()
-            from zimra import overdue_response_count
+            from zimra import overdue_response_count, awaiting_approval_count
             zimra_overdue_count = overdue_response_count()
+            zimra_approval_count = awaiting_approval_count()
             # draft invoices raised by recurring schedules, waiting for review
             recurring_review_count = Invoice.query.filter(Invoice.status == "Draft", Invoice.recurring_invoice_id.isnot(None)).count()
             open_tasks = (
@@ -891,6 +893,7 @@ def create_app():
             "open_check_in": open_check_in,
             "recurring_review_count": recurring_review_count,
             "zimra_overdue_count": zimra_overdue_count,
+            "zimra_approval_count": zimra_approval_count,
             "invoice_reminder_count": invoice_reminder_count,
         }
 
