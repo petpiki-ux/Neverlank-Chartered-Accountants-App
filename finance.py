@@ -11,7 +11,7 @@ from flask_login import login_required, current_user
 from extensions import db
 from models import visible_clients
 from models import (
-    Client, Engagement, Expense, EXPENSE_CATEGORIES, EXPENSE_STATUSES, INVOICE_CURRENCIES,
+    Client, Engagement, Expense, ExpenseCategory, EXPENSE_CATEGORIES, EXPENSE_FALLBACK_CATEGORY, EXPENSE_STATUSES, INVOICE_CURRENCIES,
     user_has_permission, user_can_access_engagement,
 )
 import analytics
@@ -90,11 +90,64 @@ def dashboard():
     )
 
 
+# ------------------------------------------------------------------ expense categories
+
+def ensure_categories():
+    """Seed the built-in list the first time only (a category the firm later deletes must stay deleted), and make sure
+    'Other' and every category already used on an expense exist."""
+    have = {c.name for c in ExpenseCategory.query.all()}
+    first_time = not have
+    added = False
+    for i, name in enumerate(EXPENSE_CATEGORIES):
+        if (first_time or name == EXPENSE_FALLBACK_CATEGORY) and name not in have:
+            db.session.add(ExpenseCategory(name=name, order=i))
+            have.add(name)
+            added = True
+    for (name,) in db.session.query(Expense.category).distinct().all():
+        if name and name not in have:
+            db.session.add(ExpenseCategory(name=name, order=100))
+            have.add(name)
+            added = True
+    if added:
+        db.session.commit()
+
+
+def category_names(active_only=True, also=None):
+    """Names for a dropdown: active ones in order, plus `also` (an expense's current category even if switched off)."""
+    ensure_categories()
+    rows = ExpenseCategory.query.order_by(ExpenseCategory.order, ExpenseCategory.name).all()
+    names = [c.name for c in rows if c.is_active or not active_only]
+    if also and also not in names:
+        names.append(also)
+    return names
+
+
+def _clean_category_name(raw):
+    return " ".join((raw or "").split())[:60]
+
+
+def add_category(raw, user):
+    """Create (or reactivate) a category. Returns (name, error)."""
+    name = _clean_category_name(raw)
+    if not name:
+        return None, "Type a name for the category."
+    ensure_categories()
+    existing = ExpenseCategory.query.filter(db.func.lower(ExpenseCategory.name) == name.lower()).first()
+    if existing is not None:
+        if not existing.is_active:
+            existing.is_active = True
+        return existing.name, None
+    last = db.session.query(db.func.max(ExpenseCategory.order)).scalar() or 0
+    db.session.add(ExpenseCategory(name=name, order=last + 1, created_by_id=user.id))
+    db.session.flush()
+    return name, None
+
+
 # ------------------------------------------------------------------ expenses
 
-def _form_context():
+def _form_context(expense=None):
     return dict(
-        categories=EXPENSE_CATEGORIES, statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
+        categories=category_names(also=expense.category if expense is not None else None), statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
         clients=visible_clients(current_user), today=date.today().isoformat(),
     )
 
@@ -108,13 +161,19 @@ def _apply_form(expense):
     if not supplier or amount is None or amount < 0 or not when:
         return "Please enter the date, who it was paid to and a valid amount."
     category = f.get("category")
+    new_category = _clean_category_name(f.get("new_category"))
+    if new_category:
+        category, err = add_category(new_category, current_user)
+        if err:
+            return err
     currency = f.get("currency", "USD")
     status = f.get("status", "Paid")
     expense.supplier = supplier
     expense.description = f.get("description", "").strip() or None
     expense.expense_date = when
     expense.amount = amount
-    expense.category = category if category in EXPENSE_CATEGORIES else "Other"
+    valid = set(category_names(also=expense.category))
+    expense.category = category if category in valid else EXPENSE_FALLBACK_CATEGORY
     expense.currency = currency if currency in INVOICE_CURRENCIES else "USD"
     expense.status = status if status in EXPENSE_STATUSES else "Paid"
     expense.due_date = _parse_date(f.get("due_date"))
@@ -138,7 +197,8 @@ def list_expenses():
     month = request.args.get("month", "")  # YYYY-MM
     if currency in INVOICE_CURRENCIES:
         q = q.filter(Expense.currency == currency)
-    if category in EXPENSE_CATEGORIES:
+    all_categories = category_names(active_only=False)
+    if category in all_categories:
         q = q.filter(Expense.category == category)
     if status in EXPENSE_STATUSES:
         q = q.filter(Expense.status == status)
@@ -157,7 +217,7 @@ def list_expenses():
     return render_template(
         "expenses/list.html", expenses=expenses, totals=totals, money=fmt_money,
         f_currency=currency, f_category=category, f_status=status, f_month=month, today=date.today(),
-        categories=EXPENSE_CATEGORIES, statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
+        categories=all_categories, statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
     )
 
 
@@ -187,11 +247,11 @@ def edit_expense(expense_id):
         error = _apply_form(expense)
         if error:
             flash(error, "danger")
-            return render_template("expenses/form.html", expense=expense, form=request.form, **_form_context())
+            return render_template("expenses/form.html", expense=expense, form=request.form, **_form_context(expense))
         db.session.commit()
         flash("Expense updated.", "success")
         return redirect(url_for("expenses.list_expenses"))
-    return render_template("expenses/form.html", expense=expense, form={}, **_form_context())
+    return render_template("expenses/form.html", expense=expense, form={}, **_form_context(expense))
 
 
 @expenses_bp.route("/<int:expense_id>/paid", methods=["POST"])
@@ -213,3 +273,79 @@ def delete_expense(expense_id):
     db.session.commit()
     flash("Expense deleted.", "info")
     return redirect(url_for("expenses.list_expenses"))
+
+
+# ------------------------------------------------------------------ manage categories
+
+def _categories_page():
+    ensure_categories()
+    rows = ExpenseCategory.query.order_by(ExpenseCategory.order, ExpenseCategory.name).all()
+    counts = dict(db.session.query(Expense.category, db.func.count(Expense.id)).group_by(Expense.category).all())
+    return render_template("expenses/categories.html", categories=rows, counts=counts, fallback=EXPENSE_FALLBACK_CATEGORY)
+
+
+@expenses_bp.route("/categories")
+@finance_required
+def categories():
+    return _categories_page()
+
+
+@expenses_bp.route("/categories/add", methods=["POST"])
+@finance_required
+def add_category_route():
+    name, err = add_category(request.form.get("name"), current_user)
+    if err:
+        flash(err, "danger")
+    else:
+        db.session.commit()
+        flash(f"Category '{name}' is ready to use.", "success")
+    return redirect(url_for("expenses.categories"))
+
+
+@expenses_bp.route("/categories/<int:category_id>/rename", methods=["POST"])
+@finance_required
+def rename_category(category_id):
+    cat = ExpenseCategory.query.get_or_404(category_id)
+    new = _clean_category_name(request.form.get("name"))
+    if cat.name == EXPENSE_FALLBACK_CATEGORY:
+        flash(f"'{EXPENSE_FALLBACK_CATEGORY}' is the catch-all and cannot be renamed.", "danger")
+    elif not new:
+        flash("Type a name for the category.", "danger")
+    elif new.lower() != cat.name.lower() and ExpenseCategory.query.filter(db.func.lower(ExpenseCategory.name) == new.lower()).first():
+        flash(f"There is already a category called '{new}'. Use that one, or switch this one off.", "danger")
+    else:
+        old = cat.name
+        moved = Expense.query.filter_by(category=old).update({"category": new})
+        cat.name = new
+        db.session.commit()
+        flash(f"Renamed '{old}' to '{new}'" + (f" on {moved} expense(s)." if moved else "."), "success")
+    return redirect(url_for("expenses.categories"))
+
+
+@expenses_bp.route("/categories/<int:category_id>/toggle", methods=["POST"])
+@finance_required
+def toggle_category(category_id):
+    cat = ExpenseCategory.query.get_or_404(category_id)
+    if cat.name == EXPENSE_FALLBACK_CATEGORY:
+        flash(f"'{EXPENSE_FALLBACK_CATEGORY}' is the catch-all and stays on.", "danger")
+    else:
+        cat.is_active = not cat.is_active
+        db.session.commit()
+        flash(f"'{cat.name}' is now {'available' if cat.is_active else 'switched off for new expenses (existing ones keep it)'}.", "info")
+    return redirect(url_for("expenses.categories"))
+
+
+@expenses_bp.route("/categories/<int:category_id>/delete", methods=["POST"])
+@finance_required
+def delete_category(category_id):
+    cat = ExpenseCategory.query.get_or_404(category_id)
+    used = Expense.query.filter_by(category=cat.name).count()
+    if cat.name == EXPENSE_FALLBACK_CATEGORY:
+        flash(f"'{EXPENSE_FALLBACK_CATEGORY}' is the catch-all and cannot be deleted.", "danger")
+    elif used:
+        flash(f"'{cat.name}' is used by {used} expense(s), so it cannot be deleted. Switch it off instead, or rename it.", "danger")
+    else:
+        db.session.delete(cat)
+        db.session.commit()
+        flash(f"Deleted '{cat.name}'.", "info")
+    return redirect(url_for("expenses.categories"))

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Expense categories - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Expense categories</h1>
+    <div class="subtitle">The headings the firm's own costs are filed under. They drive the register filter and the expenses-by-category chart in Analytics.</div></div>
+  <div><a href="{{ url_for('expenses.list_expenses') }}" class="btn secondary">Back to register</a></div>
+</div>
+<div class="card">
+  <form method="post" action="{{ url_for('expenses.add_category_route') }}" class="form-row" style="align-items:flex-end;">
+    <div style="flex:1;max-width:420px;"><label for="cat_name">New category</label><input type="text" id="cat_name" name="name" maxlength="60" required placeholder="e.g. Audit software licences"></div>
+    <div><button class="btn gold" type="submit" style="margin-bottom:14px;">Add category</button></div>
+  </form>
+</div>
+<div class="card">
+  <table>
+    <thead><tr><th>Category</th><th class="num">Expenses</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for c in categories %}
+      {% set n = counts.get(c.name, 0) %}
+      <tr {% if not c.is_active %}style="opacity:.6;"{% endif %}>
+        <td>
+          {% if c.name == fallback %}<strong>{{ c.name }}</strong> <span class="muted" style="font-size:11.5px;">catch-all, always available</span>
+          {% else %}
+          <form method="post" action="{{ url_for('expenses.rename_category', category_id=c.id) }}" style="display:flex;gap:6px;align-items:center;">
+            <input type="text" name="name" value="{{ c.name }}" maxlength="60" required style="margin-bottom:0;max-width:320px;">
+            <button class="btn small secondary" type="submit">Rename</button>
+          </form>
+          {% endif %}
+        </td>
+        <td class="num"><a href="{{ url_for('expenses.list_expenses', category=c.name) }}">{{ n }}</a></td>
+        <td>{% if c.is_active %}<span class="badge status-Paid">In use</span>{% else %}<span class="badge">Switched off</span>{% endif %}</td>
+        <td style="white-space:nowrap;">
+          {% if c.name != fallback %}
+          <form method="post" action="{{ url_for('expenses.toggle_category', category_id=c.id) }}" style="display:inline;"><button class="btn small secondary" type="submit">{{ 'Switch off' if c.is_active else 'Switch on' }}</button></form>
+          {% if n == 0 %}<form method="post" action="{{ url_for('expenses.delete_category', category_id=c.id) }}" style="display:inline;" onsubmit="return confirm('Delete this category?');"><button class="btn small danger" type="submit">Delete</button></form>{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">Renaming a category renames it on every expense that uses it. A category with expenses cannot be deleted; switch it off to stop it being offered for new expenses.</p>
+</div>
+{% endblock %}

@@ -9902,6 +9902,21 @@ EXPENSE_CATEGORIES = [
     "Bank charges", "Taxes & levies", "Other",
 ]
 EXPENSE_STATUSES = ["Unpaid", "Paid"]
+EXPENSE_FALLBACK_CATEGORY = "Other"   # always present; cannot be renamed, switched off or deleted
+
+
+class ExpenseCategory(db.Model):
+    """A category the firm files its own expenses under. Seeded from EXPENSE_CATEGORIES the first time it is needed,
+    then managed from Finance > Expenses > Categories. Expense.category stores the NAME, so renaming a category renames
+    it on its expenses too, and a category that has expenses is switched off rather than deleted."""
+    __tablename__ = "expense_category"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(60), nullable=False, unique=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.relationship("User")
 
 
 class Expense(db.Model):
