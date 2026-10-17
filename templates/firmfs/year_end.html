@@ -33,10 +33,12 @@
 
 <div class="card" id="cash">
   <h3 style="margin-top:0;">Cash and bank</h3>
-  {% if ye.cash_from_book %}
-    <p style="margin-top:0;">The balance sheet takes cash and bank from the <a href="{{ url_for('firmfs.cash_book') }}">Cash Book</a> at {{ ye.period_end.strftime('%d %B %Y') }}. Do not also enter cash figures below.</p>
+  {% if cash_auto %}
+    <p style="margin-top:0;">Cash and bank in the balance sheet, the cash flow statement and the notes come from the <a href="{{ url_for('firmfs.cash_book') }}">Cash Book</a> at {{ ye.period_end.strftime('%d %B %Y') }}, and the opening cash is the Cash Book balance at the previous year-end. Do not also enter cash figures below.</p>
+  {% elif ye.cash_manual %}
+    <p style="margin-top:0;">This year-end is set to manual cash: the figure you enter below is used. Tick "take cash from the Cash Book" in the settings to use the Cash Book instead.</p>
   {% else %}
-    <p style="margin-top:0;">Cash is the figure you enter below. Tick "take cash from the Cash Book" in the settings to use the Cash Book instead.</p>
+    <p style="margin-top:0;">No Cash Book account was running at {{ ye.period_end.strftime('%d %B %Y') }}, so cash is the figure you enter below. Once the Cash Book has an account that starts on or before this date, it takes over.</p>
   {% endif %}
   {% if cash_info['items'] %}
   <table style="max-width:560px;"><tbody>
@@ -98,7 +100,7 @@
       <div><label for="reporting_framework">Framework</label><select id="reporting_framework" name="reporting_framework">{% for k, l in frameworks %}<option value="{{ k }}" {% if k == ye.reporting_framework %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
     </div>
     <label style="font-weight:400;"><input type="checkbox" name="opening_nil" value="1" style="width:auto;" {% if ye.opening_nil %}checked{% endif %}> This is the firm's first period: the opening position is nil (allows a cash flow with no previous year-end)</label>
-    <label style="font-weight:400;display:block;margin-top:6px;"><input type="checkbox" name="cash_from_book" value="1" style="width:auto;" {% if ye.cash_from_book %}checked{% endif %}> Take cash and bank balances from the Cash Book (instead of entering them)</label>
+    <label style="font-weight:400;display:block;margin-top:6px;"><input type="checkbox" name="cash_from_book" value="1" style="width:auto;" {% if not ye.cash_manual %}checked{% endif %}> Take cash and bank balances from the Cash Book (untick to enter cash figures by hand)</label>
     <label for="extra_note" style="margin-top:10px;">Additional note (printed as the last note; one paragraph per line)</label>
     <textarea id="extra_note" name="extra_note" rows="3">{{ ye.extra_note or '' }}</textarea>
     <button class="btn" type="submit">Save settings</button>

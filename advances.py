@@ -97,7 +97,8 @@ def available_for_invoice(invoice):
 
 # ------------------------------------------------------------- the operations
 
-def record_advance(client, currency, amount, received_on, method, reference, purpose, notes, engagement, user):
+def record_advance(client, currency, amount, received_on, method, reference, purpose, notes, engagement, user,
+                   cash_account_raw=None):
     """Create the advance and its ADV- receipt. Returns (advance, None) or (None, reason). Commits on success."""
     if currency not in INVOICE_CURRENCIES:
         return None, "Choose the currency the client paid in."
@@ -111,6 +112,10 @@ def record_advance(client, currency, amount, received_on, method, reference, pur
         return None, "Choose how the client paid."
     if engagement is not None and engagement.client_id != client.id:
         return None, "That engagement doesn't belong to the selected client."
+    import cashbook
+    cash_account_id, bad_account = cashbook.parse_choice(cash_account_raw, currency)
+    if bad_account:
+        return None, bad_account
     prefix = f"ADV-{date.today().year}-"
     for attempt in (1, 2):
         advance = ClientAdvance(
@@ -128,6 +133,7 @@ def record_advance(client, currency, amount, received_on, method, reference, pur
             db.session.rollback()
             if attempt == 2:
                 return None, "Could not allocate an advance number - please try again."
+    cashbook.set_account(f"advance:{advance.id}", cash_account_id)
     db.session.commit()
     return advance, None
 
@@ -258,7 +264,7 @@ def new_advance():
             client, request.form.get("currency", "USD"), _parse_amount(request.form.get("amount")),
             _parse_date(request.form.get("received_on")), request.form.get("method", ""),
             request.form.get("reference"), request.form.get("purpose"), request.form.get("notes"),
-            engagement, current_user)
+            engagement, current_user, cash_account_raw=request.form.get("cash_account_id"))
         if error:
             flash(error, "danger")
             return form(preselect_client_id=client.id)
@@ -381,10 +387,18 @@ def refund(advance_id):
     if method not in PAYMENT_METHODS:
         flash("Choose how the refund was paid.", "danger")
         return back
-    db.session.add(ClientAdvanceRefund(
+    import cashbook
+    cash_account_id, bad_account = cashbook.parse_choice(request.form.get("cash_account_id"), advance.currency)
+    if bad_account:
+        flash(bad_account, "danger")
+        return back
+    new_refund = ClientAdvanceRefund(
         advance_id=advance.id, amount=amount, refunded_on=when, method=method,
         reference=request.form.get("reference", "").strip() or None, notes=request.form.get("notes", "").strip() or None,
-        refunded_by_id=current_user.id))
+        refunded_by_id=current_user.id)
+    db.session.add(new_refund)
+    db.session.flush()
+    cashbook.set_account(f"refund:{new_refund.id}", cash_account_id)
     db.session.commit()
     flash(f"Refund of {advance.currency} {amount:,.2f} recorded against {advance.advance_number}.", "success")
     return back

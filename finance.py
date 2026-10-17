@@ -180,11 +180,24 @@ def _apply_form(expense):
     expense.paid_date = (_parse_date(f.get("paid_date")) or when) if expense.status == "Paid" else None
     expense.reference = f.get("reference", "").strip() or None
     expense.notes = f.get("notes", "").strip() or None
+    import cashbook
+    cash_account_id, bad_account = cashbook.parse_choice(f.get("cash_account_id"), expense.currency)
+    if bad_account:
+        return bad_account
+    expense._cash_account_id = cash_account_id
     try:
         expense.client_id = int(f.get("client_id")) if f.get("client_id") else None
     except ValueError:
         expense.client_id = None
     return None
+
+
+def _store_cash_account(expense):
+    """Keep the cash book account chosen on the form (blank = automatic). The picker is only on the form for users who
+    may see it, so a save by anyone else never changes an existing choice."""
+    import cashbook
+    if cashbook.can_choose_account():
+        cashbook.set_account(f"expense:{expense.id}", getattr(expense, "_cash_account_id", None))
 
 
 @expenses_bp.route("/")
@@ -231,6 +244,8 @@ def new_expense():
             flash(error, "danger")
             return render_template("expenses/form.html", expense=None, form=request.form, **_form_context())
         db.session.add(expense)
+        db.session.flush()
+        _store_cash_account(expense)
         db.session.commit()
         flash("Expense recorded.", "success")
         if request.form.get("add_another"):
@@ -247,7 +262,9 @@ def edit_expense(expense_id):
         error = _apply_form(expense)
         if error:
             flash(error, "danger")
-            return render_template("expenses/form.html", expense=expense, form=request.form, **_form_context(expense))
+            db.session.rollback()
+            return render_template("expenses/form.html", expense=Expense.query.get(expense_id), form=request.form, **_form_context(expense))
+        _store_cash_account(expense)
         db.session.commit()
         flash("Expense updated.", "success")
         return redirect(url_for("expenses.list_expenses"))
@@ -269,6 +286,8 @@ def mark_paid(expense_id):
 @finance_required
 def delete_expense(expense_id):
     expense = Expense.query.get_or_404(expense_id)
+    import cashbook
+    cashbook.forget(f"expense:{expense.id}")
     db.session.delete(expense)
     db.session.commit()
     flash("Expense deleted.", "info")

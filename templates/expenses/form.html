@@ -32,6 +32,7 @@
     <div class="form-row">
       <div class="form-group"><label for="paid_date">Date paid (if paid)</label>
         <input type="date" id="paid_date" name="paid_date" value="{{ form.get('paid_date') or (expense.paid_date.isoformat() if expense and expense.paid_date else '') }}"></div>
+      <div class="form-group">{% with ca_currency_id='currency', ca_dir='out', ca_current=(form.get('cash_account_id') if form and form.get('cash_account_id') is not none else (cash_current('expense:' ~ expense.id) if expense else none)) %}{% include "_cash_account_field.html" %}{% endwith %}</div>
       <div class="form-group"><label for="due_date">Due date (if unpaid)</label>
         <input type="date" id="due_date" name="due_date" value="{{ form.get('due_date') or (expense.due_date.isoformat() if expense and expense.due_date else '') }}"></div>
       <div class="form-group"><label for="reference">Reference / invoice no.</label>

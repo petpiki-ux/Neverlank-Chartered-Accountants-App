@@ -1,0 +1,40 @@
+{# "Cash book account" picker shared by the capture forms. Shown only to users who may see firm finances, and only
+   when at least one cash book account exists.
+   Inputs (set with {% with %}): ca_currency (fixed currency) OR ca_currency_id (id of the currency <select>);
+   ca_method_id (id of the "Paid by" <select>, optional); ca_dir ('in' or 'out'); ca_current (account id already chosen). #}
+{% set _ca = cash_choices() %}
+{% if _ca %}
+{% set _uid = 'ca_' ~ (ca_dir or 'in') ~ '_' ~ (ca_method_id or ca_currency_id or 'x') %}
+<div>
+  <label for="{{ _uid }}">Cash book account</label>
+  <select id="{{ _uid }}" name="cash_account_id">
+    <option value="">Automatic (by payment method)</option>
+    {% for a in _ca %}<option value="{{ a.id }}" data-cur="{{ a.currency }}" data-methods="|{{ a.method_list|join('|') }}|" data-default="{{ 1 if (a.default_out if ca_dir == 'out' else a.default_in) else 0 }}" {% if ca_current and ca_current|string == a.id|string %}selected{% endif %}>{{ a.name }}{% if a.kind and a.kind not in a.name %} ({{ a.kind }}){% endif %} - {{ a.currency }}</option>{% endfor %}
+  </select>
+  <div class="muted" style="font-size:11px;margin-top:2px;">Which bank / cash / mobile-money account the money went through.</div>
+</div>
+<script>
+(function(){
+  var sel=document.getElementById({{ _uid|tojson }}); if(!sel) return;
+  var fixed={{ (ca_currency or '')|tojson }};
+  var curEl={{ (ca_currency_id or '')|tojson }} ? document.getElementById({{ (ca_currency_id or '')|tojson }}) : null;
+  var methEl={{ (ca_method_id or '')|tojson }} ? document.getElementById({{ (ca_method_id or '')|tojson }}) : null;
+  var touched={{ 'true' if ca_current else 'false' }};
+  function cur(){ return curEl ? curEl.value : fixed; }
+  function refresh(auto){
+    var c=cur(), m=methEl?methEl.value:'', i, o, pick=null, dflt=null;
+    for(i=0;i<sel.options.length;i++){ o=sel.options[i]; if(!o.value) continue;
+      var ok=(!c||o.getAttribute('data-cur')===c); o.hidden=!ok; o.disabled=!ok;
+      if(ok&&pick===null&&m&&o.getAttribute('data-methods').indexOf('|'+m+'|')>=0) pick=o.value;
+      if(ok&&dflt===null&&o.getAttribute('data-default')==='1') dflt=o.value; }
+    var cs=sel.options[sel.selectedIndex];
+    if(cs&&cs.value&&cs.disabled){ sel.value=''; touched=false; }
+    if(auto&&!touched){ sel.value=(pick!==null?pick:(dflt!==null?dflt:'')); }
+  }
+  sel.addEventListener('change',function(){ touched=true; });
+  if(curEl) curEl.addEventListener('change',function(){ refresh(true); });
+  if(methEl) methEl.addEventListener('change',function(){ refresh(true); });
+  refresh(true);
+})();
+</script>
+{% endif %}

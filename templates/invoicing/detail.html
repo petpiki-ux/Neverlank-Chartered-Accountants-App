@@ -251,6 +251,7 @@
       <input type="date" id="pay_date" name="paid_on" value="{{ (invoice.paid_at|cat).strftime('%Y-%m-%d') if invoice.legacy_paid and invoice.paid_at else today_iso }}" max="{{ today_iso }}" required></div>
     <div><label for="pay_method">Paid by</label>
       <select id="pay_method" name="method" required>{% for m in methods %}<option value="{{ m }}" {% if m == 'Bank transfer' %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+    {% with ca_currency=invoice.currency, ca_method_id='pay_method', ca_dir='in' %}{% include "_cash_account_field.html" %}{% endwith %}
     <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Record payment &amp; issue receipt</button></div>
   </form>
   <p class="muted" style="font-size:11.5px;margin-top:0;">The amount is pre-filled with the full balance; reduce it if the client is paying in instalments. Each payment gets its own receipt.</p>

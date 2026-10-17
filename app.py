@@ -284,7 +284,7 @@ def _add_missing_columns():
         # tax_expense_type - which Prohibited Deductions rule a ledger expense account maps to; source - marks income
         # tax computation lines posted from that schedule so a re-post replaces only them (prohibited_deductions.py)
         "gl_account": [("tax_expense_type", "VARCHAR(60)")],
-        "firm_year_end": [("cash_from_book", "BOOLEAN DEFAULT 0 NOT NULL")],
+        "firm_year_end": [("cash_manual", "BOOLEAN DEFAULT 0 NOT NULL")],
         "income_tax_adjustment_line": [("source", "VARCHAR(30)")],
         # helpful/unhelpful feedback on cached "Ask the library" answers (learning.py)
         "legislative_ask_cache": [("helpful_count", "INTEGER DEFAULT 0"), ("unhelpful_count", "INTEGER DEFAULT 0")],
@@ -873,6 +873,16 @@ def create_app():
     app.jinja_env.filters["cat"] = to_cat
     app.jinja_env.globals["now_cat"] = now_cat
     app.jinja_env.globals["today_cat"] = today_cat
+
+    def _cash_choices():
+        import cashbook
+        return cashbook.choosable_accounts()
+    app.jinja_env.globals["cash_choices"] = _cash_choices
+
+    def _cash_current(key):
+        import cashbook
+        return cashbook.current_choice(key)
+    app.jinja_env.globals["cash_current"] = _cash_current
 
     @app.context_processor
     def inject_globals():

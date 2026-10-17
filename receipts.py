@@ -69,7 +69,7 @@ def settle_invoice(invoice):
         invoice.paid_at = None
 
 
-def add_receipt(invoice, amount, paid_on, method, user):
+def add_receipt(invoice, amount, paid_on, method, user, cash_account_raw=None):
     """Record a payment and issue its receipt. Returns (receipt, None) or
     (None, "reason it was refused"). Commits on success."""
     if invoice.status == "Draft":
@@ -94,6 +94,10 @@ def add_receipt(invoice, amount, paid_on, method, user):
         return None, "The payment date cannot be in the future."
     if method not in PAYMENT_METHODS:
         return None, "Choose how the payment was made."
+    import cashbook
+    cash_account_id, bad_account = cashbook.parse_choice(cash_account_raw, invoice.currency)
+    if bad_account:
+        return None, bad_account
 
     prefix = f"RCT-{date.today().year}-"
     for attempt in (1, 2):
@@ -111,6 +115,7 @@ def add_receipt(invoice, amount, paid_on, method, user):
             invoice = Invoice.query.get(invoice.id)
             if attempt == 2:
                 return None, "Could not allocate a receipt number - please try again."
+    cashbook.set_account(f"receipt:{receipt.id}", cash_account_id)
     db.session.refresh(invoice)
     settle_invoice(invoice)
     db.session.commit()
@@ -213,7 +218,7 @@ def record_payment(invoice_id):
     _ensure_invoice_access(invoice)
     receipt, error = add_receipt(
         invoice, _parse_amount(request.form.get("amount")), _parse_date(request.form.get("paid_on")),
-        request.form.get("method", ""), current_user,
+        request.form.get("method", ""), current_user, cash_account_raw=request.form.get("cash_account_id"),
     )
     if error:
         flash(error, "danger")

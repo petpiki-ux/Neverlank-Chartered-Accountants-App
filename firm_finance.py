@@ -110,10 +110,11 @@ def year_end(ye_id):
         grouped.setdefault(ln.fs_category, []).append(ln)
     ordered = [(code, label, grouped[code]) for code, label in FIRM_ENTRY_CATEGORIES if code in grouped]
     cash_info = cashbook.statement_balances(ye.period_end, ye.zwg_rate)
+    cash_auto = cashbook.uses_cash_book(ye, ye.period_end)
     manual_cash = cashbook.manual_summary(cur["period_start"], ye.period_end)
     return render_template(
         "firmfs/year_end.html", ye=ye, stm=stm, d=d, sched=sched, pbt=pbt, ordered=ordered, active="index",
-        cash_info=cash_info, manual_cash=manual_cash,
+        cash_info=cash_info, manual_cash=manual_cash, cash_auto=cash_auto,
         categories=FIRM_ENTRY_CATEGORIES, currencies=INVOICE_CURRENCIES, frameworks=FIRM_FRAMEWORKS,
         previous=earlier[-1] if earlier else None,
         indicative_tax=(pbt * (ye.tax_rate_percent or 0) / 100.0) if pbt > 0 else 0.0,
@@ -136,7 +137,7 @@ def save_year_end(ye_id):
     if rate is not None:
         ye.tax_rate_percent = rate
     ye.opening_nil = bool(request.form.get("opening_nil"))
-    ye.cash_from_book = bool(request.form.get("cash_from_book"))
+    ye.cash_manual = not request.form.get("cash_from_book")
     if request.form.get("reporting_framework") in dict(FIRM_FRAMEWORKS):
         ye.reporting_framework = request.form.get("reporting_framework")
     ye.extra_note = (request.form.get("extra_note") or "").strip() or None

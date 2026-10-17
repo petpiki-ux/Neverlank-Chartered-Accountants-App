@@ -224,13 +224,24 @@ def summary(accounts, txns, start, end):
 
 # ------------------------------------------------------------------ for the financial statements
 
+def book_covers(day):
+    """True if at least one Cash Book account is running on `day` (it has started by then)."""
+    return any(a.opening_date <= day for a in CashAccount.query.all())
+
+
+def uses_cash_book(ye, day):
+    """Whether this year-end's cash and bank come from the Cash Book: yes by default, as soon as an account was running
+    at the year-end, unless the year-end is switched to manual cash."""
+    return (not getattr(ye, "cash_manual", False)) and book_covers(day)
+
+
 def statement_balances(day, zwg_rate):
     """Cash and bank balances at the end of `day`, in USD, one item per account, for the firm's balance sheet.
     Returns {"items": [{name, usd, original}], "warnings": [...]}."""
     accounts, txns, _clears = load_all()
     items, warnings = [], []
     if not accounts:
-        warnings.append("The balance sheet is set to take cash from the Cash Book, but the Cash Book has no accounts yet.")
+        warnings.append("The Cash Book has no accounts yet.")
     for a in accounts:
         bal = balance_at(a, txns, day)
         started = a.opening_date <= day
@@ -272,3 +283,73 @@ def manual_summary(start, end):
         k = (en.category, cur)
         rows[k]["in" if en.direction == "in" else "out"] += en.amount or 0.0
     return [{"category": c, "currency": cur, "in": r2(v["in"]), "out": r2(v["out"])} for (c, cur), v in sorted(rows.items())]
+
+
+# ------------------------------------------------------------------ choosing the account when money is captured
+# The capture forms (payment/receipt, client advance, advance refund, expense) carry a "Cash book account" picker so
+# the person capturing says which bank/cash/mobile-money account the money went through. The choice is stored as a
+# CashAssign (the same record the cash book's "Move" button writes), so it overrides the automatic rules. Only users
+# with the "view_firm_finances" permission (Partner/Admin) see the picker; for everyone else capture is unchanged
+# and the automatic rules apply.
+
+def can_choose_account():
+    from flask_login import current_user
+    from models import user_has_permission
+    return bool(getattr(current_user, "is_authenticated", False)) and user_has_permission(current_user, "view_firm_finances")
+
+
+def choosable_accounts():
+    """Active accounts the picker offers (empty if the user may not choose, or no accounts are set up yet)."""
+    if not can_choose_account():
+        return []
+    return accounts_in_order(active_only=True)
+
+
+def current_choice(key):
+    """The account id manually chosen for this transaction key (or None)."""
+    row = CashAssign.query.filter_by(source_key=key).first() if key else None
+    return row.account_id if row else None
+
+
+def parse_choice(raw, currency):
+    """Validate the posted picker value. Returns (account_id or None, error or None). Blank = automatic."""
+    if not can_choose_account():
+        return None, None
+    raw = (raw or "").strip()
+    if not raw:
+        return None, None
+    try:
+        acc_id = int(raw)
+    except ValueError:
+        return None, "Choose a cash book account from the list."
+    acct = CashAccount.query.get(acc_id)
+    if acct is None or not acct.is_active:
+        return None, "That cash book account is not available. Choose another."
+    if acct.currency != currency:
+        return None, f"{acct.name} is a {acct.currency} account but this is a {currency} transaction. Choose a {currency} account."
+    return acct.id, None
+
+
+def set_account(key, account_id):
+    """Store (or, with None, clear) the chosen account for a transaction key. Does not commit.
+    Always called on capture, so a stale choice left by a deleted record whose id was reused can never apply."""
+    existing = CashAssign.query.filter_by(source_key=key).first()
+    if account_id is None:
+        if existing:
+            from extensions import db
+            db.session.delete(existing)
+            CashClear.query.filter_by(source_key=key).delete()
+        return
+    from extensions import db
+    if existing:
+        if existing.account_id != account_id:
+            CashClear.query.filter_by(source_key=key).delete()
+        existing.account_id = account_id
+    else:
+        db.session.add(CashAssign(source_key=key, account_id=account_id))
+
+
+def forget(key):
+    """Remove everything stored about a transaction key (when its record is deleted). Does not commit."""
+    CashAssign.query.filter_by(source_key=key).delete()
+    CashClear.query.filter_by(source_key=key).delete()

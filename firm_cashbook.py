@@ -10,14 +10,20 @@ from flask_login import current_user
 from extensions import db
 from models import (
     CashAccount, CashEntry, CashAssign, CashClear, CASH_ACCOUNT_KINDS, CASH_ENTRY_CATEGORIES, CASH_TRANSFER_CATEGORY,
-    INVOICE_CURRENCIES, PAYMENT_METHODS, FirmYearEnd,
+    INVOICE_CURRENCIES, PAYMENT_METHODS, FirmYearEnd, Expense,
 )
-from finance import finance_required, _parse_date, _parse_float
+from finance import finance_required, _parse_date, _parse_float, category_names, add_category, _clean_category_name
 from firm_finance import firmfs_bp
 import cashbook
 import firm_statements as fs
 
 BACK_PREFIX = "/firm-finance/cash-book"
+
+# Headings offered for NEW manual entries. Bank charges and salaries are expense categories now (they are filed in the
+# Expense register), so they are not offered here again; entries already saved under them keep working.
+CASH_IN_CATEGORIES = ["Owner / shareholder contribution", "Loan received", "Interest received", "Other receipt"]
+CASH_OUT_CATEGORIES = ["Loan repayment", "Dividend paid", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Other payment"]
+NEW_CATEGORY = "__new__"
 
 
 def _back(default):
@@ -148,8 +154,18 @@ def cash_clear():
 # ------------------------------------------------------------------ manual entries
 
 def _entry_form_context(entry=None, form=None):
+    # a new entry starts with NO account chosen (the person must pick one), unless they came from one account's page
+    pre = request.args.get("account", type=int) if entry is None and form is None else None
+    # "Money out" can be filed under one of the firm's expense categories (Fuel, Rent ...): those are recorded in the Expense
+    # register, so they reach the income statement. The remaining headings are cash-only payments (loan repayment, tax ...).
+    cats_in = [c for c in CASH_IN_CATEGORIES]
+    cats_out = [c for c in CASH_ENTRY_CATEGORIES if c in CASH_OUT_CATEGORIES]
+    if entry is not None:
+        pool = cats_in if entry.direction == "in" else cats_out
+        if entry.category not in pool:
+            pool.append(entry.category)   # an older entry keeps its own heading when edited
     return dict(ye=None, active="cash", accounts=cashbook.accounts_in_order(active_only=True), entry=entry, form=form,
-                categories=CASH_ENTRY_CATEGORIES, today=date.today())
+                cats_in=cats_in, cats_out=cats_out, expense_cats=category_names(), today=date.today(), preselect=pre)
 
 
 def _read_entry_form(editing=None):
@@ -183,10 +199,46 @@ def _read_entry_form(editing=None):
             return None, f"{to.name} starts on {to.opening_date.strftime('%d %b %Y')}; the transfer cannot be dated before then."
         out["to"] = to
     else:
-        if cat not in CASH_ENTRY_CATEGORIES:
+        cat = request.form.get("category_out" if kind == "out" else "category_in") or request.form.get("category")
+        if kind == "out" and cat == NEW_CATEGORY:
+            name = _clean_category_name(request.form.get("new_category"))
+            if not name:
+                return None, "Type a name for the new expense category."
+            out["expense_new"] = name
+        elif kind == "out" and (cat or "").startswith("expense:"):
+            name = cat[len("expense:"):]
+            if name not in category_names():
+                return None, "Choose what the money was for."
+            out["expense_category"] = name
+        elif cat in CASH_ENTRY_CATEGORIES:
+            out["category"] = cat
+        else:
             return None, "Choose what the money was for."
-        out["category"] = cat
+        if "category" not in out:
+            payee = (request.form.get("payee") or "").strip()[:200]
+            if not payee:
+                return None, "Enter who the money was paid to."
+            if acct.currency not in INVOICE_CURRENCIES:
+                return None, f"The expense register does not take {acct.currency}; use a cash-only heading for this entry."
+            out["payee"] = payee
     return out, None
+
+
+def _file_as_expense(d):
+    """Record a payment filed under an expense category as an Expense (Paid) and tie it to the chosen account. Returns an
+    error message or None. The Expense register is then the only record, so the income statement and the cash book agree."""
+    name = d.get("expense_category")
+    if d.get("expense_new"):
+        name, err = add_category(d["expense_new"], current_user)
+        if err:
+            return err
+    ex = Expense(expense_date=d["on"], supplier=d["payee"], description=d["desc"] or None, category=name, amount=d["amount"],
+                 currency=d["acct"].currency, status="Paid", paid_date=d["on"], reference=d["ref"] or None,
+                 created_by_id=current_user.id)
+    db.session.add(ex)
+    db.session.flush()
+    cashbook.set_account(f"expense:{ex.id}", d["acct"].id)
+    return None
 
 
 @firmfs_bp.route("/cash-book/entries/new", methods=["GET", "POST"])
@@ -205,6 +257,13 @@ def cash_entry_new():
                 db.session.add(CashEntry(account_id=d["to"].id, entry_date=d["on"], direction="in", amount=d["amount"], category=CASH_TRANSFER_CATEGORY,
                                          description=text, reference=d["ref"], transfer_id=tid, created_by_id=current_user.id))
                 flash(f"Transferred {d['amount']:,.2f} from {d['acct'].name} to {d['to'].name}.", "success")
+            elif "category" not in d:
+                bad = _file_as_expense(d)
+                if bad:
+                    db.session.rollback()
+                    flash(bad, "danger")
+                    return render_template("firmfs/cash_entry.html", **_entry_form_context(None, request.form))
+                flash(f"Paid {d['amount']:,.2f} to {d['payee']} recorded as an expense and taken from {d['acct'].name}.", "success")
             else:
                 db.session.add(CashEntry(account_id=d["acct"].id, entry_date=d["on"], direction=d["kind"], amount=d["amount"], category=d["category"],
                                          description=d["desc"], reference=d["ref"], created_by_id=current_user.id))
@@ -227,6 +286,19 @@ def cash_entry_edit(entry_id):
             flash(err, "danger")
         elif d["kind"] == "transfer":
             flash("To make this a transfer, delete it and enter the transfer.", "danger")
+        elif "category" not in d:
+            # an older cash-only entry re-filed under an expense category becomes an expense in the register
+            bad = _file_as_expense(d)
+            if bad:
+                db.session.rollback()
+                flash(bad, "danger")
+            else:
+                CashClear.query.filter_by(source_key=f"entry:{en.id}").delete()
+                acc = d["acct"].id
+                db.session.delete(en)
+                db.session.commit()
+                flash("Entry moved to the Expense register and kept in the cash book.", "success")
+                return redirect(url_for("firmfs.cash_book", account=acc))
         else:
             moved = CashClear.query.filter_by(source_key=f"entry:{en.id}").first()
             if moved and moved.account_id != d["acct"].id:

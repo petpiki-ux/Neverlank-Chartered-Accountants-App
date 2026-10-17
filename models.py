@@ -10957,7 +10957,7 @@ class FirmYearEnd(db.Model):
     tax_rate_percent = db.Column(db.Float, default=24.72)   # only used for the indicative-tax hint on the entry page
     reporting_framework = db.Column(db.String(20), default="ifrs_for_smes")
     opening_nil = db.Column(db.Boolean, default=False, nullable=False)   # first period: the opening position is nil
-    cash_from_book = db.Column(db.Boolean, default=False, nullable=False)  # cash and bank taken from the Cash Book
+    cash_manual = db.Column(db.Boolean, default=False, nullable=False)  # True = cash entered by hand; False = taken from the Cash Book
     extra_note = db.Column(db.Text)                 # printed as an additional note
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)

@@ -295,7 +295,9 @@ def build_column(ye, prev_end, classes, assets):
     add("trade_payables", "Supplier bills not yet paid", d["payables"])
     add("other_current_liabilities", "Customer advances (received before invoicing)", d["advances"])
 
-    from_book = bool(getattr(ye, "cash_from_book", False))
+    # Cash and bank come from the Cash Book automatically once it has an account running at the year-end; only a year-end
+    # that predates the Cash Book (or one switched to manual) uses the cash figures entered on the year-end page.
+    from_book = cashbook.uses_cash_book(ye, end)
     if from_book:
         cb = cashbook.statement_balances(end, rate)
         for item in cb["items"]:
@@ -304,7 +306,7 @@ def build_column(ye, prev_end, classes, assets):
         ignored = [ln for ln in ye.lines if ln.fs_category == "cash"]
         if ignored:
             warnings.append(f"Cash is taken from the Cash Book, so the {len(ignored)} cash figure(s) entered on this year-end were ignored. "
-                            "Remove them, or untick the Cash Book option, to avoid confusion.")
+                            "Remove them, or switch this year-end to manual cash in its settings, to avoid confusion.")
 
     re_entered = False
     for ln in ye.lines:

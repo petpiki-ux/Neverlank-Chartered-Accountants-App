@@ -8,7 +8,7 @@
   <div>
     <a class="btn secondary" href="{{ url_for('firmfs.cash_accounts') }}">Accounts</a>
     {% if accounts %}<a class="btn secondary" href="{{ url_for('firmfs.cash_book_export', account=(selected.id if selected else 'all'), **{'from': start.isoformat(), 'to': end.isoformat()}) }}">Excel</a>
-    <a class="btn gold" href="{{ url_for('firmfs.cash_entry_new') }}">+ Entry or transfer</a>{% endif %}
+    <a class="btn gold" href="{{ url_for('firmfs.cash_entry_new', account=(selected.id if selected else none)) }}">+ Entry or transfer</a>{% endif %}
   </div>
 </div>
 {% include "firmfs/_nav.html" %}

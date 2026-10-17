@@ -28,6 +28,7 @@
     <div class="form-row">
       <div><label for="method">Paid by *</label>
         <select id="method" name="method" required>{% for m in methods %}<option value="{{ m }}" {% if m == 'Bank transfer' %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+      {% with ca_currency_id='currency', ca_method_id='method', ca_dir='in' %}{% include "_cash_account_field.html" %}{% endwith %}
       <div><label for="reference">Payment reference</label>
         <input type="text" id="reference" name="reference" maxlength="120" placeholder="Bank / EcoCash / cheque no."></div>
     </div>
