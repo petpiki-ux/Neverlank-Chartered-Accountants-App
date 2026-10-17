@@ -424,3 +424,24 @@ select[multiple] { min-height: 110px; }
 .ma-need { background: #f4f8fd; border-left: 4px solid #2a78d6; padding: 10px 14px; margin-top: 12px; font-size: 13.5px; }
 tr.ma-rf-row td { background: #f7fbf9; }
 .flash.info { background: #eef4fb; color: #1d4f91; border-left: 4px solid #2a78d6; }
+
+/* ---- Firm Finance (asset register and the firm's own financial statements) ---- */
+.ff-subnav { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 16px; }
+.ff-subnav a { padding: 6px 13px; font-size: 13px; font-weight: 600; color: var(--navy, #0f2942); border: 1px solid var(--border, #e3e8ee); border-radius: 16px; text-decoration: none; background: #fff; }
+.ff-subnav a:hover { background: #f1f4f8; }
+.ff-subnav a.on { background: var(--navy, #0f2942); color: #fff; border-color: var(--navy, #0f2942); }
+.fs-table { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.fs-table td, .fs-table th { padding: 5px 8px; border-bottom: 1px solid #eef1f4; }
+.fs-table th { text-align: right; background: #f7f8fa; font-weight: 600; }
+.fs-table th:first-child { text-align: left; }
+.fs-table td.n { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fs-table td.nt { text-align: center; color: #6b7785; width: 56px; }
+.fs-table tr.b td { font-weight: 700; border-top: 1px solid #c9d1da; }
+.fs-table tr.sec td { font-weight: 700; color: var(--navy, #0f2942); padding-top: 14px; border-bottom: 0; }
+.fs-table tr.sub td:first-child { padding-left: 22px; }
+.fs-table tr.memo td { color: #6b7785; font-style: italic; }
+.fs-table tr.tot td { font-weight: 700; border-top: 2px solid #333; border-bottom: 3px double #333; }
+.ff-check { display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 6px; margin-bottom: 6px; font-size: 13px; }
+.ff-check.ok { background: #eaf6ee; }
+.ff-check.bad { background: #fdf1dc; }
+.ff-check b { display: block; }

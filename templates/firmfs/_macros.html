@@ -1,0 +1,13 @@
+{% macro fm(v) -%}{%- if v is none -%}{%- elif v|abs < 0.005 -%}-{%- elif v < 0 -%}({{ '{:,.2f}'.format(-v) }}){%- else -%}{{ '{:,.2f}'.format(v) }}{%- endif -%}{%- endmacro %}
+
+{% macro heads(stm, first='') -%}
+<thead><tr><th>{{ first }}</th><th class="nt" style="text-align:center;">Note</th>
+<th>USD<br><span style="font-weight:400;font-size:11px;">{{ stm.cur.period_end.strftime('%d %b %Y') }}</span></th>
+{% if stm.has_prior %}<th>USD<br><span style="font-weight:400;font-size:11px;">{{ stm.pri.period_end.strftime('%d %b %Y') }}</span></th>{% endif %}</tr></thead>
+{%- endmacro %}
+
+{% macro rows(stm, items, sub=True) -%}
+{% for r in items %}
+<tr class="{{ 'b' if r.bold }} {{ 'memo' if r.memo }} {{ 'sub' if sub and not r.bold }}"><td>{{ r.label }}</td><td class="nt">{{ r.note or '' }}</td><td class="n">{{ fm(r.current) }}</td>{% if stm.has_prior %}<td class="n">{{ fm(r.prior) }}</td>{% endif %}</tr>
+{% endfor %}
+{%- endmacro %}

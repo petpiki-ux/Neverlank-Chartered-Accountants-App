@@ -732,6 +732,7 @@ def create_app():
     from receipts import receipts_bp
     from advances import advances_bp
     from prohibited_deductions import prohibited_bp
+    from firm_finance import firmfs_bp
     from learning import learning_bp
     from credit_notes import credit_notes_bp
     from corporate_finance import corpfin_bp
@@ -770,6 +771,7 @@ def create_app():
     app.register_blueprint(advances_bp)
     app.register_blueprint(learning_bp)
     app.register_blueprint(prohibited_bp)
+    app.register_blueprint(firmfs_bp)
     app.register_blueprint(credit_notes_bp)
     app.register_blueprint(corpfin_bp)
     app.register_blueprint(statements_bp)

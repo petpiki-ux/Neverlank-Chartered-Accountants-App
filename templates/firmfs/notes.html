@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Notes to the financial statements - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set page_title = 'Notes to the financial statements' %}
+{% include "firmfs/_head.html" %}
+<div class="card" style="overflow-x:auto;">{% include "firmfs/_notes.html" %}</div>
+{% endblock %}

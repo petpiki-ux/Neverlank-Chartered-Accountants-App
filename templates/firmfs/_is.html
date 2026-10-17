@@ -1,0 +1,3 @@
+{% from "firmfs/_macros.html" import fm, heads, rows %}
+<table class="fs-table">{{ heads(stm, 'Income statement for the ' + stm.labels.current.lower()) }}
+<tbody>{{ rows(stm, stm.pl.rows, sub=False) }}</tbody></table>

@@ -1,0 +1,9 @@
+<div class="ff-subnav">
+  <a href="{{ url_for('firmfs.index') }}" class="{{ 'on' if active == 'index' }}">Year-ends &amp; balances</a>
+  <a href="{{ url_for('firmfs.assets') }}" class="{{ 'on' if active == 'assets' }}">Asset register</a>
+  <a href="{{ url_for('firmfs.income_statement', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'is' }}">Income statement</a>
+  <a href="{{ url_for('firmfs.balance_sheet', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'bs' }}">Balance sheet</a>
+  <a href="{{ url_for('firmfs.cash_flow', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'cf' }}">Cash flow</a>
+  <a href="{{ url_for('firmfs.changes_in_equity', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'eq' }}">Changes in equity</a>
+  <a href="{{ url_for('firmfs.notes', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'notes' }}">Notes</a>
+</div>

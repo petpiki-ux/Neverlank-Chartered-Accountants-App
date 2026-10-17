@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Cash flow statement - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set page_title = 'Cash flow statement' %}
+{% include "firmfs/_head.html" %}
+<div class="card" style="overflow-x:auto;">{% include "firmfs/_cf.html" %}</div>
+{% endblock %}

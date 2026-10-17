@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}Year-end {{ ye.period_end.strftime('%d %b %Y') }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+<div class="page-header">
+  <div><h1>Balances for {{ ye.period_end.strftime('%d %B %Y') }}</h1>
+    <div class="subtitle">{{ stm.labels.current }}. Enter what the app cannot know; everything else is worked out from invoices, expenses and the asset register.</div></div>
+  <div><a class="btn" href="{{ url_for('firmfs.income_statement', ye=ye.id) }}">Open the statements</a></div>
+</div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card">
+  <h3 style="margin-top:0;">Checks</h3>
+  {% for c in stm.checks %}<div class="ff-check {{ 'ok' if c.ok else 'bad' }}"><div><b>{{ c.title }}</b>{{ c.detail }}</div></div>{% endfor %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Worked out by the app for this period (USD)</h3>
+  <div class="tbl-scroll"><table><tbody>
+    <tr><td>Revenue (invoices issued excl. VAT, less credit notes)</td><td class="num">{{ fm(d.revenue) }}</td></tr>
+    <tr><td>Expenses in the Expense register (by bill date, paid or not)</td><td class="num">{{ fm(expense_total) }}</td></tr>
+    <tr><td>Depreciation from the Asset Register</td><td class="num">{{ fm(sched.charge) }}</td></tr>
+    <tr><td>Profit or loss on disposals</td><td class="num">{{ fm(sched.gain_loss) }}</td></tr>
+    <tr><td>Fees receivable from clients at the year-end (incl. VAT)</td><td class="num">{{ fm(d.receivables) }}</td></tr>
+    <tr><td class="muted">&nbsp;&nbsp;of which VAT charged and not yet collected (enter VAT payable below)</td><td class="num muted">{{ fm(d.vat_in_receivables) }}</td></tr>
+    <tr><td class="muted">&nbsp;&nbsp;VAT charged on invoices issued in the period</td><td class="num muted">{{ fm(d.vat_charged) }}</td></tr>
+    <tr><td>Unpaid supplier bills at the year-end</td><td class="num">{{ fm(d.payables) }}</td></tr>
+    <tr><td>Customer advances held at the year-end</td><td class="num">{{ fm(d.advances) }}</td></tr>
+    <tr><td>Net book value of property, plant and equipment</td><td class="num">{{ fm(sched.closing_nbv) }}</td></tr>
+  </tbody></table></div>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">Profit before tax is USD {{ fm(pbt) }}{% if pbt > 0 and ye.tax_rate_percent %}; at {{ ye.tax_rate_percent }}% the indicative income tax is USD {{ '{:,.2f}'.format(indicative_tax) }} (for guidance only; enter the tax expense your computation gives){% endif %}.</p>
+</div>
+
+<div class="card" id="lines">
+  <h3 style="margin-top:0;">Figures entered for this year-end</h3>
+  <p class="muted" style="margin-top:0;font-size:12.5px;">Enter each figure as a normal positive number in the section it belongs to (a bank balance, a loan, share capital, an expense, a tax charge). For retained earnings, enter the amount brought forward at the START of the period; if you leave it out, the previous year-end's closing figure is used.</p>
+  {% if ordered %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Section</th><th>Description</th><th class="num">Amount</th><th>Currency</th><th></th></tr></thead><tbody>
+    {% for code, label, items in ordered %}{% for ln in items %}
+    <tr>
+      <form method="post" action="{{ url_for('firmfs.edit_line', ye_id=ye.id, line_id=ln.id) }}" id="el{{ ln.id }}"></form>
+      <td><select name="fs_category" form="el{{ ln.id }}" style="margin:0;max-width:300px;">{% for c, l in categories %}<option value="{{ c }}" {% if c == ln.fs_category %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></td>
+      <td><input type="text" name="description" form="el{{ ln.id }}" value="{{ ln.description }}" maxlength="200" style="margin:0;min-width:220px;"></td>
+      <td><input type="number" step="any" name="amount" form="el{{ ln.id }}" value="{{ ln.amount }}" style="margin:0;max-width:140px;text-align:right;"></td>
+      <td><select name="currency" form="el{{ ln.id }}" style="margin:0;">{% for c in currencies %}<option {% if c == ln.currency %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></td>
+      <td style="white-space:nowrap;"><button class="btn small" type="submit" form="el{{ ln.id }}">Save</button>
+        <button class="btn small danger" type="submit" formaction="{{ url_for('firmfs.delete_line', ye_id=ye.id, line_id=ln.id) }}" formmethod="post" form="el{{ ln.id }}" onclick="return confirm('Remove this figure?');">Remove</button></td>
+    </tr>{% endfor %}{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="muted">Nothing entered yet.</p>{% endif %}
+
+  <form method="post" action="{{ url_for('firmfs.add_line', ye_id=ye.id) }}" class="form-row" style="align-items:flex-end;margin-top:16px;">
+    <div style="min-width:280px;"><label for="fs_category">Add a figure</label>
+      <select id="fs_category" name="fs_category" required><option value="">Choose what it is...</option>{% for c, l in categories %}<option value="{{ c }}">{{ l }}</option>{% endfor %}</select></div>
+    <div style="flex:1;min-width:200px;"><label for="description">Description</label><input type="text" id="description" name="description" maxlength="200" required placeholder="e.g. CBZ current account"></div>
+    <div><label for="amount">Amount</label><input type="number" step="any" id="amount" name="amount" required style="max-width:150px;"></div>
+    <div><label for="currency">Currency</label><select id="currency" name="currency">{% for c in currencies %}<option>{{ c }}</option>{% endfor %}</select></div>
+    <div><button class="btn gold" type="submit" style="margin-bottom:14px;">Add</button></div>
+  </form>
+  {% if previous %}
+  <form method="post" action="{{ url_for('firmfs.copy_previous', ye_id=ye.id) }}" style="margin-top:4px;">
+    <button class="btn small secondary" type="submit">Copy loans, capital and reserves from {{ previous.period_end.strftime('%d %b %Y') }}</button>
+    <span class="muted" style="font-size:12px;">a starting point only; check each amount</span>
+  </form>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Settings for this year-end</h3>
+  <form method="post" action="{{ url_for('firmfs.save_year_end', ye_id=ye.id) }}">
+    <div class="form-row">
+      <div><label for="period_end">Year-end date</label><input type="date" id="period_end" name="period_end" value="{{ ye.period_end.isoformat() }}" required></div>
+      <div><label for="zwg_rate">ZWG per USD</label><input type="number" step="any" min="0" id="zwg_rate" name="zwg_rate" value="{{ ye.zwg_rate if ye.zwg_rate else '' }}" placeholder="needed only for ZWG items"></div>
+      <div><label for="tax_rate_percent">Tax rate for the indicative figure (%)</label><input type="number" step="any" min="0" id="tax_rate_percent" name="tax_rate_percent" value="{{ ye.tax_rate_percent if ye.tax_rate_percent is not none else '' }}"></div>
+      <div><label for="reporting_framework">Framework</label><select id="reporting_framework" name="reporting_framework">{% for k, l in frameworks %}<option value="{{ k }}" {% if k == ye.reporting_framework %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+    </div>
+    <label style="font-weight:400;"><input type="checkbox" name="opening_nil" value="1" style="width:auto;" {% if ye.opening_nil %}checked{% endif %}> This is the firm's first period: the opening position is nil (allows a cash flow with no previous year-end)</label>
+    <label for="extra_note" style="margin-top:10px;">Additional note (printed as the last note; one paragraph per line)</label>
+    <textarea id="extra_note" name="extra_note" rows="3">{{ ye.extra_note or '' }}</textarea>
+    <button class="btn" type="submit">Save settings</button>
+  </form>
+  <form method="post" action="{{ url_for('firmfs.delete_year_end', ye_id=ye.id) }}" style="margin-top:12px;" onsubmit="return confirm('Delete this year-end and every figure entered for it? Invoices, expenses and the asset register are not affected.');">
+    <button class="btn small danger" type="submit">Delete this year-end</button>
+  </form>
+</div>
+{% endblock %}

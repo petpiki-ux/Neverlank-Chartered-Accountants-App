@@ -1,0 +1,32 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>{{ firm_title }} - financial statements - {{ stm.labels.current }}</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;font-size:11.5px;color:#222;margin:0;}
+.page{padding:26px 34px;page-break-after:always;} .page:last-child{page-break-after:auto;}
+h1{font-size:17px;margin:0 0 2px;} h2{font-size:14px;margin:0 0 4px;} h3{font-size:13px;}
+.muted{color:#666;} .hd{border-bottom:2px solid #b8934a;padding-bottom:8px;margin-bottom:14px;}
+.fs-table{border-collapse:collapse;width:100%;font-size:11.5px;} .fs-table td,.fs-table th{padding:3px 6px;border-bottom:1px solid #eee;}
+.fs-table th{text-align:right;background:#f4f1e8;} .fs-table th:first-child{text-align:left;}
+.fs-table td.n{text-align:right;white-space:nowrap;} .fs-table td.nt{text-align:center;width:44px;color:#666;}
+.fs-table tr.b td{font-weight:bold;border-top:1px solid #999;} .fs-table tr.sec td{font-weight:bold;padding-top:10px;border-bottom:0;}
+.fs-table tr.sub td:first-child{padding-left:18px;} .fs-table tr.memo td{color:#666;font-style:italic;}
+.fs-table tr.tot td{font-weight:bold;border-top:1px solid #333;border-bottom:3px double #333;}
+.warn{background:#fff3cd;padding:6px 8px;margin:8px 0;font-size:11px;}
+.noprint{padding:10px 34px;background:#f4f1e8;} @media print{.noprint{display:none}.page{padding:0;}}
+@page{margin:16mm;}
+</style></head><body>
+<div class="noprint"><button onclick="window.print()">Print</button> <span class="muted">Management accounts, not audited. Check the warnings below before issuing.</span></div>
+{% macro head(title) %}<div class="hd"><h1>{{ firm_title }}</h1><h2>{{ title }}</h2><div class="muted">{{ stm.labels.current }} &middot; presented in United States dollars (USD) &middot; management accounts, unaudited</div></div>{% endmacro %}
+<div class="page">
+  {{ head('Financial statements') }}
+  <p style="margin-top:40px;font-size:13px;">Contents</p>
+  <ol style="line-height:1.9;"><li>Income statement</li><li>Statement of financial position</li><li>Statement of changes in equity</li><li>Cash flow statement</li><li>Notes to the financial statements</li></ol>
+  {% for c in stm.checks if not c.ok %}<div class="warn"><b>{{ c.title }}.</b> {{ c.detail }}</div>{% endfor %}
+  <p class="muted" style="margin-top:30px;">Prepared on {{ today.strftime('%d %B %Y') }} from the firm's invoicing, expense register and asset register and the balances entered for the year-end.</p>
+</div>
+<div class="page">{{ head('Income statement') }}{% include "firmfs/_is.html" %}</div>
+<div class="page">{{ head('Statement of financial position') }}{% include "firmfs/_bs.html" %}</div>
+<div class="page">{{ head('Statement of changes in equity') }}{% include "firmfs/_eq.html" %}</div>
+<div class="page">{{ head('Cash flow statement') }}{% include "firmfs/_cf.html" %}</div>
+<div class="page">{{ head('Notes to the financial statements') }}{% include "firmfs/_notes.html" %}</div>
+</body></html>

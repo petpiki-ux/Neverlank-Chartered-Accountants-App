@@ -1,0 +1,7 @@
+{% extends "base.html" %}
+{% block title %}Statement of changes in equity - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set page_title = 'Statement of changes in equity' %}
+{% include "firmfs/_head.html" %}
+<div class="card" style="overflow-x:auto;">{% include "firmfs/_eq.html" %}</div>
+{% endblock %}

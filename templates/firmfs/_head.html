@@ -1,0 +1,23 @@
+<div class="page-header">
+  <div><h1>{{ page_title }}</h1>
+    <div class="subtitle">{{ firm_title }} &middot; {{ stm.labels.current }} &middot; accrual basis, USD &middot; management accounts (unaudited)</div></div>
+  <div>
+    <a class="btn secondary" href="{{ url_for('firmfs.print_all', ye=ye.id) }}" target="_blank">Print all</a>
+    <a class="btn secondary" href="{{ url_for('firmfs.export_xlsx', ye=ye.id) }}">Excel</a>
+  </div>
+</div>
+{% include "firmfs/_nav.html" %}
+<div class="card" style="padding:10px 14px;">
+  <form method="get" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0;">
+    <label for="ye" style="margin:0;">Year-end</label>
+    <select id="ye" name="ye" onchange="this.form.submit()" style="margin:0;max-width:260px;">
+      {% for y in year_ends|reverse %}<option value="{{ y.id }}" {% if y.id == ye.id %}selected{% endif %}>{{ y.period_end.strftime('%d %B %Y') }}</option>{% endfor %}
+    </select>
+    <noscript><button class="btn small" type="submit">Show</button></noscript>
+    <a href="{{ url_for('firmfs.year_end', ye_id=ye.id) }}" class="btn small secondary">Balances &amp; settings</a>
+    {% if stm.ok %}<span class="badge status-Paid">All checks pass</span>{% else %}<span class="badge overdue">{{ stm.checks|rejectattr('ok')|list|length }} check(s) need attention</span>{% endif %}
+  </form>
+</div>
+{% for c in stm.checks if not c.ok %}
+<div class="ff-check bad"><div><b>{{ c.title }}</b>{{ c.detail }}</div></div>
+{% endfor %}

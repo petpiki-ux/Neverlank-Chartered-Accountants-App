@@ -10850,3 +10850,131 @@ class ProhibitedDeductionItem(db.Model):
     engagement = db.relationship("Engagement", backref=db.backref("prohibited_items", lazy=True, cascade="all, delete-orphan", order_by="ProhibitedDeductionItem.id"))
     gl_account = db.relationship("GLAccount")
     created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - the firm's own Asset Register and Financial Statements
+#
+# The firm's statements (income statement, balance sheet, cash flow, equity
+# and notes) are built by firm_statements.py from three sources:
+#   * what the app already knows (invoices, credit notes, receipts, advances,
+#     the Expense register) - revenue, expenses, receivables, payables,
+#     customer advances - on an ACCRUAL basis;
+#   * the firm's own Asset Register below (cost, depreciation, disposals);
+#   * the balances a Partner/Admin enters for each year-end (FirmYearEnd +
+#     FirmBalanceLine): bank and cash, loans, share capital, VAT, tax payable,
+#     dividends, opening retained earnings, and anything else the app cannot
+#     know.
+# All figures are in USD; a ZWG item is translated at the rate entered on the
+# year-end (ZWG per 1 USD) and that rate is disclosed in the notes.
+# ---------------------------------------------------------------------------
+FIRM_ASSET_METHODS = ["Straight-line", "Reducing balance", "Not depreciated"]
+FIRM_FRAMEWORKS = [("ifrs_for_smes", "IFRS for SMEs"), ("full_ifrs", "Full IFRS")]
+
+# The categories a year-end balance line can be filed under (financials.FS_CATEGORIES codes). Revenue, receivables from
+# invoices, supplier bills, customer advances, PPE and depreciation come from the app and the Asset Register instead.
+FIRM_ENTRY_CATEGORIES = [
+    ("cash", "Cash and cash equivalents (bank, cash on hand, mobile money)"),
+    ("trade_receivables", "Other receivables and prepayments"),
+    ("inventories", "Inventories (stationery, consumables)"),
+    ("other_current_assets", "Other current assets"),
+    ("intangible_assets", "Intangible assets (software, licences)"),
+    ("investment_property", "Investment property"),
+    ("long_term_investments", "Long-term investments"),
+    ("deferred_tax_asset", "Deferred tax asset"),
+    ("other_noncurrent_assets", "Other non-current assets"),
+    ("trade_payables", "Accruals and other payables"),
+    ("other_current_liabilities", "Other current liabilities (VAT payable, PAYE, deposits)"),
+    ("current_tax_payable", "Income tax payable at year-end"),
+    ("short_term_borrowings", "Short-term borrowings / bank overdraft"),
+    ("short_term_provisions", "Short-term provisions"),
+    ("long_term_borrowings", "Long-term borrowings"),
+    ("deferred_tax_liability", "Deferred tax liability"),
+    ("long_term_provisions", "Long-term provisions"),
+    ("other_noncurrent_liabilities", "Other non-current liabilities"),
+    ("share_capital", "Share capital"),
+    ("share_premium", "Share premium"),
+    ("other_reserves", "Other reserves"),
+    ("retained_earnings", "Retained earnings brought forward (opening)"),
+    ("dividends_paid", "Dividends declared / paid in the year"),
+    ("other_income", "Other income (interest received, sundry)"),
+    ("admin_expenses", "Other administrative expenses (not in the Expense register)"),
+    ("other_expenses", "Other expenses"),
+    ("finance_costs", "Finance costs (interest on loans)"),
+    ("income_tax_expense", "Income tax expense for the year"),
+    ("oci_items", "Other comprehensive income, net of tax"),
+]
+FIRM_ENTRY_CATEGORY_CODES = [c[0] for c in FIRM_ENTRY_CATEGORIES]
+
+
+class FirmAssetClass(db.Model):
+    """A class of the firm's own fixed assets with its depreciation policy (e.g. Computer equipment, straight-line, 33.33%)."""
+    __tablename__ = "firm_asset_class"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    depreciation_method = db.Column(db.String(30), nullable=False, default="Straight-line")
+    rate_percent = db.Column(db.Float)            # per annum; if empty the useful life is used
+    useful_life_years = db.Column(db.Float)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class FirmAsset(db.Model):
+    """One item in the firm's Asset Register. Depreciation is calculated by the app (whole months, from the month of
+    acquisition up to but not including the month of disposal) unless an accumulated depreciation figure brought forward
+    from the old books is entered with the date it is stated at."""
+    __tablename__ = "firm_asset"
+    id = db.Column(db.Integer, primary_key=True)
+    asset_code = db.Column(db.String(40), unique=True)
+    description = db.Column(db.String(250), nullable=False)
+    asset_class_id = db.Column(db.Integer, db.ForeignKey("firm_asset_class.id"))
+    date_acquired = db.Column(db.Date, nullable=False, default=date.today)
+    cost = db.Column(db.Float, nullable=False, default=0.0)         # USD
+    residual_value = db.Column(db.Float, default=0.0)
+    supplier = db.Column(db.String(150))
+    location = db.Column(db.String(120))
+    serial_number = db.Column(db.String(120))
+    notes = db.Column(db.Text)
+    acc_dep_bf = db.Column(db.Float)                # accumulated depreciation brought forward from the old books
+    acc_dep_bf_date = db.Column(db.Date)            # ... stated at the end of the month containing this date
+    disposed_on = db.Column(db.Date)
+    disposal_proceeds = db.Column(db.Float, default=0.0)
+    disposal_note = db.Column(db.String(250))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    asset_class = db.relationship("FirmAssetClass", backref=db.backref("assets", lazy=True))
+    created_by = db.relationship("User")
+
+
+class FirmYearEnd(db.Model):
+    """A reporting date for the firm's financial statements, with the figures that are entered rather than derived."""
+    __tablename__ = "firm_year_end"
+    id = db.Column(db.Integer, primary_key=True)
+    period_end = db.Column(db.Date, nullable=False, unique=True)
+    zwg_rate = db.Column(db.Float)                  # ZWG per 1 USD, used for every ZWG item in this period
+    tax_rate_percent = db.Column(db.Float, default=24.72)   # only used for the indicative-tax hint on the entry page
+    reporting_framework = db.Column(db.String(20), default="ifrs_for_smes")
+    opening_nil = db.Column(db.Boolean, default=False, nullable=False)   # first period: the opening position is nil
+    extra_note = db.Column(db.Text)                 # printed as an additional note
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    created_by = db.relationship("User")
+    lines = db.relationship("FirmBalanceLine", backref="year_end", cascade="all, delete-orphan",
+                            order_by="FirmBalanceLine.id")
+
+
+class FirmBalanceLine(db.Model):
+    """One entered figure for a year-end, filed under an IAS 1 category. `amount` is the natural balance (an asset,
+    liability, income or expense is entered as a positive number) in `currency`."""
+    __tablename__ = "firm_balance_line"
+    id = db.Column(db.Integer, primary_key=True)
+    year_end_id = db.Column(db.Integer, db.ForeignKey("firm_year_end.id"), nullable=False)
+    fs_category = db.Column(db.String(40), nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)

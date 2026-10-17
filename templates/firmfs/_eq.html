@@ -1,0 +1,9 @@
+{% from "firmfs/_macros.html" import fm %}
+{% for b in stm.soce %}
+<table class="fs-table" style="margin-bottom:22px;"><thead><tr><th>Changes in equity - {{ b.heading.lower() }}</th>
+{% for code, lbl in b.columns %}<th>{{ lbl }}</th>{% endfor %}<th>Total</th></tr></thead>
+<tbody>
+{% for r in b.rows %}<tr class="{{ 'b' if r.bold }}"><td>{{ r.label }}</td>{% for code, lbl in b.columns %}<td class="n">{{ fm(r['values'][code]) }}</td>{% endfor %}<td class="n">{{ fm(r.total) }}</td></tr>{% endfor %}
+</tbody></table>
+{% endfor %}
+{% if stm.has_prior and stm.soce|length < 2 %}<p class="muted" style="font-size:12px;">The comparative period is not shown because the year-end before it is not entered (its opening capital and reserves are unknown).</p>{% endif %}

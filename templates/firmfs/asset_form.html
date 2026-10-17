@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if editing else 'Add' }} asset - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set ye = None %}
+{% macro val(name, default='') %}{{ form.get(name, default) if form else default }}{% endmacro %}
+<div class="page-header"><div><h1>{{ 'Edit ' ~ asset.asset_code if editing else 'Add an asset' }}</h1>
+  <div class="subtitle">Cost is in USD. Depreciation is calculated from the class's policy; you do not enter it.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.assets') }}">Back to register</a></div></div>
+{% include "firmfs/_nav.html" %}
+<div class="card">
+  <form method="post">
+    <div class="form-row">
+      <div><label for="asset_code">Asset code</label><input type="text" id="asset_code" name="asset_code" maxlength="40" value="{{ val('asset_code', asset.asset_code or '') }}" placeholder="auto (FA-0001)"></div>
+      <div style="flex:2;min-width:260px;"><label for="description">Description</label><input type="text" id="description" name="description" maxlength="250" required value="{{ val('description', asset.description or '') }}" placeholder="e.g. Dell Latitude laptop"></div>
+      <div><label for="asset_class_id">Class</label><select id="asset_class_id" name="asset_class_id"><option value="">Unclassified (no depreciation)</option>
+        {% for c in classes %}<option value="{{ c.id }}" {% if (val('asset_class_id', asset.asset_class_id|string if asset.asset_class_id else '')|trim) == c.id|string %}selected{% endif %}>{{ c.name }} ({{ c.depreciation_method }}{% if c.rate_percent is not none %}, {{ c.rate_percent|round(2) }}%{% endif %})</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row">
+      <div><label for="date_acquired">Date acquired</label><input type="date" id="date_acquired" name="date_acquired" required value="{{ val('date_acquired', asset.date_acquired.isoformat() if asset.date_acquired else '') }}"></div>
+      <div><label for="cost">Cost (USD)</label><input type="number" step="any" min="0" id="cost" name="cost" required value="{{ val('cost', asset.cost if asset.cost is not none else '') }}"></div>
+      <div><label for="residual_value">Residual value (USD)</label><input type="number" step="any" min="0" id="residual_value" name="residual_value" value="{{ val('residual_value', asset.residual_value or 0) }}"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="supplier">Supplier</label><input type="text" id="supplier" name="supplier" maxlength="150" value="{{ val('supplier', asset.supplier or '') }}"></div>
+      <div><label for="location">Location</label><input type="text" id="location" name="location" maxlength="120" value="{{ val('location', asset.location or '') }}"></div>
+      <div><label for="serial_number">Serial number</label><input type="text" id="serial_number" name="serial_number" maxlength="120" value="{{ val('serial_number', asset.serial_number or '') }}"></div>
+    </div>
+    <details {% if asset.acc_dep_bf is not none or (form and form.get('acc_dep_bf')) %}open{% endif %} style="margin-bottom:12px;"><summary style="cursor:pointer;font-weight:600;">Brought forward from the old books (optional)</summary>
+      <p class="muted" style="font-size:12.5px;">Only if the firm's earlier accounts already show accumulated depreciation you want to keep. It replaces the calculated figure from the end of the month it is stated at; later months are calculated from there.</p>
+      <div class="form-row">
+        <div><label for="acc_dep_bf">Accumulated depreciation (USD)</label><input type="number" step="any" min="0" id="acc_dep_bf" name="acc_dep_bf" value="{{ val('acc_dep_bf', asset.acc_dep_bf if asset.acc_dep_bf is not none else '') }}"></div>
+        <div><label for="acc_dep_bf_date">Stated at (date)</label><input type="date" id="acc_dep_bf_date" name="acc_dep_bf_date" value="{{ val('acc_dep_bf_date', asset.acc_dep_bf_date.isoformat() if asset.acc_dep_bf_date else '') }}"></div>
+      </div></details>
+    <label for="notes">Notes</label><textarea id="notes" name="notes" rows="2">{{ val('notes', asset.notes or '') }}</textarea>
+    <button class="btn gold" type="submit">{{ 'Save changes' if editing else 'Add to register' }}</button>
+    {% if editing %}</form>
+    <form method="post" action="{{ url_for('firmfs.delete_asset', asset_id=asset.id) }}" style="margin-top:12px;" onsubmit="return confirm('Remove this asset from the register? Use Dispose for an asset that was sold or scrapped.');"><button class="btn small danger" type="submit">Remove from register</button></form>
+    {% else %}</form>{% endif %}
+  {% if editing and asset.disposed_on %}<p class="muted" style="margin-top:12px;">Disposed on {{ asset.disposed_on.strftime('%d %b %Y') }} for USD {{ '{:,.2f}'.format(asset.disposal_proceeds or 0) }}{% if asset.disposal_note %} - {{ asset.disposal_note }}{% endif %}.</p>{% endif %}
+</div>
+{% endblock %}

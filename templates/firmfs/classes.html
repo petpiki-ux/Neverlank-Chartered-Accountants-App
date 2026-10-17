@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% block title %}Asset classes - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set ye = None %}
+<div class="page-header"><div><h1>Asset classes &amp; depreciation policy</h1>
+  <div class="subtitle">Each class carries a method and a rate (or a useful life). Changing a class recalculates depreciation in every statement.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.assets') }}">Back to register</a></div></div>
+{% include "firmfs/_nav.html" %}
+<div class="card">
+  <form method="post" action="{{ url_for('firmfs.add_class') }}" class="form-row" style="align-items:flex-end;">
+    <div style="flex:1;min-width:200px;"><label for="name">New class</label><input type="text" id="name" name="name" maxlength="80" required placeholder="e.g. Computer equipment"></div>
+    <div><label for="depreciation_method">Method</label><select id="depreciation_method" name="depreciation_method">{% for m in methods %}<option>{{ m }}</option>{% endfor %}</select></div>
+    <div><label for="rate_percent">Rate % a year</label><input type="number" step="any" min="0" max="100" id="rate_percent" name="rate_percent" style="max-width:110px;"></div>
+    <div><label for="useful_life_years">or life (years)</label><input type="number" step="any" min="0" id="useful_life_years" name="useful_life_years" style="max-width:110px;"></div>
+    <div><button class="btn gold" type="submit" style="margin-bottom:14px;">Add class</button></div>
+  </form>
+  {% if not classes %}<form method="post" action="{{ url_for('firmfs.seed_classes') }}"><button class="btn small secondary" type="submit">Or add a starter set (land &amp; buildings, vehicles, furniture, office and computer equipment)</button></form>{% endif %}
+</div>
+<div class="card">
+  <table><thead><tr><th>Class</th><th>Method</th><th>Rate % a year</th><th>or life (yrs)</th><th class="num">Assets</th><th></th></tr></thead><tbody>
+  {% for c in classes %}
+    <tr {% if not c.is_active %}style="opacity:.6;"{% endif %}>
+      <form method="post" action="{{ url_for('firmfs.edit_class', class_id=c.id) }}" id="ec{{ c.id }}"></form>
+      <td><input type="text" name="name" form="ec{{ c.id }}" value="{{ c.name }}" maxlength="80" required style="margin:0;"></td>
+      <td><select name="depreciation_method" form="ec{{ c.id }}" style="margin:0;">{% for m in methods %}<option {% if m == c.depreciation_method %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></td>
+      <td><input type="number" step="any" min="0" max="100" name="rate_percent" form="ec{{ c.id }}" value="{{ c.rate_percent if c.rate_percent is not none else '' }}" style="margin:0;max-width:100px;"></td>
+      <td><input type="number" step="any" min="0" name="useful_life_years" form="ec{{ c.id }}" value="{{ c.useful_life_years if c.useful_life_years is not none else '' }}" style="margin:0;max-width:100px;"></td>
+      <td class="num">{{ counts[c.id] }}</td>
+      <td style="white-space:nowrap;"><button class="btn small" type="submit" form="ec{{ c.id }}">Save</button>
+        <button class="btn small secondary" type="submit" form="ec{{ c.id }}" formaction="{{ url_for('firmfs.toggle_class', class_id=c.id) }}" formmethod="post">{{ 'Switch off' if c.is_active else 'Switch on' }}</button>
+        {% if counts[c.id] == 0 %}<button class="btn small danger" type="submit" form="ec{{ c.id }}" formaction="{{ url_for('firmfs.delete_class', class_id=c.id) }}" formmethod="post" onclick="return confirm('Delete this class?');">Delete</button>{% endif %}</td>
+    </tr>
+  {% endfor %}
+  </tbody></table>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">The rate wins if both a rate and a life are given. 'Not depreciated' suits land and work in progress. A class with assets can be switched off but not deleted. The rates in the starter set are only a typical starting point: set the firm's own policy.</p>
+</div>
+{% endblock %}

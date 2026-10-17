@@ -32,7 +32,7 @@
       <a href="{{ url_for('hr.project_board') }}">Tasks{% if my_open_task_count %} <span class="badge overdue">{{ my_open_task_count }}</span>{% endif %}</a>
       <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
       <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
-      {% set finance_blueprints = ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'advances', 'credit_notes', 'statements', 'analytics', 'expenses'] %}
+      {% set finance_blueprints = ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'advances', 'credit_notes', 'statements', 'analytics', 'expenses', 'firmfs'] %}
       <a href="{{ url_for('invoicing.list_invoices') }}"{% if request.blueprint in finance_blueprints %} class="active"{% endif %}>Finance{% if recurring_review_count or invoice_reminder_count %} <span class="badge overdue" title="Recurring invoices waiting for review and overdue-invoice reminders due">{{ recurring_review_count + invoice_reminder_count }}</span>{% endif %}</a>
       {% if user_has_permission(current_user, 'manage_corporate_finance') %}
       <a href="{{ url_for('corpfin.dashboard') }}" style="white-space:nowrap;"{% if request.blueprint == 'corpfin' %} class="active"{% endif %}>Corporate Finance</a>
@@ -79,7 +79,7 @@
       {% endif %}
     {% endwith %}
 
-    {% if request.blueprint in ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'advances', 'statements', 'analytics', 'expenses'] %}
+    {% if request.blueprint in ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'advances', 'credit_notes', 'statements', 'analytics', 'expenses', 'firmfs'] %}
     <div class="finance-tabs">
       <a href="{{ url_for('quotations.list_quotations') }}"{% if request.blueprint == 'quotations' %} class="on"{% endif %}>Quotations</a>
       <a href="{{ url_for('invoicing.list_invoices') }}"{% if request.blueprint in ['invoicing', 'recurring'] or (request.blueprint == 'invoice_send' and request.endpoint != 'invoice_send.reminders') %} class="on"{% endif %}>Invoices{% if recurring_review_count %} <span class="badge overdue" title="Recurring invoices raised as Drafts, waiting for your review">{{ recurring_review_count }}</span>{% endif %}</a>
@@ -90,6 +90,7 @@
       <a href="{{ url_for('statements.index') }}"{% if request.blueprint == 'statements' %} class="on"{% endif %}>Statements</a>
       {% if user_has_permission(current_user, 'view_firm_finances') %}
       <a href="{{ url_for('analytics.dashboard') }}"{% if request.blueprint in ['analytics', 'expenses'] %} class="on"{% endif %}>Analytics</a>
+      <a href="{{ url_for('firmfs.index') }}"{% if request.blueprint == 'firmfs' %} class="on"{% endif %}>Firm Finance</a>
       {% endif %}
     </div>
     {% endif %}

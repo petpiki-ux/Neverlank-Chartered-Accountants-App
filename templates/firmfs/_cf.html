@@ -1,0 +1,25 @@
+{% from "firmfs/_macros.html" import fm %}
+{% set cf = stm.cf %}
+{% if not cf %}
+<p class="muted">The cash flow statement is not available yet: it needs the previous year-end's balances as the opening position. Add the previous year-end (even with only its closing balances), or tick "first period" on this year-end if the firm started in this period.</p>
+{% else %}
+<table class="fs-table"><thead><tr><th>Cash flow statement for the {{ stm.labels.current.lower() }}</th><th class="nt" style="text-align:center;">Note</th><th>USD<br><span style="font-weight:400;font-size:11px;">{{ stm.cur.period_end.strftime('%d %b %Y') }}</span></th></tr></thead>
+<tbody>
+<tr class="sec"><td colspan="3">Cash flows from operating activities</td></tr>
+{% for r in cf.operating_rows %}<tr class="{{ 'b' if r.bold }} {{ 'sub' if not r.bold }}"><td>{{ r.label }}</td><td class="nt">{{ r.note or '' }}</td><td class="n">{{ fm(r.current) }}</td></tr>{% endfor %}
+<tr class="b"><td>Net cash from operating activities</td><td></td><td class="n">{{ fm(cf.net_operating) }}</td></tr>
+<tr class="sec"><td colspan="3">Cash flows from investing activities</td></tr>
+{% for r in cf.investing_rows %}<tr class="sub"><td>{{ r.label }}</td><td class="nt">{{ r.note or '' }}</td><td class="n">{{ fm(r.current) }}</td></tr>{% endfor %}
+<tr class="b"><td>Net cash from investing activities</td><td></td><td class="n">{{ fm(cf.net_investing) }}</td></tr>
+<tr class="sec"><td colspan="3">Cash flows from financing activities</td></tr>
+{% for r in cf.financing_rows %}<tr class="sub"><td>{{ r.label }}</td><td class="nt">{{ r.note or '' }}</td><td class="n">{{ fm(r.current) }}</td></tr>{% endfor %}
+<tr class="b"><td>Net cash from financing activities</td><td></td><td class="n">{{ fm(cf.net_financing) }}</td></tr>
+<tr class="b"><td>Net increase/(decrease) in cash and cash equivalents</td><td></td><td class="n">{{ fm(cf.net_movement) }}</td></tr>
+<tr><td>Cash and cash equivalents at the start of the period</td><td></td><td class="n">{{ fm(cf.cash_open) }}</td></tr>
+<tr class="tot"><td>Cash and cash equivalents at the end of the period</td><td></td><td class="n">{{ fm(cf.cash_close_computed) }}</td></tr>
+{% if cf.variance|abs >= 0.005 %}
+<tr class="memo"><td>Cash per the statement of financial position</td><td></td><td class="n">{{ fm(cf.cash_close_actual) }}</td></tr>
+<tr class="memo"><td>Unreconciled difference (see the checks)</td><td></td><td class="n">{{ fm(cf.variance) }}</td></tr>
+{% endif %}
+</tbody></table>
+{% endif %}

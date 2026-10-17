@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Firm Finance - {{ firm_name }}{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+<div class="page-header">
+  <div><h1>Firm Finance</h1>
+    <div class="subtitle">The firm's own asset register and financial statements: income statement, balance sheet, cash flow, changes in equity and notes.</div></div>
+  {% if latest %}<div><a class="btn secondary" href="{{ url_for('firmfs.print_all', ye=latest.ye.id) }}" target="_blank">Print latest</a>
+    <a class="btn secondary" href="{{ url_for('firmfs.export_xlsx', ye=latest.ye.id) }}">Excel</a></div>{% endif %}
+</div>
+{% set ye = latest.ye if latest else None %}
+{% include "firmfs/_nav.html" %}
+
+{% if latest %}
+{% set pl = latest.pl %}{% set s = latest.sfp %}
+<div class="card">
+  <h3 style="margin-top:0;">{{ latest.labels.current }}</h3>
+  <div style="display:flex;gap:28px;flex-wrap:wrap;">
+    <div><div class="muted" style="font-size:12px;">Revenue</div><div style="font-size:20px;font-weight:700;">USD {{ fm(latest.totals.revenue.current) }}</div></div>
+    <div><div class="muted" style="font-size:12px;">Profit before tax</div><div style="font-size:20px;font-weight:700;">USD {{ fm(pl.profit_before_tax.current) }}</div></div>
+    <div><div class="muted" style="font-size:12px;">Profit for the year</div><div style="font-size:20px;font-weight:700;">USD {{ fm(pl.profit_for_year.current) }}</div></div>
+    <div><div class="muted" style="font-size:12px;">Total assets</div><div style="font-size:20px;font-weight:700;">USD {{ fm(s.total_assets.current) }}</div></div>
+    <div><div class="muted" style="font-size:12px;">Equity</div><div style="font-size:20px;font-weight:700;">USD {{ fm(s.total_equity.current) }}</div></div>
+    <div><div class="muted" style="font-size:12px;">Cash</div><div style="font-size:20px;font-weight:700;">USD {{ fm(latest.totals.cash.current) }}</div></div>
+  </div>
+  <div style="margin-top:14px;">
+  {% for c in latest.checks %}<div class="ff-check {{ 'ok' if c.ok else 'bad' }}"><div><b>{{ c.title }}</b>{{ c.detail }}</div></div>{% endfor %}
+  </div>
+  <div style="margin-top:6px;">
+    <a class="btn small" href="{{ url_for('firmfs.income_statement', ye=latest.ye.id) }}">Income statement</a>
+    <a class="btn small" href="{{ url_for('firmfs.balance_sheet', ye=latest.ye.id) }}">Balance sheet</a>
+    <a class="btn small" href="{{ url_for('firmfs.cash_flow', ye=latest.ye.id) }}">Cash flow</a>
+    <a class="btn small secondary" href="{{ url_for('firmfs.year_end', ye_id=latest.ye.id) }}">Enter balances</a>
+  </div>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 style="margin-top:0;">Year-ends</h3>
+  {% if year_ends %}
+  <table><thead><tr><th>Year-end</th><th>ZWG per USD</th><th class="num">Entered figures</th><th></th></tr></thead><tbody>
+  {% for r in year_ends %}<tr>
+    <td><a href="{{ url_for('firmfs.year_end', ye_id=r.ye.id) }}"><strong>{{ r.ye.period_end.strftime('%d %B %Y') }}</strong></a>{% if r.ye.opening_nil %} <span class="badge">first period</span>{% endif %}</td>
+    <td>{{ r.ye.zwg_rate if r.ye.zwg_rate else '-' }}</td><td class="num">{{ r.lines }}</td>
+    <td style="white-space:nowrap;"><a class="btn small secondary" href="{{ url_for('firmfs.year_end', ye_id=r.ye.id) }}">Balances</a>
+      <a class="btn small" href="{{ url_for('firmfs.income_statement', ye=r.ye.id) }}">Statements</a></td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="muted">No year-end yet. Add the first reporting date below (for example 31 December 2025), then enter the balances the app cannot work out itself: bank, loans, share capital, VAT and tax.</p>{% endif %}
+  <form method="post" action="{{ url_for('firmfs.create_year_end') }}" class="form-row" style="align-items:flex-end;margin-top:14px;">
+    <div><label for="period_end">New year-end date</label><input type="date" id="period_end" name="period_end" required></div>
+    <div><label for="zwg_rate">ZWG per USD (if any ZWG items)</label><input type="number" step="any" min="0" id="zwg_rate" name="zwg_rate" placeholder="optional"></div>
+    <div><label for="reporting_framework">Framework</label><select id="reporting_framework" name="reporting_framework"><option value="ifrs_for_smes">IFRS for SMEs</option><option value="full_ifrs">Full IFRS</option></select></div>
+    <div><label style="display:block;">&nbsp;</label><label style="font-weight:400;"><input type="checkbox" name="opening_nil" value="1" style="width:auto;"> first period (nothing before it)</label></div>
+    <div><button class="btn gold" type="submit" style="margin-bottom:14px;">Add year-end</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">How the statements are put together</h3>
+  <p style="margin-top:0;"><strong>From the app, on an accrual basis:</strong> revenue is the invoices issued (Sent or Paid) excluding VAT, less credit notes; expenses come from the Expense register by bill date whether paid or not, filed under their categories; fees receivable are what clients still owe at the year-end; payables are the unpaid expense bills; money received from clients before invoicing is a liability (customer advances), never revenue; depreciation, asset values and the profit or loss on disposals come from the Asset Register ({{ asset_count }} asset(s) in it).</p>
+  <p style="margin-bottom:0;"><strong>Entered for each year-end:</strong> bank and cash, other assets and liabilities, loans, VAT payable, income tax expense and payable, share capital, dividends and the opening retained earnings. Everything is in USD; a ZWG item is translated at the rate entered on the year-end and the rate is stated in the notes. Each statement carries its own checks: the balance sheet must balance, the cash flow must agree to cash, and opening retained earnings must equal the previous closing.</p>
+</div>
+{% endblock %}
