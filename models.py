@@ -10957,6 +10957,7 @@ class FirmYearEnd(db.Model):
     tax_rate_percent = db.Column(db.Float, default=24.72)   # only used for the indicative-tax hint on the entry page
     reporting_framework = db.Column(db.String(20), default="ifrs_for_smes")
     opening_nil = db.Column(db.Boolean, default=False, nullable=False)   # first period: the opening position is nil
+    cash_from_book = db.Column(db.Boolean, default=False, nullable=False)  # cash and bank taken from the Cash Book
     extra_note = db.Column(db.Text)                 # printed as an additional note
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -10978,3 +10979,82 @@ class FirmBalanceLine(db.Model):
     amount = db.Column(db.Float, nullable=False, default=0.0)
     currency = db.Column(db.String(10), nullable=False, default="USD")
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - Cash Book
+#
+# The firm's cash and bank accounts. Money already recorded elsewhere is brought in AUTOMATICALLY (client receipts,
+# client advances and refunds, paid expenses, invoices marked paid before receipting existed) and is never stored a
+# second time: cashbook.py reads it when needed. Only what the app cannot know is entered here (CashEntry: owner
+# contributions, loans, bank charges, transfers between accounts ...). Which account an automatic transaction lands in
+# follows the payment method set on each account, then the account's "default" flags; CashAssign records a manual
+# move to another account, and CashClear records that a line has appeared on the bank statement (reconciliation).
+# ---------------------------------------------------------------------------
+CASH_ACCOUNT_KINDS = ["Bank", "Cash", "Mobile money"]
+CASH_ENTRY_CATEGORIES = [
+    "Owner / shareholder contribution", "Loan received", "Loan repayment", "Dividend paid", "Interest received",
+    "Bank charges", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Salaries paid",
+    "Other receipt", "Other payment",
+]
+CASH_TRANSFER_CATEGORY = "Transfer between accounts"
+
+
+class CashAccount(db.Model):
+    __tablename__ = "cash_account"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    kind = db.Column(db.String(20), nullable=False, default="Bank")
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    opening_balance = db.Column(db.Float, nullable=False, default=0.0)   # the balance at the START of opening_date
+    opening_date = db.Column(db.Date, nullable=False, default=date.today)  # earlier transactions are not counted
+    methods = db.Column(db.String(200))        # payment methods that land here, comma separated (e.g. "Bank transfer,Card")
+    default_in = db.Column(db.Boolean, default=False, nullable=False)    # money in with no matching method lands here
+    default_out = db.Column(db.Boolean, default=False, nullable=False)   # money out (paid expenses, refunds) lands here
+    reference = db.Column(db.String(120))      # bank and account number
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def method_list(self):
+        return [m.strip() for m in (self.methods or "").split(",") if m.strip()]
+
+
+class CashEntry(db.Model):
+    """A cash book entry typed in by hand (what the app has no other record of). A transfer between two accounts is
+    two entries sharing a transfer_id (out of one account, into the other)."""
+    __tablename__ = "cash_entry"
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"), nullable=False)
+    entry_date = db.Column(db.Date, nullable=False, default=date.today)
+    direction = db.Column(db.String(3), nullable=False, default="in")   # "in" or "out"
+    amount = db.Column(db.Float, nullable=False, default=0.0)           # always positive
+    category = db.Column(db.String(60), nullable=False, default="Other receipt")
+    description = db.Column(db.String(250))
+    reference = db.Column(db.String(120))
+    transfer_id = db.Column(db.String(36))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    account = db.relationship("CashAccount", backref=db.backref("entries", lazy=True))
+    created_by = db.relationship("User")
+
+
+class CashAssign(db.Model):
+    """An automatic transaction moved by hand to a different account than the rules would choose."""
+    __tablename__ = "cash_assign"
+    id = db.Column(db.Integer, primary_key=True)
+    source_key = db.Column(db.String(60), nullable=False, unique=True)   # e.g. "receipt:12"
+    account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"), nullable=False)
+    account = db.relationship("CashAccount")
+
+
+class CashClear(db.Model):
+    """A line that has appeared on the bank statement (reconciled), and the statement date it cleared on."""
+    __tablename__ = "cash_clear"
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"), nullable=False)
+    source_key = db.Column(db.String(60), nullable=False)
+    cleared_on = db.Column(db.Date, nullable=False)
+    __table_args__ = (db.UniqueConstraint("account_id", "source_key", name="uq_cash_clear"),)

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit cash book entry' if entry else 'Cash book entry' }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{% macro val(name, default='') %}{{ form.get(name, default) if form else default }}{% endmacro %}
+{% set kind = (form.get('kind') if form else (entry.direction if entry else 'in')) %}
+<div class="page-header"><div><h1>{{ 'Edit entry' if entry else 'Cash book entry' }}</h1>
+  <div class="subtitle">For money the app has no other record of. Receipts, advances, refunds and paid expenses are already in the book: do not enter them again.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.cash_book') }}">Back to the cash book</a></div></div>
+{% include "firmfs/_nav.html" %}
+<div class="card">
+  <form method="post">
+    <div class="form-row">
+      <div><label>What is it?</label>
+        <select name="kind" id="kind" onchange="toggleKind()">
+          <option value="in" {% if kind == 'in' %}selected{% endif %}>Money in</option>
+          <option value="out" {% if kind == 'out' %}selected{% endif %}>Money out</option>
+          {% if not entry %}<option value="transfer" {% if kind == 'transfer' %}selected{% endif %}>Transfer between accounts</option>{% endif %}
+        </select></div>
+      <div><label id="acct_label">Account</label>
+        <select name="account_id" required>{% for a in accounts %}<option value="{{ a.id }}" {% if (val('account_id', entry.account_id|string if entry else '')|trim) == a.id|string %}selected{% endif %}>{{ a.name }} ({{ a.currency }})</option>{% endfor %}</select></div>
+      <div id="to_wrap" style="display:none;"><label>To account</label>
+        <select name="to_account_id">{% for a in accounts %}<option value="{{ a.id }}" {% if (val('to_account_id')|trim) == a.id|string %}selected{% endif %}>{{ a.name }} ({{ a.currency }})</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row">
+      <div><label for="entry_date">Date</label><input type="date" id="entry_date" name="entry_date" required value="{{ val('entry_date', entry.entry_date.isoformat() if entry else today.isoformat()) }}"></div>
+      <div><label for="amount">Amount</label><input type="number" step="any" min="0" id="amount" name="amount" required value="{{ val('amount', entry.amount if entry else '') }}"></div>
+      <div id="cat_wrap"><label for="category">What was it for?</label>
+        <select id="category" name="category">{% for c in categories %}<option {% if (val('category', entry.category if entry else '')) == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row">
+      <div style="flex:2;min-width:260px;"><label for="description">Details</label><input type="text" id="description" name="description" maxlength="250" value="{{ val('description', entry.description if entry and entry.description else '') }}" placeholder="e.g. Director loan from P. Piki"></div>
+      <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" maxlength="120" value="{{ val('reference', entry.reference if entry and entry.reference else '') }}"></div>
+    </div>
+    <button class="btn gold" type="submit">{{ 'Save changes' if entry else 'Add to cash book' }}</button>
+  </form>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">An entry here changes the bank or cash balance only. If it also affects the income statement or balance sheet (a loan, a dividend, share capital, bank charges), record that on the year-end page too; the year-end page lists these cash book movements to help.</p>
+</div>
+<script>
+function toggleKind(){var k=document.getElementById('kind').value;
+  document.getElementById('to_wrap').style.display=(k==='transfer')?'block':'none';
+  document.getElementById('cat_wrap').style.display=(k==='transfer')?'none':'block';
+  document.getElementById('acct_label').textContent=(k==='transfer')?'From account':'Account';}
+toggleKind();
+</script>
+{% endblock %}

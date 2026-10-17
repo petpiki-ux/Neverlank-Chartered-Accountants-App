@@ -39,6 +39,7 @@ from collections import defaultdict
 from datetime import date, timedelta
 
 import analytics
+import cashbook
 import financials
 from financials import (
     _row, _is_nil, _filter_nil_rows, _infer_period_start, _attach_note_numbers,
@@ -294,8 +295,21 @@ def build_column(ye, prev_end, classes, assets):
     add("trade_payables", "Supplier bills not yet paid", d["payables"])
     add("other_current_liabilities", "Customer advances (received before invoicing)", d["advances"])
 
+    from_book = bool(getattr(ye, "cash_from_book", False))
+    if from_book:
+        cb = cashbook.statement_balances(end, rate)
+        for item in cb["items"]:
+            add("cash", item["name"], item["usd"])
+        warnings.extend(cb["warnings"])
+        ignored = [ln for ln in ye.lines if ln.fs_category == "cash"]
+        if ignored:
+            warnings.append(f"Cash is taken from the Cash Book, so the {len(ignored)} cash figure(s) entered on this year-end were ignored. "
+                            "Remove them, or untick the Cash Book option, to avoid confusion.")
+
     re_entered = False
     for ln in ye.lines:
+        if from_book and ln.fs_category == "cash":
+            continue
         if ln.currency == "USD" or not ln.currency:
             usd = ln.amount or 0.0
         elif rate and rate > 0:

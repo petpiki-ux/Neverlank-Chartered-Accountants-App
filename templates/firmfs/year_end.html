@@ -31,6 +31,29 @@
   <p class="muted" style="font-size:12px;margin-bottom:0;">Profit before tax is USD {{ fm(pbt) }}{% if pbt > 0 and ye.tax_rate_percent %}; at {{ ye.tax_rate_percent }}% the indicative income tax is USD {{ '{:,.2f}'.format(indicative_tax) }} (for guidance only; enter the tax expense your computation gives){% endif %}.</p>
 </div>
 
+<div class="card" id="cash">
+  <h3 style="margin-top:0;">Cash and bank</h3>
+  {% if ye.cash_from_book %}
+    <p style="margin-top:0;">The balance sheet takes cash and bank from the <a href="{{ url_for('firmfs.cash_book') }}">Cash Book</a> at {{ ye.period_end.strftime('%d %B %Y') }}. Do not also enter cash figures below.</p>
+  {% else %}
+    <p style="margin-top:0;">Cash is the figure you enter below. Tick "take cash from the Cash Book" in the settings to use the Cash Book instead.</p>
+  {% endif %}
+  {% if cash_info['items'] %}
+  <table style="max-width:560px;"><tbody>
+    {% for i in cash_info['items'] %}<tr><td>{{ i.name }}</td><td class="num">{{ fm(i.usd) }}</td></tr>{% endfor %}
+    <tr style="font-weight:700;"><td>Cash book total (USD)</td><td class="num">{{ fm(cash_info['items']|sum(attribute='usd')) }}</td></tr>
+  </tbody></table>
+  {% else %}<p class="muted">The Cash Book has no balances at this date.</p>{% endif %}
+  {% for w in cash_info['warnings'] %}<div class="ff-check bad"><div>{{ w }}</div></div>{% endfor %}
+  {% if manual_cash %}
+  <p style="margin:14px 0 4px;font-weight:600;font-size:13px;">Cash book entries in this period (not already in invoices or expenses): a guide for the figures below</p>
+  <table style="max-width:560px;"><thead><tr><th>What for</th><th>Currency</th><th class="num">In</th><th class="num">Out</th></tr></thead><tbody>
+    {% for m in manual_cash %}<tr><td>{{ m.category }}</td><td>{{ m.currency }}</td><td class="num">{{ fm(m['in']) }}</td><td class="num">{{ fm(m.out) }}</td></tr>{% endfor %}
+  </tbody></table>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">For example a loan received or repaid changes borrowings, owner contributions change share capital or a director's loan, and dividends go under dividends. The cash book moves the cash; you record the other side here so the balance sheet still balances.</p>
+  {% endif %}
+</div>
+
 <div class="card" id="lines">
   <h3 style="margin-top:0;">Figures entered for this year-end</h3>
   <p class="muted" style="margin-top:0;font-size:12.5px;">Enter each figure as a normal positive number in the section it belongs to (a bank balance, a loan, share capital, an expense, a tax charge). For retained earnings, enter the amount brought forward at the START of the period; if you leave it out, the previous year-end's closing figure is used.</p>
@@ -75,6 +98,7 @@
       <div><label for="reporting_framework">Framework</label><select id="reporting_framework" name="reporting_framework">{% for k, l in frameworks %}<option value="{{ k }}" {% if k == ye.reporting_framework %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
     </div>
     <label style="font-weight:400;"><input type="checkbox" name="opening_nil" value="1" style="width:auto;" {% if ye.opening_nil %}checked{% endif %}> This is the firm's first period: the opening position is nil (allows a cash flow with no previous year-end)</label>
+    <label style="font-weight:400;display:block;margin-top:6px;"><input type="checkbox" name="cash_from_book" value="1" style="width:auto;" {% if ye.cash_from_book %}checked{% endif %}> Take cash and bank balances from the Cash Book (instead of entering them)</label>
     <label for="extra_note" style="margin-top:10px;">Additional note (printed as the last note; one paragraph per line)</label>
     <textarea id="extra_note" name="extra_note" rows="3">{{ ye.extra_note or '' }}</textarea>
     <button class="btn" type="submit">Save settings</button>

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Cash book accounts - {{ firm_name }}{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+{% macro val(name, default='') %}{{ form.get(name, default) if form else default }}{% endmacro %}
+<div class="page-header"><div><h1>Cash book accounts</h1>
+  <div class="subtitle">Each account has a payment method list: recorded receipts and payments with that method land in it. One account per currency can be the default for everything else.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.cash_book') }}">Back to the cash book</a></div></div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card">
+  <h3 style="margin-top:0;">{{ 'Edit ' ~ edit.name if edit else 'Add an account' }}</h3>
+  {% set e = edit %}
+  <form method="post" action="{{ url_for('firmfs.cash_account_edit', account_id=e.id) if e else url_for('firmfs.cash_account_add') }}">
+    <div class="form-row">
+      <div style="flex:1;min-width:220px;"><label for="name">Name</label><input type="text" id="name" name="name" maxlength="80" required value="{{ val('name', e.name if e else '') }}" placeholder="e.g. CBZ current account"></div>
+      <div><label for="kind">Kind</label><select id="kind" name="kind">{% for k in kinds %}<option {% if val('kind', e.kind if e else 'Bank') == k %}selected{% endif %}>{{ k }}</option>{% endfor %}</select></div>
+      <div><label for="currency">Currency</label><select id="currency" name="currency">{% for c in currencies %}<option {% if val('currency', e.currency if e else 'USD') == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+      <div><label for="reference">Bank and account number</label><input type="text" id="reference" name="reference" maxlength="120" value="{{ val('reference', e.reference if e and e.reference else '') }}"></div>
+    </div>
+    <div class="form-row">
+      <div><label for="opening_balance">Opening balance</label><input type="number" step="any" id="opening_balance" name="opening_balance" value="{{ val('opening_balance', e.opening_balance if e else 0) }}"></div>
+      <div><label for="opening_date">Book starts on</label><input type="date" id="opening_date" name="opening_date" required value="{{ val('opening_date', e.opening_date.isoformat() if e else today.isoformat()) }}"></div>
+    </div>
+    <p class="muted" style="font-size:12px;margin:0 0 10px;">The opening balance is the balance at the START of the date above. Recorded transactions dated before it are not counted.</p>
+    <label>Payment methods that land in this account</label>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:10px;">
+      {% for m in methods %}<label style="font-weight:400;"><input type="checkbox" name="methods" value="{{ m }}" style="width:auto;" {% if (form.getlist('methods') if form else (e.method_list if e else [])) and m in (form.getlist('methods') if form else e.method_list) %}checked{% endif %}> {{ m }}</label>{% endfor %}
+    </div>
+    <div style="display:flex;gap:22px;flex-wrap:wrap;margin-bottom:10px;">
+      <label style="font-weight:400;"><input type="checkbox" name="default_in" value="1" style="width:auto;" {% if (form and form.get('default_in')) or (not form and e and e.default_in) %}checked{% endif %}> Default for money in (any receipt whose method matches no account)</label>
+      <label style="font-weight:400;"><input type="checkbox" name="default_out" value="1" style="width:auto;" {% if (form and form.get('default_out')) or (not form and e and e.default_out) %}checked{% endif %}> Default for money out (paid expenses and refunds, which have no payment method)</label>
+    </div>
+    <button class="btn gold" type="submit">{{ 'Save changes' if e else 'Add account' }}</button>
+    {% if e %}<a class="btn secondary" href="{{ url_for('firmfs.cash_accounts') }}">Cancel</a>{% endif %}
+  </form>
+</div>
+
+<div class="card">
+  {% if accounts %}
+  <table><thead><tr><th>Account</th><th>Currency</th><th>Methods</th><th>Defaults</th><th>Book starts</th><th class="num">Balance today</th><th class="num">Lines</th><th></th></tr></thead><tbody>
+  {% for a in accounts %}<tr {% if not a.is_active %}style="opacity:.6;"{% endif %}>
+    <td><strong>{{ a.name }}</strong> <span class="muted" style="font-size:11.5px;">{{ a.kind }}</span>{% if a.reference %}<div class="muted" style="font-size:11.5px;">{{ a.reference }}</div>{% endif %}</td>
+    <td>{{ a.currency }}</td><td>{{ a.methods or '-' }}</td>
+    <td>{% if a.default_in %}<span class="badge">in</span> {% endif %}{% if a.default_out %}<span class="badge">out</span>{% endif %}{% if not a.default_in and not a.default_out %}-{% endif %}</td>
+    <td>{{ a.opening_date.strftime('%d %b %Y') }}<div class="muted" style="font-size:11.5px;">from {{ fm(a.opening_balance) if a.opening_balance else '0.00' }}</div></td>
+    <td class="num">{{ fm(info[a.id].balance) if info else '' }}</td><td class="num">{{ info[a.id].lines if info else '' }}</td>
+    <td style="white-space:nowrap;"><a class="btn small secondary" href="{{ url_for('firmfs.cash_account_edit', account_id=a.id) }}">Edit</a>
+      <form method="post" action="{{ url_for('firmfs.cash_account_toggle', account_id=a.id) }}" style="display:inline;"><button class="btn small secondary" type="submit">{{ 'Switch off' if a.is_active else 'Switch on' }}</button></form>
+      <form method="post" action="{{ url_for('firmfs.cash_account_delete', account_id=a.id) }}" style="display:inline;" onsubmit="return confirm('Delete this account?');"><button class="btn small danger" type="submit">Delete</button></form></td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}
+  <p class="muted" style="margin-top:0;">No accounts yet.</p>
+  <form method="post" action="{{ url_for('firmfs.cash_accounts_seed') }}"><button class="btn gold" type="submit">Create a starter set (bank, cash on hand, EcoCash)</button></form>
+  {% endif %}
+  <p class="muted" style="font-size:12px;margin-bottom:0;">An account with transactions cannot be deleted; switch it off. A switched-off account keeps its history but no new transactions are matched to it.</p>
+</div>
+{% endblock %}

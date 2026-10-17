@@ -13,6 +13,7 @@ from models import (
     FIRM_ENTRY_CATEGORY_CODES, FIRM_FRAMEWORKS, INVOICE_CURRENCIES,
 )
 from finance import finance_required, _parse_date, _parse_float
+import cashbook
 import firm_statements as fs
 import financials
 
@@ -108,8 +109,11 @@ def year_end(ye_id):
     for ln in ye.lines:
         grouped.setdefault(ln.fs_category, []).append(ln)
     ordered = [(code, label, grouped[code]) for code, label in FIRM_ENTRY_CATEGORIES if code in grouped]
+    cash_info = cashbook.statement_balances(ye.period_end, ye.zwg_rate)
+    manual_cash = cashbook.manual_summary(cur["period_start"], ye.period_end)
     return render_template(
         "firmfs/year_end.html", ye=ye, stm=stm, d=d, sched=sched, pbt=pbt, ordered=ordered, active="index",
+        cash_info=cash_info, manual_cash=manual_cash,
         categories=FIRM_ENTRY_CATEGORIES, currencies=INVOICE_CURRENCIES, frameworks=FIRM_FRAMEWORKS,
         previous=earlier[-1] if earlier else None,
         indicative_tax=(pbt * (ye.tax_rate_percent or 0) / 100.0) if pbt > 0 else 0.0,
@@ -132,6 +136,7 @@ def save_year_end(ye_id):
     if rate is not None:
         ye.tax_rate_percent = rate
     ye.opening_nil = bool(request.form.get("opening_nil"))
+    ye.cash_from_book = bool(request.form.get("cash_from_book"))
     if request.form.get("reporting_framework") in dict(FIRM_FRAMEWORKS):
         ye.reporting_framework = request.form.get("reporting_framework")
     ye.extra_note = (request.form.get("extra_note") or "").strip() or None
@@ -262,7 +267,7 @@ def _asset_from_form(asset):
     desc = (request.form.get("description") or "").strip()
     acquired = _parse_date(request.form.get("date_acquired"))
     cost = _parse_float(request.form.get("cost"))
-    residual = _parse_float(request.form.get("residual_value"), 0.0)
+    residual = 0.0 if not (request.form.get("residual_value") or "").strip() else _parse_float(request.form.get("residual_value"))
     cid = request.form.get("asset_class_id", type=int)
     bf = _parse_float(request.form.get("acc_dep_bf"))
     bf_date = _parse_date(request.form.get("acc_dep_bf_date"))
@@ -338,7 +343,7 @@ def edit_asset(asset_id):
 def dispose_asset(asset_id):
     asset = FirmAsset.query.get_or_404(asset_id)
     on = _parse_date(request.form.get("disposed_on"))
-    proceeds = _parse_float(request.form.get("disposal_proceeds"), 0.0)
+    proceeds = 0.0 if not (request.form.get("disposal_proceeds") or "").strip() else _parse_float(request.form.get("disposal_proceeds"))
     if not on or on < asset.date_acquired:
         flash("Enter a disposal date that is not before the acquisition date.", "danger")
     elif proceeds is None or proceeds < 0:
@@ -716,3 +721,7 @@ def build_xlsx(stm):
     out = io.BytesIO()
     wb.save(out)
     return out.getvalue()
+
+
+# the Cash Book's routes live in firm_cashbook.py and register on this same blueprint
+import firm_cashbook  # noqa: E402,F401
