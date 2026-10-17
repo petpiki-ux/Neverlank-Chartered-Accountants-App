@@ -353,3 +353,24 @@ def forget(key):
     """Remove everything stored about a transaction key (when its record is deleted). Does not commit."""
     CashAssign.query.filter_by(source_key=key).delete()
     CashClear.query.filter_by(source_key=key).delete()
+
+
+def category_total(categories, start, end, zwg_rate):
+    """Money paid out (less money received back) under these manual-entry headings between two dates, in USD, for the
+    tax pages (QPDs and final income tax payments). Returns (total, [payment rows], [warnings])."""
+    total, rows, warnings = 0.0, [], []
+    q = (CashEntry.query.filter(CashEntry.category.in_(list(categories)), CashEntry.entry_date >= start, CashEntry.entry_date <= end)
+         .order_by(CashEntry.entry_date, CashEntry.id))
+    for en in q.all():
+        cur = en.account.currency if en.account else "USD"
+        sign = 1.0 if en.direction == "out" else -1.0
+        if cur == "USD":
+            usd = en.amount or 0.0
+        elif zwg_rate and zwg_rate > 0:
+            usd = (en.amount or 0.0) / zwg_rate
+        else:
+            warnings.append(f"A {cur} payment of {en.amount:,.2f} on {en.entry_date.strftime('%d %b %Y')} ({en.category}) was left out: no ZWG rate is entered for this year-end.")
+            continue
+        total += sign * usd
+        rows.append({"date": en.entry_date, "category": en.category, "usd": r2(sign * usd), "description": en.description or "", "account": en.account.name if en.account else ""})
+    return r2(total), rows, warnings

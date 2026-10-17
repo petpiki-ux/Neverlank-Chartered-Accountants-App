@@ -726,3 +726,4 @@ def build_xlsx(stm):
 
 # the Cash Book's routes live in firm_cashbook.py and register on this same blueprint
 import firm_cashbook  # noqa: E402,F401
+import firm_taxpages  # noqa: E402,F401   (Tax: allowances, computation, deferred tax, QPD)

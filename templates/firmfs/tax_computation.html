@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+{% block title %}Income tax computation - {{ firm_name }}{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+{% set page_title = 'Income tax computation' %}
+{% include "firmfs/_head.html" %}
+{% include "firmfs/_taxtabs.html" %}
+{% if not tax %}
+{% include "firmfs/_taxmanual.html" %}
+{% else %}
+{% set c = tax.comp %}
+<div class="card">
+  <p class="muted" style="margin-top:0;font-size:12.5px;">Starts from the profit before tax in the income statement, then applies the depreciation, capital allowances, expense deductibility rules and any lines you add. Rate {{ '%g'|format(ye.tax_rate_percent) if ye.tax_rate_percent is not none else 'not set' }}% (income tax and AIDS levy combined; change it in the <a href="{{ url_for('firmfs.year_end', ye_id=ye.id) }}">year-end settings</a>).</p>
+  <div class="tbl-scroll"><table style="max-width:760px;">
+    <thead><tr><th></th><th class="num">USD</th><th></th></tr></thead>
+    <tbody>
+      <tr style="font-weight:700;"><td>Profit before tax (income statement)</td><td class="num">{{ fm(c.profit_before_tax) }}</td><td></td></tr>
+      {% for l in c['addbacks'] %}<tr><td style="padding-left:22px;">Add: {{ l.description }}</td><td class="num">{{ fm(l.amount) }}</td>
+        <td>{% if l.manual %}<form method="post" action="{{ url_for('firmfs.tax_line_delete', line_id=l.line_id) }}" style="display:inline;"><button class="btn small secondary" type="submit">Remove</button></form>{% endif %}</td></tr>{% endfor %}
+      {% for l in c['deductions'] %}<tr><td style="padding-left:22px;">Less: {{ l.description }}</td><td class="num">{{ fm(-l.amount) }}</td>
+        <td>{% if l.manual %}<form method="post" action="{{ url_for('firmfs.tax_line_delete', line_id=l.line_id) }}" style="display:inline;"><button class="btn small secondary" type="submit">Remove</button></form>{% endif %}</td></tr>{% endfor %}
+      <tr style="font-weight:700;"><td>Taxable income before assessed loss</td><td class="num">{{ fm(c.taxable_income_before_losses) }}</td><td></td></tr>
+      <tr><td style="padding-left:22px;">Assessed loss brought forward{% if ye.tax_loss_bf is not none %} (entered){% else %} (from the previous year-end){% endif %}</td><td class="num">{{ fm(c.tax_loss_brought_forward) }}</td><td></td></tr>
+      <tr><td style="padding-left:22px;">Less: assessed loss used</td><td class="num">{{ fm(-c.loss_utilised) }}</td><td></td></tr>
+      <tr style="font-weight:700;"><td>Taxable income</td><td class="num">{{ fm(c.taxable_income) }}</td><td></td></tr>
+      <tr style="font-weight:700;"><td>Income tax for the year at {{ '%g'|format(ye.tax_rate_percent or 0) }}%</td><td class="num">{{ fm(tax.current_tax) }}</td><td></td></tr>
+      <tr class="muted"><td style="padding-left:22px;">Assessed loss carried forward</td><td class="num">{{ fm(tax.loss_cf) }}</td><td></td></tr>
+    </tbody></table></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Tax payable</h3>
+  <div class="tbl-scroll"><table style="max-width:760px;"><tbody>
+    <tr><td>Income tax payable brought forward</td><td class="num">{{ fm(tax.payable_bf) }}</td></tr>
+    <tr><td>Income tax for the year</td><td class="num">{{ fm(tax.current_tax) }}</td></tr>
+    <tr><td style="padding-left:22px;">Less: QPD payments made in the period (Cash book: "QPD (provisional tax) paid")</td><td class="num">{{ fm(-tax.qpd_paid) }}</td></tr>
+    <tr><td style="padding-left:22px;">Less: other income tax payments in the period (Cash book: "Income tax paid")</td><td class="num">{{ fm(-tax.settled) }}</td></tr>
+    <tr style="font-weight:700;"><td>Income tax payable at the year-end{% if tax.payable < 0 %} (paid in advance){% endif %}</td><td class="num">{{ fm(tax.payable) }}</td></tr>
+  </tbody></table></div>
+  {% if tax.qpd_rows or tax.settled_rows %}<p class="muted" style="font-size:12px;margin-bottom:0;">Payments counted: {% for p in tax.qpd_rows + tax.settled_rows %}{{ p.date.strftime('%d %b %Y') }} {{ fm(p.usd) }} ({{ p.category }}){% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">What reaches the statements</h3>
+  <div class="tbl-scroll"><table style="max-width:760px;"><tbody>
+    <tr><td>Current tax</td><td class="num">{{ fm(tax.current_tax) }}</td></tr>
+    <tr><td>Deferred tax charged/(credited) - see <a href="{{ url_for('firmfs.tax_deferred', ye=ye.id) }}">Deferred tax</a></td><td class="num">{{ fm(tax.deferred_expense) }}</td></tr>
+    <tr style="font-weight:700;"><td>Income tax expense in the income statement</td><td class="num">{{ fm(tax.income_tax_expense) }}</td></tr>
+  </tbody></table></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Add a line</h3>
+  <form method="post" action="{{ url_for('firmfs.tax_line_add') }}">
+    <input type="hidden" name="ye_id" value="{{ ye.id }}">
+    <div class="form-row">
+      <div><label for="item_type">Type</label><select id="item_type" name="item_type">{% for k, l in line_types %}<option value="{{ k }}">{{ l }}</option>{% endfor %}</select></div>
+      <div style="flex:2;min-width:240px;"><label for="description">Description</label><input type="text" id="description" name="description" maxlength="200" placeholder="e.g. Fines and penalties; Interest from a bank (exempt)" required></div>
+      <div><label for="amount">Amount (USD)</label><input type="number" step="any" min="0" id="amount" name="amount" required></div>
+    </div>
+    <button class="btn gold" type="submit">Add to the computation</button>
+  </form>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">Expenses that are only partly deductible (entertainment, private use) are better set once on <a href="{{ url_for('firmfs.tax_rules', ye=ye.id) }}">Rates &amp; rules</a>; they then follow the Expense register automatically.</p>
+</div>
+
+<div class="card">
+  <form method="post" action="{{ url_for('firmfs.tax_loss_save') }}" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+    <input type="hidden" name="ye_id" value="{{ ye.id }}">
+    <div><label for="tax_loss_bf">Assessed loss brought forward (USD)</label><input type="number" step="any" min="0" id="tax_loss_bf" name="tax_loss_bf" value="{{ ye.tax_loss_bf if ye.tax_loss_bf is not none else '' }}" placeholder="blank = follow the previous year-end"></div>
+    <button class="btn small" type="submit">Save</button>
+  </form>
+  <hr style="margin:14px 0;">
+  <form method="post" action="{{ url_for('firmfs.tax_mode_save') }}">
+    <input type="hidden" name="ye_id" value="{{ ye.id }}"><input type="hidden" name="from_tax_pages" value="1">
+    <span class="muted" style="font-size:12.5px;">Income tax, tax payable and deferred tax in the statements come from these pages. </span>
+    <button class="btn small secondary" type="button" onclick="if(confirm('Switch this year-end to manual tax? The statements will use the tax figures typed on the year-end page.')){this.form.from_tax_pages.value='';this.form.submit();}">Switch this year-end to manual tax</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

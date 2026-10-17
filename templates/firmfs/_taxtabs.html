@@ -1,0 +1,8 @@
+<div class="ff-subnav" style="margin-top:-4px;">
+  <a href="{{ url_for('firmfs.tax_computation', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'tax_comp' }}">Income tax computation</a>
+  <a href="{{ url_for('firmfs.tax_capital_allowances', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'tax_cap' }}">Capital allowances</a>
+  <a href="{{ url_for('firmfs.tax_deferred', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'tax_def' }}">Deferred tax</a>
+  <a href="{{ url_for('firmfs.tax_qpd', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'tax_qpd' }}">QPD (provisional tax)</a>
+  <a href="{{ url_for('firmfs.tax_rules', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'tax_rules' }}">Rates &amp; rules</a>
+  {% if ye and tax %}<a href="{{ url_for('firmfs.tax_export', ye=ye.id) }}">Excel tax pack</a>{% endif %}
+</div>

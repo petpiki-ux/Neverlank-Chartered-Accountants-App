@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Deferred tax - {{ firm_name }}{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+{% set page_title = 'Deferred tax' %}
+{% include "firmfs/_head.html" %}
+{% include "firmfs/_taxtabs.html" %}
+{% if not tax %}
+{% include "firmfs/_taxmanual.html" %}
+{% else %}
+<div class="card">
+  <p class="muted" style="margin-top:0;font-size:12.5px;">Deferred tax is the tax rate ({{ '%g'|format(ye.tax_rate_percent or 0) }}%) on the temporary differences between the carrying amount of an item in the accounts and its tax base. For property, plant and equipment the carrying amount is the Asset register's net book value and the tax base is the tax value from <a href="{{ url_for('firmfs.tax_capital_allowances', ye=ye.id) }}">Capital allowances</a>. A carrying amount above the tax base gives a deferred tax liability; below it, an asset.</p>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Item</th><th class="num">Carrying amount</th><th class="num">Tax base</th><th class="num">Temporary difference</th><th class="num">Deferred tax</th><th></th></tr></thead>
+    <tbody>
+    {% for r in tax.deferred.rows %}
+      <tr><td>{{ r.description }}</td><td class="num">{{ fm(r.accounting_amount) }}</td><td class="num">{{ fm(r.tax_base_amount) }}</td><td class="num">{{ fm(r.temporary_difference) }}</td><td class="num">{{ fm(r.deferred_tax) }}</td>
+        <td>{% for it in tax.deferred_items if it.description == r.description and it.accounting_amount == r.accounting_amount and it.tax_base_amount == r.tax_base_amount %}{% if loop.first %}<form method="post" action="{{ url_for('firmfs.tax_deferred_delete', item_id=it.id) }}" style="display:inline;"><button class="btn small secondary" type="submit">Remove</button></form>{% endif %}{% endfor %}</td></tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr style="font-weight:700;"><td colspan="4">Deferred tax {{ 'liability' if tax.deferred_closing > 0 else ('asset' if tax.deferred_closing < 0 else '') }} at {{ ye.period_end.strftime('%d %b %Y') }}</td><td class="num">{{ fm(tax.deferred_closing) }}</td><td></td></tr></tfoot>
+  </table></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Movement</h3>
+  <div class="tbl-scroll"><table style="max-width:620px;"><tbody>
+    <tr><td>Deferred tax liability/(asset) at the start</td><td class="num">{{ fm(tax.deferred_opening) }}</td></tr>
+    <tr><td>Charged/(credited) to profit or loss</td><td class="num">{{ fm(tax.deferred_expense) }}</td></tr>
+    <tr style="font-weight:700;"><td>Deferred tax liability/(asset) at the end</td><td class="num">{{ fm(tax.deferred_closing) }}</td></tr>
+  </tbody></table></div>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">The start balance is the previous year-end's closing balance (or, for the first year-end, the position at the start of the year from the register; nil for a first period). No deferred tax asset is recognised on an assessed loss.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Add another temporary difference</h3>
+  <p class="muted" style="margin-top:0;font-size:12.5px;">For an item other than equipment: a provision (carrying amount is the liability, tax base nil), income received in advance, a prepayment. Enter assets and liabilities with the same sign convention: the difference is carrying amount minus tax base.</p>
+  <form method="post" action="{{ url_for('firmfs.tax_deferred_add') }}">
+    <input type="hidden" name="ye_id" value="{{ ye.id }}">
+    <div class="form-row">
+      <div style="flex:2;min-width:240px;"><label for="description">Description</label><input type="text" id="description" name="description" maxlength="200" required placeholder="e.g. Provision for leave pay"></div>
+      <div><label for="accounting_amount">Carrying amount</label><input type="number" step="any" id="accounting_amount" name="accounting_amount"></div>
+      <div><label for="tax_base_amount">Tax base</label><input type="number" step="any" id="tax_base_amount" name="tax_base_amount"></div>
+    </div>
+    <button class="btn gold" type="submit">Add</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

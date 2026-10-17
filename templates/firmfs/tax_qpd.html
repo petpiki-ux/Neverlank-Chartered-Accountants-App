@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}QPD - {{ firm_name }}{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+{% set page_title = 'QPD (provisional tax)' %}
+{% include "firmfs/_head.html" %}
+{% include "firmfs/_taxtabs.html" %}
+<div class="card">
+  <form method="get" class="an-filters" style="margin-bottom:6px;">
+    <input type="hidden" name="ye" value="{{ ye.id }}">
+    <div><label for="as_at">Profit so far, up to</label><input type="date" id="as_at" name="as_at" value="{{ est.as_at.isoformat() }}"></div>
+    <div><button class="btn small" type="submit">Estimate</button></div>
+  </form>
+  <p class="muted" style="font-size:12.5px;margin:0;">Fees and expenses from {{ est.start.strftime('%d %b %Y') }} to {{ est.as_at.strftime('%d %b %Y') }} are scaled up to the full year (x {{ '%.2f'|format(est.scale) }}). Depreciation, capital allowances, expense deductibility rules and the lines on the tax computation are the full year's. Other income and expenses typed on the year-end page are not part of this estimate.</p>
+</div>
+<div class="card">
+  <div class="tbl-scroll"><table style="max-width:700px;"><tbody>
+    <tr><td>Fees to date</td><td class="num">{{ fm(est.revenue_ytd) }}</td></tr>
+    <tr><td>Expenses to date</td><td class="num">{{ fm(est.expenses_ytd) }}</td></tr>
+    <tr><td>Estimated profit before tax for the year</td><td class="num">{{ fm(est.pbt_annual) }}</td></tr>
+    <tr><td>Estimated taxable income (after adjustments and assessed loss)</td><td class="num">{{ fm(est.comp.taxable_income) }}</td></tr>
+    <tr style="font-weight:700;"><td>Estimated income tax for the year at {{ '%g'|format(ye.tax_rate_percent or 0) }}%</td><td class="num">{{ fm(est.annual_tax) }}</td></tr>
+  </tbody></table></div>
+</div>
+<div class="card">
+  <h3 style="margin-top:0;">Instalments</h3>
+  {% if est.instalments %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Instalment</th><th>Due</th><th class="num">Cumulative %</th><th class="num">This instalment</th><th class="num">Cumulative due</th><th class="num">Paid by then</th><th class="num">Short</th></tr></thead>
+    <tbody>
+    {% for i in est.instalments %}
+      <tr><td>{{ i.label }}</td><td>{{ i.due_date.strftime('%d %b %Y') }}{% if i.past %} <span class="badge">past</span>{% endif %}</td><td class="num">{{ '%g'|format(i.cumulative_pct) }}%</td><td class="num">{{ fm(i.amount) }}</td><td class="num">{{ fm(i.cumulative_amount) }}</td><td class="num">{{ fm(i.paid_by_then) }}</td>
+        <td class="num" {% if i.past and i.short > 0.005 %}style="color:#b3261e;font-weight:600;"{% endif %}>{{ fm(i.short) }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% endif %}
+  <p class="muted" style="font-size:12px;margin-bottom:0;">Instalment rates and dates are the firm-wide table the client QPD estimator uses. Payments are the Cash book entries under "QPD (provisional tax) paid" dated {{ est.end.year }}: <a href="{{ url_for('firmfs.cash_entry_new') }}">record a QPD payment</a>. Due dates are taken in calendar {{ est.end.year }}; check them against ZIMRA's dates for a year-end that is not 31 December. Paid in {{ est.end.year }}: {{ fm(est.paid_total) }}.</p>
+</div>
+{% endblock %}

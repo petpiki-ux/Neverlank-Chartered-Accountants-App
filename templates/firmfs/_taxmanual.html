@@ -1,0 +1,6 @@
+<div class="card">
+  <p style="margin-top:0;">This year-end uses <b>manual tax</b>: income tax, tax payable and deferred tax in the statements are the figures typed on the <a href="{{ url_for('firmfs.year_end', ye_id=ye.id) }}">year-end page</a>, and the Tax pages are not used.</p>
+  <form method="post" action="{{ url_for('firmfs.tax_mode_save') }}"><input type="hidden" name="ye_id" value="{{ ye.id }}">
+    <label style="font-weight:400;"><input type="checkbox" name="from_tax_pages" value="1" style="width:auto;"> Take tax from the Tax pages instead</label>
+    <button class="btn" type="submit">Save</button></form>
+</div>

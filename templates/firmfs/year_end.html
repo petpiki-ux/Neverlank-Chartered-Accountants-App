@@ -31,6 +31,21 @@
   <p class="muted" style="font-size:12px;margin-bottom:0;">Profit before tax is USD {{ fm(pbt) }}{% if pbt > 0 and ye.tax_rate_percent %}; at {{ ye.tax_rate_percent }}% the indicative income tax is USD {{ '{:,.2f}'.format(indicative_tax) }} (for guidance only; enter the tax expense your computation gives){% endif %}.</p>
 </div>
 
+<div class="card" id="tax">
+  <h3 style="margin-top:0;">Income tax</h3>
+  {% if stm.cur.tax %}
+    <p style="margin-top:0;">Income tax, tax payable and deferred tax come from the <a href="{{ url_for('firmfs.tax_computation', ye=ye.id) }}">Tax pages</a> (capital allowances, computation, deferred tax, QPD). Do not also enter them below.</p>
+    <table style="max-width:560px;"><tbody>
+      <tr><td>Income tax for the year</td><td class="num">{{ fm(stm.cur.tax.current_tax) }}</td></tr>
+      <tr><td>Deferred tax charged/(credited)</td><td class="num">{{ fm(stm.cur.tax.deferred_expense) }}</td></tr>
+      <tr><td>Income tax payable at the year-end</td><td class="num">{{ fm(stm.cur.tax.payable) }}</td></tr>
+      <tr><td>Deferred tax liability/(asset)</td><td class="num">{{ fm(stm.cur.tax.deferred_closing) }}</td></tr>
+    </tbody></table>
+  {% else %}
+    <p style="margin:0;">This year-end uses manual tax: the figures typed below are used. <a href="{{ url_for('firmfs.tax_computation', ye=ye.id) }}">Switch to the Tax pages</a>.</p>
+  {% endif %}
+</div>
+
 <div class="card" id="cash">
   <h3 style="margin-top:0;">Cash and bank</h3>
   {% if cash_auto %}

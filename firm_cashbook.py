@@ -22,7 +22,7 @@ BACK_PREFIX = "/firm-finance/cash-book"
 # Headings offered for NEW manual entries. Bank charges and salaries are expense categories now (they are filed in the
 # Expense register), so they are not offered here again; entries already saved under them keep working.
 CASH_IN_CATEGORIES = ["Owner / shareholder contribution", "Loan received", "Interest received", "Other receipt"]
-CASH_OUT_CATEGORIES = ["Loan repayment", "Dividend paid", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Other payment"]
+CASH_OUT_CATEGORIES = ["Loan repayment", "Dividend paid", "QPD (provisional tax) paid", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Other payment"]
 NEW_CATEGORY = "__new__"
 
 

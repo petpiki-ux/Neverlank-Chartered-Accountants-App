@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block title %}Tax rates and rules - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set stm = None %}{% set tax = None %}
+<div class="page-header"><div><h1>Tax rates &amp; rules</h1>
+  <div class="subtitle">Capital allowance treatment of each asset class, and how much of each expense category is not deductible. These are data, not law: confirm them against the current Income Tax Act and tick "verified".</div></div></div>
+{% include "firmfs/_nav.html" %}
+{% include "firmfs/_taxtabs.html" %}
+<div class="card">
+  <h3 style="margin-top:0;">Asset classes</h3>
+  {% if classes %}
+  <form method="post" action="{{ url_for('firmfs.tax_rules_assets_save') }}">
+    <input type="hidden" name="ye" value="{{ ye.id if ye else '' }}">
+    <div class="tbl-scroll"><table>
+      <thead><tr><th>Class</th><th>Method</th><th class="num">Wear and tear %</th><th class="num">SIA %</th><th class="num">SIA years</th><th class="num">Cost cap</th><th>First-year by months</th><th>Note</th><th>Verified</th></tr></thead>
+      <tbody>
+      {% for c in classes %}{% set r = rules[c.id] %}
+        <tr><td>{{ c.name }}</td>
+          <td><select name="method_{{ c.id }}">{% for k, l in methods %}<option value="{{ k }}" {% if r.method == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></td>
+          <td><input type="number" step="any" min="0" max="100" name="wt_{{ c.id }}" value="{{ r.wt_rate_percent or 0 }}" style="width:80px;"></td>
+          <td><input type="number" step="any" min="0" max="100" name="sia_{{ c.id }}" value="{{ r.sia_percent if r.sia_percent is not none else 25 }}" style="width:80px;"></td>
+          <td><input type="number" step="1" min="0" name="years_{{ c.id }}" value="{{ r.sia_years if r.sia_years is not none else 4 }}" style="width:64px;"></td>
+          <td><input type="number" step="any" min="0" name="cap_{{ c.id }}" value="{{ r.cost_cap or '' }}" placeholder="none" style="width:100px;"></td>
+          <td style="text-align:center;"><input type="checkbox" name="prorata_{{ c.id }}" value="1" style="width:auto;" {% if r.prorata_first_year %}checked{% endif %}></td>
+          <td><input type="text" name="note_{{ c.id }}" maxlength="250" value="{{ r.note or '' }}" style="min-width:200px;"></td>
+          <td style="text-align:center;"><input type="checkbox" name="verified_{{ c.id }}" value="1" style="width:auto;" {% if r.verified %}checked{% endif %}>{% if not r.verified %}<div class="muted" style="font-size:11px;">not verified</div>{% endif %}</td></tr>
+      {% endfor %}
+      </tbody></table></div>
+    <p class="muted" style="font-size:12px;">SIA: the percentage of cost claimed each year for the number of years. Wear and tear: straight-line on cost, or reducing balance on the tax value. Cost cap: allowances are worked on no more than this cost (passenger vehicles). Changing a rule clears its "verified" tick; tick it again and save once you have checked it.</p>
+    <button class="btn gold" type="submit">Save asset rules</button>
+  </form>
+  {% else %}<p>No asset classes yet. <a href="{{ url_for('firmfs.asset_classes') }}">Add classes</a> in the Asset register first.</p>{% endif %}
+</div>
+<div class="card">
+  <h3 style="margin-top:0;">Expense deductibility</h3>
+  <form method="post" action="{{ url_for('firmfs.tax_rules_categories_save') }}">
+    <input type="hidden" name="ye" value="{{ ye.id if ye else '' }}">
+    <div class="tbl-scroll"><table style="max-width:820px;">
+      <thead><tr><th>Expense category</th><th class="num">Not deductible %</th><th>Why (section of the Act)</th></tr></thead>
+      <tbody>
+      {% for cat in cats %}
+        <tr><td>{{ cat }}<input type="hidden" name="name_{{ loop.index0 }}" value="{{ cat }}"></td>
+          <td><input type="number" step="any" min="0" max="100" name="pct_{{ loop.index0 }}" value="{{ crules.get(cat, 0) }}" style="width:90px;"></td>
+          <td><input type="text" name="note_{{ loop.index0 }}" maxlength="250" value="{{ cnotes.get(cat) or '' }}" style="min-width:260px;"></td></tr>
+      {% endfor %}
+      </tbody></table></div>
+    <p class="muted" style="font-size:12px;">The percentage is added back to profit in the computation whenever the category has expenses. For a one-off item use a line on the computation instead. See also the Section 16(1) prohibited deductions rules used for client engagements.</p>
+    <button class="btn gold" type="submit">Save expense rules</button>
+  </form>
+</div>
+{% endblock %}

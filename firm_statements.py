@@ -40,6 +40,7 @@ from datetime import date, timedelta
 
 import analytics
 import cashbook
+import firm_tax
 import financials
 from financials import (
     _row, _is_nil, _filter_nil_rows, _infer_period_start, _attach_note_numbers,
@@ -262,7 +263,7 @@ def column_profit(t):
     return pbt, pbt - t["income_tax_expense"]
 
 
-def build_column(ye, prev_end, classes, assets):
+def build_column(ye, prev_end, classes, assets, prev_col=None):
     """One year-end's accounts. `ye` is a FirmYearEnd. Returns {"accounts": {code: [{name, amount}]}, "totals":
     {code: amount}, ...}. Retained earnings brought forward is only filled here if it was entered; the chain builder
     carries it forward otherwise."""
@@ -308,9 +309,19 @@ def build_column(ye, prev_end, classes, assets):
             warnings.append(f"Cash is taken from the Cash Book, so the {len(ignored)} cash figure(s) entered on this year-end were ignored. "
                             "Remove them, or switch this year-end to manual cash in its settings, to avoid confusion.")
 
+    # Income tax, tax payable and deferred tax come from the Tax pages unless this year-end is switched to manual tax
+    tax_auto = not getattr(ye, "tax_manual", False)
+    if tax_auto:
+        ignored_tax = [ln for ln in ye.lines if ln.fs_category in firm_tax.TAX_CODES]
+        if ignored_tax:
+            warnings.append(f"Tax is taken from the Tax pages, so the {len(ignored_tax)} tax figure(s) entered on this year-end were ignored. "
+                            "Remove them, or switch this year-end to manual tax in its settings, to avoid confusion.")
+
     re_entered = False
     for ln in ye.lines:
         if from_book and ln.fs_category == "cash":
+            continue
+        if tax_auto and ln.fs_category in firm_tax.TAX_CODES:
             continue
         if ln.currency == "USD" or not ln.currency:
             usd = ln.amount or 0.0
@@ -323,8 +334,28 @@ def build_column(ye, prev_end, classes, assets):
             re_entered = True
         add(ln.fs_category, ln.description if ln.currency in (None, "USD") else f"{ln.description} ({ln.currency} {ln.amount:,.2f} at {rate:g})", usd)
 
+    tax = None
+    if tax_auto:
+        t_pre = {code: sum(x["amount"] for x in acc[code]) for code in ALL_CODES}
+        tax = firm_tax.column_tax(ye, start, end, column_profit(t_pre)[0], d, sched, classes, assets,
+                                  (prev_col or {}).get("tax"))
+        warnings.extend(tax["warnings"])
+        if abs(tax["current_tax"]) >= 0.005:
+            add("income_tax_expense", "Current tax (see Tax computation)", tax["current_tax"])
+        if abs(tax["deferred_expense"]) >= 0.005:
+            add("income_tax_expense", "Deferred tax (see Deferred tax)", tax["deferred_expense"])
+        if tax["payable"] >= 0.005:
+            add("current_tax_payable", "Income tax payable (tax for the year and earlier, less payments made)", tax["payable"])
+        elif tax["payable"] <= -0.005:
+            add("other_current_assets", "Income tax prepaid (payments made exceed the tax due)", -tax["payable"])
+        if tax["deferred_closing"] >= 0.005:
+            add("deferred_tax_liability", "Deferred tax on temporary differences", tax["deferred_closing"])
+        elif tax["deferred_closing"] <= -0.005:
+            add("deferred_tax_asset", "Deferred tax on temporary differences", -tax["deferred_closing"])
+
     totals = {code: r2(sum(x["amount"] for x in acc[code])) for code in ALL_CODES}
     return {
+        "tax": tax,
         "ye": ye, "ye_id": ye.id, "period_start": start, "period_end": end, "label": period_label(start, end),
         "accounts": acc, "totals": totals, "schedule": sched, "derived": d, "warnings": warnings,
         "re_entered": re_entered, "re_carried": False,
@@ -342,7 +373,7 @@ def build_chain(year_ends, classes, assets):
     cols = []
     prev_end = None
     for ye in sorted(year_ends, key=lambda y: y.period_end):
-        col = build_column(ye, prev_end, classes, assets)
+        col = build_column(ye, prev_end, classes, assets, cols[-1] if cols else None)
         if not col["re_entered"]:
             if cols:
                 carry = column_closing_re(cols[-1])

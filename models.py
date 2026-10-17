@@ -10958,6 +10958,8 @@ class FirmYearEnd(db.Model):
     reporting_framework = db.Column(db.String(20), default="ifrs_for_smes")
     opening_nil = db.Column(db.Boolean, default=False, nullable=False)   # first period: the opening position is nil
     cash_manual = db.Column(db.Boolean, default=False, nullable=False)  # True = cash entered by hand; False = taken from the Cash Book
+    tax_manual = db.Column(db.Boolean, default=False, nullable=False)   # True = tax figures entered by hand; False = from the Tax pages
+    tax_loss_bf = db.Column(db.Float)               # assessed loss brought forward; empty = the previous year-end's loss carried forward
     extra_note = db.Column(db.Text)                 # printed as an additional note
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -10995,7 +10997,7 @@ CASH_ACCOUNT_KINDS = ["Bank", "Cash", "Mobile money"]
 CASH_ENTRY_CATEGORIES = [
     "Owner / shareholder contribution", "Loan received", "Loan repayment", "Dividend paid", "Interest received",
     "Bank charges", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Salaries paid",
-    "Other receipt", "Other payment",
+    "Other receipt", "Other payment", "QPD (provisional tax) paid",
 ]
 CASH_TRANSFER_CATEGORY = "Transfer between accounts"
 
@@ -11058,3 +11060,71 @@ class CashClear(db.Model):
     source_key = db.Column(db.String(60), nullable=False)
     cleared_on = db.Column(db.Date, nullable=False)
     __table_args__ = (db.UniqueConstraint("account_id", "source_key", name="uq_cash_clear"),)
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - Tax (capital allowances, income tax computation, QPD, deferred tax)
+#
+# Every rate here is DATA the Partner can edit (the published sources disagree and the Acts change); a rule starts
+# "not verified" and the Partner marks it verified against the current Act. Nothing here is a hard-coded ZIMRA figure.
+# ---------------------------------------------------------------------------
+FIRM_TAX_METHODS = [
+    ("SIA", "Special initial allowance (a % of cost a year)"),
+    ("WT_SL", "Wear and tear, straight-line on cost"),
+    ("WT_RB", "Wear and tear, reducing balance"),
+    ("NONE", "No capital allowance"),
+]
+FIRM_TAX_LINE_TYPES = [
+    ("addback", "Add back (expense not deductible, income taxable)"),
+    ("deduction", "Deduction"),
+    ("exempt", "Exempt or non-taxable income"),
+]
+
+
+class FirmTaxAssetRule(db.Model):
+    """The capital allowance treatment of one asset class."""
+    __tablename__ = "firm_tax_asset_rule"
+    id = db.Column(db.Integer, primary_key=True)
+    asset_class_id = db.Column(db.Integer, db.ForeignKey("firm_asset_class.id"), nullable=False, unique=True)
+    method = db.Column(db.String(10), nullable=False, default="WT_SL")
+    wt_rate_percent = db.Column(db.Float, default=0.0)       # wear and tear, per annum
+    sia_percent = db.Column(db.Float, default=25.0)          # special initial allowance, per annum
+    sia_years = db.Column(db.Integer, default=4)
+    cost_cap = db.Column(db.Float)                           # allowances are worked on no more than this cost (e.g. passenger vehicles)
+    prorata_first_year = db.Column(db.Boolean, default=False, nullable=False)  # wear and tear in the year of purchase by months owned
+    verified = db.Column(db.Boolean, default=False, nullable=False)
+    note = db.Column(db.String(250))
+    asset_class = db.relationship("FirmAssetClass")
+
+
+class FirmTaxCategoryRule(db.Model):
+    """The share of an Expense-register category the Income Tax Act does not allow (0 = fully deductible)."""
+    __tablename__ = "firm_tax_category_rule"
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(60), nullable=False, unique=True)
+    disallowed_percent = db.Column(db.Float, nullable=False, default=0.0)
+    note = db.Column(db.String(250))
+
+
+class FirmTaxLine(db.Model):
+    """A hand-entered line of one year-end's income tax computation."""
+    __tablename__ = "firm_tax_line"
+    id = db.Column(db.Integer, primary_key=True)
+    year_end_id = db.Column(db.Integer, db.ForeignKey("firm_year_end.id"), nullable=False)
+    item_type = db.Column(db.String(12), nullable=False, default="addback")
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    year_end = db.relationship("FirmYearEnd", backref=db.backref("tax_lines", cascade="all, delete-orphan", lazy=True))
+
+
+class FirmDeferredItem(db.Model):
+    """A temporary difference other than property, plant and equipment (a provision, prepaid income ...)."""
+    __tablename__ = "firm_deferred_item"
+    id = db.Column(db.Integer, primary_key=True)
+    year_end_id = db.Column(db.Integer, db.ForeignKey("firm_year_end.id"), nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    accounting_amount = db.Column(db.Float, nullable=False, default=0.0)   # carrying amount in the statements
+    tax_base_amount = db.Column(db.Float, nullable=False, default=0.0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    year_end = db.relationship("FirmYearEnd", backref=db.backref("deferred_items", cascade="all, delete-orphan", lazy=True))
