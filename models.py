@@ -11247,3 +11247,13 @@ class FirmExchangeRate(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     __table_args__ = (db.UniqueConstraint("currency", "rate_date", name="uq_firm_fx_rate"),)
     created_by = db.relationship("User")
+
+
+class FirmFxConfig(db.Model):
+    """One row of settings for fetching exchange rates from the Reserve Bank of Zimbabwe website."""
+    __tablename__ = "firm_fx_config"
+    id = db.Column(db.Integer, primary_key=True)
+    rbz_basis = db.Column(db.String(10), default="mid")        # which RBZ interbank figure is stored: mid | bid | ask
+    auto_fetch = db.Column(db.Boolean, default=True)           # fetch the latest published rate when the rates page is opened
+    last_attempt = db.Column(db.DateTime)
+    last_message = db.Column(db.String(300))

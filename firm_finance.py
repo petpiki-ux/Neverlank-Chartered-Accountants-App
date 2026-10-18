@@ -123,7 +123,7 @@ def year_end(ye_id):
     manual_cash = cashbook.manual_summary(cur["period_start"], ye.period_end)
     return render_template(
         "firmfs/year_end.html", ye=ye, stm=stm, d=d, sched=sched, pbt=pbt, ordered=ordered, active="index",
-        cash_info=cash_info, manual_cash=manual_cash, cash_auto=cash_auto, fx=fx, fx_stale_days=firm_fx.STALE_DAYS,
+        cash_info=cash_info, manual_cash=manual_cash, cash_auto=cash_auto, fx=fx, fx_stale_days=firm_fx.STALE_DAYS, today_date=date.today(),
         categories=FIRM_ENTRY_CATEGORIES, currencies=INVOICE_CURRENCIES, frameworks=FIRM_FRAMEWORKS,
         previous=earlier[-1] if earlier else None,
         indicative_tax=(pbt * (ye.tax_rate_percent or 0) / 100.0) if pbt > 0 else 0.0,

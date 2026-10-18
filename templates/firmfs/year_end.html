@@ -114,6 +114,7 @@
       {% if fx.status == 'match' %}<span class="badge status-Paid">matches</span>{% elif fx.status in ('differs', 'unused') %}
       <form method="post" action="{{ url_for('firmfs.exchange_rate_apply', ye_id=ye.id) }}" style="display:inline;"><input type="hidden" name="back" value="year_end"><button class="btn small secondary" type="submit">Use the register rate</button></form>{% endif %}
     {% else %}The <a href="{{ url_for('firmfs.exchange_rates') }}">Exchange rates register</a> has no rate dated on or before this year-end.{% endif %}
+    {% if ye.period_end <= today_date %}<form method="post" action="{{ url_for('firmfs.rbz_for_year_end', ye_id=ye.id) }}" style="display:inline;"><input type="hidden" name="back" value="year_end"><button class="btn small secondary" type="submit" title="Reads the RBZ interbank rate for the closing date from rbz.co.zw">Get the closing rate from the RBZ</button></form>{% endif %}
   </p>
   {% elif not fx.row %}
   <p class="muted" style="font-size:12.5px;margin:0 0 10px;">Keep ZWG rates in the <a href="{{ url_for('firmfs.exchange_rates') }}">Exchange rates register</a>; a year-end without a typed rate takes the latest one dated on or before it.</p>

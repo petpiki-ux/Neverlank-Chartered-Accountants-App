@@ -20,10 +20,35 @@
             {% elif i.status == 'unused' %}<span class="badge overdue">No rate set: ZWG items are left out</span>
             {% elif i.status == 'typed' %}<span class="badge">Typed (no register rate)</span>
             {% else %}<span class="badge overdue">No rate</span>{% endif %}</td>
-        <td>{% if i.row and i.status in ('differs', 'unused') %}<form method="post" action="{{ url_for('firmfs.exchange_rate_apply', ye_id=y.id) }}" style="display:inline;"><button class="btn small" type="submit">Use the register rate</button></form>{% endif %}</td></tr>
+        <td style="white-space:nowrap;">{% if y.period_end <= today %}<form method="post" action="{{ url_for('firmfs.rbz_for_year_end', ye_id=y.id) }}" style="display:inline;"><button class="btn small secondary" type="submit" title="Reads the RBZ rate for the closing date">Get from RBZ</button></form> {% endif %}{% if i.row and i.status in ('differs', 'unused') %}<form method="post" action="{{ url_for('firmfs.exchange_rate_apply', ye_id=y.id) }}" style="display:inline;"><button class="btn small" type="submit">Use the register rate</button></form>{% endif %}</td></tr>
     {% endfor %}
     </tbody></table></div>
   {% else %}<p class="muted" style="margin:0;">No year-ends yet. A year-end created without a rate takes its closing rate from the register below.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Reserve Bank of Zimbabwe rates</h3>
+  <p style="font-size:13px;margin-top:0;">Reads the RBZ interbank rate (ZWG per 1 USD) from <b>rbz.co.zw</b>. The RBZ publishes one file per working day; weekends and public holidays have none, so the last working day's rate applies. A rate you typed yourself is never replaced.</p>
+  {% if auto %}<p class="muted" style="font-size:12.5px;margin:0 0 8px;">{{ auto }}</p>{% elif cfg.last_message %}<p class="muted" style="font-size:12.5px;margin:0 0 8px;">Last attempt {{ cfg.last_attempt.strftime('%d %b %Y %H:%M') if cfg.last_attempt else '' }} (UTC): {{ cfg.last_message }}</p>{% endif %}
+  <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;">
+    <form method="post" action="{{ url_for('firmfs.rbz_latest') }}" style="margin:0;">
+      <button class="btn gold" type="submit">Get the latest RBZ rate</button>
+      <label style="margin:6px 0 0;font-size:12px;display:flex;gap:6px;align-items:center;"><input type="checkbox" name="overwrite" value="1" style="width:auto;"> replace a rate I typed for that date</label>
+    </form>
+    <form method="post" action="{{ url_for('firmfs.rbz_month') }}" style="margin:0;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
+      <div><label for="rm" style="margin:0;">Fill a month</label><select id="rm" name="month" style="margin:0;">{% for n, nm in months %}<option value="{{ n }}" {% if n == today.month %}selected{% endif %}>{{ nm }}</option>{% endfor %}</select></div>
+      <div><label for="ry" style="margin:0;">&nbsp;</label><input type="number" id="ry" name="year" value="{{ today.year }}" min="2009" max="{{ today.year }}" style="margin:0;width:90px;"></div>
+      <button class="btn" type="submit">Get that month</button>
+      <label style="margin:0 0 8px;font-size:12px;display:flex;gap:6px;align-items:center;"><input type="checkbox" name="overwrite" value="1" style="width:auto;"> replace rates already in the register</label>
+    </form>
+  </div>
+  <form method="post" action="{{ url_for('firmfs.rbz_settings') }}" style="margin:14px 0 0;display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
+    <label style="margin:0;">Figure to store
+      <select name="basis" style="margin:0 0 0 6px;width:auto;">{% for k, v in bases.items() %}<option value="{{ k }}" {% if cfg.rbz_basis == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
+    <label style="margin:0;display:flex;gap:6px;align-items:center;"><input type="checkbox" name="auto_fetch" value="1" style="width:auto;" {% if cfg.auto_fetch %}checked{% endif %}> Fetch the latest rate automatically when this page opens (at most every 6 hours)</label>
+    <button class="btn small secondary" type="submit">Save</button>
+  </form>
+  <p class="muted" style="font-size:12px;margin:10px 0 0;">The RBZ interbank figures are the bid, ask and average. The average (mid) is stored unless you choose otherwise; the bid and ask are kept in the note. If the website is down or its layout changes, the fetch stops with a message and you can still type rates in below.</p>
 </div>
 
 <div class="card">
