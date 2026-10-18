@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Chart of accounts - Firm ledger{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Chart of accounts</h1>
+  <div class="subtitle">Each account feeds one line of the financial statements. Accounts the app posts to (marked "app") can be renamed but keep their statement line; your own accounts can be added, renamed, remapped or switched off.</div></div>
+  <div><form method="post" action="{{ url_for('firmfs.ledger_accounts_sync') }}" style="display:inline;"><button class="btn secondary" type="submit" title="Create accounts for new cash book accounts, expense categories and services">Sync with cash book, expenses and services</button></form></div></div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card">
+  <h3 style="margin-top:0;">{{ 'Edit ' ~ edit.label if edit else 'Add an account' }}</h3>
+  {% set e = edit %}
+  <form method="post" action="{{ url_for('firmfs.ledger_account_save') }}">
+    {% if e %}<input type="hidden" name="id" value="{{ e.id }}">{% endif %}
+    <div class="form-row">
+      <div style="width:110px;"><label for="code">Code</label><input type="text" id="code" name="code" maxlength="12" required value="{{ e.code if e else '' }}"></div>
+      <div style="flex:2;min-width:260px;"><label for="name">Name</label><input type="text" id="name" name="name" maxlength="120" required value="{{ e.name if e else '' }}"></div>
+      <div><label for="account_type">Type</label><select id="account_type" name="account_type" {% if e and e.system_key %}style="pointer-events:none;opacity:.6;"{% endif %}>{% for t in types %}<option {% if (e.account_type if e else 'Asset') == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row">
+      <div style="flex:1;min-width:300px;"><label for="fs_category">Feeds this line of the statements</label>
+        <select id="fs_category" name="fs_category" {% if e and e.system_key %}style="pointer-events:none;opacity:.6;"{% endif %}>
+          <option value="excluded" {% if e and (e.fs_category or 'excluded') == 'excluded' %}selected{% endif %}>Not in the statements (clearing / memo)</option>
+          {% for section, items in groups.items() %}<optgroup label="{{ section }}">{% for code, label in items %}<option value="{{ code }}" {% if e and e.fs_category == code %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup>{% endfor %}
+        </select></div>
+      <div style="flex:2;min-width:260px;"><label for="description">Note</label><input type="text" id="description" name="description" maxlength="250" value="{{ e.description if e and e.description else '' }}"></div>
+    </div>
+    {% if e and e.system_key %}<p class="muted" style="font-size:12px;margin:0 0 10px;">The app posts to this account and the statements calculate its figure, so its type and statement line are fixed. Its name, code and note can be changed.</p>{% endif %}
+    <button class="btn gold" type="submit">{{ 'Save changes' if e else 'Add account' }}</button>
+    {% if e %}<a class="btn secondary" href="{{ url_for('firmfs.ledger_accounts') }}">Cancel</a>{% endif %}
+  </form>
+</div>
+
+{% for typ in types %}
+<div class="card">
+  <h3 style="margin-top:0;">{{ typ }}</h3>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th style="width:80px;">Code</th><th>Account</th><th>Statement line</th><th>Origin</th><th class="num">Journal lines</th><th></th></tr></thead>
+    <tbody>
+    {% for a in accounts if a.account_type == typ %}
+      <tr {% if not a.is_active %}style="opacity:.55;"{% endif %}>
+        <td><b>{{ a.code }}</b></td>
+        <td>{{ a.name }}{% if a.description %}<div class="muted" style="font-size:11.5px;">{{ a.description }}</div>{% endif %}</td>
+        <td>{{ cat_label.get(a.fs_category, 'Not in the statements') if a.fs_category else 'Not in the statements' }}</td>
+        <td>{% if a.system_key %}<span class="badge">app</span>{% else %}own{% endif %}{% if not a.is_active %} <span class="badge overdue">off</span>{% endif %}</td>
+        <td class="num">{{ used.get(a.id, '') }}</td>
+        <td style="white-space:nowrap;">
+          <a class="btn small secondary" href="{{ url_for('firmfs.ledger_accounts', edit=a.id) }}">Edit</a>
+          <a class="btn small secondary" href="{{ url_for('firmfs.ledger_account', account=a.id, ye=ye.id if ye else None) }}">Ledger</a>
+          {% if not a.system_key %}
+          <form method="post" action="{{ url_for('firmfs.ledger_account_toggle', account_id=a.id) }}" style="display:inline;"><button class="btn small secondary" type="submit">{{ 'Switch off' if a.is_active else 'Switch on' }}</button></form>
+          {% if not used.get(a.id) %}<form method="post" action="{{ url_for('firmfs.ledger_account_delete', account_id=a.id) }}" style="display:inline;" onsubmit="return confirm('Delete this account?');"><button class="btn small danger" type="submit">Delete</button></form>{% endif %}
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endfor %}
+{% endblock %}

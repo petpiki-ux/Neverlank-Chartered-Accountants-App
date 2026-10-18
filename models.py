@@ -11128,3 +11128,100 @@ class FirmDeferredItem(db.Model):
     tax_base_amount = db.Column(db.Float, nullable=False, default=0.0)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     year_end = db.relationship("FirmYearEnd", backref=db.backref("deferred_items", cascade="all, delete-orphan", lazy=True))
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - Ledger (double entry and journals)
+#
+# The firm's chart of accounts (FirmAccount) and manual journals (FirmJournal / FirmJournalLine). Everything the app
+# already records - invoices, credit notes, receipts, advances, expenses, cash book entries, depreciation, disposals and
+# tax - is turned into balanced debit/credit postings by firm_ledger.py when a page is opened; those derived postings are
+# never stored, so nothing is keyed twice. Only the manual journals are stored. A posted journal is never edited or
+# deleted: it is reversed by a new journal. FirmPeriodLock closes the books to new or changed journals up to a date.
+# ---------------------------------------------------------------------------
+FIRM_ACCOUNT_TYPES = ["Asset", "Liability", "Equity", "Income", "Expense"]
+FIRM_JOURNAL_STATUSES = ["draft", "posted"]
+
+
+class FirmAccount(db.Model):
+    __tablename__ = "firm_account"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(12), nullable=False, unique=True)
+    name = db.Column(db.String(120), nullable=False)
+    account_type = db.Column(db.String(12), nullable=False, default="Asset")
+    fs_category = db.Column(db.String(40))          # statement line it feeds; None / "excluded" = not in the statements
+    system_key = db.Column(db.String(80), unique=True)   # set on accounts the posting engine writes to (e.g. "CASH:3", "EXP:Fuel")
+    description = db.Column(db.String(250))
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def is_system(self):
+        return bool(self.system_key)
+
+    @property
+    def label(self):
+        return f"{self.code} {self.name}"
+
+
+class FirmJournal(db.Model):
+    __tablename__ = "firm_journal"
+    id = db.Column(db.Integer, primary_key=True)
+    number = db.Column(db.String(20), nullable=False, unique=True)     # JE-2026-0001
+    journal_date = db.Column(db.Date, nullable=False, default=date.today)
+    description = db.Column(db.String(250), nullable=False)
+    reference = db.Column(db.String(120))
+    status = db.Column(db.String(10), nullable=False, default="draft")
+    reverses_id = db.Column(db.Integer, db.ForeignKey("firm_journal.id"))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    posted_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    posted_at = db.Column(db.DateTime)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    posted_by = db.relationship("User", foreign_keys=[posted_by_id])
+    reverses = db.relationship("FirmJournal", remote_side=[id], backref=db.backref("reversals", lazy=True))
+    lines = db.relationship("FirmJournalLine", backref="journal", cascade="all, delete-orphan",
+                            order_by="FirmJournalLine.order, FirmJournalLine.id")
+
+    @property
+    def total_debit(self):
+        return round(sum(l.debit or 0.0 for l in self.lines), 2)
+
+    @property
+    def total_credit(self):
+        return round(sum(l.credit or 0.0 for l in self.lines), 2)
+
+    @property
+    def is_balanced(self):
+        return abs(self.total_debit - self.total_credit) < 0.005 and self.total_debit > 0
+
+    @property
+    def reversed_by(self):
+        return next((r for r in self.reversals if r.status == "posted"), None)
+
+
+class FirmJournalLine(db.Model):
+    __tablename__ = "firm_journal_line"
+    id = db.Column(db.Integer, primary_key=True)
+    journal_id = db.Column(db.Integer, db.ForeignKey("firm_journal.id"), nullable=False)
+    account_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"), nullable=False)
+    debit = db.Column(db.Float, nullable=False, default=0.0)
+    credit = db.Column(db.Float, nullable=False, default=0.0)
+    narration = db.Column(db.String(250))
+    order = db.Column(db.Integer, default=0)
+    account = db.relationship("FirmAccount")
+
+
+class FirmPeriodLock(db.Model):
+    """The books are closed to journals dated on or before `locked_through`. The latest row is the one in force;
+    older rows are the history (who closed or reopened the books, and when)."""
+    __tablename__ = "firm_period_lock"
+    id = db.Column(db.Integer, primary_key=True)
+    locked_through = db.Column(db.Date)             # None = nothing locked (the books were reopened)
+    note = db.Column(db.String(250))
+    set_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    set_at = db.Column(db.DateTime, default=datetime.utcnow)
+    set_by = db.relationship("User")

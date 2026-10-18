@@ -1,0 +1,9 @@
+<div class="ff-subnav" style="margin-top:-4px;">
+  <a href="{{ url_for('firmfs.ledger_index', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'ledger_journals' }}">Journals</a>
+  <a href="{{ url_for('firmfs.journal_new', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'ledger_new' }}">New journal</a>
+  <a href="{{ url_for('firmfs.ledger_accounts', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'ledger_accounts' }}">Chart of accounts</a>
+  <a href="{{ url_for('firmfs.ledger_account', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'ledger_gl' }}">Ledger by account</a>
+  <a href="{{ url_for('firmfs.ledger_trial_balance', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'ledger_tb' }}">Trial balance</a>
+  <a href="{{ url_for('firmfs.ledger_reconcile', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'ledger_rec' }}">Agree to the statements</a>
+  <a href="{{ url_for('firmfs.ledger_lock', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'ledger_lock' }}">Close the books{% if lock %} <span class="muted" style="font-weight:400;">(to {{ lock.strftime('%d %b %Y') }})</span>{% endif %}</a>
+</div>

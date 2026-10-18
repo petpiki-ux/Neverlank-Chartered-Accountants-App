@@ -1,0 +1,60 @@
+{% extends "base.html" %}
+{% block title %}Ledger agreed to the statements - Firm ledger{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+<div class="page-header"><div><h1>Ledger agreed to the statements</h1>
+  <div class="subtitle">{{ col.label }} &middot; for each line of the financial statements, what the ledger holds against what the statement shows.</div></div></div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card" style="padding:10px 14px;">
+  <form method="get" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin:0;">
+    <label for="ye" style="margin:0;">Year-end</label>
+    <select id="ye" name="ye" onchange="this.form.submit()" style="margin:0;max-width:260px;">
+      {% for y in year_ends|reverse %}<option value="{{ y.id }}" {% if y.id == ye.id %}selected{% endif %}>{{ y.period_end.strftime('%d %B %Y') }}</option>{% endfor %}
+    </select>
+    {% if rec.different == 0 %}<span class="badge status-Paid">Ledger agrees to the statements</span>{% else %}<span class="badge overdue">{{ rec.different }} line(s) differ</span>{% endif %}
+    {% if rec.tb.balanced %}<span class="badge status-Paid">Trial balance balances</span>{% else %}<span class="badge overdue">Trial balance out by {{ fm((rec.tb.debit - rec.tb.credit)|abs) }}</span>{% endif %}
+    {% if rec.suspense_net|abs < 0.01 %}<span class="badge status-Paid">Clearing accounts net to nil</span>{% else %}<span class="badge overdue">Clearing accounts net {{ fm(rec.suspense_net) }}</span>{% endif %}
+  </form>
+</div>
+{% for w in warnings %}<div class="ff-check"><div>{{ w }}</div></div>{% endfor %}
+
+<div class="card">
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Statement line</th><th>Statement</th><th class="num">Ledger</th><th class="num">Financial statements</th><th class="num">Difference</th></tr></thead>
+    <tbody>
+    {% for r in rec.rows %}
+      <tr {% if r.diff|abs >= 0.01 %}style="background:#fdecea;"{% endif %}>
+        <td>{{ r.label }}</td><td class="muted" style="font-size:12px;">{{ {'SFP':'Balance sheet','PL':'Income statement','EQUITY':'Equity'}.get(r.statement, r.statement) }}</td>
+        <td class="num">{{ fm(r.ledger) }}</td><td class="num">{{ fm(r.stmt) }}</td><td class="num">{{ fm(r.diff) if r.diff|abs >= 0.01 else '-' }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="muted" style="font-size:12.5px;margin:12px 0 0;">Balance sheet lines are compared at {{ col.period_end.strftime('%d %b %Y') }}; income statement and dividend lines for {{ rec.start.strftime('%d %b %Y') }} to {{ rec.end.strftime('%d %b %Y') }}.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">If a line differs</h3>
+  <p style="font-size:13px;margin-top:0;">The ledger is built from the same records as the statements, plus your posted journals, so a difference points to a real cause:</p>
+  <ul style="font-size:13px;line-height:1.55;margin:0 0 0 18px;">
+    <li><b>Receivables:</b> an invoice paid more than its total shows a credit balance in the ledger; the statements show nil for it. Check the receipts on that invoice.</li>
+    <li><b>ZWG items:</b> the ledger translates each item at the rate of the year-end that covers its date; the statements translate every balance at this year-end's rate. A difference is an exchange difference that is not yet journalised.</li>
+    <li><b>Receipts and payments dated differently</b> from the invoice or bill they settle only matter when the dates fall in different years and rates.</li>
+    <li><b>Receipts for an invoice that is not Sent or Paid</b> (draft or cancelled) are in the cash book but not in the receivables.</li>
+    <li><b>Expense categories or services remapped</b> to another statement line move the ledger figure but not the statement's derived figure.</li>
+  </ul>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Clearing accounts at {{ rec.end.strftime('%d %b %Y') }}</h3>
+  {% if rec.suspense %}
+  <div class="tbl-scroll"><table style="max-width:760px;">
+    <thead><tr><th>Account</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead><tbody>
+    {% for r in rec.suspense %}<tr><td><a href="{{ url_for('firmfs.ledger_account', account=r.account.id, ye=ye.id) }}">{{ r.account.code }} {{ r.account.name }}</a></td><td class="num">{{ fm(r.debit) if r.debit else '' }}</td><td class="num">{{ fm(r.credit) if r.credit else '' }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  <p class="muted" style="font-size:12.5px;margin:10px 0 0;">When the financial statements balance, the clearing accounts net to nil between them: what one holds against the real accounts, another holds the other way. They show what still needs a journal, for example a loan received that is in the cash book but whose liability was typed on the year-end page. To clear one, post a journal from the clearing account to the real account and remove the figure typed on the year-end page, so it is not counted twice.</p>
+  {% else %}
+  <p class="muted" style="margin:0;">Nothing is held in the clearing accounts at this date.</p>
+  {% endif %}
+</div>
+{% endblock %}

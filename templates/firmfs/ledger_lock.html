@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Close the books - Firm ledger{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Close the books</h1>
+  <div class="subtitle">Closing a period stops new journals, reversals and drafts being dated on or before the closing date. It protects the journals behind the statements you have signed off.</div></div></div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card">
+  {% if lock %}
+    <p style="margin-top:0;"><span class="badge overdue">Closed</span> The books are closed through <b>{{ lock.strftime('%d %B %Y') }}</b>.
+    {% if drafts_locked %} {{ drafts_locked }} draft journal(s) are dated on or before it and cannot be posted until re-dated.{% endif %}</p>
+  {% else %}
+    <p style="margin-top:0;"><span class="badge status-Paid">Open</span> No period is closed: journals can be dated in any period.</p>
+  {% endif %}
+  <form method="post" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+    <div><label for="locked_through" style="margin:0;">Close the books through</label>
+      <input type="date" id="locked_through" name="locked_through" value="{{ lock.isoformat() if lock else (year_ends[-1].period_end.isoformat() if year_ends else '') }}" style="margin:0;" list="yelist">
+      <datalist id="yelist">{% for y in year_ends %}<option value="{{ y.period_end.isoformat() }}">{% endfor %}</datalist></div>
+    <div style="flex:1;min-width:220px;"><label for="note" style="margin:0;">Note (optional)</label><input type="text" id="note" name="note" maxlength="250" placeholder="e.g. Year ended 31 Dec 2025 signed off" style="margin:0;"></div>
+    <button class="btn gold" type="submit" name="action" value="lock">Close the books</button>
+    {% if lock %}<button class="btn secondary" type="submit" name="action" value="unlock" onclick="return confirm('Reopen the books? Journals can then be dated in closed periods again. This is recorded below.');">Reopen</button>{% endif %}
+  </form>
+  <p class="muted" style="font-size:12px;margin:12px 0 0;">The lock applies to manual journals. Invoices, receipts, bills and the cash book are controlled where they are captured; the ledger follows them. Every change to the closing date is recorded below with who made it.</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">History</h3>
+  {% if history %}
+  <div class="tbl-scroll"><table style="max-width:820px;"><thead><tr><th>When</th><th>Closed through</th><th>Note</th><th>By</th></tr></thead><tbody>
+  {% for h in history %}<tr><td>{{ h.set_at.strftime('%d %b %Y %H:%M') if h.set_at }}</td><td>{{ h.locked_through.strftime('%d %b %Y') if h.locked_through else 'Reopened (nothing closed)' }}</td><td>{{ h.note or '' }}</td><td>{{ h.set_by.name if h.set_by else '' }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% else %}<p class="muted" style="margin:0;">The books have never been closed.</p>{% endif %}
+</div>
+{% endblock %}

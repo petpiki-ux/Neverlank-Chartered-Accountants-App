@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit ' ~ j.number if j else 'New journal' }} - Firm ledger{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>{{ 'Edit draft ' ~ j.number if j else 'New journal' }}</h1>
+  <div class="subtitle">Debits must equal credits. Save it as a draft to come back to, or post it to the ledger. A posted journal is never edited: it is reversed.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.ledger_index', ye=ye.id if ye else None) }}">Back to journals</a></div></div>
+{% include "firmfs/_nav.html" %}
+
+{% if lock %}<div class="ff-check"><div><b>Books closed through {{ lock.strftime('%d %B %Y') }}.</b> A journal dated on or before that day is refused.</div></div>{% endif %}
+
+<form method="post" id="jform">
+  <div class="card">
+    <div class="form-row">
+      <div><label for="journal_date">Date</label><input type="date" id="journal_date" name="journal_date" required value="{{ form.journal_date }}"></div>
+      <div style="flex:2;min-width:260px;"><label for="description">Description</label><input type="text" id="description" name="description" maxlength="250" required value="{{ form.description or '' }}" placeholder="e.g. Accrue audit fees for September"></div>
+      <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" maxlength="120" value="{{ form.reference or '' }}" placeholder="optional"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="tbl-scroll"><table id="jlines">
+      <thead><tr><th style="min-width:300px;">Account</th><th class="num" style="width:150px;">Debit</th><th class="num" style="width:150px;">Credit</th><th style="min-width:200px;">Narration (optional)</th><th></th></tr></thead>
+      <tbody>
+      {% for r in rows %}
+        <tr class="jrow">
+          <td><select name="line_account" style="margin:0;width:100%;"><option value="">Choose an account</option>
+            {% for typ in ['Asset','Liability','Equity','Income','Expense'] %}
+              <optgroup label="{{ typ }}">{% for a in accounts if a.account_type == typ %}<option value="{{ a.id }}" {% if r.account_id == a.id %}selected{% endif %}>{{ a.code }} {{ a.name }}</option>{% endfor %}</optgroup>
+            {% endfor %}</select></td>
+          <td><input type="number" step="0.01" min="0" name="line_debit" value="{{ r.debit }}" class="jdr" style="margin:0;text-align:right;"></td>
+          <td><input type="number" step="0.01" min="0" name="line_credit" value="{{ r.credit }}" class="jcr" style="margin:0;text-align:right;"></td>
+          <td><input type="text" name="line_narration" maxlength="250" value="{{ r.narration }}" style="margin:0;"></td>
+          <td><button type="button" class="btn small secondary jdel" title="Remove this line">&times;</button></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      <tfoot><tr style="font-weight:700;"><td style="text-align:right;">Totals</td><td class="num" id="tdr">0.00</td><td class="num" id="tcr">0.00</td><td colspan="2" id="tdiff"></td></tr></tfoot>
+    </table></div>
+    <p style="margin:10px 0 0;"><button type="button" class="btn small secondary" id="addline">Add a line</button></p>
+    <p class="muted" style="font-size:12px;margin:10px 0 0;">Cash and bank accounts are not offered: record money in or out in the <a href="{{ url_for('firmfs.cash_book') }}">Cash Book</a>. Tax accounts are posted from the Tax pages. If a line should change an amount the app fills from its own records (receivables, payables, assets), the journal will say so after saving.</p>
+  </div>
+
+  <div class="card" style="display:flex;gap:10px;flex-wrap:wrap;">
+    <button class="btn gold" type="submit" name="action" value="post" id="postbtn">Post to the ledger</button>
+    <button class="btn" type="submit" name="action" value="save">Save as draft</button>
+    <a class="btn secondary" href="{{ url_for('firmfs.ledger_index', ye=ye.id if ye else None) }}">Cancel</a>
+  </div>
+</form>
+
+<script>
+(function () {
+  var body = document.querySelector('#jlines tbody');
+  function num(v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; }
+  function totals() {
+    var dr = 0, cr = 0;
+    body.querySelectorAll('.jrow').forEach(function (r) { dr += num(r.querySelector('.jdr').value); cr += num(r.querySelector('.jcr').value); });
+    document.getElementById('tdr').textContent = dr.toFixed(2);
+    document.getElementById('tcr').textContent = cr.toFixed(2);
+    var diff = Math.round((dr - cr) * 100) / 100, el = document.getElementById('tdiff');
+    if (dr === 0 && cr === 0) { el.textContent = ''; }
+    else if (diff === 0) { el.innerHTML = '<span class="badge status-Paid">Balanced</span>'; }
+    else { el.innerHTML = '<span class="badge overdue">Out of balance by ' + Math.abs(diff).toFixed(2) + (diff > 0 ? ' (credit needed)' : ' (debit needed)') + '</span>'; }
+  }
+  body.addEventListener('input', function (e) {
+    var row = e.target.closest('.jrow');
+    if (!row) return;
+    // a line is either a debit or a credit: typing in one clears the other
+    if (e.target.classList.contains('jdr') && num(e.target.value) > 0) row.querySelector('.jcr').value = '';
+    if (e.target.classList.contains('jcr') && num(e.target.value) > 0) row.querySelector('.jdr').value = '';
+    totals();
+  });
+  body.addEventListener('click', function (e) {
+    if (!e.target.classList.contains('jdel')) return;
+    var rows = body.querySelectorAll('.jrow');
+    var row = e.target.closest('.jrow');
+    if (rows.length <= 2) { row.querySelectorAll('input').forEach(function (i) { i.value = ''; }); row.querySelector('select').value = ''; }
+    else { row.remove(); }
+    totals();
+  });
+  document.getElementById('addline').addEventListener('click', function () {
+    var rows = body.querySelectorAll('.jrow');
+    var clone = rows[rows.length - 1].cloneNode(true);
+    clone.querySelectorAll('input').forEach(function (i) { i.value = ''; });
+    clone.querySelector('select').value = '';
+    // suggest the amount that balances the journal on the new line
+    var dr = 0, cr = 0;
+    rows.forEach(function (r) { dr += num(r.querySelector('.jdr').value); cr += num(r.querySelector('.jcr').value); });
+    var diff = Math.round((dr - cr) * 100) / 100;
+    if (diff > 0) clone.querySelector('.jcr').value = diff.toFixed(2);
+    if (diff < 0) clone.querySelector('.jdr').value = (-diff).toFixed(2);
+    body.appendChild(clone);
+    totals();
+  });
+  totals();
+})();
+</script>
+{% endblock %}

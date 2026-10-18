@@ -263,6 +263,29 @@ def column_profit(t):
     return pbt, pbt - t["income_tax_expense"]
 
 
+def entered_lines(ye, from_book, tax_auto):
+    """The figures entered on a year-end that reach the statements: [(fs_category, description, usd)], warnings.
+    Cash lines are skipped when cash comes from the Cash Book, tax lines when tax comes from the Tax pages, and ZWG lines
+    when the year-end has no rate. The ledger (firm_ledger) uses this too, so both always agree."""
+    items, warnings = [], []
+    rate = ye.zwg_rate
+    for ln in ye.lines:
+        if from_book and ln.fs_category == "cash":
+            continue
+        if tax_auto and ln.fs_category in firm_tax.TAX_CODES:
+            continue
+        if ln.currency == "USD" or not ln.currency:
+            usd = ln.amount or 0.0
+        elif rate and rate > 0:
+            usd = (ln.amount or 0.0) / rate
+        else:
+            warnings.append(f"'{ln.description}' is in {ln.currency} but no rate is entered, so it was left out.")
+            continue
+        name = ln.description if ln.currency in (None, "USD") else f"{ln.description} ({ln.currency} {ln.amount:,.2f} at {rate:g})"
+        items.append((ln.fs_category, name, usd))
+    return items, warnings
+
+
 def build_column(ye, prev_end, classes, assets, prev_col=None):
     """One year-end's accounts. `ye` is a FirmYearEnd. Returns {"accounts": {code: [{name, amount}]}, "totals":
     {code: amount}, ...}. Retained earnings brought forward is only filled here if it was entered; the chain builder
@@ -318,21 +341,19 @@ def build_column(ye, prev_end, classes, assets, prev_col=None):
                             "Remove them, or switch this year-end to manual tax in its settings, to avoid confusion.")
 
     re_entered = False
-    for ln in ye.lines:
-        if from_book and ln.fs_category == "cash":
-            continue
-        if tax_auto and ln.fs_category in firm_tax.TAX_CODES:
-            continue
-        if ln.currency == "USD" or not ln.currency:
-            usd = ln.amount or 0.0
-        elif rate and rate > 0:
-            usd = (ln.amount or 0.0) / rate
-        else:
-            warnings.append(f"'{ln.description}' is in {ln.currency} but no rate is entered, so it was left out.")
-            continue
-        if ln.fs_category == "retained_earnings":
+    items, w_entered = entered_lines(ye, from_book, tax_auto)
+    warnings.extend(w_entered)
+    for code, name, usd in items:
+        if code == "retained_earnings":
             re_entered = True
-        add(ln.fs_category, ln.description if ln.currency in (None, "USD") else f"{ln.description} ({ln.currency} {ln.amount:,.2f} at {rate:g})", usd)
+        add(code, name, usd)
+
+    # Posted manual journals (Firm Finance > Ledger) add to the statements through the accounts' statement lines
+    import firm_ledger
+    j_items, w_j = firm_ledger.journal_statement_items(ye, start, end, first=prev_end is None, from_book=from_book, tax_auto=tax_auto)
+    warnings.extend(w_j)
+    for code, name, amount in j_items:
+        add(code, name, amount)
 
     tax = None
     if tax_auto:

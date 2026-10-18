@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Journals - Firm ledger{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+<div class="page-header"><div><h1>Journals</h1>
+  <div class="subtitle">Double entry for the firm. Invoices, receipts, expenses, the cash book, depreciation and tax are posted to the ledger automatically; journals are for adjustments, accruals, provisions and opening balances.</div></div>
+  <div><a class="btn gold" href="{{ url_for('firmfs.journal_new', ye=ye.id if ye else None) }}">New journal</a></div></div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card" style="padding:10px 14px;">
+  <form method="get" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0;">
+    {% if ye %}<input type="hidden" name="ye" value="{{ ye.id }}">{% endif %}
+    <div><label style="margin:0;">Status</label><select name="status" style="margin:0;"><option value="">All</option><option value="draft" {% if status == 'draft' %}selected{% endif %}>Drafts</option><option value="posted" {% if status == 'posted' %}selected{% endif %}>Posted</option></select></div>
+    <div><label style="margin:0;">From</label><input type="date" name="from" value="{{ d_from.isoformat() if d_from }}" style="margin:0;"></div>
+    <div><label style="margin:0;">To</label><input type="date" name="to" value="{{ d_to.isoformat() if d_to }}" style="margin:0;"></div>
+    <div style="flex:1;min-width:180px;"><label style="margin:0;">Search</label><input type="text" name="q" value="{{ q }}" placeholder="number, description or reference" style="margin:0;"></div>
+    <button class="btn small" type="submit">Filter</button>
+  </form>
+  {% if drafts %}<p class="muted" style="font-size:12.5px;margin:8px 0 0;">{{ drafts }} draft journal(s) are saved but not posted. Drafts do not touch the ledger or the statements.</p>{% endif %}
+  {% if lock %}<p class="muted" style="font-size:12.5px;margin:6px 0 0;">The books are closed through <b>{{ lock.strftime('%d %B %Y') }}</b>: journals cannot be dated on or before that day.</p>{% endif %}
+</div>
+
+<div class="card">
+  {% if journals %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Journal</th><th>Date</th><th>Description</th><th>Reference</th><th class="num">Amount (USD)</th><th>Status</th><th>By</th></tr></thead>
+    <tbody>
+    {% for j in journals %}
+      <tr>
+        <td><a href="{{ url_for('firmfs.journal_view', journal_id=j.id, ye=ye.id if ye else None) }}"><b>{{ j.number }}</b></a></td>
+        <td>{{ j.journal_date.strftime('%d %b %Y') }}</td>
+        <td>{{ j.description }}{% if j.reverses_id %} <span class="badge">reversal</span>{% elif j.reversed_by %} <span class="badge overdue">reversed</span>{% endif %}</td>
+        <td>{{ j.reference or '' }}</td>
+        <td class="num">{{ fm(j.total_debit) }}</td>
+        <td>{% if j.status == 'posted' %}<span class="badge status-Paid">Posted</span>{% else %}<span class="badge status-Planning">Draft</span>{% if not j.is_balanced %} <span class="muted" style="font-size:11.5px;">not balanced</span>{% endif %}{% endif %}</td>
+        <td class="muted" style="font-size:12px;">{{ j.created_by.name if j.created_by else '' }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p class="muted" style="margin:0;">No journals yet. <a href="{{ url_for('firmfs.journal_new', ye=ye.id if ye else None) }}">Create the first one</a>, or look at the <a href="{{ url_for('firmfs.ledger_trial_balance', ye=ye.id if ye else None) }}">trial balance</a> to see what the app has already posted.</p>
+  {% endif %}
+</div>
+{% endblock %}

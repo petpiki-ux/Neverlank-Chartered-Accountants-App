@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}{{ j.number }} - Firm ledger{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+<div class="page-header"><div><h1>{{ j.number }}
+    {% if j.status == 'posted' %}<span class="badge status-Paid" style="vertical-align:middle;">Posted</span>{% else %}<span class="badge status-Planning" style="vertical-align:middle;">Draft</span>{% endif %}
+    {% if j.reverses_id %}<span class="badge" style="vertical-align:middle;">reversal</span>{% elif j.reversed_by %}<span class="badge overdue" style="vertical-align:middle;">reversed</span>{% endif %}</h1>
+  <div class="subtitle">{{ j.description }}</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.ledger_index', ye=ye.id if ye else None) }}">Back to journals</a></div></div>
+{% include "firmfs/_nav.html" %}
+
+{% for p in problems %}<div class="ff-check bad"><div>{{ p }}</div></div>{% endfor %}
+{% for w in warnings %}<div class="ff-check"><div>{{ w }}</div></div>{% endfor %}
+
+<div class="card">
+  <div style="display:flex;gap:28px;flex-wrap:wrap;font-size:13.5px;margin-bottom:12px;">
+    <div><span class="muted">Date</span><br><b>{{ j.journal_date.strftime('%d %B %Y') }}</b></div>
+    <div><span class="muted">Reference</span><br><b>{{ j.reference or '-' }}</b></div>
+    <div><span class="muted">Prepared by</span><br><b>{{ j.created_by.name if j.created_by else '-' }}</b> <span class="muted" style="font-size:12px;">{{ j.created_at.strftime('%d %b %Y %H:%M') if j.created_at else '' }}</span></div>
+    {% if j.status == 'posted' %}<div><span class="muted">Posted by</span><br><b>{{ j.posted_by.name if j.posted_by else '-' }}</b> <span class="muted" style="font-size:12px;">{{ j.posted_at.strftime('%d %b %Y %H:%M') if j.posted_at else '' }}</span></div>{% endif %}
+    {% if j.reverses %}<div><span class="muted">Reverses</span><br><a href="{{ url_for('firmfs.journal_view', journal_id=j.reverses.id, ye=ye.id if ye else None) }}"><b>{{ j.reverses.number }}</b></a></div>{% endif %}
+    {% if j.reversed_by %}<div><span class="muted">Reversed by</span><br><a href="{{ url_for('firmfs.journal_view', journal_id=j.reversed_by.id, ye=ye.id if ye else None) }}"><b>{{ j.reversed_by.number }}</b></a></div>{% endif %}
+  </div>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Account</th><th>Statement line</th><th>Narration</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
+    <tbody>
+    {% for l in j.lines %}
+      <tr><td><a href="{{ url_for('firmfs.ledger_account', account=l.account_id, ye=ye.id if ye else None) }}">{{ l.account.code }} {{ l.account.name }}</a></td>
+        <td class="muted" style="font-size:12px;">{{ cat_label.get(l.account.fs_category, 'Not in the statements') if cat_label is defined else (l.account.fs_category or 'Not in the statements') }}</td>
+        <td>{{ l.narration or '' }}</td><td class="num">{{ fm(l.debit) if l.debit else '' }}</td><td class="num">{{ fm(l.credit) if l.credit else '' }}</td></tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr style="font-weight:700;"><td colspan="3" style="text-align:right;">Totals</td><td class="num">{{ fm(j.total_debit) }}</td><td class="num">{{ fm(j.total_credit) }}</td></tr></tfoot>
+  </table></div>
+</div>
+
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;">
+  {% if j.status == 'draft' %}
+    <form method="post" action="{{ url_for('firmfs.journal_post', journal_id=j.id) }}"><button class="btn gold" type="submit" {% if problems %}disabled title="Fix the problems above first"{% endif %}>Post to the ledger</button></form>
+    <a class="btn" href="{{ url_for('firmfs.journal_edit', journal_id=j.id, ye=ye.id if ye else None) }}">Edit</a>
+    <form method="post" action="{{ url_for('firmfs.journal_delete', journal_id=j.id) }}" onsubmit="return confirm('Delete this draft?');"><button class="btn danger" type="submit">Delete draft</button></form>
+  {% else %}
+    {% if can_reverse %}
+    <form method="post" action="{{ url_for('firmfs.journal_reverse', journal_id=j.id) }}" style="display:flex;gap:8px;align-items:flex-end;" onsubmit="return confirm('Post a reversing journal for {{ j.number }}?');">
+      <div><label style="margin:0;font-size:12px;">Reverse on</label><input type="date" name="reverse_date" value="{{ today.isoformat() }}" style="margin:0;"></div>
+      <button class="btn danger" type="submit">Reverse this journal</button>
+    </form>
+    {% endif %}
+  {% endif %}
+  <form method="post" action="{{ url_for('firmfs.journal_copy', journal_id=j.id) }}"><button class="btn secondary" type="submit">Copy to a new draft</button></form>
+</div>
+{% if j.status == 'posted' %}<p class="muted" style="font-size:12.5px;">A posted journal cannot be edited or deleted. To correct it, reverse it (this posts an equal and opposite journal, dated as you choose) and post the right one.</p>{% endif %}
+{% endblock %}

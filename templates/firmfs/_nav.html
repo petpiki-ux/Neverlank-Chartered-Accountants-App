@@ -4,9 +4,11 @@
   <a href="{{ url_for('firmfs.cash_book') }}" class="{{ 'on' if active == 'cash' }}">Cash book</a>
   <a href="{{ url_for('expenses.list_expenses') }}">Expenses</a>
   <a href="{{ url_for('firmfs.tax_computation', ye=ye.id if ye else None) }}" class="{{ 'on' if active and active.startswith('tax') }}">Tax</a>
+  <a href="{{ url_for('firmfs.ledger_index', ye=ye.id if ye else None) }}" class="{{ 'on' if active and active.startswith('ledger') }}">Ledger</a>
   <a href="{{ url_for('firmfs.income_statement', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'is' }}">Income statement</a>
   <a href="{{ url_for('firmfs.balance_sheet', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'bs' }}">Balance sheet</a>
   <a href="{{ url_for('firmfs.cash_flow', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'cf' }}">Cash flow</a>
   <a href="{{ url_for('firmfs.changes_in_equity', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'eq' }}">Changes in equity</a>
   <a href="{{ url_for('firmfs.notes', ye=ye.id if ye else None) }}" class="{{ 'on' if active == 'notes' }}">Notes</a>
 </div>
+{% if active and active.startswith('ledger') %}{% include "firmfs/_ledgertabs.html" %}{% endif %}
