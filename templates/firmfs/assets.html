@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "firmfs/_funding.html" import funding, fundScript %}
 {% block title %}Asset register - {{ firm_name }}{% endblock %}
 {% block content %}
 {% from "firmfs/_macros.html" import fm %}
@@ -50,9 +51,10 @@
             <form method="post" action="{{ url_for('firmfs.undo_disposal', asset_id=r.id) }}" style="display:inline;"><button class="btn small secondary" type="submit">Undo disposal</button></form>
           {% else %}
             <details style="display:inline-block;position:relative;"><summary class="btn small secondary" style="display:inline-block;cursor:pointer;">Dispose</summary>
-              <form method="post" action="{{ url_for('firmfs.dispose_asset', asset_id=r.id) }}" style="position:absolute;right:0;z-index:5;background:#fff;border:1px solid var(--border,#e3e8ee);border-radius:8px;padding:10px;width:260px;box-shadow:0 4px 14px rgba(0,0,0,.12);">
+              <form method="post" action="{{ url_for('firmfs.dispose_asset', asset_id=r.id) }}" style="position:absolute;right:0;z-index:5;background:#fff;border:1px solid var(--border,#e3e8ee);border-radius:8px;padding:10px;width:300px;box-shadow:0 4px 14px rgba(0,0,0,.12);">
                 <label>Date disposed</label><input type="date" name="disposed_on" value="{{ as_at.isoformat() }}" required>
                 <label>Sale proceeds (USD, 0 if scrapped)</label><input type="number" step="any" min="0" name="disposal_proceeds" value="0" required>
+                <div style="margin-bottom:8px;">{{ funding('disp', funding_ch, {}, None) }}</div>
                 <label>Note</label><input type="text" name="disposal_note" maxlength="250">
                 <button class="btn small gold" type="submit">Record disposal</button></form></details>
           {% endif %}
@@ -77,4 +79,5 @@
   <p class="muted" style="font-size:12px;margin-bottom:0;">Depreciation is charged for each month an asset is owned, from the month it was acquired up to (not including) the month it was disposed of. Straight-line: (cost - residual value) x rate / 12 a month. Reducing balance: net book value at the start of the financial year x rate / 12 a month. These figures feed the balance sheet, income statement and cash flow.</p>
 </div>
 {% endif %}
+{{ fundScript() }}
 {% endblock %}

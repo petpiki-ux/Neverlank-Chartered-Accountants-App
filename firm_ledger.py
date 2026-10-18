@@ -124,6 +124,12 @@ JOURNAL_REFUSED_KEYS = {"TAX_PAY", "TAX_EXP_CUR", "TAX_EXP_DEF", "DTL", "DTA", "
 SUSPENSE_KEYS = ("SUSP_OPEN", "SUSP_CASH", "SUSP_ASSET", "CLR_TRANSFER", "VAT_CTRL")
 
 CASH_RANGE, REV_RANGE, EXP_RANGE = (1010, 1099), (4100, 4499), (5100, 5899)
+SUB_NOTE = "Sub-account (asset class) of"
+
+
+def is_control_key(key):
+    """Accounts the statements derive themselves; includes the per-class sub-accounts of property, plant and equipment."""
+    return bool(key) and (key in CONTROL_KEYS or key.startswith("PPE_COST:") or key.startswith("PPE_ACCDEP:"))
 
 
 def _next_code(start, stop):
@@ -198,6 +204,36 @@ def ensure_chart(services=None, categories=None):
     svcs = set(services if services is not None else services_in_use())
     for svc in sorted(svcs):
         add_dynamic(f"REV:{svc}", f"Professional fees - {svc}", "Income", "revenue", REV_RANGE, "Fees invoiced for this service. Posted by the app from invoices.")
+    # one sub-account of Property, plant and equipment (cost, and accumulated depreciation) per asset class
+    from models import FirmAssetClass
+    for cls in FirmAssetClass.query.order_by(FirmAssetClass.order, FirmAssetClass.id).all():
+        for base, tail in (("PPE_COST", "cost"), ("PPE_ACCDEP", "accumulated depreciation")):
+            parent = have.get(base)
+            key = f"{base}:{cls.id}"
+            if parent is None:
+                continue
+            if key in have:
+                a = have[key]
+                if a.parent_id != parent.id:
+                    a.parent_id = parent.id
+                    changed = True
+                want = f"{cls.name} - {tail}"[:120]
+                if a.name != want and (a.description or "").startswith(SUB_NOTE):
+                    a.name = want
+                    changed = True
+                continue
+            n = 1
+            while f"{parent.code}-{n:02d}" in taken:
+                n += 1
+            code = f"{parent.code}-{n:02d}"
+            a = FirmAccount(code=code, name=f"{cls.name} - {tail}"[:120], account_type="Asset", fs_category="ppe", system_key=key,
+                            description=f"{SUB_NOTE} {parent.label}. Posted by the app from the Asset register.", parent_id=parent.id,
+                            order=(parent.order or 0))
+            db.session.add(a)
+            db.session.flush()
+            have[key] = a
+            taken.add(code)
+            changed = True
     # a renamed cash book account / category keeps its ledger account name in step unless the user renamed the ledger account
     for ca in CashAccount.query.all():
         a = have.get(f"CASH:{ca.id}")
@@ -306,7 +342,7 @@ def journal_problems(j, for_post=True, year_ends=None):
 def journal_warnings(j):
     """Soft cautions shown on the journal (it can still be posted)."""
     out = []
-    names = sorted({ln.account.label for ln in j.lines if ln.account and ln.account.system_key in CONTROL_KEYS})
+    names = sorted({ln.account.label for ln in j.lines if ln.account and is_control_key(ln.account.system_key)})
     if names:
         out.append("This journal adjusts account(s) the app fills from its own records (" + "; ".join(names) +
                    "). The adjustment is added to the statements, but the client, supplier or asset records will not show it.")
@@ -615,29 +651,36 @@ def build_ledger(year_ends=None, include_journals=True):
         ye, start, end = col["ye"], col["period_start"], col["period_end"]
         sched = col["schedule"]
         by_class = defaultdict(float)
+
+        def ppe(base, row):
+            """The ledger account for an asset's class (a sub-account), or the parent account when it has no class."""
+            k = f"{base}:{row.get('asset_class_id')}" if row.get("asset_class_id") else None
+            return k if k and L.account(k) else base
+
         for row in sched["assets"]:
             cost = r2(row["cost"])
             label = f"{row['asset_code']} {row['description']}"
             if row["additions"]:
                 L.post(row["date_acquired"], "Asset purchase", row["asset_code"], f"Purchase - {label}",
-                       [("PPE_COST", cost, 0, label), ("SUSP_ASSET", 0, cost, "funding to be matched")],
+                       [(ppe("PPE_COST", row), cost, 0, label), ("SUSP_ASSET", 0, cost, "funding to be matched")],
                        meta={"kind": "asset_purchase", "asset": row["asset_code"], "description": label})
             if idx == 0 and row["opening_cost"]:
                 oc, oa = r2(row["opening_cost"]), r2(row["opening_acc_dep"])
                 L.post(start - timedelta(days=1), "Asset b/f", row["asset_code"], f"Brought forward - {label}",
-                       [("PPE_COST", oc, 0, label), ("PPE_ACCDEP", 0, oa, label), ("SUSP_OPEN", 0, oc - oa, "net book value b/f")])
+                       [(ppe("PPE_COST", row), oc, 0, label), (ppe("PPE_ACCDEP", row), 0, oa, label), ("SUSP_OPEN", 0, oc - oa, "net book value b/f")])
             if row["charge"]:
-                by_class[row["class_name"]] += row["charge"]
+                by_class[(row.get("asset_class_id"), row["class_name"])] += row["charge"]
             if row["disposed_in_period"]:
                 dc, da, pr = r2(row["disposals_cost"]), r2(row["disposals_acc_dep"]), r2(row["proceeds"])
                 gl = r2(pr + da - dc)
                 L.post(row["disposed_on"], "Asset disposal", row["asset_code"], f"Disposal - {label}",
-                       [("SUSP_ASSET", pr, 0, "proceeds to be matched"), ("PPE_ACCDEP", da, 0, label), ("PPE_COST", 0, dc, label),
+                       [("SUSP_ASSET", pr, 0, "proceeds to be matched"), (ppe("PPE_ACCDEP", row), da, 0, label), (ppe("PPE_COST", row), 0, dc, label),
                         ("DISP_GL", max(-gl, 0), max(gl, 0), "profit / (loss) on disposal")],
                        meta={"kind": "asset_disposal", "asset": row["asset_code"], "description": label})
-        for cname, amt in sorted(by_class.items()):
+        for (cid, cname), amt in sorted(by_class.items(), key=lambda kv: (kv[0][1] or "", kv[0][0] or 0)):
             a2 = r2(amt)
-            L.post(end, "Depreciation", "", f"Depreciation - {cname} ({col['label']})", [("DEPR", a2, 0, cname), ("PPE_ACCDEP", 0, a2, cname)])
+            L.post(end, "Depreciation", "", f"Depreciation - {cname} ({col['label']})",
+                   [("DEPR", a2, 0, cname), (ppe("PPE_ACCDEP", {"asset_class_id": cid}), 0, a2, cname)])
 
         tax = col.get("tax")
         if tax is not None:
@@ -703,6 +746,45 @@ def build_ledger(year_ends=None, include_journals=True):
 
 # ====================================================================== reports
 
+def _with_group_totals(L, rows):
+    """Put a parent account's sub-accounts straight under it and, after them, a 'Total' line for the group (shown, never added into
+    the trial balance's totals). `rows` are sorted by code, parents before their children."""
+    kids = defaultdict(list)
+    for r in rows:
+        if r["account"].parent_id:
+            kids[r["account"].parent_id].append(r)
+    out, done = [], set()
+    for r in rows:
+        a = r["account"]
+        if a.parent_id and a.parent_id in L.accounts:
+            continue                                  # placed under its parent below
+        out.append(r)
+        if a.id in kids:
+            out.extend(kids[a.id])
+            done.add(a.id)
+    for pid, ks in kids.items():                      # sub-accounts whose parent has no balance of its own
+        if pid in done or pid not in L.accounts:
+            continue
+        parent = L.accounts[pid]
+        at = next((i for i, r in enumerate(out) if r["account"].code > parent.code), len(out))
+        head = {"account": parent, "debit": 0.0, "credit": 0.0, "indent": 0, "heading": True}
+        out[at:at] = [head] + ks
+        done.add(pid)
+    # group totals after the last child of each parent
+    result, seen = [], set()
+    for i, r in enumerate(out):
+        result.append(r)
+        pid = r["account"].parent_id
+        if pid and pid in L.accounts:
+            nxt = out[i + 1] if i + 1 < len(out) else None
+            if nxt is None or nxt["account"].parent_id != pid:
+                members = [x for x in out if x["account"].id == pid or x["account"].parent_id == pid]
+                net = r2(sum(x["debit"] - x["credit"] for x in members))
+                result.append({"account": L.accounts[pid], "debit": net if net > 0 else 0.0, "credit": -net if net < 0 else 0.0,
+                               "indent": 0, "group_total": True})
+    return result
+
+
 def trial_balance(L, as_at, period_start=None):
     """Trial balance at the end of `as_at`. Balance-sheet accounts carry everything to the date; income and expense accounts
     (and dividends) show only the current financial year, and the results of earlier years are rolled into one retained
@@ -727,13 +809,17 @@ def trial_balance(L, as_at, period_start=None):
             continue
         rows.append({"account": a, "debit": v if v > 0 else 0.0, "credit": -v if v < 0 else 0.0})
     rows.sort(key=lambda r: r["account"].code)
+    for r in rows:
+        r["indent"] = 1 if r["account"].parent_id else 0
+    rows = _with_group_totals(L, rows)
     rolled = r2(rolled)
     if abs(rolled) >= CENT:
         rows.append({"account": None, "label": "Results of earlier years rolled into retained earnings", "debit": rolled if rolled > 0 else 0.0,
                      "credit": -rolled if rolled < 0 else 0.0})
-    td, tc = r2(sum(r["debit"] for r in rows)), r2(sum(r["credit"] for r in rows))
+    real = [r for r in rows if not r.get("group_total")]
+    td, tc = r2(sum(r["debit"] for r in real)), r2(sum(r["credit"] for r in real))
     return {"rows": rows, "debit": td, "credit": tc, "balanced": abs(td - tc) < 0.01, "as_at": as_at, "period_start": ps,
-            "suspense": [r for r in rows if r["account"] is not None and r["account"].system_key in SUSPENSE_KEYS]}
+            "suspense": [r for r in real if r["account"] is not None and r["account"].system_key in SUSPENSE_KEYS]}
 
 
 def general_ledger(L, account, start, end):
@@ -743,8 +829,9 @@ def general_ledger(L, account, start, end):
     floor = L.period_start_of(start) if period_acct else None
     opening = 0.0
     lines = []
+    ids = {account.id} | {a.id for a in L.accounts.values() if a.parent_id == account.id}      # a parent shows its sub-accounts too
     for ln in L.lines:
-        if ln["account_id"] != account.id:
+        if ln["account_id"] not in ids:
             continue
         if ln["date"] < start:
             if floor is None or ln["date"] >= floor:
@@ -931,14 +1018,16 @@ def allocation_proposals(L):
         if l["account_id"] == vat:
             vat_move[period(l["date"])] += l["cr"] - l["dr"]
 
-    def add(key, kind, title, why, effect, amount, on, per, lines, source_acct=None):
-        """Append a proposal after taking off what earlier allocation journals did and capping at the clearing balance."""
+    def add(key, kind, title, why, effect, amount, on, per, lines, source_acct=None, extra=None, cap=None):
+        """Append a proposal after taking off what earlier allocation journals did and capping at the clearing balance (or at
+        `cap`, for an account that holds items of both signs). Returns the amount proposed (0 when nothing)."""
         amount = r2(amount - _allocated(key))
-        if source_acct:
-            cap = abs(running.get(source_acct, 0.0))
+        if cap is not None:
             amount = min(amount, cap)
+        elif source_acct:
+            amount = min(amount, abs(running.get(source_acct, 0.0)))
         if amount < CENT:
-            return
+            return 0.0
         scale = lambda v: r2(v)
         built = [(ref, dr, cr, narr) for (ref, dr, cr, narr) in lines(amount)]
         blocked = None
@@ -948,7 +1037,8 @@ def allocation_proposals(L):
             sign = 1.0 if any(ref == source_acct and dr > 0 for ref, dr, cr, narr in built) else -1.0
             running[source_acct] = r2(running.get(source_acct, 0.0) - sign * amount)
         out["proposals"].append({"key": key, "kind": kind, "title": title, "why": why, "effect": effect, "amount": amount, "date": on,
-                                 "period": per, "lines": built, "blocked": blocked})
+                                 "period": per, "lines": built, "blocked": blocked, **(extra or {})})
+        return amount
 
     pool = defaultdict(float)
     for (i, cat), v in typed.items():
@@ -1018,7 +1108,17 @@ def allocation_proposals(L):
                 (lambda a, t=tgt, td=tgt_dr, out_=money_dr_cash: [("SUSP_CASH", 0 if out_ else a, a if out_ else 0, name), (t.id, a if td else 0, 0 if td else a, name)]),
                 "SUSP_CASH")
 
-    # ---- asset purchases and sale proceeds against cash book payments / receipts of the same amount
+    # ---- asset purchases and sale proceeds: the funding chosen on the Asset register, else a cash book payment / receipt of the same amount
+    from models import FirmAsset
+    # the asset clearing account holds purchases (credits) and sale proceeds (debits) together, so each side is capped on its own:
+    # what the Asset register put there, less what journals (ours and any made by hand) have already taken out
+    asset_lines = [l for l in L.lines if l["account_id"] == susp_asset]
+    asset_cap = {"acq": r2(sum(l["cr"] - l["dr"] for l in asset_lines if l["kind"] == "derived" and l["meta"].get("kind") == "asset_purchase")
+                           - sum(l["dr"] for l in asset_lines if l["kind"] == "journal")),
+                 "disp": r2(sum(l["dr"] - l["cr"] for l in asset_lines if l["kind"] == "derived" and l["meta"].get("kind") == "asset_disposal")
+                            - sum(l["cr"] for l in asset_lines if l["kind"] == "journal"))}
+    asset_info = {a.asset_code: {"acq_method": a.acq_method, "acq_account_id": a.acq_account_id,
+                                 "disp_method": a.disp_method, "disp_account_id": a.disp_account_id} for a in FirmAsset.query.all()}
     candidates = [l for l in entries if l["meta"].get("key") not in used_entry_keys and l["meta"].get("category") in ("Other payment", "Other receipt")]
     taken = set()
     for al in sorted([l for l in derived if l["account_id"] == susp_asset], key=lambda l: l["date"]):
@@ -1026,6 +1126,27 @@ def allocation_proposals(L):
         if abs(amt) < CENT or al["meta"].get("kind") not in ("asset_purchase", "asset_disposal"):
             continue
         want_out = amt > 0
+        # how it was paid for, chosen on the Asset register: a ledger account (credit / shareholder / other) clears the funding directly
+        fa = asset_info.get(al["meta"].get("asset"))
+        meth, acct_id = (fa["disp_method"], fa["disp_account_id"]) if not want_out and fa else ((fa["acq_method"], fa["acq_account_id"]) if fa else (None, None))
+        tgt = L.accounts.get(acct_id) if acct_id else None
+        if fa and meth in ("credit", "shareholder", "other") and tgt is not None and tgt.is_active:
+            on_ = al["date"]
+            i = period(on_)
+            on = period_end(i, on_)
+            verb = "purchase" if want_out else "sale proceeds"
+            how = {"credit": "bought on credit" if want_out else "sold on credit", "shareholder": "provided by a shareholder", "other": "funded"}[meth]
+            cat = tgt.fs_category if tgt.fs_category in CAT else None
+            used = add(f"fund|{al['meta'].get('asset')}|{'acq' if want_out else 'disp'}", "post",
+                f"Asset {verb} {'posted to' if want_out else 'received into'} {tgt.name}: {al['meta'].get('description')}",
+                f"On the Asset register this was {how}: the {verb} of {abs(amt):,.2f} is {'credited to' if want_out else 'debited to'} {tgt.label}.",
+                (f"Adds {abs(amt):,.2f} to {financials.category_label(cat)}" if cat and want_out else
+                 f"Changes {financials.category_label(cat)} by {abs(amt):,.2f}" if cat else "None: that account is outside the statements"),
+                abs(amt), on, label(i, on_),
+                (lambda a, w=want_out, t=tgt: [("SUSP_ASSET", a if w else 0, 0 if w else a, "asset funding"), (t.id, 0 if w else a, a if w else 0, "chosen on the Asset register")]),
+                "SUSP_ASSET", extra={"chosen": True}, cap=asset_cap["acq" if want_out else "disp"])
+            asset_cap["acq" if want_out else "disp"] -= used
+            continue
         best = None
         for c in candidates:
             k = c["meta"].get("key")
@@ -1046,11 +1167,12 @@ def allocation_proposals(L):
         on = period_end(i, on_)
         asset = al["meta"].get("asset")
         verb = "purchase" if want_out else "sale proceeds"
-        add(f"match|{asset}|{c['meta'].get('key')}", "match", f"Asset {verb} matched to a cash book entry: {al['meta'].get('description')}",
+        used = add(f"match|{asset}|{c['meta'].get('key')}", "match", f"Asset {verb} matched to a cash book entry: {al['meta'].get('description')}",
             f"The Asset register records the {verb} of {abs(amt):,.2f}; the cash book has a {'payment' if want_out else 'receipt'} of the same amount on {c['date'].strftime('%d %b %Y')} ({c['meta'].get('description')}).",
             "None: both sides are outside the statements", abs(amt), on, label(i, on_),
             (lambda a, w=want_out: [("SUSP_ASSET", a if w else 0, 0 if w else a, "asset funding"), ("SUSP_CASH", 0 if w else a, a if w else 0, "cash book entry")]),
-            "SUSP_ASSET")
+            "SUSP_ASSET", cap=asset_cap["acq" if want_out else "disp"])
+        asset_cap["acq" if want_out else "disp"] -= used
 
     # ---- loose cash book entries: the user chooses the account
     for l in sorted(entries, key=lambda l: (l["date"], l["seq"])):
@@ -1067,7 +1189,7 @@ def allocation_proposals(L):
     # ---- what is left
     unmatched_assets = [l for l in derived if l["account_id"] == susp_asset and l["meta"].get("kind") in ("asset_purchase", "asset_disposal")]
     if unmatched_assets and out["balances"].get("SUSP_ASSET") and abs(running.get("SUSP_ASSET", 0.0)) >= CENT:
-        out["notices"].append(f"Asset funding still unmatched: {abs(running['SUSP_ASSET']):,.2f}. Record the payment for each asset in the Cash Book (category 'Other payment', same amount) and it will match here, or post a journal against the supplier or lender.")
+        out["notices"].append(f"Asset funding still unmatched: {abs(running['SUSP_ASSET']):,.2f}. On the Asset register choose how each asset was paid for (bank or cash, on credit, or provided by a shareholder), or record the payment in the Cash Book (category 'Other payment', same amount) and it will match here, or post a journal against the supplier or lender.")
     if abs(out["balances"].get("CLR_TRANSFER", 0.0)) >= CENT:
         out["notices"].append(f"Transfers between cash accounts do not net to nil ({out['balances']['CLR_TRANSFER']:,.2f}): a transfer was recorded with different amounts, or between a USD and a ZWG account. Check both sides in the Cash Book.")
     leftover_typed = {k: v for k, v in pool.items() if abs(v) >= CENT and (k[1] in CAT)}

@@ -10941,6 +10941,18 @@ class FirmAsset(db.Model):
     disposed_on = db.Column(db.Date)
     disposal_proceeds = db.Column(db.Float, default=0.0)
     disposal_note = db.Column(db.String(250))
+    # how it was paid for (the correcting leg of the purchase): "" = not stated (left in the clearing account), "bank" = paid from a
+    # Cash Book account (the app keeps one Cash Book payment for it, acq_cash_entry_id), "credit" = owed to a supplier,
+    # "shareholder" = provided by a shareholder / director, "other" = any other ledger account
+    acq_method = db.Column(db.String(12))
+    acq_account_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"))      # ledger account for credit / shareholder / other
+    acq_cash_account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"))
+    acq_cash_entry_id = db.Column(db.Integer)                                     # the Cash Book payment the app made for it
+    # the same for the sale proceeds: "", "bank", "credit" (owed by the buyer), "other"
+    disp_method = db.Column(db.String(12))
+    disp_account_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"))
+    disp_cash_account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"))
+    disp_cash_entry_id = db.Column(db.Integer)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -11151,6 +11163,7 @@ class FirmAccount(db.Model):
     account_type = db.Column(db.String(12), nullable=False, default="Asset")
     fs_category = db.Column(db.String(40))          # statement line it feeds; None / "excluded" = not in the statements
     system_key = db.Column(db.String(80), unique=True)   # set on accounts the posting engine writes to (e.g. "CASH:3", "EXP:Fuel")
+    parent_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"))   # a sub-account (e.g. one asset class under Property, plant and equipment)
     description = db.Column(db.String(250))
     is_active = db.Column(db.Boolean, default=True, nullable=False)
     order = db.Column(db.Integer, default=0)

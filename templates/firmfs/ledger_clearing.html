@@ -25,8 +25,8 @@
     <thead><tr><th style="width:34px;"></th><th>Item</th><th>Journal</th><th class="num">Amount</th><th>Effect on the statements</th></tr></thead><tbody>
     {% for p in plan.proposals %}
       <tr>
-        <td><input type="checkbox" name="apply" value="{{ p.key }}" style="width:auto;" {% if p.kind == 'match' and not p.blocked %}checked{% endif %} {% if p.blocked %}disabled{% endif %}></td>
-        <td><b>{{ 'Match' if p.kind == 'match' else 'Post' }}</b> &middot; {{ p.title }}<div class="muted" style="font-size:12px;">{{ p.why }}</div>
+        <td><input type="checkbox" name="apply" value="{{ p.key }}" style="width:auto;" {% if (p.kind == 'match' or p.chosen) and not p.blocked %}checked{% endif %} {% if p.blocked %}disabled{% endif %}></td>
+        <td><b>{{ 'Match' if p.kind == 'match' else ('Funding' if p.chosen else 'Post') }}</b> &middot; {{ p.title }}<div class="muted" style="font-size:12px;">{{ p.why }}</div>
           {% if p.blocked %}<div style="font-size:12px;color:var(--danger,#b00);">{{ p.blocked }}</div>{% endif %}</td>
         <td style="font-size:12px;white-space:nowrap;">{{ p.date.strftime('%d %b %Y') }}<br>{{ p.period }}</td>
         <td class="num">{{ fm(p.amount) }}</td>

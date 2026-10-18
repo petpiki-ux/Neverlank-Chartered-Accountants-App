@@ -270,8 +270,103 @@ def assets():
     outside = [a for a in assets_ if a["id"] not in in_scope_ids]
     return render_template(
         "firmfs/assets.html", sched=sched, rows=rows, outside=outside, as_at=as_at, start=start, active="assets",
-        show_disposed=show_disposed, class_count=len(classes), year_ends=yes, today=date.today(),
+        show_disposed=show_disposed, class_count=len(classes), year_ends=yes, today=date.today(), funding_ch=funding_choices(),
     )
+
+
+
+# ------------------------------------------------------------------ how an asset was paid for (the correcting leg)
+
+ACQ_METHODS = [("", "Not stated yet (left in the clearing account)"), ("bank", "Paid from a bank or cash account"),
+               ("credit", "Bought on credit (owed to the supplier)"), ("shareholder", "Provided by a shareholder or director"),
+               ("other", "Funded another way (choose the ledger account)")]
+DISP_METHODS = [("", "Not stated yet (left in the clearing account)"), ("bank", "Received into a bank or cash account"),
+                ("credit", "Sold on credit (owed by the buyer)"), ("other", "Received another way (choose the ledger account)")]
+_DEFAULT_CODES = {"acq_credit": "2050", "acq_shareholder": "3000", "disp_credit": "1110"}
+
+
+def funding_choices():
+    """What the asset forms offer for the correcting leg: USD Cash Book accounts, and ledger accounts a journal may use, by type."""
+    import firm_ledger as fl
+    from models import CashAccount, FirmAccount
+    fl.ensure_chart()
+    cash = [a for a in CashAccount.query.filter_by(is_active=True).order_by(CashAccount.order, CashAccount.id).all() if (a.currency or "USD") == "USD"]
+    by_type = {"Asset": [], "Liability": [], "Equity": [], "all": []}
+    for a in FirmAccount.query.order_by(FirmAccount.code).all():
+        if (not a.is_active or a.fs_category == "cash" or a.system_key in fl.JOURNAL_REFUSED_KEYS or a.system_key in fl.SUSPENSE_KEYS
+                or fl.is_control_key(a.system_key) or a.fs_category in fl.TAX_CODES or (a.system_key or "").startswith(("REV:", "EXP:"))):
+            continue
+        by_type["all"].append(a)
+        if a.account_type in by_type:
+            by_type[a.account_type].append(a)
+    default = {k: next((a.id for a in by_type["all"] if a.code == code), None) for k, code in _DEFAULT_CODES.items()}
+    return {"cash": cash, "by_type": by_type, "default": default, "acq_methods": ACQ_METHODS, "disp_methods": DISP_METHODS}
+
+
+def _funding_from_form(prefix):
+    """(method, ledger account id, cash account id, error) for 'acq' or 'disp' read from the form."""
+    from models import CashAccount, FirmAccount
+    allowed = {m for m, _ in (ACQ_METHODS if prefix == "acq" else DISP_METHODS)}
+    method = (request.form.get(f"{prefix}_method") or "").strip()
+    if method not in allowed:
+        return None, None, None, "Choose how the asset was paid for from the list."
+    if not method:
+        return "", None, None, None
+    if method == "bank":
+        ca = CashAccount.query.get(request.form.get(f"{prefix}_cash_account_id", type=int) or 0)
+        if ca is None or not ca.is_active:
+            return None, None, None, "Choose the bank or cash account it was " + ("paid from." if prefix == "acq" else "received into.")
+        if (ca.currency or "USD") != "USD":
+            return None, None, None, f"{ca.name} is not a USD account. Asset costs are in USD: choose a USD account, or enter the payment in the Cash Book yourself."
+        return "bank", None, ca.id, None
+    ch = funding_choices()
+    want_type = {"credit": "Liability" if prefix == "acq" else "Asset", "shareholder": "Equity", "other": "all"}[method]
+    acct = FirmAccount.query.get(request.form.get(f"{prefix}_account_{method}", type=int) or 0)
+    if acct is None or acct not in ch["by_type"][want_type]:
+        return None, None, None, {"credit": "Choose the account the supplier is owed through." if prefix == "acq" else "Choose the account the buyer owes through.",
+                                  "shareholder": "Choose the equity account the shareholder's contribution goes to.",
+                                  "other": "Choose the ledger account."}[method]
+    return method, acct.id, None, None
+
+
+def _sync_cash_entry(asset, prefix):
+    """Keep the one Cash Book entry the app makes for a bank / cash purchase or sale in step with the asset (create, update or remove)."""
+    from models import CashEntry
+    from models import CashClear
+    method = getattr(asset, f"{prefix}_method")
+    eid = getattr(asset, f"{prefix}_cash_entry_id")
+    entry = CashEntry.query.get(eid) if eid else None
+    if prefix == "acq":
+        amount, on, direction, cat = asset.cost or 0.0, asset.date_acquired, "out", "Other payment"
+        desc = f"Purchase of {asset.asset_code} - {asset.description}"
+    else:
+        amount, on, direction, cat = asset.disposal_proceeds or 0.0, asset.disposed_on, "in", "Other receipt"
+        desc = f"Sale proceeds of {asset.asset_code} - {asset.description}"
+    cash_id = getattr(asset, f"{prefix}_cash_account_id")
+    if method != "bank" or not cash_id or not on or amount <= 0:
+        if entry is not None:
+            CashClear.query.filter_by(source_key=f"entry:{entry.id}").delete()
+            db.session.delete(entry)
+        setattr(asset, f"{prefix}_cash_entry_id", None)
+        return
+    if entry is None:
+        entry = CashEntry(created_by_id=getattr(current_user, "id", None))
+        db.session.add(entry)
+    elif entry.account_id != cash_id:
+        CashClear.query.filter_by(source_key=f"entry:{entry.id}").delete()
+    entry.account_id, entry.entry_date, entry.direction, entry.amount, entry.category = cash_id, on, direction, round(amount, 2), cat
+    entry.description, entry.reference = desc[:250], asset.asset_code
+    db.session.flush()
+    setattr(asset, f"{prefix}_cash_entry_id", entry.id)
+
+
+def _funding_note(asset, prefix="acq"):
+    method = getattr(asset, f"{prefix}_method")
+    if method == "bank":
+        return " A matching Cash Book entry was made, and it clears on Ledger > Clear the clearing accounts."
+    if method:
+        return " Post the funding on Ledger > Clear the clearing accounts."
+    return ""
 
 
 def _classes_for_form(also=None):
@@ -301,6 +396,11 @@ def _asset_from_form(asset):
         return "Enter both the accumulated depreciation brought forward and the date it is stated at, or neither."
     if bf is not None and (bf < 0 or bf > cost):
         return "Accumulated depreciation brought forward cannot be negative or more than the cost."
+    a_method, a_acct, a_cash, a_err = _funding_from_form("acq")
+    if a_err:
+        return a_err
+    if a_method == "bank" and cost <= 0:
+        return "A bank or cash payment needs a cost above zero."
     code = (request.form.get("asset_code") or "").strip()
     if code:
         clash = FirmAsset.query.filter(FirmAsset.asset_code == code, FirmAsset.id != (asset.id or 0)).first()
@@ -315,6 +415,7 @@ def _asset_from_form(asset):
     asset.serial_number = (request.form.get("serial_number") or "").strip()[:120] or None
     asset.notes = (request.form.get("notes") or "").strip() or None
     asset.acc_dep_bf, asset.acc_dep_bf_date = bf, bf_date
+    asset.acq_method, asset.acq_account_id, asset.acq_cash_account_id = a_method or None, a_acct, a_cash
     return None
 
 
@@ -329,11 +430,13 @@ def new_asset():
         else:
             asset.created_by_id = current_user.id
             db.session.add(asset)
+            db.session.flush()
+            _sync_cash_entry(asset, "acq")
             db.session.commit()
-            flash(f"{asset.asset_code} added to the register.", "success")
+            flash(f"{asset.asset_code} added to the register." + _funding_note(asset), "success")
             return redirect(url_for("firmfs.assets"))
     return render_template("firmfs/asset_form.html", asset=asset, classes=_classes_for_form(), active="assets", editing=False,
-                           form=request.form if request.method == "POST" else None)
+                           form=request.form if request.method == "POST" else None, funding_ch=funding_choices())
 
 
 @firmfs_bp.route("/assets/<int:asset_id>/edit", methods=["GET", "POST"])
@@ -346,12 +449,13 @@ def edit_asset(asset_id):
             flash(err, "danger")
             db.session.rollback()
         else:
+            _sync_cash_entry(asset, "acq")
             db.session.commit()
-            flash(f"{asset.asset_code} updated.", "success")
+            flash(f"{asset.asset_code} updated." + _funding_note(asset), "success")
             return redirect(url_for("firmfs.assets"))
         asset = FirmAsset.query.get_or_404(asset_id)
     return render_template("firmfs/asset_form.html", asset=asset, classes=_classes_for_form(asset.asset_class_id), active="assets",
-                           editing=True, form=request.form if request.method == "POST" else None)
+                           editing=True, form=request.form if request.method == "POST" else None, funding_ch=funding_choices())
 
 
 @firmfs_bp.route("/assets/<int:asset_id>/dispose", methods=["POST"])
@@ -365,10 +469,16 @@ def dispose_asset(asset_id):
     elif proceeds is None or proceeds < 0:
         flash("Enter the sale proceeds as a number (0 if scrapped).", "danger")
     else:
+        d_method, d_acct, d_cash, d_err = _funding_from_form("disp") if proceeds > 0 else ("", None, None, None)
+        if d_err:
+            flash(d_err, "danger")
+            return redirect(url_for("firmfs.assets"))
         asset.disposed_on, asset.disposal_proceeds = on, proceeds
         asset.disposal_note = (request.form.get("disposal_note") or "").strip()[:250] or None
+        asset.disp_method, asset.disp_account_id, asset.disp_cash_account_id = d_method or None, d_acct, d_cash
+        _sync_cash_entry(asset, "disp")
         db.session.commit()
-        flash(f"{asset.asset_code} marked as disposed on {on.strftime('%d %b %Y')}.", "success")
+        flash(f"{asset.asset_code} marked as disposed on {on.strftime('%d %b %Y')}." + _funding_note(asset, "disp"), "success")
     return redirect(url_for("firmfs.assets"))
 
 
@@ -377,6 +487,8 @@ def dispose_asset(asset_id):
 def undo_disposal(asset_id):
     asset = FirmAsset.query.get_or_404(asset_id)
     asset.disposed_on, asset.disposal_proceeds, asset.disposal_note = None, 0.0, None
+    _sync_cash_entry(asset, "disp")
+    asset.disp_method = asset.disp_account_id = asset.disp_cash_account_id = None
     db.session.commit()
     flash(f"Disposal of {asset.asset_code} reversed.", "info")
     return redirect(url_for("firmfs.assets"))
@@ -387,6 +499,9 @@ def undo_disposal(asset_id):
 def delete_asset(asset_id):
     asset = FirmAsset.query.get_or_404(asset_id)
     code = asset.asset_code
+    asset.acq_method = asset.disp_method = None
+    _sync_cash_entry(asset, "acq")
+    _sync_cash_entry(asset, "disp")
     db.session.delete(asset)
     db.session.commit()
     flash(f"{code} removed from the register. (Use 'Dispose' for an asset that was sold or scrapped.)", "info")

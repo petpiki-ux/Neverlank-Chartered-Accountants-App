@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "firmfs/_funding.html" import funding, fundScript %}
 {% block title %}{{ 'Edit' if editing else 'Add' }} asset - {{ firm_name }}{% endblock %}
 {% block content %}
 {% set ye = None %}
@@ -25,6 +26,7 @@
       <div><label for="location">Location</label><input type="text" id="location" name="location" maxlength="120" value="{{ val('location', asset.location or '') }}"></div>
       <div><label for="serial_number">Serial number</label><input type="text" id="serial_number" name="serial_number" maxlength="120" value="{{ val('serial_number', asset.serial_number or '') }}"></div>
     </div>
+    <div style="margin-bottom:12px;max-width:520px;">{{ funding('acq', funding_ch, asset, form) }}</div>
     <details {% if asset.acc_dep_bf is not none or (form and form.get('acc_dep_bf')) %}open{% endif %} style="margin-bottom:12px;"><summary style="cursor:pointer;font-weight:600;">Brought forward from the old books (optional)</summary>
       <p class="muted" style="font-size:12.5px;">Only if the firm's earlier accounts already show accumulated depreciation you want to keep. It replaces the calculated figure from the end of the month it is stated at; later months are calculated from there.</p>
       <div class="form-row">
@@ -38,4 +40,5 @@
     {% else %}</form>{% endif %}
   {% if editing and asset.disposed_on %}<p class="muted" style="margin-top:12px;">Disposed on {{ asset.disposed_on.strftime('%d %b %Y') }} for USD {{ '{:,.2f}'.format(asset.disposal_proceeds or 0) }}{% if asset.disposal_note %} - {{ asset.disposal_note }}{% endif %}.</p>{% endif %}
 </div>
+{{ fundScript() }}
 {% endblock %}

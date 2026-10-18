@@ -286,6 +286,10 @@ def _add_missing_columns():
         "gl_account": [("tax_expense_type", "VARCHAR(60)")],
         "firm_journal": [("alloc_key", "VARCHAR(120)")],
         "firm_fx_config": [("prefer", "VARCHAR(10)")],
+        "firm_account": [("parent_id", "INTEGER")],
+        "firm_asset": [("acq_method", "VARCHAR(12)"), ("acq_account_id", "INTEGER"), ("acq_cash_account_id", "INTEGER"),
+                       ("acq_cash_entry_id", "INTEGER"), ("disp_method", "VARCHAR(12)"), ("disp_account_id", "INTEGER"),
+                       ("disp_cash_account_id", "INTEGER"), ("disp_cash_entry_id", "INTEGER")],
         "firm_year_end": [("cash_manual", "BOOLEAN DEFAULT 0 NOT NULL"), ("tax_manual", "BOOLEAN DEFAULT 0 NOT NULL"), ("tax_loss_bf", "FLOAT")],
         "income_tax_adjustment_line": [("source", "VARCHAR(30)")],
         # helpful/unhelpful feedback on cached "Ask the library" answers (learning.py)

@@ -401,6 +401,8 @@ def ledger_tb_export():
     for c in ws[ws.max_row]:
         c.font, c.fill = bold, head
     for r in tb["rows"]:
+        if r.get("group_total") or r.get("heading"):
+            continue
         a = r["account"]
         ws.append([a.code if a else "", a.name if a else r["label"], a.account_type if a else "", (financials.category_label(a.fs_category) if a and a.fs_category in fl.CAT else "Not in the statements") if a else "",
                    r["debit"] or None, r["credit"] or None])

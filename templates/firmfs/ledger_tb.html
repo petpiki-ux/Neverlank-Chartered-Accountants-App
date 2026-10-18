@@ -25,11 +25,18 @@
     <thead><tr><th style="width:80px;">Code</th><th>Account</th><th>Statement line</th><th class="num">Debit</th><th class="num">Credit</th></tr></thead>
     <tbody>
     {% for r in tb.rows %}
+      {% if r.group_total %}
+      <tr style="font-style:italic;background:#f7f5ee;"><td></td><td>Total {{ r.account.name }} and its sub-accounts</td><td></td>
+        <td class="num">{{ fm(r.debit) if r.debit else '' }}</td><td class="num">{{ fm(r.credit) if r.credit else '' }}</td></tr>
+      {% elif r.heading %}
+      <tr><td>{{ r.account.code }}</td><td><a href="{{ url_for('firmfs.ledger_account', account=r.account.id, ye=ye.id if ye else None, date=as_at.isoformat() if custom else None) }}">{{ r.account.name }}</a></td><td></td><td></td><td></td></tr>
+      {% else %}
       <tr {% if r.account and r.account.system_key in ('SUSP_OPEN','SUSP_CASH','SUSP_ASSET','CLR_TRANSFER','VAT_CTRL') %}style="background:#fff8e6;"{% endif %}>
         <td>{{ r.account.code if r.account else '' }}</td>
-        <td>{% if r.account %}<a href="{{ url_for('firmfs.ledger_account', account=r.account.id, ye=ye.id if ye else None, date=as_at.isoformat() if custom else None) }}">{{ r.account.name }}</a>{% else %}<i>{{ r.label }}</i>{% endif %}</td>
+        <td {% if r.indent %}style="padding-left:28px;"{% endif %}>{% if r.account %}<a href="{{ url_for('firmfs.ledger_account', account=r.account.id, ye=ye.id if ye else None, date=as_at.isoformat() if custom else None) }}">{{ r.account.name }}</a>{% else %}<i>{{ r.label }}</i>{% endif %}</td>
         <td class="muted" style="font-size:12px;">{% if r.account %}{{ cat_label.get(r.account.fs_category, 'Not in the statements') if r.account.fs_category else 'Not in the statements' }}{% endif %}</td>
         <td class="num">{{ fm(r.debit) if r.debit else '' }}</td><td class="num">{{ fm(r.credit) if r.credit else '' }}</td></tr>
+      {% endif %}
     {% else %}
       <tr><td colspan="5" class="muted">Nothing is posted yet at this date.</td></tr>
     {% endfor %}
