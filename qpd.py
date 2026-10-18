@@ -74,11 +74,13 @@ def _get_or_create_estimate(client_id, tax_year):
 
 
 def get_fx_rate_as_of(target_date):
-    """The most recently logged FxRate on or before target_date - None if
-    nothing has been logged yet on or before that date."""
+    """The USD:ZWG rate for target_date from the firm's one exchange-rate engine (fx_engine.py), for tax purposes: the ZIMRA rate
+    logged in the FX Rates log first, then a rate typed in Firm Finance, then the RBZ interbank rate; the most recent reading on or
+    before the date. Returns an object with .rate and .rate_date, or None when no source has a rate yet."""
     if target_date is None:
         return None
-    return FxRate.query.filter(FxRate.rate_date <= target_date).order_by(FxRate.rate_date.desc()).first()
+    import fx_engine
+    return fx_engine.rate_on(target_date, "tax")
 
 
 def _lookup_coa_mapping(client_id, account_name):

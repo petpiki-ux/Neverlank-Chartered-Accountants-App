@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Tax rates (ZIMRA) against the RBZ - Firm Finance{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Tax rates (ZIMRA) against the RBZ</h1>
+  <div class="subtitle">The USD:ZWG rates you keep under Tax (QPD) &gt; FX rates, set beside what the Reserve Bank of Zimbabwe published for the same day. {{ total }} Tax rate(s) on file{% if first %}, from {{ first.strftime('%d %b %Y') }} to {{ last.strftime('%d %b %Y') }}{% endif %}.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.exchange_rates') }}">Exchange rates register</a></div></div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card" style="padding:10px 14px;">
+  <form method="get" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0;">
+    <div><label style="margin:0;" for="from">From</label><input type="date" id="from" name="from" value="{{ start.isoformat() }}" style="margin:0;"></div>
+    <div><label style="margin:0;" for="to">To</label><input type="date" id="to" name="to" value="{{ end.isoformat() }}" style="margin:0;"></div>
+    <button class="btn" type="submit">Show</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Result for {{ start.strftime('%d %b %Y') }} to {{ end.strftime('%d %b %Y') }}</h3>
+  {% if rows %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;">
+    <span class="badge status-Paid">{{ counts.get('same', 0) }} same as the RBZ mid</span>
+    {% if counts.get('bid') or counts.get('ask') %}<span class="badge">{{ counts.get('bid', 0) }} equal the bid, {{ counts.get('ask', 0) }} equal the ask</span>{% endif %}
+    {% if counts.get('near') %}<span class="badge">{{ counts.get('near') }} within 0.5%</span>{% endif %}
+    {% if counts.get('differs') %}<span class="badge overdue">{{ counts.get('differs') }} differ</span>{% endif %}
+    {% if counts.get('norbz') %}<span class="badge">{{ counts.get('norbz') }} with no RBZ reading yet</span>{% endif %}
+  </div>
+  <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+    <form method="post" action="{{ url_for('firmfs.fx_compare_load') }}" style="margin:0;"><input type="hidden" name="from" value="{{ start.isoformat() }}"><input type="hidden" name="to" value="{{ end.isoformat() }}">
+      <button class="btn gold" type="submit">Load the RBZ figures for these dates</button></form>
+  </div>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Date</th><th class="num">Tax rate (ZIMRA)</th><th class="num">RBZ bid</th><th class="num">RBZ ask</th><th class="num">RBZ mid</th><th class="num">Difference</th><th>Verdict</th><th>Statements use</th></tr></thead><tbody>
+    {% for r in rows %}
+      <tr>
+        <td>{{ r.date.strftime('%a %d %b %Y') }}</td>
+        <td class="num">{{ '%g'|format(r.zimra.rate) }}{% if r.zimra.original_rate_zwl %}<div class="muted" style="font-size:11px;">from ZWL {{ '%g'|format(r.zimra.original_rate_zwl) }}</div>{% endif %}</td>
+        <td class="num">{{ '%g'|format(r.rbz[0]) if r.rbz else '-' }}</td><td class="num">{{ '%g'|format(r.rbz[1]) if r.rbz else '-' }}</td><td class="num">{{ '%g'|format(r.rbz[2]) if r.rbz else '-' }}</td>
+        <td class="num">{% if r.rbz %}{{ '%+.4f'|format(r.zimra.rate - r.rbz[2]) }}<div class="muted" style="font-size:11px;">{{ '%+.2f'|format((r.zimra.rate - r.rbz[2]) / r.rbz[2] * 100) }}%</div>{% else %}-{% endif %}</td>
+        <td style="font-size:12.5px;">{% if r.code == 'same' %}<span class="badge status-Paid">{{ r.label }}</span>{% elif r.code == 'differs' %}<span class="badge overdue">{{ r.label }}</span>{% else %}{{ r.label }}{% endif %}</td>
+        <td style="font-size:12px;">{% if r.used %}{{ '%g'|format(r.used.rate) }} <span class="muted">{{ r.used.source }}</span>{% else %}<span class="muted">nothing yet</span>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody></table></div>
+  <p class="muted" style="font-size:12.5px;margin:10px 0 0;">The RBZ publishes a bid, an ask and a mid (average) each working day. A Tax rate is "the same" when it equals the mid to four decimals (or the mid rounded to fewer). Weekends and public holidays have no RBZ file, so those dates show "No RBZ reading". Nothing is copied between the two: the engine reads both. Statements use a rate you typed, else the RBZ's, else the Tax rate (switch the order on the Exchange rates page); Tax (QPD) uses the ZIMRA rate first.</p>
+  {% else %}
+  <p class="muted" style="margin:0;">No Tax rates are dated in this period. Rates are kept under Tax &gt; FX rates (upload them there).</p>
+  {% endif %}
+</div>
+{% endblock %}

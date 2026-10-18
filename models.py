@@ -11257,3 +11257,28 @@ class FirmFxConfig(db.Model):
     auto_fetch = db.Column(db.Boolean, default=True)           # fetch the latest published rate when the rates page is opened
     last_attempt = db.Column(db.DateTime)
     last_message = db.Column(db.String(300))
+    prefer = db.Column(db.String(10))                          # when RBZ and ZIMRA share a date for reporting: "zimra" puts ZIMRA first (default RBZ)
+
+
+class FirmFxMiss(db.Model):
+    """A working day the RBZ has no usable rate file for (public holiday, a copy of another day's file ...). Remembered so the
+    automatic catch-up does not ask for it again and again; recent days are re-checked, old ones are settled."""
+    __tablename__ = "firm_fx_miss"
+    id = db.Column(db.Integer, primary_key=True)
+    currency = db.Column(db.String(10), nullable=False, default="ZWG")
+    rate_date = db.Column(db.Date, nullable=False)
+    reason = db.Column(db.String(250))
+    checked_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint("currency", "rate_date", name="uq_firm_fx_miss"),)
+
+
+class FirmRbzReading(db.Model):
+    """What the RBZ published for one day (ZWG per 1 USD: bid, ask, mid), kept whatever rate the register ended up using for that
+    date. It is the evidence the Tax-rates (ZIMRA) comparison is made against."""
+    __tablename__ = "firm_rbz_reading"
+    id = db.Column(db.Integer, primary_key=True)
+    rate_date = db.Column(db.Date, nullable=False, unique=True)
+    bid = db.Column(db.Float, nullable=False)
+    ask = db.Column(db.Float, nullable=False)
+    mid = db.Column(db.Float, nullable=False)
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow)

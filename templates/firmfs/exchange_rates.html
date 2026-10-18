@@ -2,7 +2,8 @@
 {% block title %}Exchange rates - Firm Finance{% endblock %}
 {% block content %}
 <div class="page-header"><div><h1>Exchange rates</h1>
-  <div class="subtitle">Keep dated ZWG-per-USD rates here (for example the RBZ interbank rate at each month-end). A year-end's closing rate is the latest rate dated on or before it. The statements translate every ZWG item at the closing rate stored on the year-end.</div></div></div>
+  <div class="subtitle">One rate engine for the whole app (ZWG per 1 USD). It reads the RBZ interbank rates, the Tax rates (ZIMRA) kept under Tax &gt; FX rates, and any rate you type here, and answers every rate question from them: year-end closing rates, the statements, the cash book, the ledger, QPD and any engagement work.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.fx_compare') }}">Check Tax rates against the RBZ</a></div></div>
 {% include "firmfs/_nav.html" %}
 
 <div class="card">
@@ -29,26 +30,36 @@
 <div class="card">
   <h3 style="margin-top:0;">Reserve Bank of Zimbabwe rates</h3>
   <p style="font-size:13px;margin-top:0;">Reads the RBZ interbank rate (ZWG per 1 USD) from <b>rbz.co.zw</b>. The RBZ publishes one file per working day; weekends and public holidays have none, so the last working day's rate applies. A rate you typed yourself is never replaced.</p>
-  {% if auto %}<p class="muted" style="font-size:12.5px;margin:0 0 8px;">{{ auto }}</p>{% elif cfg.last_message %}<p class="muted" style="font-size:12.5px;margin:0 0 8px;">Last attempt {{ cfg.last_attempt.strftime('%d %b %Y %H:%M') if cfg.last_attempt else '' }} (UTC): {{ cfg.last_message }}</p>{% endif %}
+  {% if cfg.last_message %}<p class="muted" style="font-size:12.5px;margin:0 0 8px;">Last automatic check {{ cfg.last_attempt.strftime('%d %b %Y %H:%M') if cfg.last_attempt else '' }} (UTC): {{ cfg.last_message }}</p>{% endif %}
   <div style="display:flex;gap:18px;flex-wrap:wrap;align-items:flex-end;">
     <form method="post" action="{{ url_for('firmfs.rbz_latest') }}" style="margin:0;">
       <button class="btn gold" type="submit">Get the latest RBZ rate</button>
-      <label style="margin:6px 0 0;font-size:12px;display:flex;gap:6px;align-items:center;"><input type="checkbox" name="overwrite" value="1" style="width:auto;"> replace a rate I typed for that date</label>
     </form>
     <form method="post" action="{{ url_for('firmfs.rbz_month') }}" style="margin:0;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;">
       <div><label for="rm" style="margin:0;">Fill a month</label><select id="rm" name="month" style="margin:0;">{% for n, nm in months %}<option value="{{ n }}" {% if n == today.month %}selected{% endif %}>{{ nm }}</option>{% endfor %}</select></div>
       <div><label for="ry" style="margin:0;">&nbsp;</label><input type="number" id="ry" name="year" value="{{ today.year }}" min="2009" max="{{ today.year }}" style="margin:0;width:90px;"></div>
       <button class="btn" type="submit">Get that month</button>
-      <label style="margin:0 0 8px;font-size:12px;display:flex;gap:6px;align-items:center;"><input type="checkbox" name="overwrite" value="1" style="width:auto;"> replace rates already in the register</label>
+      <label style="margin:0 0 8px;font-size:12px;display:flex;gap:6px;align-items:center;"><input type="checkbox" name="overwrite" value="1" style="width:auto;"> ask the RBZ again for days already read</label>
     </form>
   </div>
+  <form method="post" action="{{ url_for('firmfs.rbz_catch_up') }}" style="margin:12px 0 0;"><button class="btn" type="submit">Fill every missing day now</button>
+    <span class="muted" style="font-size:12px;">Looks at the last 45 days and the days around each year-end, including days that failed before.</span></form>
   <form method="post" action="{{ url_for('firmfs.rbz_settings') }}" style="margin:14px 0 0;display:flex;gap:14px;align-items:center;flex-wrap:wrap;">
     <label style="margin:0;">Figure to store
       <select name="basis" style="margin:0 0 0 6px;width:auto;">{% for k, v in bases.items() %}<option value="{{ k }}" {% if cfg.rbz_basis == k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></label>
-    <label style="margin:0;display:flex;gap:6px;align-items:center;"><input type="checkbox" name="auto_fetch" value="1" style="width:auto;" {% if cfg.auto_fetch %}checked{% endif %}> Fetch the latest rate automatically when this page opens (at most every 6 hours)</label>
+    <label style="margin:0;">If the RBZ and ZIMRA rates differ, statements use
+      <select name="prefer" style="margin:0 0 0 6px;width:auto;"><option value="rbz" {% if cfg.prefer != 'zimra' %}selected{% endif %}>the RBZ rate</option><option value="zimra" {% if cfg.prefer == 'zimra' %}selected{% endif %}>the ZIMRA (Tax) rate</option></select></label>
+    <label style="margin:0;display:flex;gap:6px;align-items:center;"><input type="checkbox" name="auto_fetch" value="1" style="width:auto;" {% if cfg.auto_fetch %}checked{% endif %}> When the Managing Partner signs in or this page opens, fetch today's rate and any missing days (at most every 6 hours)</label>
     <button class="btn small secondary" type="submit">Save</button>
   </form>
-  <p class="muted" style="font-size:12px;margin:10px 0 0;">The RBZ interbank figures are the bid, ask and average. The average (mid) is stored unless you choose otherwise; the bid and ask are kept in the note. If the website is down or its layout changes, the fetch stops with a message and you can still type rates in below.</p>
+  {% if misses %}
+  <details style="margin-top:10px;"><summary style="cursor:pointer;font-size:13px;">Working days the RBZ has no usable file for ({{ misses|length }})</summary>
+    <div class="tbl-scroll"><table style="max-width:760px;"><thead><tr><th>Date</th><th>Why</th></tr></thead><tbody>
+    {% for m in misses %}<tr><td>{{ m.rate_date.strftime('%a %d %b %Y') }}</td><td style="font-size:12.5px;">{{ m.reason or '' }}</td></tr>{% endfor %}
+    </tbody></table></div>
+    <p class="muted" style="font-size:12px;margin:6px 0 0;">Public holidays have no file. For any other day you need, type the rate in below; the register then uses it.</p>
+  </details>{% endif %}
+  <p class="muted" style="font-size:12px;margin:10px 0 0;">The RBZ interbank figures are the bid, ask and average. The average (mid) is used unless you choose otherwise; the bid and ask are always kept. Tax computations (QPD) use the ZIMRA rate first and fall back to the RBZ; a rate you type wins over both for the statements. If the website is down or its layout changes, the fetch stops with a message and you can still type rates in below.</p>
 </div>
 
 <div class="card">
@@ -80,14 +91,43 @@
 </div>
 
 <div class="card">
-  <h3 style="margin-top:0;">Register</h3>
-  {% if rates %}
+  <h3 style="margin-top:0;">Rates by day</h3>
+  <form method="get" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0 0 10px;">
+    <div><label style="margin:0;" for="from">From</label><input type="date" id="from" name="from" value="{{ start.isoformat() }}" style="margin:0;"></div>
+    <div><label style="margin:0;" for="to">To</label><input type="date" id="to" name="to" value="{{ end.isoformat() }}" style="margin:0;"></div>
+    <button class="btn" type="submit">Show</button>
+  </form>
+  {% if days %}
   <div class="tbl-scroll"><table>
-    <thead><tr><th>Date</th><th>Currency</th><th class="num">Per 1 USD</th><th>Source</th><th>Note</th><th>Entered by</th><th></th></tr></thead><tbody>
-    {% for r in rates %}<tr><td>{{ r.rate_date.strftime('%d %b %Y') }}</td><td>{{ r.currency }}</td><td class="num">{{ '%g'|format(r.rate) }}</td><td>{{ r.source or '' }}</td><td>{{ r.note or '' }}</td><td class="muted" style="font-size:12px;">{{ r.created_by.name if r.created_by else '' }}</td>
-      <td><form method="post" action="{{ url_for('firmfs.exchange_rate_delete', rate_id=r.id) }}" style="display:inline;" onsubmit="return confirm('Delete this rate?');"><button class="btn small danger" type="submit">Delete</button></form></td></tr>{% endfor %}
+    <thead><tr><th>Date</th><th class="num">Statements use</th><th>From</th><th class="num">RBZ bid</th><th class="num">RBZ ask</th><th class="num">RBZ mid</th><th class="num">Tax (ZIMRA)</th><th class="num">Typed</th><th>Check</th><th></th></tr></thead><tbody>
+    {% for d in days %}
+      <tr>
+        <td>{{ d.date.strftime('%a %d %b %Y') }}</td>
+        <td class="num"><b>{{ '%g'|format(d.used.rate) if d.used else '-' }}</b></td>
+        <td style="font-size:12px;">{% if d.used %}{{ d.used.source }}{% if not d.used.exact %} <span class="muted">(dated {{ d.used.rate_date.strftime('%d %b') }})</span>{% endif %}{% endif %}</td>
+        <td class="num">{{ '%g'|format(d.rbz[0]) if d.rbz else '' }}</td><td class="num">{{ '%g'|format(d.rbz[1]) if d.rbz else '' }}</td><td class="num">{{ '%g'|format(d.rbz[2]) if d.rbz else '' }}</td>
+        <td class="num">{{ '%g'|format(d.zimra.rate) if d.zimra else '' }}</td>
+        <td class="num">{{ '%g'|format(d.manual.rate) if d.manual else '' }}</td>
+        <td style="font-size:12px;">{% if d.code == 'same' %}<span class="badge status-Paid">agree</span>{% elif d.code == 'differs' %}<span class="badge overdue">{{ d.label }}</span>{% elif d.code in ('near','bid','ask') %}{{ d.label }}{% endif %}</td>
+        <td>{% if d.manual %}<form method="post" action="{{ url_for('firmfs.exchange_rate_delete', rate_id=d.manual.id) }}" style="display:inline;" onsubmit="return confirm('Delete the rate you typed for this date?');"><button class="btn small danger" type="submit">Delete typed</button></form>{% endif %}</td>
+      </tr>
+    {% endfor %}
     </tbody></table></div>
-  {% else %}<p class="muted" style="margin:0;">No rates yet.</p>{% endif %}
-  <p class="muted" style="font-size:12px;margin:10px 0 0;">Deleting a rate does not change a year-end that already took it; use "Use the register rate" to refresh a year-end after adding or changing rates.</p>
+  <p class="muted" style="font-size:12px;margin:10px 0 0;">A date shows every reading the engine has. "Statements use" is the one it picks: a rate you typed, else the RBZ's, else the Tax (ZIMRA) rate; a date with no reading of its own takes the latest earlier one. Deleting a typed rate does not change a year-end that already took it; use "Use the register rate" to refresh a year-end.</p>
+  {% else %}<p class="muted" style="margin:0;">No rates in this period.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Convert an amount</h3>
+  <form method="get" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0;">
+    <div><label style="margin:0;" for="amount">Amount</label><input type="number" step="any" id="amount" name="amount" style="margin:0;width:140px;" required></div>
+    <div><label style="margin:0;" for="frm">From</label><select id="frm" name="frm" style="margin:0;"><option>USD</option><option>ZWG</option></select></div>
+    <div><label style="margin:0;" for="to_cur">To</label><select id="to_cur" name="to_cur" style="margin:0;"><option>ZWG</option><option>USD</option></select></div>
+    <div><label style="margin:0;" for="on">On</label><input type="date" id="on" name="on" value="{{ today.isoformat() }}" style="margin:0;"></div>
+    <div><label style="margin:0;" for="purpose">For</label><select id="purpose" name="purpose" style="margin:0;"><option value="reporting">Financial reporting</option><option value="tax">Tax</option></select></div>
+    <button class="btn" type="submit">Convert</button>
+  </form>
+  {% if convert %}<p style="margin:10px 0 0;">{% if convert.value is not none %}<b>{{ '{:,.2f}'.format(convert.amount) }} {{ convert.from }} = {{ '{:,.2f}'.format(convert.value) }} {{ convert.to }}</b>{% if convert.rate %} at {{ '%g'|format(convert.rate.rate) }} ({{ convert.rate.source }}, dated {{ convert.rate.rate_date.strftime('%d %b %Y') }}){% endif %}{% else %}No rate is on file on or before {{ convert.on.strftime('%d %b %Y') }}.{% endif %}</p>{% endif %}
+  <p class="muted" style="font-size:12px;margin:8px 0 0;">The same answer is available to any page or script at <code>/firm-finance/exchange-rates/lookup?on=2026-09-30&amp;purpose=tax</code>.</p>
 </div>
 {% endblock %}
