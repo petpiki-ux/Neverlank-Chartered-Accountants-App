@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Exchange rates - Firm Finance{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Exchange rates</h1>
+  <div class="subtitle">Keep dated ZWG-per-USD rates here (for example the RBZ interbank rate at each month-end). A year-end's closing rate is the latest rate dated on or before it. The statements translate every ZWG item at the closing rate stored on the year-end.</div></div></div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card">
+  <h3 style="margin-top:0;">Closing rate for each year-end</h3>
+  {% if year_ends %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Year-end</th><th class="num">Rate in use</th><th class="num">Register rate</th><th>Dated</th><th>Status</th><th></th></tr></thead><tbody>
+    {% for y, i in year_ends %}
+      <tr><td><a href="{{ url_for('firmfs.year_end', ye_id=y.id) }}">{{ y.period_end.strftime('%d %B %Y') }}</a></td>
+        <td class="num">{{ '%g'|format(i.in_use) if i.in_use else '-' }}</td>
+        <td class="num">{{ '%g'|format(i.row.rate) if i.row else '-' }}</td>
+        <td>{% if i.row %}{{ i.row.rate_date.strftime('%d %b %Y') }}{% if i.row.source %} <span class="muted" style="font-size:11.5px;">{{ i.row.source }}</span>{% endif %}{% if i.stale %} <span class="badge overdue">{{ i.age_days }} days earlier</span>{% endif %}{% endif %}</td>
+        <td>{% if i.status == 'match' %}<span class="badge status-Paid">Uses the register rate</span>
+            {% elif i.status == 'differs' %}<span class="badge overdue">Typed rate differs from the register</span>
+            {% elif i.status == 'unused' %}<span class="badge overdue">No rate set: ZWG items are left out</span>
+            {% elif i.status == 'typed' %}<span class="badge">Typed (no register rate)</span>
+            {% else %}<span class="badge overdue">No rate</span>{% endif %}</td>
+        <td>{% if i.row and i.status in ('differs', 'unused') %}<form method="post" action="{{ url_for('firmfs.exchange_rate_apply', ye_id=y.id) }}" style="display:inline;"><button class="btn small" type="submit">Use the register rate</button></form>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="muted" style="margin:0;">No year-ends yet. A year-end created without a rate takes its closing rate from the register below.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Add a rate</h3>
+  <form method="post" action="{{ url_for('firmfs.exchange_rate_add') }}">
+    <div class="form-row">
+      <div><label for="currency">Currency</label><select id="currency" name="currency">{% for c in currencies %}<option>{{ c }}</option>{% endfor %}</select></div>
+      <div><label for="rate_date">Date</label><input type="date" id="rate_date" name="rate_date" value="{{ today.isoformat() }}" required></div>
+      <div><label for="rate">Units per 1 USD</label><input type="number" step="any" min="0" id="rate" name="rate" required placeholder="e.g. 26.5"></div>
+      <div style="flex:1;min-width:200px;"><label for="source">Source</label><input type="text" id="source" name="source" maxlength="120" placeholder="e.g. RBZ interbank rate"></div>
+      <div style="flex:1;min-width:200px;"><label for="note">Note</label><input type="text" id="note" name="note" maxlength="250"></div>
+    </div>
+    <button class="btn gold" type="submit">Save rate</button>
+    <span class="muted" style="font-size:12px;">A rate for a date that already has one replaces it.</span>
+  </form>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Paste several rates</h3>
+  <form method="post" action="{{ url_for('firmfs.exchange_rate_bulk') }}">
+    <div class="form-row">
+      <div><label for="bcurrency">Currency</label><select id="bcurrency" name="currency">{% for c in currencies %}<option>{{ c }}</option>{% endfor %}</select></div>
+      <div style="flex:1;min-width:200px;"><label for="bsource">Source</label><input type="text" id="bsource" name="source" maxlength="120" placeholder="e.g. RBZ interbank rate"></div>
+    </div>
+    <label for="lines">One rate per line: date, rate</label>
+    <textarea id="lines" name="lines" rows="5" placeholder="2025-12-31, 26.5&#10;31/01/2026, 26.8"></textarea>
+    <button class="btn" type="submit">Save rates</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Register</h3>
+  {% if rates %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Date</th><th>Currency</th><th class="num">Per 1 USD</th><th>Source</th><th>Note</th><th>Entered by</th><th></th></tr></thead><tbody>
+    {% for r in rates %}<tr><td>{{ r.rate_date.strftime('%d %b %Y') }}</td><td>{{ r.currency }}</td><td class="num">{{ '%g'|format(r.rate) }}</td><td>{{ r.source or '' }}</td><td>{{ r.note or '' }}</td><td class="muted" style="font-size:12px;">{{ r.created_by.name if r.created_by else '' }}</td>
+      <td><form method="post" action="{{ url_for('firmfs.exchange_rate_delete', rate_id=r.id) }}" style="display:inline;" onsubmit="return confirm('Delete this rate?');"><button class="btn small danger" type="submit">Delete</button></form></td></tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="muted" style="margin:0;">No rates yet.</p>{% endif %}
+  <p class="muted" style="font-size:12px;margin:10px 0 0;">Deleting a rate does not change a year-end that already took it; use "Use the register rate" to refresh a year-end after adding or changing rates.</p>
+</div>
+{% endblock %}

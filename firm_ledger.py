@@ -447,7 +447,7 @@ class Ledger:
         return self.cols[-1]["period_end"] + timedelta(days=1)
 
     # ---- posting
-    def post(self, on, source, ref, description, legs, link=None, journal_id=None, kind="derived"):
+    def post(self, on, source, ref, description, legs, link=None, journal_id=None, kind="derived", tag=None, meta=None):
         """legs: [(account key or id, debit, credit, narration)] in USD. Zero legs are dropped; a cent of rounding goes to
         the opening-balances clearing account so the posting always balances."""
         built = []
@@ -469,7 +469,7 @@ class Ledger:
         self._seq += 1
         for aid, dr, cr, narr in built:
             self.lines.append({"seq": self._seq, "date": on, "source": source, "ref": ref or "", "description": description,
-                               "account_id": aid, "dr": dr, "cr": cr, "narr": narr or "", "link": link, "journal_id": journal_id, "kind": kind})
+                               "account_id": aid, "dr": dr, "cr": cr, "narr": narr or "", "link": link, "journal_id": journal_id, "kind": kind, "tag": tag, "meta": meta or {}})
 
     def finish(self):
         self.lines.sort(key=lambda l: (l["date"], l["seq"]))
@@ -605,7 +605,8 @@ def build_ledger(year_ends=None, include_journals=True):
                 contra = "SUSP_CASH"
         desc = t["description"] if not where.startswith("not in") and not where.startswith("before") else f"{t['description']} ({where})"
         legs = [(cash_key, max(amt, 0), max(-amt, 0), t["ref"]), (contra, max(-amt, 0), max(amt, 0), t.get("category") or src)]
-        L.post(t["date"], "Cash book - " + src.lower(), t["ref"], desc, legs, link=t.get("link") and (t["link"][0], t["link"][1]))
+        L.post(t["date"], "Cash book - " + src.lower(), t["ref"], desc, legs, link=t.get("link") and (t["link"][0], t["link"][1]),
+               meta={"kind": "cash_entry" if src == "Entry" else "cash_txn", "category": t.get("category"), "key": t["key"], "description": t["description"]})
 
     # ---------------- asset register, tax, entered figures (per year-end)
     prev_entered = {}
@@ -619,7 +620,8 @@ def build_ledger(year_ends=None, include_journals=True):
             label = f"{row['asset_code']} {row['description']}"
             if row["additions"]:
                 L.post(row["date_acquired"], "Asset purchase", row["asset_code"], f"Purchase - {label}",
-                       [("PPE_COST", cost, 0, label), ("SUSP_ASSET", 0, cost, "funding to be matched")])
+                       [("PPE_COST", cost, 0, label), ("SUSP_ASSET", 0, cost, "funding to be matched")],
+                       meta={"kind": "asset_purchase", "asset": row["asset_code"], "description": label})
             if idx == 0 and row["opening_cost"]:
                 oc, oa = r2(row["opening_cost"]), r2(row["opening_acc_dep"])
                 L.post(start - timedelta(days=1), "Asset b/f", row["asset_code"], f"Brought forward - {label}",
@@ -631,7 +633,8 @@ def build_ledger(year_ends=None, include_journals=True):
                 gl = r2(pr + da - dc)
                 L.post(row["disposed_on"], "Asset disposal", row["asset_code"], f"Disposal - {label}",
                        [("SUSP_ASSET", pr, 0, "proceeds to be matched"), ("PPE_ACCDEP", da, 0, label), ("PPE_COST", 0, dc, label),
-                        ("DISP_GL", max(-gl, 0), max(gl, 0), "profit / (loss) on disposal")])
+                        ("DISP_GL", max(-gl, 0), max(gl, 0), "profit / (loss) on disposal")],
+                       meta={"kind": "asset_disposal", "asset": row["asset_code"], "description": label})
         for cname, amt in sorted(by_class.items()):
             a2 = r2(amt)
             L.post(end, "Depreciation", "", f"Depreciation - {cname} ({col['label']})", [("DEPR", a2, 0, cname), ("PPE_ACCDEP", 0, a2, cname)])
@@ -668,7 +671,8 @@ def build_ledger(year_ends=None, include_journals=True):
                 continue
             d_dr = delta if side == "debit" else -delta
             L.post(end, "Entered figure", "", f"Entered on the year-end {end.strftime('%d %b %Y')}: {label}",
-                   [(acct.id, max(d_dr, 0), max(-d_dr, 0), label), ("SUSP_OPEN", max(-d_dr, 0), max(d_dr, 0), "to be journalised")])
+                   [(acct.id, max(d_dr, 0), max(-d_dr, 0), label), ("SUSP_OPEN", max(-d_dr, 0), max(d_dr, 0), "to be journalised")],
+                   meta={"kind": "entered", "category": code})
         prev_entered = {k: v for k, v in entered.items() if CAT[k][2] == "SFP"}
 
         if col["re_entered"]:
@@ -692,7 +696,7 @@ def build_ledger(year_ends=None, include_journals=True):
         for j in FirmJournal.query.filter_by(status="posted").order_by(FirmJournal.journal_date, FirmJournal.id).all():
             legs = [(ln.account_id, ln.debit or 0.0, ln.credit or 0.0, ln.narration) for ln in j.lines]
             L.post(j.journal_date, "Journal", j.number, j.description, legs, link=("firmfs.journal_view", {"journal_id": j.id}),
-                   journal_id=j.id, kind="journal")
+                   journal_id=j.id, kind="journal", tag=j.reference)
     L.finish()
     return L
 
@@ -820,3 +824,283 @@ def reconcile(L, col):
     tb = trial_balance(L, end, start)
     return {"rows": rows, "different": len(bad), "tb": tb, "suspense": tb["suspense"],
             "suspense_net": r2(sum(r["debit"] - r["credit"] for r in tb["suspense"])), "start": start, "end": end, "col": col}
+
+
+# ====================================================================== clearing accounts: automatic allocation
+#
+# The clearing accounts hold the two halves of items the app could only post one side of. Typical pairs:
+#   a cash book entry "Owner contribution 5,000"  (cash Dr, clearing Cr)   and   share capital 5,000 typed on the year-end
+#   (share capital Cr, clearing Dr). The two clearing legs cancel: MATCH journal, no effect on the statements.
+#   a cash book entry with nothing typed against it: POST journal from the clearing account to the account that entry
+#   belongs to (share capital, loans, dividends ...); this DOES change the statements, as it should.
+# The proposals are recomputed from the ledger each time, minus what earlier allocation journals already cleared (alloc_key),
+# and never move a clearing account past nil.
+
+# cash book entry heading -> (statement line it belongs to, preferred account code or "salaries")
+ALLOC_GROUPS = {
+    "Owner / shareholder contribution": ("share_capital", "3000"),
+    "Loan received": ("long_term_borrowings", "2300"),
+    "Loan repayment": ("long_term_borrowings", "2300"),
+    "Dividend paid": ("dividends_paid", "3300"),
+    "Interest received": ("other_income", "4510"),
+    "Bank charges": ("finance_costs", "7000"),
+    "Salaries paid": ("admin_expenses", "salaries"),
+    "PAYE and other taxes paid": ("other_current_liabilities", "2040"),
+}
+VAT_PAYABLE_CODE = "2030"
+
+
+def _alloc_target(L, cat, hint):
+    """The ledger account a group posts to: the hinted code if active, else the default account of the statement line."""
+    if hint == "salaries":
+        for a in L.accounts.values():
+            if a.is_active and (a.system_key or "").startswith("EXP:") and any(w in a.name.lower() for w in ("salar", "wage", "payroll")):
+                return a
+        return L.account("EXP_OTHER")
+    for a in L.accounts.values():
+        if a.code == hint and a.is_active:
+            return a
+    return L.default_for(cat)
+
+
+def _allocated(key):
+    """Amount already covered by journals made for this proposal (posted and not reversed, or still drafts)."""
+    total = 0.0
+    for j in FirmJournal.query.filter(FirmJournal.alloc_key == key).all():
+        if j.status == "posted" and j.reversed_by is not None:
+            continue
+        total += j.total_debit
+    return r2(total)
+
+
+def allocation_proposals(L):
+    """Everything the clearing accounts can be cleared with, as {"proposals": [...], "choose": [...], "notices": [...],
+    "balances": {key: net}}. A proposal: key, kind (match|post), title, why, effect, amount, date, period, lines
+    [(account ref, debit, credit, narration)], blocked (reason or None)."""
+    cols = L.cols
+    lock = current_lock()
+    out = {"proposals": [], "choose": [], "notices": [], "balances": {}}
+    ids = {k: (L.by_key[k].id if k in L.by_key else None) for k in SUSPENSE_KEYS}
+    bal = defaultdict(float)
+    for ln in L.lines:
+        bal[ln["account_id"]] += ln["dr"] - ln["cr"]
+    out["balances"] = {k: r2(bal.get(i, 0.0)) for k, i in ids.items() if i}
+    running = {k: out["balances"].get(k, 0.0) for k in ("SUSP_CASH", "SUSP_ASSET", "VAT_CTRL")}
+
+    def period(d):
+        for i, c in enumerate(cols):
+            if d <= c["period_end"]:
+                return i
+        return len(cols)
+
+    def period_end(i, fallback):
+        return cols[i]["period_end"] if i < len(cols) else fallback
+
+    def label(i, fallback):
+        return cols[i]["label"] if i < len(cols) else f"after the last year-end ({fallback.strftime('%d %b %Y')})"
+
+    derived = [l for l in L.lines if l["kind"] == "derived"]
+    susp_cash, susp_open, susp_asset, vat = (ids["SUSP_CASH"], ids["SUSP_OPEN"], ids["SUSP_ASSET"], ids["VAT_CTRL"])
+
+    # ---- cash book entries sitting in the cash clearing account, by period and heading
+    entries = [l for l in derived if l["account_id"] == susp_cash and l["meta"].get("kind") == "cash_entry"]
+    other_cash = [l for l in derived if l["account_id"] == susp_cash and l["meta"].get("kind") == "cash_txn"]
+    if other_cash:
+        n = len(other_cash)
+        tot = r2(sum(l["cr"] - l["dr"] for l in other_cash))
+        out["notices"].append(f"{n} receipt/payment/advance/expense movement(s), net {tot:,.2f} in, are in no Cash Book account (no account matches their "
+                              "currency or payment method). Add or adjust a Cash Book account so they land in one; they cannot be allocated here.")
+    grouped = defaultdict(list)
+    used_entry_keys = set()
+    for l in entries:
+        cat = l["meta"].get("category")
+        if cat in ALLOC_GROUPS:
+            grouped[(period(l["date"]), ALLOC_GROUPS[cat][0])].append(l)
+
+    # ---- what was typed on the year-ends (entered figures), per period and statement line, as natural movements
+    typed = defaultdict(float)
+    for l in derived:
+        if l["meta"].get("kind") == "entered":
+            a = L.accounts[l["account_id"]]
+            cat = a.fs_category
+            if cat in CAT:
+                typed[(period(l["date"]), cat)] += (l["cr"] - l["dr"]) if CAT[cat][4] == "credit" else (l["dr"] - l["cr"])
+
+    vat_move = defaultdict(float)
+    for l in derived:
+        if l["account_id"] == vat:
+            vat_move[period(l["date"])] += l["cr"] - l["dr"]
+
+    def add(key, kind, title, why, effect, amount, on, per, lines, source_acct=None):
+        """Append a proposal after taking off what earlier allocation journals did and capping at the clearing balance."""
+        amount = r2(amount - _allocated(key))
+        if source_acct:
+            cap = abs(running.get(source_acct, 0.0))
+            amount = min(amount, cap)
+        if amount < CENT:
+            return
+        scale = lambda v: r2(v)
+        built = [(ref, dr, cr, narr) for (ref, dr, cr, narr) in lines(amount)]
+        blocked = None
+        if lock and on <= lock:
+            blocked = f"The books are closed through {lock.strftime('%d %b %Y')}; reopen them, or post this journal by hand in an open period."
+        if source_acct:
+            sign = 1.0 if any(ref == source_acct and dr > 0 for ref, dr, cr, narr in built) else -1.0
+            running[source_acct] = r2(running.get(source_acct, 0.0) - sign * amount)
+        out["proposals"].append({"key": key, "kind": kind, "title": title, "why": why, "effect": effect, "amount": amount, "date": on,
+                                 "period": per, "lines": built, "blocked": blocked})
+
+    pool = defaultdict(float)
+    for (i, cat), v in typed.items():
+        pool[(i, cat)] = v
+
+    # ---- VAT control against the VAT payable typed on the year-end (first claim on other current liabilities)
+    for i in sorted(vat_move):
+        v = vat_move[i]
+        if v < CENT:
+            if v < -CENT:
+                out["notices"].append(f"VAT paid exceeds VAT charged by {-v:,.2f} in {label(i, L.lines[-1]['date'])}: check the 'VAT paid to ZIMRA' entries in the Cash Book.")
+            continue
+        on = period_end(i, max(l["date"] for l in L.lines if l["account_id"] == vat and period(l["date"]) == i))
+        m = min(v, max(pool[(i, "other_current_liabilities")], 0.0))
+        pool[(i, "other_current_liabilities")] -= m
+        if m >= CENT:
+            add(f"match|{on}|vat", "match", f"VAT payable matched ({label(i, on)})",
+                f"VAT charged on invoices ({v:,.2f}) is in the VAT control account; you typed a VAT payable on the year-end. The two are the same liability, so they cancel.",
+                "None: both sides are outside the statements", m, on, label(i, on),
+                lambda a: [("VAT_CTRL", a, 0, "VAT control"), ("SUSP_OPEN", 0, a, "VAT payable typed on the year-end")], "VAT_CTRL")
+        if v - m >= CENT:
+            tgt = _alloc_target(L, "other_current_liabilities", VAT_PAYABLE_CODE)
+            add(f"post|{on}|vat", "post", f"VAT payable recognised ({label(i, on)})",
+                f"VAT charged on invoices and not yet paid ({v - m:,.2f}) has no VAT payable typed against it, so the statements do not show the liability yet.",
+                f"Adds {v - m:,.2f} to {financials.category_label('other_current_liabilities')}", v - m, on, label(i, on),
+                lambda a, t=tgt: [("VAT_CTRL", a, 0, "VAT control"), (t.id, 0, a, "VAT payable")], "VAT_CTRL")
+
+    # ---- cash book entries by heading: match to the typed figure, post the rest to the right account
+    for (i, cat), lines_ in sorted(grouped.items(), key=lambda kv: (kv[0][0], kv[0][1])):
+        heads = sorted({l["meta"].get("category") for l in lines_})
+        hint = ALLOC_GROUPS[heads[0]][1]
+        side_credit = CAT[cat][4] == "credit"
+        money_in = r2(sum(l["cr"] - l["dr"] for l in lines_))
+        nat = money_in if side_credit else -money_in
+        on = period_end(i, max(l["date"] for l in lines_))
+        per = label(i, on)
+        for l in lines_:
+            used_entry_keys.add(l["meta"].get("key"))
+        m = 0.0
+        avail = pool[(i, cat)]
+        if nat > 0 and avail > 0:
+            m = min(nat, avail)
+        elif nat < 0 and avail < 0:
+            m = -min(-nat, -avail)
+        pool[(i, cat)] -= m
+        name = ", ".join(heads)
+        money_dr_cash = money_in < 0                                   # money out: the clearing account was debited
+        if abs(m) >= CENT:
+            amt = abs(m)
+            add(f"match|{on}|{cat}", "match", f"{name} matched to {financials.category_label(cat)} ({per})",
+                f"The cash book shows {name.lower()} of {abs(nat):,.2f}; {financials.category_label(cat)} of {abs(avail + m):,.2f} was typed on the year-end. "
+                "Together they are one item, so the two clearing legs cancel.",
+                "None: both sides are outside the statements", amt, on, per,
+                (lambda a, out_=money_dr_cash: [("SUSP_CASH", 0 if out_ else a, a if out_ else 0, name), ("SUSP_OPEN", a if out_ else 0, 0 if out_ else a, f"{financials.category_label(cat)} typed on the year-end")]),
+                "SUSP_CASH")
+        rest = abs(nat) - abs(m)
+        if rest >= CENT:
+            tgt = _alloc_target(L, cat, hint)
+            if tgt is None:
+                out["notices"].append(f"No active ledger account is mapped to {financials.category_label(cat)}, so {name.lower()} of {rest:,.2f} ({per}) cannot be allocated. Add an account for it in the Chart of accounts.")
+                continue
+            natural_up = nat > 0                                       # the statement line grows
+            tgt_dr = (not side_credit) if natural_up else side_credit
+            add(f"post|{on}|{cat}", "post", f"{name} posted to {tgt.name} ({per})",
+                f"{rest:,.2f} of {name.lower()} is in the cash book with nothing typed against it on the year-end, so it is posted to {tgt.label}.",
+                f"{'Adds' if natural_up else 'Takes'} {rest:,.2f} {'to' if natural_up else 'from'} {financials.category_label(cat)}", rest, on, per,
+                (lambda a, t=tgt, td=tgt_dr, out_=money_dr_cash: [("SUSP_CASH", 0 if out_ else a, a if out_ else 0, name), (t.id, a if td else 0, 0 if td else a, name)]),
+                "SUSP_CASH")
+
+    # ---- asset purchases and sale proceeds against cash book payments / receipts of the same amount
+    candidates = [l for l in entries if l["meta"].get("key") not in used_entry_keys and l["meta"].get("category") in ("Other payment", "Other receipt")]
+    taken = set()
+    for al in sorted([l for l in derived if l["account_id"] == susp_asset], key=lambda l: l["date"]):
+        amt = r2(al["cr"] - al["dr"])                                  # + purchase to fund, - proceeds to match
+        if abs(amt) < CENT or al["meta"].get("kind") not in ("asset_purchase", "asset_disposal"):
+            continue
+        want_out = amt > 0
+        best = None
+        for c in candidates:
+            k = c["meta"].get("key")
+            if k in taken:
+                continue
+            money = r2(c["cr"] - c["dr"])
+            if (want_out and money < 0 or (not want_out) and money > 0) and abs(abs(money) - abs(amt)) < CENT:
+                gap = abs((c["date"] - al["date"]).days)
+                if best is None or gap < best[0]:
+                    best = (gap, c)
+        if best is None:
+            continue
+        c = best[1]
+        taken.add(c["meta"].get("key"))
+        used_entry_keys.add(c["meta"].get("key"))
+        on_ = max(al["date"], c["date"])
+        i = period(on_)
+        on = period_end(i, on_)
+        asset = al["meta"].get("asset")
+        verb = "purchase" if want_out else "sale proceeds"
+        add(f"match|{asset}|{c['meta'].get('key')}", "match", f"Asset {verb} matched to a cash book entry: {al['meta'].get('description')}",
+            f"The Asset register records the {verb} of {abs(amt):,.2f}; the cash book has a {'payment' if want_out else 'receipt'} of the same amount on {c['date'].strftime('%d %b %Y')} ({c['meta'].get('description')}).",
+            "None: both sides are outside the statements", abs(amt), on, label(i, on_),
+            (lambda a, w=want_out: [("SUSP_ASSET", a if w else 0, 0 if w else a, "asset funding"), ("SUSP_CASH", 0 if w else a, a if w else 0, "cash book entry")]),
+            "SUSP_ASSET")
+
+    # ---- loose cash book entries: the user chooses the account
+    for l in sorted(entries, key=lambda l: (l["date"], l["seq"])):
+        k = l["meta"].get("key")
+        if k in used_entry_keys:
+            continue
+        money = r2(l["cr"] - l["dr"])
+        key = f"choose|{k}"
+        done = _allocated(key)
+        if done >= abs(money) - CENT:
+            continue
+        out["choose"].append({"key": key, "date": l["date"], "category": l["meta"].get("category") or "", "description": l["meta"].get("description") or l["description"],
+                              "amount": money, "blocked": (f"The books are closed through {lock.strftime('%d %b %Y')}." if lock and l["date"] <= lock else None)})
+    # ---- what is left
+    unmatched_assets = [l for l in derived if l["account_id"] == susp_asset and l["meta"].get("kind") in ("asset_purchase", "asset_disposal")]
+    if unmatched_assets and out["balances"].get("SUSP_ASSET") and abs(running.get("SUSP_ASSET", 0.0)) >= CENT:
+        out["notices"].append(f"Asset funding still unmatched: {abs(running['SUSP_ASSET']):,.2f}. Record the payment for each asset in the Cash Book (category 'Other payment', same amount) and it will match here, or post a journal against the supplier or lender.")
+    if abs(out["balances"].get("CLR_TRANSFER", 0.0)) >= CENT:
+        out["notices"].append(f"Transfers between cash accounts do not net to nil ({out['balances']['CLR_TRANSFER']:,.2f}): a transfer was recorded with different amounts, or between a USD and a ZWG account. Check both sides in the Cash Book.")
+    leftover_typed = {k: v for k, v in pool.items() if abs(v) >= CENT and (k[1] in CAT)}
+    for (i, cat), v in sorted(leftover_typed.items()):
+        if cat in ("retained_earnings",):
+            continue
+        out["notices"].append(f"{financials.category_label(cat)}: {abs(v):,.2f} typed on the year-end ({label(i, date.today())}) has no cash book entry or other record to match. "
+                              "If it was a non-cash item, post a journal for its other side (for example from the asset or the expense it relates to).")
+    return out
+
+
+def apply_proposal(p, user, post=True, choice=None):
+    """Make the journal for one proposal (or one 'choose' item with `choice`, an account id). Returns (journal, problems)."""
+    if "lines" in p:
+        on, desc, key, lines = p["date"], p["title"], p["key"], p["lines"]
+    else:
+        acct = FirmAccount.query.get(choice) if choice else None
+        a = abs(p["amount"])
+        money_in = p["amount"] > 0
+        sa = FirmAccount.query.filter_by(system_key="SUSP_CASH").first()
+        on, key = p["date"], p["key"]
+        desc = f"Cash book entry allocated: {p['description']}"[:250]
+        lines = [(sa.id, a if money_in else 0, 0 if money_in else a, p["category"]), (acct.id if acct else None, 0 if money_in else a, a if money_in else 0, p["description"])]
+    j = FirmJournal(number=next_journal_number(on), journal_date=on, description=desc[:250], reference="Auto-allocation", alloc_key=key,
+                    status="draft", created_by_id=getattr(user, "id", None))
+    by_key = {a.system_key: a for a in FirmAccount.query.filter(FirmAccount.system_key.isnot(None)).all()}
+    for n, (ref, dr, cr, narr) in enumerate(lines):
+        acct = by_key.get(ref) if isinstance(ref, str) else (FirmAccount.query.get(ref) if ref else None)
+        j.lines.append(FirmJournalLine(account_id=acct.id if acct else None, account=acct, debit=r2(dr), credit=r2(cr), narration=(narr or "")[:250] or None, order=n))
+    problems = journal_problems(j, for_post=post)
+    if problems:
+        return None, problems
+    db.session.add(j)
+    if post:
+        post_journal(j, user)
+    return j, []

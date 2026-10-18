@@ -284,6 +284,7 @@ def _add_missing_columns():
         # tax_expense_type - which Prohibited Deductions rule a ledger expense account maps to; source - marks income
         # tax computation lines posted from that schedule so a re-post replaces only them (prohibited_deductions.py)
         "gl_account": [("tax_expense_type", "VARCHAR(60)")],
+        "firm_journal": [("alloc_key", "VARCHAR(120)")],
         "firm_year_end": [("cash_manual", "BOOLEAN DEFAULT 0 NOT NULL"), ("tax_manual", "BOOLEAN DEFAULT 0 NOT NULL"), ("tax_loss_bf", "FLOAT")],
         "income_tax_adjustment_line": [("source", "VARCHAR(30)")],
         # helpful/unhelpful feedback on cached "Ask the library" answers (learning.py)

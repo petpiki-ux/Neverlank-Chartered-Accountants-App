@@ -124,8 +124,8 @@ def _save_journal(j, is_new):
 def _form_state(j):
     """What the journal form shows: the typed values if a save was refused, else the journal's own."""
     return {
-        "journal_date": request.form.get("journal_date") or (j.journal_date.isoformat() if j and j.journal_date else date.today().isoformat()),
-        "description": request.form.get("description") if request.method == "POST" else (j.description if j else ""),
+        "journal_date": request.form.get("journal_date") or (j.journal_date.isoformat() if j and j.journal_date else (request.args.get("date") or date.today().isoformat())),
+        "description": request.form.get("description") if request.method == "POST" else (j.description if j else request.args.get("description", "")),
         "reference": request.form.get("reference") if request.method == "POST" else (j.reference if j and j.reference else ""),
     }
 
@@ -141,6 +141,11 @@ def _form_lines(j):
                  "narration": l.narration or ""} for l in j.lines]
     else:
         rows = []
+        pre = request.args.get("acct", type=int)
+        if pre:                                   # a line pre-filled from a link (e.g. from the clearing page)
+            rows.append({"account_id": None, "debit": request.args.get("dr", ""), "credit": request.args.get("cr", ""),
+                         "narration": request.args.get("narr", "")})
+            rows.append({"account_id": pre, "debit": "", "credit": "", "narration": ""})
     while len(rows) < 4:
         rows.append({"account_id": None, "debit": "", "credit": "", "narration": ""})
     return rows
@@ -468,3 +473,65 @@ def ledger_lock():
         drafts_locked = FirmJournal.query.filter(FirmJournal.status == "draft", FirmJournal.journal_date <= fl.current_lock()).count()
     return render_template("firmfs/ledger_lock.html", active="ledger_lock", ye=ye, year_ends=yes, lock=fl.current_lock(),
                            history=fl.lock_history(), drafts_locked=drafts_locked)
+
+
+# ------------------------------------------------------------------ clear the clearing accounts
+
+def _alloc_plan():
+    yes = _year_ends()
+    L = fl.build_ledger(year_ends=yes)
+    return L, yes, fl.allocation_proposals(L)
+
+
+@firmfs_bp.route("/ledger/clearing")
+@finance_required
+def ledger_clearing():
+    ye, yes = _pick_year_end()
+    L, yes, plan = _alloc_plan()
+    susp = [(L.by_key[k], plan["balances"].get(k, 0.0)) for k in fl.SUSPENSE_KEYS if k in L.by_key]
+    accounts = [a for a in sorted(L.accounts.values(), key=lambda a: a.code)
+                if a.is_active and a.system_key not in fl.SUSPENSE_KEYS and a.system_key not in fl.JOURNAL_REFUSED_KEYS and a.fs_category != "cash"]
+    return render_template("firmfs/ledger_clearing.html", active="ledger_clear", ye=ye, year_ends=yes, lock=fl.current_lock(), plan=plan,
+                           susp=susp, accounts=accounts, warnings=L.warnings)
+
+
+@firmfs_bp.route("/ledger/clearing/apply", methods=["POST"])
+@finance_required
+def ledger_clearing_apply():
+    ye_id = request.form.get("ye_id", type=int)
+    back = url_for("firmfs.ledger_clearing", ye=ye_id)
+    chosen = set(request.form.getlist("apply"))
+    if not chosen:
+        flash("Tick at least one item.", "info")
+        return redirect(back)
+    post = request.form.get("mode") != "draft"
+    L, yes, plan = _alloc_plan()                       # recomputed here: the page's amounts are never trusted
+    made, errors, skipped = [], [], 0
+    work = [(p, None) for p in plan["proposals"] if p["key"] in chosen]
+    for c in plan["choose"]:
+        if c["key"] in chosen:
+            acct = request.form.get("choose_" + c["key"], type=int)
+            if not acct:
+                skipped += 1
+                continue
+            work.append((c, acct))
+    for p, acct in work:
+        if p.get("blocked"):
+            errors.append(p["blocked"])
+            continue
+        j, problems = fl.apply_proposal(p, current_user, post=post, choice=acct)
+        if problems:
+            errors.extend(problems)
+            continue
+        made.append(j)
+    if made:
+        db.session.commit()
+        flash(f"{len(made)} journal(s) {'posted' if post else 'saved as drafts'}: " + ", ".join(j.number for j in made) + ".", "success")
+    else:
+        db.session.rollback()
+        flash("Nothing was posted: those items are no longer needed." if not errors and not skipped else "Nothing was posted.", "info")
+    for e in dict.fromkeys(errors):
+        flash(e, "danger")
+    if skipped:
+        flash(f"{skipped} item(s) left alone because no account was chosen.", "info")
+    return redirect(back)

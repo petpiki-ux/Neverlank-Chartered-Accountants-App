@@ -83,14 +83,21 @@ def create_year_end():
     if FirmYearEnd.query.filter_by(period_end=pe).first():
         flash("That year-end already exists.", "danger")
         return redirect(url_for("firmfs.index"))
+    typed_rate = _parse_float(request.form.get("zwg_rate"))
+    from_register = None
+    if not typed_rate:
+        import firm_fx
+        from_register = firm_fx.register_rate("ZWG", pe)
+        typed_rate = from_register.rate if from_register else None
     ye = FirmYearEnd(
-        period_end=pe, zwg_rate=_parse_float(request.form.get("zwg_rate")),
+        period_end=pe, zwg_rate=typed_rate,
         opening_nil=bool(request.form.get("opening_nil")), created_by_id=current_user.id,
         reporting_framework=request.form.get("reporting_framework") if request.form.get("reporting_framework") in dict(FIRM_FRAMEWORKS) else "ifrs_for_smes",
     )
     db.session.add(ye)
     db.session.commit()
-    flash(f"Year-end {pe.strftime('%d %B %Y')} created. Enter the balances the app cannot know.", "success")
+    flash(f"Year-end {pe.strftime('%d %B %Y')} created. Enter the balances the app cannot know."
+          + (f" Its ZWG rate ({from_register.rate:g}) was taken from the Exchange rates register (dated {from_register.rate_date.strftime('%d %b %Y')})." if from_register else ""), "success")
     return redirect(url_for("firmfs.year_end", ye_id=ye.id))
 
 
@@ -109,12 +116,14 @@ def year_end(ye_id):
     for ln in ye.lines:
         grouped.setdefault(ln.fs_category, []).append(ln)
     ordered = [(code, label, grouped[code]) for code, label in FIRM_ENTRY_CATEGORIES if code in grouped]
+    import firm_fx
+    fx = firm_fx.year_end_info(ye)
     cash_info = cashbook.statement_balances(ye.period_end, ye.zwg_rate)
     cash_auto = cashbook.uses_cash_book(ye, ye.period_end)
     manual_cash = cashbook.manual_summary(cur["period_start"], ye.period_end)
     return render_template(
         "firmfs/year_end.html", ye=ye, stm=stm, d=d, sched=sched, pbt=pbt, ordered=ordered, active="index",
-        cash_info=cash_info, manual_cash=manual_cash, cash_auto=cash_auto,
+        cash_info=cash_info, manual_cash=manual_cash, cash_auto=cash_auto, fx=fx, fx_stale_days=firm_fx.STALE_DAYS,
         categories=FIRM_ENTRY_CATEGORIES, currencies=INVOICE_CURRENCIES, frameworks=FIRM_FRAMEWORKS,
         previous=earlier[-1] if earlier else None,
         indicative_tax=(pbt * (ye.tax_rate_percent or 0) / 100.0) if pbt > 0 else 0.0,
@@ -133,6 +142,12 @@ def save_year_end(ye_id):
             return redirect(url_for("firmfs.year_end", ye_id=ye.id))
         ye.period_end = pe
     ye.zwg_rate = _parse_float(request.form.get("zwg_rate"))
+    if not ye.zwg_rate:
+        import firm_fx
+        row = firm_fx.register_rate("ZWG", ye.period_end)
+        if row:
+            ye.zwg_rate = row.rate
+            flash(f"No rate was typed, so the register rate {row.rate:g} (dated {row.rate_date.strftime('%d %b %Y')}) is used.", "info")
     rate = _parse_float(request.form.get("tax_rate_percent"))
     if rate is not None:
         ye.tax_rate_percent = rate
@@ -728,3 +743,4 @@ def build_xlsx(stm):
 import firm_cashbook  # noqa: E402,F401
 import firm_taxpages  # noqa: E402,F401   (Tax: allowances, computation, deferred tax, QPD)
 import firm_ledgerpages  # noqa: E402,F401   (Ledger: journals, chart of accounts, trial balance)
+import firm_fx  # noqa: E402,F401   (Exchange rates register)

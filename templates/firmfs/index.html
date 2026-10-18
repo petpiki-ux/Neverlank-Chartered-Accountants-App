@@ -48,7 +48,7 @@
   {% else %}<p class="muted">No year-end yet. Add the first reporting date below (for example 31 December 2025), then enter the balances the app cannot work out itself: bank, loans, share capital, VAT and tax.</p>{% endif %}
   <form method="post" action="{{ url_for('firmfs.create_year_end') }}" class="form-row" style="align-items:flex-end;margin-top:14px;">
     <div><label for="period_end">New year-end date</label><input type="date" id="period_end" name="period_end" required></div>
-    <div><label for="zwg_rate">ZWG per USD (if any ZWG items)</label><input type="number" step="any" min="0" id="zwg_rate" name="zwg_rate" placeholder="optional"></div>
+    <div><label for="zwg_rate">ZWG per USD (if any ZWG items)</label><input type="number" step="any" min="0" id="zwg_rate" name="zwg_rate" placeholder="blank = from the Exchange rates register"></div>
     <div><label for="reporting_framework">Framework</label><select id="reporting_framework" name="reporting_framework"><option value="ifrs_for_smes">IFRS for SMEs</option><option value="full_ifrs">Full IFRS</option></select></div>
     <div><label style="display:block;">&nbsp;</label><label style="font-weight:400;"><input type="checkbox" name="opening_nil" value="1" style="width:auto;"> first period (nothing before it)</label></div>
     <div><button class="btn gold" type="submit" style="margin-bottom:14px;">Add year-end</button></div>

@@ -11174,6 +11174,7 @@ class FirmJournal(db.Model):
     reference = db.Column(db.String(120))
     status = db.Column(db.String(10), nullable=False, default="draft")
     reverses_id = db.Column(db.Integer, db.ForeignKey("firm_journal.id"))
+    alloc_key = db.Column(db.String(120))      # set on journals made by the clearing-account auto-allocation (see firm_ledger)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -11225,3 +11226,24 @@ class FirmPeriodLock(db.Model):
     set_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     set_at = db.Column(db.DateTime, default=datetime.utcnow)
     set_by = db.relationship("User")
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - Exchange rates register
+#
+# Dated rates (units of a foreign currency per 1 USD) with their source. A year-end's closing rate is the latest rate dated
+# on or before the year-end; the year-end keeps its own stored rate (FirmYearEnd.zwg_rate), which can be filled from the
+# register or typed over it.
+# ---------------------------------------------------------------------------
+class FirmExchangeRate(db.Model):
+    __tablename__ = "firm_exchange_rate"
+    id = db.Column(db.Integer, primary_key=True)
+    currency = db.Column(db.String(10), nullable=False, default="ZWG")
+    rate_date = db.Column(db.Date, nullable=False)
+    rate = db.Column(db.Float, nullable=False)                 # units of `currency` per 1 USD
+    source = db.Column(db.String(120))                         # e.g. "RBZ interbank rate"
+    note = db.Column(db.String(250))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint("currency", "rate_date", name="uq_firm_fx_rate"),)
+    created_by = db.relationship("User")

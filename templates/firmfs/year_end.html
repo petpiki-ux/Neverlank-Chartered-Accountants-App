@@ -107,10 +107,21 @@
 
 <div class="card">
   <h3 style="margin-top:0;">Settings for this year-end</h3>
+  {% if fx.status != 'none' or ye.zwg_rate %}
+  <p style="font-size:12.5px;margin:0 0 10px;">
+    Closing rate in use: <b>{{ '%g'|format(ye.zwg_rate) if ye.zwg_rate else 'none' }}</b> ZWG per USD.
+    {% if fx.row %}Exchange rates register: <b>{{ '%g'|format(fx.row.rate) }}</b> dated {{ fx.row.rate_date.strftime('%d %b %Y') }}{% if fx.row.source %} ({{ fx.row.source }}){% endif %}{% if fx.stale %} <span class="badge overdue">{{ fx.age_days }} days before the year-end</span>{% endif %}.
+      {% if fx.status == 'match' %}<span class="badge status-Paid">matches</span>{% elif fx.status in ('differs', 'unused') %}
+      <form method="post" action="{{ url_for('firmfs.exchange_rate_apply', ye_id=ye.id) }}" style="display:inline;"><input type="hidden" name="back" value="year_end"><button class="btn small secondary" type="submit">Use the register rate</button></form>{% endif %}
+    {% else %}The <a href="{{ url_for('firmfs.exchange_rates') }}">Exchange rates register</a> has no rate dated on or before this year-end.{% endif %}
+  </p>
+  {% elif not fx.row %}
+  <p class="muted" style="font-size:12.5px;margin:0 0 10px;">Keep ZWG rates in the <a href="{{ url_for('firmfs.exchange_rates') }}">Exchange rates register</a>; a year-end without a typed rate takes the latest one dated on or before it.</p>
+  {% endif %}
   <form method="post" action="{{ url_for('firmfs.save_year_end', ye_id=ye.id) }}">
     <div class="form-row">
       <div><label for="period_end">Year-end date</label><input type="date" id="period_end" name="period_end" value="{{ ye.period_end.isoformat() }}" required></div>
-      <div><label for="zwg_rate">ZWG per USD</label><input type="number" step="any" min="0" id="zwg_rate" name="zwg_rate" value="{{ ye.zwg_rate if ye.zwg_rate else '' }}" placeholder="needed only for ZWG items"></div>
+      <div><label for="zwg_rate">ZWG per USD</label><input type="number" step="any" min="0" id="zwg_rate" name="zwg_rate" value="{{ ye.zwg_rate if ye.zwg_rate else '' }}" placeholder="blank = Exchange rates register"></div>
       <div><label for="tax_rate_percent">Tax rate for the indicative figure (%)</label><input type="number" step="any" min="0" id="tax_rate_percent" name="tax_rate_percent" value="{{ ye.tax_rate_percent if ye.tax_rate_percent is not none else '' }}"></div>
       <div><label for="reporting_framework">Framework</label><select id="reporting_framework" name="reporting_framework">{% for k, l in frameworks %}<option value="{{ k }}" {% if k == ye.reporting_framework %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
     </div>
