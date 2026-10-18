@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% from "firmfs/_funding.html" import funding, fundScript %}
+{% block title %}Asset register - {{ firm_name }}{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+<div class="page-header">
+  <div><h1>Asset register</h1>
+    <div class="subtitle">The firm's own fixed assets &middot; USD &middot; depreciation is calculated by the app, monthly, from each class's policy.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.asset_classes') }}">Classes &amp; depreciation policy</a>
+    <a class="btn gold" href="{{ url_for('firmfs.new_asset') }}">+ Add asset</a></div>
+</div>
+{% set ye = None %}
+{% include "firmfs/_nav.html" %}
+
+{% if class_count == 0 %}
+<div class="card"><p style="margin-top:0;">No asset classes yet. A class carries the depreciation method and rate for the assets filed under it.</p>
+  <form method="post" action="{{ url_for('firmfs.seed_classes') }}" style="display:inline;"><button class="btn gold" type="submit">Add a starter set of classes</button></form>
+  <a class="btn secondary" href="{{ url_for('firmfs.asset_classes') }}">Create my own</a></div>
+{% endif %}
+
+<div class="card">
+  <form method="get" class="an-filters" style="margin-bottom:0;">
+    <div><label for="as_at">Show the register as at</label><input type="date" id="as_at" name="as_at" value="{{ as_at.isoformat() }}"></div>
+    <div><label style="font-weight:400;"><input type="checkbox" name="disposed" value="1" style="width:auto;" {% if show_disposed %}checked{% endif %}> include assets disposed of in the period</label></div>
+    <div><button class="btn small" type="submit">Show</button>
+      {% for y in year_ends|reverse %}{% if loop.index <= 4 %}<a class="btn small secondary" href="{{ url_for('firmfs.assets', as_at=y.period_end.isoformat()) }}">{{ y.period_end.strftime('%d %b %Y') }}</a> {% endif %}{% endfor %}</div>
+  </form>
+  <p class="muted" style="font-size:12px;margin:8px 0 0;">Period shown: {{ start.strftime('%d %b %Y') }} to {{ as_at.strftime('%d %b %Y') }}. The period starts the day after the previous year-end (or twelve months before the date shown).</p>
+</div>
+
+<div class="card">
+  {% if rows %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th class="num">Cost</th><th class="num">Depn at start</th><th class="num">Charge</th><th class="num">Depn at end</th><th class="num">NBV at end</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}
+      <tr {% if r.disposed_in_period %}style="opacity:.7;"{% endif %}>
+        <td>{{ r.asset_code }}</td>
+        <td>{{ r.description }}{% if r.serial_number %}<div class="muted" style="font-size:11.5px;">S/N {{ r.serial_number }}</div>{% endif %}
+          {% if r.disposed_in_period %}<div style="font-size:11.5px;"><span class="badge">Disposed {{ r.disposed_on.strftime('%d %b %Y') }}</span> proceeds {{ fm(r.proceeds) }}, {{ 'profit' if r.gain_loss >= 0 else 'loss' }} {{ fm(r.gain_loss|abs) }}</div>{% endif %}</td>
+        <td>{{ r.class_name }}</td>
+        <td>{{ r.date_acquired.strftime('%d %b %Y') }}</td>
+        <td class="num">{{ fm(r.cost) }}</td>
+        <td class="num">{{ fm(r.opening_acc_dep) }}</td>
+        <td class="num">{{ fm(r.charge) }}</td>
+        <td class="num">{{ fm(r.closing_acc_dep if not r.disposed_in_period else r.disposals_acc_dep) }}</td>
+        <td class="num">{{ fm(r.closing_nbv) }}</td>
+        <td style="white-space:nowrap;">
+          <a class="btn small secondary" href="{{ url_for('firmfs.edit_asset', asset_id=r.id) }}">Edit</a>
+          {% if r.disposed_in_period %}
+            <form method="post" action="{{ url_for('firmfs.undo_disposal', asset_id=r.id) }}" style="display:inline;"><button class="btn small secondary" type="submit">Undo disposal</button></form>
+          {% else %}
+            <details style="display:inline-block;position:relative;"><summary class="btn small secondary" style="display:inline-block;cursor:pointer;">Dispose</summary>
+              <form method="post" action="{{ url_for('firmfs.dispose_asset', asset_id=r.id) }}" style="position:absolute;right:0;z-index:5;background:#fff;border:1px solid var(--border,#e3e8ee);border-radius:8px;padding:10px;width:300px;box-shadow:0 4px 14px rgba(0,0,0,.12);">
+                <label>Date disposed</label><input type="date" name="disposed_on" value="{{ as_at.isoformat() }}" required>
+                <label>Sale proceeds (USD, 0 if scrapped)</label><input type="number" step="any" min="0" name="disposal_proceeds" value="0" required>
+                <div style="margin-bottom:8px;">{{ funding('disp', funding_ch, {}, None) }}</div>
+                <label>Note</label><input type="text" name="disposal_note" maxlength="250">
+                <button class="btn small gold" type="submit">Record disposal</button></form></details>
+          {% endif %}
+        </td>
+      </tr>
+    {% endfor %}
+    <tr style="font-weight:700;"><td colspan="4">Total</td><td class="num">{{ fm(rows|sum(attribute='cost')) }}</td><td class="num">{{ fm(rows|sum(attribute='opening_acc_dep')) }}</td><td class="num">{{ fm(rows|sum(attribute='charge')) }}</td><td class="num">{{ fm(rows|sum(attribute='closing_acc_dep')) }}</td><td class="num">{{ fm(rows|sum(attribute='closing_nbv')) }}</td><td></td></tr>
+    </tbody>
+  </table></div>
+  {% else %}<p class="muted">No assets in the register for this period. <a href="{{ url_for('firmfs.new_asset') }}">Add the first asset</a>.</p>{% endif %}
+  {% if outside %}<p class="muted" style="font-size:12px;margin-bottom:0;">Not in this period: {{ outside|length }} asset(s) bought after {{ as_at.strftime('%d %b %Y') }} or disposed of before {{ start.strftime('%d %b %Y') }} ({% for a in outside[:6] %}{{ a.asset_code }}{% if not loop.last %}, {% endif %}{% endfor %}{% if outside|length > 6 %}, ...{% endif %}).</p>{% endif %}
+</div>
+
+{% if sched.by_class %}
+<div class="card">
+  <h3 style="margin-top:0;">Movement by class</h3>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Class</th><th class="num">Cost at start</th><th class="num">Additions</th><th class="num">Disposals</th><th class="num">Cost at end</th><th class="num">Depn at start</th><th class="num">Charge</th><th class="num">Disposals</th><th class="num">Depn at end</th><th class="num">NBV at start</th><th class="num">NBV at end</th></tr></thead><tbody>
+    {% for m in sched.by_class %}<tr><td>{{ m.class_name }}</td><td class="num">{{ fm(m.opening_cost) }}</td><td class="num">{{ fm(m.additions) }}</td><td class="num">{{ fm(-m.disposals_cost) }}</td><td class="num">{{ fm(m.closing_cost) }}</td><td class="num">{{ fm(m.opening_acc_dep) }}</td><td class="num">{{ fm(m.charge) }}</td><td class="num">{{ fm(-m.disposals_acc_dep) }}</td><td class="num">{{ fm(m.closing_acc_dep) }}</td><td class="num">{{ fm(m.opening_nbv) }}</td><td class="num">{{ fm(m.closing_nbv) }}</td></tr>{% endfor %}
+    {% set m = sched.total %}<tr style="font-weight:700;"><td>Total</td><td class="num">{{ fm(m.opening_cost) }}</td><td class="num">{{ fm(m.additions) }}</td><td class="num">{{ fm(-m.disposals_cost) }}</td><td class="num">{{ fm(m.closing_cost) }}</td><td class="num">{{ fm(m.opening_acc_dep) }}</td><td class="num">{{ fm(m.charge) }}</td><td class="num">{{ fm(-m.disposals_acc_dep) }}</td><td class="num">{{ fm(m.closing_acc_dep) }}</td><td class="num">{{ fm(m.opening_nbv) }}</td><td class="num">{{ fm(m.closing_nbv) }}</td></tr>
+    </tbody></table></div>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">Depreciation is charged for each month an asset is owned, from the month it was acquired up to (not including) the month it was disposed of. Straight-line: (cost - residual value) x rate / 12 a month. Reducing balance: net book value at the start of the financial year x rate / 12 a month. These figures feed the balance sheet, income statement and cash flow.</p>
+</div>
+{% endif %}
+{{ fundScript() }}
+{% endblock %}

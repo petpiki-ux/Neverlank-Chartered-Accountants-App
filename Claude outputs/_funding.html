@@ -1,0 +1,56 @@
+{# How an asset was paid for (acquisition) or paid for by the buyer (disposal): the correcting leg of the asset's posting.
+   funding(prefix, ch, asset, form): prefix is "acq" or "disp". #}
+{% macro funding(prefix, ch, asset, form=None) %}
+{% set methods = ch.acq_methods if prefix == 'acq' else ch.disp_methods %}
+{% set cur_method = (form.get(prefix ~ '_method') if form else (asset[prefix ~ '_method'] or '')) or '' %}
+{% set cur_cash = (form.get(prefix ~ '_cash_account_id')|int(0) if form else (asset[prefix ~ '_cash_account_id'] or 0)) %}
+{% set cur_acct = (form.get(prefix ~ '_account_' ~ cur_method)|int(0) if form and cur_method else (asset[prefix ~ '_account_id'] or 0)) %}
+<div class="fund-wrap">
+  <label>{{ 'How was it paid for?' if prefix == 'acq' else 'How was the sale paid?' }}</label>
+  <select name="{{ prefix }}_method" onchange="fundToggle(this)">
+    {% for m, label in methods %}<option value="{{ m }}" {% if cur_method == m %}selected{% endif %}>{{ label }}</option>{% endfor %}
+  </select>
+  <div class="fund-box" data-show="bank" style="display:none;margin-top:6px;">
+    <label>{{ 'Paid from' if prefix == 'acq' else 'Received into' }}</label>
+    <select name="{{ prefix }}_cash_account_id">
+      {% for a in ch.cash %}<option value="{{ a.id }}" {% if cur_cash == a.id %}selected{% endif %}>{{ a.name }}</option>{% endfor %}
+    </select>
+    <div class="muted" style="font-size:11.5px;">The app enters the {{ 'payment' if prefix == 'acq' else 'receipt' }} in this Cash Book account for you (USD accounts only). Do not enter it again yourself.</div>
+  </div>
+  {% if prefix == 'acq' %}
+  <div class="fund-box" data-show="credit" style="display:none;margin-top:6px;">
+    <label>Owed through (liability account)</label>
+    <select name="acq_account_credit">
+      {% for a in ch.by_type['Liability'] %}<option value="{{ a.id }}" {% if (cur_method == 'credit' and cur_acct == a.id) or (not (cur_method == 'credit' and cur_acct) and ch.default.acq_credit == a.id) %}selected{% endif %}>{{ a.label }}</option>{% endfor %}
+    </select></div>
+  <div class="fund-box" data-show="shareholder" style="display:none;margin-top:6px;">
+    <label>Credited to (equity account)</label>
+    <select name="acq_account_shareholder">
+      {% for a in ch.by_type['Equity'] %}<option value="{{ a.id }}" {% if (cur_method == 'shareholder' and cur_acct == a.id) or (not (cur_method == 'shareholder' and cur_acct) and ch.default.acq_shareholder == a.id) %}selected{% endif %}>{{ a.label }}</option>{% endfor %}
+    </select></div>
+  {% else %}
+  <div class="fund-box" data-show="credit" style="display:none;margin-top:6px;">
+    <label>Owed by the buyer through (asset account)</label>
+    <select name="disp_account_credit">
+      {% for a in ch.by_type['Asset'] %}<option value="{{ a.id }}" {% if (cur_method == 'credit' and cur_acct == a.id) or (not (cur_method == 'credit' and cur_acct) and ch.default.disp_credit == a.id) %}selected{% endif %}>{{ a.label }}</option>{% endfor %}
+    </select></div>
+  {% endif %}
+  <div class="fund-box" data-show="other" style="display:none;margin-top:6px;">
+    <label>Ledger account</label>
+    <select name="{{ prefix }}_account_other">
+      {% for a in ch.by_type['all'] %}<option value="{{ a.id }}" {% if cur_method == 'other' and cur_acct == a.id %}selected{% endif %}>{{ a.label }}</option>{% endfor %}
+    </select></div>
+  <div class="muted fund-note" style="font-size:11.5px;margin-top:6px;">Other than a bank or cash account, the funding is posted by a journal you tick on Ledger &gt; Clear the clearing accounts. Until then it stays in the clearing account.</div>
+</div>
+{% endmacro %}
+
+{% macro fundScript() %}
+<script>
+function fundToggle(sel) {
+  var wrap = sel.closest('.fund-wrap'); if (!wrap) return;
+  wrap.querySelectorAll('.fund-box').forEach(function (b) { b.style.display = (b.getAttribute('data-show') === sel.value) ? '' : 'none'; });
+  var note = wrap.querySelector('.fund-note'); if (note) note.style.display = (sel.value && sel.value !== 'bank') ? '' : 'none';
+}
+document.querySelectorAll('.fund-wrap select[name$="_method"]').forEach(fundToggle);
+</script>
+{% endmacro %}

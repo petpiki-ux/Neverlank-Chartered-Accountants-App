@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Ledger by account - Firm ledger{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+<div class="page-header"><div><h1>Ledger by account</h1>
+  <div class="subtitle">Every posting to one account, with a running balance. Postings from the app's own records show their source; journals link to the journal.</div></div></div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card" style="padding:10px 14px;">
+  <form method="get" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin:0;">
+    {% if ye %}<input type="hidden" name="ye" value="{{ ye.id }}">{% endif %}
+    <div style="flex:1;min-width:300px;"><label style="margin:0;">Account</label>
+      <select name="account" onchange="this.form.submit()" style="margin:0;"><option value="">Choose an account</option>
+        {% for a in accounts %}<option value="{{ a.id }}" {% if acct and acct.id == a.id %}selected{% endif %}>{{ a.code }} {{ a.name }}</option>{% endfor %}</select></div>
+    <div><label style="margin:0;">From</label><input type="date" name="from" value="{{ start.isoformat() }}" style="margin:0;"></div>
+    <div><label style="margin:0;">To</label><input type="date" name="to" value="{{ end.isoformat() }}" style="margin:0;"></div>
+    <button class="btn small" type="submit">Show</button>
+  </form>
+</div>
+{% for w in warnings %}<div class="ff-check"><div>{{ w }}</div></div>{% endfor %}
+
+{% if gl %}
+<div class="card">
+  <h3 style="margin-top:0;">{{ acct.code }} {{ acct.name }}</h3>
+  {% set subs = L.accounts.values()|selectattr('parent_id', 'equalto', acct.id)|list %}
+  {% if subs %}<p class="muted" style="font-size:12.5px;margin:0 0 8px;">Includes its sub-accounts: {% for a in subs|sort(attribute='code') %}<a href="{{ url_for('firmfs.ledger_account', account=a.id, ye=ye.id if ye else None) }}">{{ a.label }}</a>{% if not loop.last %}, {% endif %}{% endfor %}.</p>{% endif %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Date</th><th>Source</th><th>Reference</th><th>Description</th><th class="num">Debit</th><th class="num">Credit</th><th class="num">Balance</th></tr></thead>
+    <tbody>
+      <tr class="muted"><td colspan="6">Opening balance{% if acct.account_type in ('Income','Expense') %} (nil at the start of the financial year){% endif %}</td><td class="num">{{ fm(gl.opening) }}</td></tr>
+      {% for l in gl.lines %}
+      <tr><td>{{ l.date.strftime('%d %b %Y') }}</td><td>{{ l.source }}</td>
+        <td>{% if l.link %}<a href="{{ url_for(l.link[0], **l.link[1]) }}">{{ l.ref or 'open' }}</a>{% else %}{{ l.ref }}{% endif %}</td>
+        <td>{{ l.description }}{% if subs %}<div class="muted" style="font-size:11.5px;">{{ L.accounts[l.account_id].label }}</div>{% endif %}{% if l.narr and l.narr != l.description %}<div class="muted" style="font-size:11.5px;">{{ l.narr }}</div>{% endif %}</td>
+        <td class="num">{{ fm(l.dr) if l.dr else '' }}</td><td class="num">{{ fm(l.cr) if l.cr else '' }}</td><td class="num">{{ fm(l.balance) }}</td></tr>
+      {% else %}
+      <tr><td colspan="7" class="muted">No postings in this period.</td></tr>
+      {% endfor %}
+    </tbody>
+    <tfoot><tr style="font-weight:700;"><td colspan="4" style="text-align:right;">Movement and closing balance (debit positive, credit in brackets)</td><td class="num">{{ fm(gl.debit) }}</td><td class="num">{{ fm(gl.credit) }}</td><td class="num">{{ fm(gl.closing) }}</td></tr></tfoot>
+  </table></div>
+</div>
+{% else %}
+<div class="card"><p class="muted" style="margin:0;">Choose an account above, or open one from the <a href="{{ url_for('firmfs.ledger_trial_balance', ye=ye.id if ye else None) }}">trial balance</a>.</p></div>
+{% endif %}
+{% endblock %}

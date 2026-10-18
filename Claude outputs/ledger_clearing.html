@@ -1,0 +1,79 @@
+{% extends "base.html" %}
+{% block title %}Clear the clearing accounts - Firm ledger{% endblock %}
+{% block content %}
+{% from "firmfs/_macros.html" import fm %}
+<div class="page-header"><div><h1>Clear the clearing accounts</h1>
+  <div class="subtitle">The clearing accounts hold the half of an item the app could only post one side of. It finds where each amount belongs; you review and accept.</div></div></div>
+{% include "firmfs/_nav.html" %}
+
+<div class="card">
+  <h3 style="margin-top:0;">Balances now</h3>
+  <div class="tbl-scroll"><table style="max-width:640px;">
+    <thead><tr><th>Clearing account</th><th class="num">Balance (debit positive)</th></tr></thead><tbody>
+    {% for a, bal in susp %}<tr><td><a href="{{ url_for('firmfs.ledger_account', account=a.id, ye=ye.id if ye else None) }}">{{ a.code }} {{ a.name }}</a></td><td class="num">{{ fm(bal) }}</td></tr>{% endfor %}
+    </tbody></table></div>
+  <p class="muted" style="font-size:12.5px;margin:10px 0 0;">When everything is placed these net to nil. A <b>match</b> cancels two clearing legs that are the same item (the cash book entry and the figure typed on the year-end), so the statements do not change. A <b>post</b> moves an item that has nothing typed against it to the real account, so it starts counting in the statements.</p>
+</div>
+
+<form method="post" action="{{ url_for('firmfs.ledger_clearing_apply') }}">
+<input type="hidden" name="ye_id" value="{{ ye.id if ye else '' }}">
+
+<div class="card">
+  <h3 style="margin-top:0;">Proposed by the app</h3>
+  {% if plan.proposals %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th style="width:34px;"></th><th>Item</th><th>Journal</th><th class="num">Amount</th><th>Effect on the statements</th></tr></thead><tbody>
+    {% for p in plan.proposals %}
+      <tr>
+        <td><input type="checkbox" name="apply" value="{{ p.key }}" style="width:auto;" {% if (p.kind == 'match' or p.chosen) and not p.blocked %}checked{% endif %} {% if p.blocked %}disabled{% endif %}></td>
+        <td><b>{{ 'Match' if p.kind == 'match' else ('Funding' if p.chosen else 'Post') }}</b> &middot; {{ p.title }}<div class="muted" style="font-size:12px;">{{ p.why }}</div>
+          {% if p.blocked %}<div style="font-size:12px;color:var(--danger,#b00);">{{ p.blocked }}</div>{% endif %}</td>
+        <td style="font-size:12px;white-space:nowrap;">{{ p.date.strftime('%d %b %Y') }}<br>{{ p.period }}</td>
+        <td class="num">{{ fm(p.amount) }}</td>
+        <td style="font-size:12px;">{{ p.effect }}</td>
+      </tr>
+    {% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="muted" style="margin:0;">Nothing more can be matched or posted automatically.</p>{% endif %}
+</div>
+
+{% if plan.choose %}
+<div class="card">
+  <h3 style="margin-top:0;">Cash book entries with no obvious home</h3>
+  <p style="font-size:13px;margin-top:0;">Choose the account each one belongs to, tick it, and it is posted against the cash clearing account.</p>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th style="width:34px;"></th><th>Date</th><th>Entry</th><th class="num">Amount</th><th>Post to</th></tr></thead><tbody>
+    {% for c in plan.choose %}
+      <tr>
+        <td><input type="checkbox" name="apply" value="{{ c.key }}" style="width:auto;" {% if c.blocked %}disabled{% endif %}></td>
+        <td>{{ c.date.strftime('%d %b %Y') }}</td>
+        <td>{{ c.category }}{% if c.description and c.description != c.category %}: {{ c.description }}{% endif %}
+          {% if c.blocked %}<div style="font-size:12px;color:var(--danger,#b00);">{{ c.blocked }}</div>{% endif %}</td>
+        <td class="num">{{ fm(c.amount) }} <span class="muted" style="font-size:11px;">{{ 'in' if c.amount > 0 else 'out' }}</span></td>
+        <td><select name="choose_{{ c.key }}" style="margin:0;max-width:280px;">
+          <option value="">- choose an account -</option>
+          {% for a in accounts %}<option value="{{ a.id }}">{{ a.code }} {{ a.name }}</option>{% endfor %}
+        </select></td>
+      </tr>
+    {% endfor %}
+    </tbody></table></div>
+</div>
+{% endif %}
+
+{% if plan.proposals or plan.choose %}
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px;">
+  <button class="btn gold" type="submit" name="mode" value="post">Post the ticked journals</button>
+  <button class="btn" type="submit" name="mode" value="draft">Save the ticked journals as drafts to review</button>
+</div>
+<p class="muted" style="font-size:12.5px;">Matches are ticked for you. Posts are not: tick them once you agree with the account. Every journal is reference "Auto-allocation", is dated at the year-end it belongs to, and can be reversed like any other. Running this again never doubles anything up.</p>
+{% endif %}
+</form>
+
+{% if plan.notices %}
+<div class="card">
+  <h3 style="margin-top:0;">Needs your attention</h3>
+  <ul style="margin:0;padding-left:18px;font-size:13px;">{% for n in plan.notices %}<li style="margin-bottom:4px;">{{ n }}</li>{% endfor %}</ul>
+  <p class="muted" style="font-size:12.5px;margin:10px 0 0;">For anything else, post a manual journal: <a href="{{ url_for('firmfs.journal_new', ye=ye.id if ye else None) }}">New journal</a>.</p>
+</div>
+{% endif %}
+{% endblock %}
