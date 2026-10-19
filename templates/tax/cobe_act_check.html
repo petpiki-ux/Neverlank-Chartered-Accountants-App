@@ -1,0 +1,81 @@
+{% extends "base.html" %}
+{% block title %}The COBE Act beside the Secretarial module - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div>
+  <h1 style="font-size:22px;">The COBE Act beside the Secretarial module</h1>
+  <div class="subtitle">Companies and Other Business Entities Act [Chapter 24:31] &middot; what the Act says, what the module does, and where they differ</div></div>
+  <div>
+    <a href="{{ url_for('tax.act_contents', code='cobe') }}" class="btn secondary">COBE Act, section by section</a>
+    <a href="{{ url_for('tax.search_legislative_updates') }}" class="btn secondary">Search the library</a>
+  </div></div>
+
+{% if not st.loaded %}
+<div class="card">
+  <strong>The COBE Act is not filed section by section yet,</strong> so the Act's words below are missing and the section numbers are not links.
+  {% if can_load %}
+  <form method="post" action="{{ url_for('tax.act_load', code='cobe') }}" enctype="multipart/form-data" style="margin-top:8px;">
+    <button class="btn" type="submit">File the COBE Act now</button>
+  </form>
+  {% else %}Ask a Partner or Admin to file it from <a href="{{ url_for('tax.act_contents', code='cobe') }}">the COBE Act page</a>.{% endif %}
+</div>
+{% endif %}
+
+<div class="card" style="font-size:12.5px;">
+  <p style="margin:0 0 6px;">The text of the Act is the Veritas consolidation (Acts 4/2019 and 8/2020, commenced 13 February 2020) that was supplied to the firm. Later amendments, Statutory Instruments, the Standard Scale that fixes the penalty levels, and the forms the Registrar prescribes are not in it. <strong>Nothing here is marked verified:</strong> a Partner should confirm each line against the Gazette and the Registrar's current forms before relying on it.</p>
+  <p style="margin:0;">
+    {% for k, label in result_labels.items() %}{% if counts.get(k) %}<span class="badge" style="margin-right:6px;{% if k == 'differs' %}background:#a33;color:#fff;{% elif k == 'missing' %}background:#8a6d1d;color:#fff;{% elif k == 'updated' %}background:#2e6f95;color:#fff;{% else %}background:#2e7d32;color:#fff;{% endif %}">{{ counts[k] }} &middot; {{ label }}</span>{% endif %}{% endfor %}
+  </p>
+</div>
+
+{% for f in findings %}
+<div class="card" id="f{{ loop.index }}">
+  <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline;">
+    <h3 style="margin:0;font-size:15px;">{{ f.topic }}
+      <span class="muted" style="font-size:12px;font-weight:400;">
+        {% for r in f.refs %}{{ act_ref(r, text=('s' ~ r) if not r.startswith('Sch') else 'Ninth Schedule', code='cobe') }}{% if not loop.last %}, {% endif %}{% endfor %}
+      </span></h3>
+    <span class="badge" style="{% if f.result == 'differs' %}background:#a33;color:#fff;{% elif f.result == 'missing' %}background:#8a6d1d;color:#fff;{% elif f.result == 'updated' %}background:#2e6f95;color:#fff;{% else %}background:#2e7d32;color:#fff;{% endif %}">{{ result_labels[f.result] }}</span>
+  </div>
+  {% set first = f.refs[0] %}{% set w = act_words(first, 650, code='cobe') %}{% if w %}
+  <blockquote style="margin:8px 0 0;padding:6px 12px;border-left:3px solid #b8923a;font-size:12.5px;color:#444;"><span class="muted" style="font-size:11px;">The Act, section {{ first }}:</span> {{ w }}</blockquote>
+  {% endif %}
+  <p style="margin:8px 0 2px;font-size:13px;"><strong>The module:</strong> {{ f.app }}</p>
+  <p style="margin:2px 0 0;font-size:13px;">{{ f.note }}</p>
+</div>
+{% endfor %}
+
+<div class="card">
+  <h3 style="margin-top:0;font-size:15px;">Section numbers that pointed at a different topic</h3>
+  <p class="muted" style="font-size:12px;">These numbers were quoted in checklists, tasks, risk questions or analytical points. In the Act supplied they are different provisions, so each was replaced. Rows already stored in existing engagements are updated automatically when the app starts, but only where the wording has not been edited by hand.</p>
+  <table style="font-size:12.5px;">
+    <tr><th>Quoted</th><th>Used for</th><th>What that section is</th><th>Where the topic is</th></tr>
+    {% for q, use, actual, right in corrections %}
+    <tr><td>{{ q }}</td><td>{{ use }}</td><td>{{ actual }}</td><td>{{ right }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;font-size:15px;">The Act's time limits</h3>
+  <table style="font-size:12.5px;">
+    <tr><th style="width:22%;">Matter</th><th style="width:12%;">Sections</th><th>The Act</th></tr>
+    {% for topic, refs, rule, pen in deadlines %}
+    <tr><td>{{ topic }}</td><td>{% for r in refs %}{{ act_ref(r, text='s' ~ r, code='cobe') }}{% if not loop.last %}, {% endif %}{% endfor %}</td><td>{{ rule }}{% if pen %} <span class="muted">{{ pen }}</span>{% endif %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;font-size:15px;">Civil penalty orders ({{ act_ref('294', text='section 294', code='cobe') }})</h3>
+  <p class="muted" style="font-size:12px;">The Registrar may serve one of five categories on a company and every officer in default. The money amounts are the Standard Scale levels in force, which are not in the library.</p>
+  <table style="font-size:12.5px;">
+    <tr><th>Category</th><th>What it provides</th><th>Used in the Act for, for example</th></tr>
+    {% for c, what, ex in penalty_categories %}<tr><td>{{ c }}</td><td>{{ what }}</td><td>{{ ex }}</td></tr>{% endfor %}
+  </table>
+  <p style="font-size:12.5px;margin:10px 0 4px;"><strong>Late-submission fees</strong> ({{ act_ref('sch9', text='Ninth Schedule', code='cobe') }}): the prescribed fee is multiplied by the time the document is late.</p>
+  <table style="font-size:12.5px;max-width:520px;">
+    {% for when, mult in late_table %}<tr><td>{{ when }}</td><td>{{ mult }}</td></tr>{% endfor %}
+  </table>
+  <p class="muted" style="font-size:12px;">The schedule is headed 'Section 18(4) and (5)', which in this text do not mention late fees, and it does not say which filings it applies to, so the module does not calculate a penalty.</p>
+</div>
+{% endblock %}

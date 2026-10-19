@@ -38,9 +38,22 @@ def _schedule_number(word):
 
 
 _SCHED_RE = re.compile(r"^\s*([A-Z][A-Z\- ]{3,22}?)\s+SCHEDULE\b(.*)$")
-_TOC_RE = re.compile(r"^\s*(\d{1,3}[A-Z]{0,2})(?:\.\s+|\s+(?=[A-Z\[]))(\S.*)$")
+_TOC_RE = re.compile(r"^\s*(\d{1,3}[A-Z]{0,2})(?:\.\s*(?=[A-Z\[\u2026])|\.\s+|\s+(?=[A-Z\[\u2026]))(\S.*)$")
+_SUBPART_RE = re.compile(r"^\s*SUB-?\s?PART\s+([A-Z]{1,2})\s*:\s*(.*)$")
+_PAGE_RE = re.compile(r"^\s*Page\s+\d+\s+of\s+\d+\s*$", re.I)
+_CHAPTER_RE = re.compile(r"^\s*CHAPTER\s+([IVXLCDM]+)\s*$")
+# a printed heading that divides the Act (never part of the section above it)
+_HEAD_RE = re.compile(r"^\s*(?:CHAPTER\s+[IVXLCDM]+\s*$|PART\s+[IVXLCDM]+[A-Z]*\s*$|SUBPART\s+[A-Z]\b)")
+_NOISE_RE = re.compile(r"DISTRIBUTED BY VERITAS|veritas@mango|veritaszim\.net|Veritas makes every effort|cannot take legal responsibility", re.I)
+# "PROVISIONS COMMON TO COMPANIES AND PBCs PART I": a Part number printed at the end of a Chapter's title line
+_TITLE_PART_RE = re.compile(r"^\s*([A-Z][A-Z ,\-&']{8,}?)\s+PART\s+([IVXLCDM]+[A-Z]*)\s*$")
+
+
+def _is_repealed_title(t):
+    t = (t or "").strip()
+    return t.startswith("[Repealed") or t.startswith("\u2026") or t.startswith("...") or t.lower().startswith("repealed")
 _PART_RE = re.compile(r"^\s*PART\s+([IVXLCDM]+[A-Z]*)\s*$")
-_BODY_START_RE = re.compile(r"AN ACT to provide")
+_BODY_START_RE = re.compile(r"AN ACT to provide|^\s*ENACTED by the (?:President|Parliament)")
 
 
 def _norm(s):
@@ -51,7 +64,7 @@ def _clean_lines(text):
     """Drop form-feed characters and bare page-number lines."""
     out = []
     for ln in (text or "").replace("\x0c", "\n").split("\n"):
-        if re.match(r"^\s*\d{1,3}\s*$", ln):
+        if re.match(r"^\s*\d{1,3}\s*$", ln) or _PAGE_RE.match(ln) or _NOISE_RE.search(ln):
             continue
         out.append(ln.rstrip())
     return out
@@ -74,26 +87,66 @@ def _parse_toc(lines):
     entries = []
     part = None
     part_title = None
+    chapter = None
+    part_base = None
+    part_title_base = None
     i = toc_start + 1
     while i < body_start:
         ln = lines[i]
         if re.match(r"^\s*SCHEDULES\s*$", ln):
             break
+        mc = _CHAPTER_RE.match(ln)
+        if mc:
+            chapter = "Chapter " + mc.group(1)
+            part, part_title = chapter, None
+            part_base, part_title_base = chapter, None
+            j = i + 1
+            while j < body_start and not lines[j].strip():
+                j += 1
+            nxt = lines[j] if j < body_start else ""
+            mtp = _TITLE_PART_RE.match(nxt)
+            if mtp:   # the chapter title and its first Part share a line
+                part = "%s, Part %s" % (chapter, mtp.group(2))
+                part_base = part
+                k = j + 1
+                while k < body_start and not lines[k].strip():
+                    k += 1
+                part_title = lines[k].strip().title() if k < body_start else ""
+                part_title_base = part_title
+                i = k + 1
+            else:
+                part_title = nxt.strip().title()
+                i = j + 1
+            continue
         mp = _PART_RE.match(ln)
         if mp:
-            part = "Part " + mp.group(1)
+            part = ("%s, Part %s" % (chapter, mp.group(1))) if chapter else ("Part " + mp.group(1))
+            part_base = part
             j = i + 1
             while j < body_start and not lines[j].strip():
                 j += 1
             part_title = lines[j].strip().title() if j < body_start else ""
+            part_title_base = part_title
             i = j + 1
+            continue
+        msp = _SUBPART_RE.match(ln)
+        if msp and part:
+            # "SUB-PART A: INCORPORATION OF COMPANIES ..." (may run over a second line): a division inside a Part
+            t = msp.group(2).strip()
+            j = i + 1
+            while j < body_start and lines[j].strip() and not _TOC_RE.match(lines[j]) and lines[j].strip() == lines[j].strip().upper() and not _HEAD_RE.match(lines[j]):
+                t += " " + lines[j].strip()
+                j += 1
+            part = "%s, Sub-part %s" % (part_base, msp.group(1))
+            part_title = "%s: %s" % (part_title_base, t.title())
+            i = j
             continue
         mt = _TOC_RE.match(ln)
         if mt:
             title = mt.group(2).strip()
             j = i + 1
             # continuation lines: indented, not a new entry / Part
-            while j < body_start and lines[j].strip() and not _TOC_RE.match(lines[j]) and not _PART_RE.match(lines[j]) and not re.match(r"^\s*SCHEDULES", lines[j]):
+            while j < body_start and lines[j].strip() and not _TOC_RE.match(lines[j]) and not _PART_RE.match(lines[j]) and not re.match(r"^\s*SCHEDULES", lines[j]) and not re.match(r"^\s*[A-Za-z\- ]{3,24}\s+schedule\s*:", lines[j], re.I):
                 title = (title.rstrip("-") + " " + lines[j].strip()) if not title.endswith("-") else (title[:-1] + lines[j].strip())
                 j += 1
             entries.append({"number": mt.group(1), "title": title, "part": part, "part_title": part_title})
@@ -111,10 +164,18 @@ def _schedule_titles(toc_lines):
         if re.match(r"^\s*SCHEDULES\s*$", ln):
             start = i
     if start is None:
+        # no "SCHEDULES" heading: begin at the first "FIRST SCHEDULE: ..." line
+        for i, ln in enumerate(toc_lines):
+            if re.match(r"^\s*[A-Za-z][A-Za-z\- ]{2,24}?\s+schedule\s*:", ln, re.I):
+                start = i - 1
+                break
+    if start is None:
         return out
     cur = None
     for ln in toc_lines[start + 1:]:
-        m = re.match(r"^\s*([A-Za-z][A-Za-z\- ]{2,24}?)\s+[Ss]chedule\s*:\s*(.*)$", ln)
+        if re.match(r"^\s*ACT\s*$", ln):
+            break
+        m = re.match(r"^\s*([A-Za-z][A-Za-z\- ]{2,24}?)\s+schedule\s*:\s*(.*)$", ln, re.I)
         if m:
             num = _schedule_number(m.group(1).strip())
             if num is not None:
@@ -190,7 +251,7 @@ def parse_act(text):
     for ent in entries:
         num = ent["number"]
         want = _norm(ent["title"])[:10]
-        repealed = ent["title"].strip().startswith("[Repealed")
+        repealed = _is_repealed_title(ent["title"])
         pat = re.compile(r"^\s{0,10}" + re.escape(num) + r"(?![0-9A-Za-z])\s*(.*)$")
         hit = None
         for start in (pos, body_start + 1):
@@ -224,6 +285,19 @@ def parse_act(text):
                     body_number = m.group(1)
                     warnings.append("Section %s (%s) is numbered %s in the body of the Act; filed as %s." % (num, ent["title"][:40], body_number, body_number))
                     break
+        if hit is None and not repealed:
+            # The list and the body word a title differently ("Shell companies and shelf companies" / "Shell and shelf companies"):
+            # same number, same first word, and nothing between the number and the title but spaces.
+            first_word = re.sub(r"[^a-z]", "", (ent["title"].split() or [""])[0].lower())
+            if first_word:
+                for i in range(pos, first_sched_line):
+                    if i in used:
+                        continue
+                    m = pat.match(lines[i])
+                    if m and m.group(1).strip() and re.sub(r"[^a-z]", "", m.group(1).split()[0].lower()) == first_word and not re.match(r"^\s*[a-z]\)", m.group(1)):
+                        hit = i
+                        warnings.append("Section %s is headed '%s' in the list and '%s' in the body." % (num, ent["title"][:40], m.group(1).strip()[:40]))
+                        break
         if hit is None:
             warnings.append("Section %s (%s) was not found in the body." % (num, ent["title"][:50]))
             continue
@@ -240,20 +314,22 @@ def parse_act(text):
         # strip a trailing Part heading that belongs to the next section
         while body and not body[-1].strip():
             body.pop()
-        j = len(body)
-        tail = body[-4:]
-        for back in range(1, min(5, len(body)) + 1):
-            if _PART_RE.match(body[-back]):
-                j = len(body) - back
+        while True:
+            j = len(body)
+            for back in range(1, min(9, len(body)) + 1):
+                if _HEAD_RE.match(body[-back]):
+                    j = len(body) - back
+                    break
+            if j == len(body):
                 break
-        body = body[:j]
-        while body and not body[-1].strip():
-            body.pop()
+            body = body[:j]
+            while body and not body[-1].strip():
+                body.pop()
         txt = "\n".join(body).strip("\n")
         sections.append({
             "order": k + 1, "number": ent["number"], "title": ent["title"],
             "part": ent["part"], "part_title": ent["part_title"],
-            "text": txt, "repealed": ent["title"].strip().startswith("[Repealed"),
+            "text": txt, "repealed": _is_repealed_title(ent["title"]),
         })
 
     schedules = []
@@ -266,6 +342,12 @@ def parse_act(text):
                 title = ln.strip()
                 break
         refers = rest.strip()
+        if not refers:
+            for ln in body[:8]:
+                mr = re.match(r"^\s*(\(\s*Sections?\b[^)]*\))\s*$", ln)
+                if mr:
+                    refers = mr.group(1)
+                    break
         if refers.startswith("(") and refers.endswith(")"):
             refers = refers[1:-1].strip()
         elif refers.startswith("("):

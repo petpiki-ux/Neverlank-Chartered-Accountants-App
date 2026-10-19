@@ -879,35 +879,35 @@ BUSINESS_IT_RISK_IMPACT_QUESTIONS = [
 # separate columns, same reasoning as the forensic/BI-IT-specific fields
 # above.
 SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS = [
-    ("q_filing_compliance_history", "What is this entity's track record of lodging Annual Returns (Sec 165) and notifying director/officer changes (Sec 215) within the statutory windows?", [
+    ("q_filing_compliance_history", "What is this entity's track record of lodging Annual Returns (Sec 165: within 21 days of the registration anniversary) and notifying director/officer changes (Sec 217: within one month) within the statutory windows?", [
         "Consistently on time, no history of late or missed filings",
         "Mostly on time, isolated minor delays",
         "Some history of late filings",
         "Frequent late filings, or at least one lapse into defunct/struck-off status previously remedied",
-        "Currently overdue on Annual Returns, or at imminent risk of being struck off (Sec 310)",
+        "Currently overdue on Annual Returns, or at imminent risk of being struck off (Sec 52)",
     ]),
-    ("q_governance_procedural_rigor", "How rigorous are the entity's board/general meeting procedures (quorum compliance under Sec 195/206, notice periods under Sec 170, no director proxies under Sec 196)?", [
+    ("q_governance_procedural_rigor", "How rigorous are the entity's board/general meeting procedures (quorum under Sec 170 for members and Sec 204 for the board, notice periods under Secs 169 and 175, board decisions by written consent or electronic meeting only as Sec 196 allows)?", [
         "Well-documented, consistently compliant meeting procedures",
         "Generally sound, only minor procedural gaps",
         "Noticeable procedural weaknesses (e.g. occasional quorum or notice issues)",
         "Significant procedural weaknesses across multiple meetings",
         "Minute books incomplete/unsigned, or meetings routinely held without proper quorum or notice",
     ]),
-    ("q_ownership_capital_complexity", "How complex or frequent are this entity's ownership and capital events (share allotments, transfers, beneficial ownership changes under Sec 72, distributions or buybacks under Sec 102/104)?", [
+    ("q_ownership_capital_complexity", "How complex or frequent are this entity's ownership and capital events (share allotments, transfers, beneficial ownership changes under Sec 72, distributions under Sec 102/138 or buy-backs under Sec 128-129)?", [
         "Simple, stable ownership structure, no capital events pending",
         "Occasional, straightforward capital events",
         "Moderate complexity - several shareholders/classes, or an event in progress",
         "Significant complexity - multiple classes, nominee arrangements, or frequent capital events",
         "Highly complex ownership/capital structure with unresolved beneficial ownership questions",
     ]),
-    ("q_transactional_activity", "How much transactional or change-of-control activity (charge/mortgage creation under Sec 163, constitutional amendments, restructurings under Sec 227-232) is anticipated or under way?", [
+    ("q_transactional_activity", "How much transactional or change-of-control activity (charge/mortgage creation under Sec 154-155, constitutional amendments, restructurings under Sec 227-232) is anticipated or under way?", [
         "None anticipated",
         "Limited, routine activity only",
         "Some non-routine activity anticipated (e.g. a single charge registration)",
         "Significant activity anticipated (e.g. a restructuring or multiple charges)",
         "Major, time-critical transactional activity already under way",
     ]),
-    ("q_registry_standing", "What is this entity's current standing with the Registrar of Companies (up to date vs at risk of deregistration/striking-off under Sec 310)?", [
+    ("q_registry_standing", "What is this entity's current standing with the Registrar of Companies (up to date vs at risk of deregistration/striking-off under Sec 52)?", [
         "Fully up to date and in good standing",
         "Up to date, one historical lapse since remedied",
         "One or more filings currently outstanding but within a curable window",
@@ -917,28 +917,28 @@ SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS = [
 ]
 
 SECRETARIAL_RISK_IMPACT_QUESTIONS = [
-    ("q_penalty_exposure", "If a filing or deadline is missed, what is the likely exposure to administrative fines, late-filing penalties, or Registrar default notices?", [
+    ("q_penalty_exposure", "If a filing or deadline is missed, what is the likely exposure to civil penalty orders (Sec 294), late-filing penalties, or Registrar default notices?", [
         "Minimal - unlikely to attract any penalty",
         "Limited - a small, one-off penalty at most",
         "Moderate - a meaningful penalty or formal Registrar notice",
         "Significant - substantial penalties across multiple lapses",
-        "Severe - deregistration/striking-off exposure (Sec 310)",
+        "Severe - deregistration/striking-off exposure (Sec 52)",
     ]),
-    ("q_governance_invalidity", "If a board or shareholder resolution were later challenged for a quorum, notice, or proxy defect (Sec 170/196), how significant would the consequences be?", [
+    ("q_governance_invalidity", "If a board or shareholder resolution were later challenged for a quorum, notice, or proxy defect (Secs 169-171, 175, 196), how significant would the consequences be?", [
         "Minimal - no material decisions at risk",
         "Limited - only routine matters potentially affected",
         "Moderate - some commercially significant decisions could be challenged",
         "Significant - key resolutions (allotments, borrowings) could be voided",
         "Severe - ultra vires exposure across major corporate actions, litigation risk",
     ]),
-    ("q_solvency_director_liability", "If a distribution, share buyback, or director loan were found not to have followed the statutory Solvency and Liquidity Test (Sec 102) or disclosure requirements (Sec 216), what is the exposure?", [
+    ("q_solvency_director_liability", "If a distribution, share buyback, or director loan were found not to have followed the statutory Solvency and Liquidity Test (Secs 102 and 138), the restriction on loans to directors (Sec 208) or the disclosure requirements (Sec 216), what is the exposure?", [
         "Minimal - no distributions/buybacks/director loans in the period",
         "Limited - small, well-documented transactions only",
         "Moderate - some transactions without full contemporaneous documentation",
         "Significant - material distributions/buybacks with weak solvency evidence",
         "Severe - unlawful distribution exposure and personal director liability",
     ]),
-    ("q_encumbrance_control_risk", "If a charge/mortgage were left unregistered past the 30-day window (Sec 163), or a change-of-control step were taken without required consents, what is the exposure?", [
+    ("q_encumbrance_control_risk", "If a mortgage, security interest or debenture were left out of the register beyond the 14-day period (Sec 155) or not registered as Sec 154 requires, or a change-of-control step were taken without required consents, what is the exposure?", [
         "Minimal - no charges or change-of-control steps in the period",
         "Limited - registrations well within statutory deadlines",
         "Moderate - some risk of a registration slipping past deadline",
@@ -1148,28 +1148,32 @@ SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
     ("Entity Classification & Scope", "Is the entity registered as a Private Limited Company, Public Limited Company, Company Limited by Guarantee, Private Business Corporation (PBC), or Foreign Company under Section 5?", ("incorporation",)),
     ("Entity Classification & Scope", "Does the entity operate in banking, building societies, insurance, or microfinance - noting that these financial institutions are excluded from the COBE Act under Section 4 and governed by sector-specific statutes?", ("incorporation",)),
     ("Constitutional Documents & Corporate Governance", "Does the Memorandum clearly specify all authorised share types and classes pursuant to the disclosure standards for share capital?", ("constitutional", "share_capital")),
-    ("Constitutional Documents & Corporate Governance", "What are the specific rules and thresholds set out in the Articles regarding board powers, borrowing limits (Section 196), execution of documents, and pre-emption rights?", ("constitutional", "directorship")),
-    ("Constitutional Documents & Corporate Governance", "Does a private company meet the minimum statutory director requirements under Section 195 (minimum 2 directors if under 10 members; minimum 3 directors if over 10 members)?", ("directorship",)),
-    ("Constitutional Documents & Corporate Governance", "For public companies, does the board meet the requirement of 7 to 15 directors, including at least 3 independent non-executive directors (Section 206)?", ("directorship",)),
+    ("Constitutional Documents & Corporate Governance", "What are the specific rules and thresholds set out in the Articles regarding board powers, borrowing limits, execution of documents (Section 35), and pre-emption rights (Sections 99 and 139)?", ("constitutional", "directorship")),
+    ("Constitutional Documents & Corporate Governance", "Does the company meet the director requirements of Section 195 (a private company with more than one and fewer than ten shareholders: at least two directors; ten or more shareholders: at least three; a public company: seven to fifteen), including at least one director ordinarily resident in Zimbabwe (Section 195(2))?", ("directorship",)),
+    ("Constitutional Documents & Corporate Governance", "For public companies, does the board have 7 to 15 directors (Section 195(1)), including at least three non-executive or independent directors (Section 206(2))?", ("directorship",)),
     ("Constitutional Documents & Corporate Governance", "Are directors aware of their statutory duty of care, skill, and good faith (Section 54) and duty of loyalty (Section 55)?", ("directorship",)),
-    ("Statutory Registers & Ownership Transparency", "Does the company maintain an up-to-date Register of Beneficial Ownership under Section 72, identifying natural persons who directly or indirectly hold 20% or more of shares or voting rights?", ("statutory_records", "share_capital")),
-    ("Statutory Registers & Ownership Transparency", "Does any nominee shareholding comply with the statutory cap under Section 72, which restricts nominee holdings to no more than 20% of shares on behalf of a beneficial owner?", ("statutory_records", "share_capital")),
-    ("Statutory Registers & Ownership Transparency", "Are the Register of Members (Section 157), Register of Directors and Secretaries (Section 215), Register of Directors' Interests and Conflicts (Section 211), and Register of Mortgages and Debentures/Charges (Section 162) maintained at the registered office and reconciled?", ("statutory_records",)),
+    ("Constitutional Documents & Corporate Governance", "Does the company have at least one company secretary who is ordinarily resident in Zimbabwe (Section 198(1)); for a public company, is the secretary qualified under Section 198(4) and not holding another office; and does the secretary certify in the annual financial statements whether the returns and notices required by the Act have been filed (Section 198(3)(f))?", ('directorship', 'incorporation', 'statutory_records')),
+    ("Statutory Registers & Ownership Transparency", "Does the company maintain an up-to-date Register of Beneficial Owners under Section 72 (kept where the register of members is kept, with a custodian resident in Zimbabwe), identifying natural persons who directly or indirectly hold MORE than 20% of the shares or voting rights, can appoint or remove a majority of the directors, or otherwise exercise significant control (Section 2), and are updates filed with the Registrar within seven days of a material change?", ("statutory_records", "share_capital")),
+    ("Statutory Registers & Ownership Transparency", "Does any nominee shareholding comply with Section 73, which allows shares to be held through a nominee only where the beneficial owner (with associates) holds less than 20%?", ("statutory_records", "share_capital")),
+    ("Statutory Registers & Ownership Transparency", "Are the Register of Members (Section 159), Register of Directors and Secretaries (Section 217), Register of Allotments (Section 121), Register of Mortgages and Debentures (Section 155) and, for a company other than a private company, the Register of Directors' Share Holdings (Section 213) maintained at the registered office and reconciled?", ("statutory_records",)),
+    ("Statutory Registers & Ownership Transparency", "Has the company appointed a person resident in Zimbabwe as custodian of the register of beneficial owners, and are the name and contact details recorded in the form filed with the Registrar (Section 72(4)-(5))?", ('statutory_records', 'share_capital')),
     ("Capital Structure, Distributions & Solvency", "Have any variations of share rights, share allotments, or capital changes been executed in accordance with board powers and properly reflected in the Memorandum/Articles?", ("share_capital",)),
-    ("Capital Structure, Distributions & Solvency", "Before making any distribution, share buyback, or financial assistance, has the board formally evaluated and certified that the company meets the statutory Solvency and Liquidity Test (Section 102)?", ("share_capital",)),
-    ("Capital Structure, Distributions & Solvency", "Are there any proposed structural changes or class variations that might trigger minority shareholder appraisal remedies (Section 143 or Section 228)?", ("share_capital", "constitutional")),
-    ("Board Operations, Meetings & Documentation", "Are all loans, guarantees, or security provided by the company for directors or officers fully disclosed and approved under Section 216?", ("directorship", "meetings")),
-    ("Board Operations, Meetings & Documentation", "Is the board aligned with Section 196, which prohibits directors from acting or voting by proxy at board meetings?", ("meetings",)),
-    ("Board Operations, Meetings & Documentation", "Are minute books kept up-to-date for all board meetings, committee meetings, and AGMs/EGMs, capturing key commercial decisions, risk evaluations, and conflict disclosures?", ("meetings",)),
-    ("Statutory Filings & Registry Compliance", "Is the company compliant with filing its Annual Return (Section 165) within the statutory timeframe following its financial year-end?", ("incorporation", "statutory_records")),
-    ("Statutory Filings & Registry Compliance", "Have changes in directors/secretaries, registered office address, or share capital updates been lodged with the Registrar within the required statutory notification periods?", ("statutory_records", "directorship")),
-    ("Statutory Filings & Registry Compliance", "Has the entity completed its mandatory administrative re-registration process under the COBE Act framework?", ("incorporation", "statutory_records", "re_registration")),
+    ("Capital Structure, Distributions & Solvency", "Before making any distribution, has the board authorised it and acknowledged by resolution that the Solvency and Liquidity Test is met (Sections 102 and 138); and before a share buy-back or financial assistance for the purchase of shares (Sections 128-129 and 123), has a general meeting authorised it in advance?", ("share_capital",)),
+    ("Capital Structure, Distributions & Solvency", "Are there any proposed structural changes or class variations that might trigger minority shareholder appraisal remedies (Section 233, which applies to a variation of class rights under Section 143 and a merger under Section 228)?", ("share_capital", "constitutional")),
+    ("Capital Structure, Distributions & Solvency", "Is the register of allotments kept at the registered office, and is the return of allotments (with the contract, for shares not paid in cash) lodged with the Registrar within one month of each allotment (Section 121)?", ('share_capital',)),
+    ("Board Operations, Meetings & Documentation", "Are all loans, guarantees, or security provided by the company for directors or officers within the exceptions to the prohibition in Section 208 (for a private company, with the consent of holders of nine-tenths of the shares) and disclosed in the accounts as Section 216 requires?", ("directorship", "meetings")),
+    ("Board Operations, Meetings & Documentation", "Does the board act only at meetings (in person, or by electronic or conference means where the articles allow it) or by written consent signed by ALL directors entitled to vote, as Section 196 provides, applying the board quorum in the articles (Section 204)?", ("meetings",)),
+    ("Board Operations, Meetings & Documentation", "Are minute books kept up-to-date for all board meetings, committee meetings, and AGMs/EGMs, capturing key commercial decisions, risk evaluations, and conflict disclosures (Section 180 for members' meetings, prepared within 20 days; Section 205 for the board and committees)?", ("meetings",)),
+    ("Statutory Filings & Registry Compliance", "Is the company compliant with filing its Annual Return within 21 days of the anniversary of its incorporation, registration or re-registration (Section 165(2)), with the private-company certificate where it applies (Section 165(3))?", ("incorporation", "statutory_records")),
+    ("Statutory Filings & Registry Compliance", "Have changes in directors/secretaries (within one month, Section 217), the registered office or postal address (Section 31), share allotments (one month, Section 121), capital increases (one month, Section 141) and special resolutions (one month, Section 178) been lodged with the Registrar within the periods the Act sets?", ("statutory_records", "directorship")),
+    ("Statutory Filings & Registry Compliance", "Has the entity completed its mandatory administrative re-registration process under the COBE Act (Section 303(9) and the Tenth Schedule; a company that did not re-register in time is struck off, Section 303(12))?", ("incorporation", "statutory_records", "re_registration")),
+    ("Statutory Filings & Registry Compliance", "Is the date of incorporation, registration or re-registration recorded on the Secretarial Engagement Plan, so the annual return can be diarised for 21 days after each anniversary (Section 165(2)), and has an AGM been held within the last twelve months (Section 167(2))?", ('incorporation', 'statutory_records', 'meetings')),
     ("Company Re-registration", "Has the company already been re-registered on the Registrar's online system, and are the new certificate and registration details held on the client file?", ("re_registration",)),
-    ("Company Re-registration", "If not yet re-registered, what is the Registrar's current re-registration deadline and fee (both have been extended and revised before), and has the board been told that a company not re-registered by the deadline risks being treated as non-operational and struck off the register?", ("re_registration",)),
+    ("Company Re-registration", "If not yet re-registered, what is the Registrar's current re-registration deadline and fee (both have been extended and revised before; the Act's own period was twelve months from the effective date, Section 303(9)), and has the board been told that a company not re-registered by the deadline risks being treated as non-operational and struck off the register (Section 303(12))?", ("re_registration",)),
     ("Company Re-registration", "Are all annual returns filed up to date? The Registrar asks for proof of this with the application, so any outstanding returns must be cleared first.", ("re_registration", "statutory_records")),
     ("Company Re-registration", "Are the existing registration documents available as clear scans - Certificate of Incorporation, Memorandum and Articles of Association, the registered-office and directors forms (CR5, CR6) and the latest annual return?", ("re_registration",)),
     ("Company Re-registration", "Are the details of every director, secretary and shareholder (full names, ID or passport numbers, dates of birth, addresses and contact details) current and consistent with the statutory registers and the Register of Beneficial Ownership (Section 72)?", ("re_registration", "statutory_records")),
-    ("Company Re-registration", "Do the Memorandum and Articles need to be amended to conform with the COBE Act, and will the members approve those amendments by special resolution as part of the re-registration?", ("re_registration", "constitutional")),
+    ("Company Re-registration", "Do the Memorandum and Articles need to be amended to conform with the COBE Act, and will the members approve those amendments by special resolution (Sections 79, 81 and 175)? Section 303(11) does not allow such changes 'under the guise of' re-registration: they follow the ordinary formalities, before, after or together with it.", ("re_registration", "constitutional")),
     ("Company Re-registration", "Who is authorised to sign the board resolution, the members' resolution and any authority or affidavit the Registrar requires, and are they available to sign?", ("re_registration",)),
 ]
 
@@ -1631,46 +1635,49 @@ def secretarial_substantive_areas(engagement):
 SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES = {
     "Onboarding & Diagnostics": [
         "Perform initial search with the Registrar of Companies.",
-        "Reconcile the Memorandum and Articles of Association for borrowing limits (Sec 196) and share capital authorisation.",
+        "Reconcile the Memorandum and Articles of Association for any borrowing limits and for share capital authorisation (Sec 96).",
         "Run the Secretarial Risk Assessment Matrix (see the Risk Assessment tab) to flag overdue filings or missing records.",
         "Compile the Client Statutory Diagnostic & Baseline Report.",
     ],
     "Board & General Meeting Cycle": [
         "Draft and circulate the annual governance calendar to board members.",
-        "Issue formal Notice of AGM (Sec 170) at least 21 days prior to the meeting.",
+        "Issue formal Notice of AGM at least 21 days prior to the meeting (Sec 169(1)); a meeting to pass a special resolution also needs 21 days (Sec 175(1)).",
         "Compile, collate and dispatch board packs 7-10 days prior to scheduled meetings.",
-        "Attend meetings, record proceedings, and produce draft minute books (Sec 176) within 5 working days post-meeting.",
+        "Attend meetings, record proceedings, and produce draft minutes within 5 working days post-meeting (the Act allows 20 days for members' meetings, Sec 180; board minutes, Sec 205).",
         "File the signed board packs, approved minute books and action trackers.",
+        "Diarise the next AGM so that no more than twelve months pass between annual general meetings (Sec 167(2)), and send members a copy of the financial statements at least 14 days before it where Sec 190(1) applies.",
     ],
     "Annual Returns & Filings Log": [
-        "Lodge the Annual Return (Form CR11) with the Registrar within 42 days of the AGM (Sec 165).",
-        "File Form CR6 for any change in directors or secretaries within 14 days (Sec 215).",
-        "Lodge Form CR5 for changes in registered office address within 14 days (Sec 160).",
-        "File returns of allotment of shares within statutory timelines following board approval (Sec 93 & 95).",
-        "Lodge the Company Summary return introduced under the new COBE Act - reconfirm the prescribed form reference and filing deadline with the Registrar, as these were not yet confirmed when this item was added.",
+        "Prepare the annual return certificates: for a private company, the certificate signed by a director and the secretary (no invitation to the public; number of members - Sec 165(3)); have the return certified by a director and the secretary and keep a signed duplicate at the registered office (Sec 165(4)).",
+        "Lodge the Annual Return with the Registrar within 21 days of the anniversary of the company's incorporation, registration or re-registration (Sec 165(2)), with the private-company certificate where it applies (Sec 165(3)).",
+        "File Form CR6 for any change in directors or secretaries within one month (Sec 217(4)-(5)).",
+        "Record any change of registered office or postal address in the constitutive documents and notify the Registrar on Form CR5 (Sec 31; the Act sets no number of days).",
+        "File the return of allotments with the Registrar within one month of each allotment (Sec 121(2)).",
+        "Confirm with the Registrar whether the 'Company Summary' return is the same document as the annual return (Sec 165(1) calls the annual return a summary) or a separate return, and reconfirm its form reference and filing deadline - it is not mentioned in the COBE Act as supplied.",
         "File the stamped registry certificates and official filing acknowledgments.",
     ],
     "Statutory Register Audit": [
-        "Maintain and update the Register of Beneficial Ownership (Sec 72), verifying no unapproved nominee shareholding exceeds the 20% statutory cap.",
-        "Update the Register of Members (Sec 157) following executed share transfers (Sec 149).",
-        "Reconcile the Register of Charges and Mortgages (Sec 162) against outstanding corporate debt facilities.",
+        "Maintain and update the Register of Beneficial Owners (Sec 72), file updates with the Registrar within seven days of a material change (Sec 72(2)), and verify any nominee holds only for a beneficial owner with less than 20% (Sec 73(2)(a)).",
+        "Update the Register of Members (Sec 159) following executed share transfers made on a proper instrument of transfer (Sec 151).",
+        "Reconcile the Register of Mortgages and Debentures (Sec 155) against outstanding corporate debt facilities; each entry is due within 14 days of the hypothecation.",
+        "Confirm the company has a secretary ordinarily resident in Zimbabwe (Sec 198(1)), at least one director ordinarily resident in Zimbabwe (Sec 195(2)) and the number of directors Sec 195(1) requires, and that the secretary certifies in the annual financial statements whether the returns and notices required by the Act have been filed (Sec 198(3)(f)).",
         "File the up-to-date statutory register file and the annual UBO verification declaration.",
     ],
     "Company Re-registration": [
-        "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current re-registration deadline, fee and document list with the Registrar (these have been extended and revised before).",
+        "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current re-registration deadline, fee and document list with the Registrar (these have been extended and revised before). The Act's own period was twelve months from the effective date (Sec 303(9)); a company not re-registered is struck off (Sec 303(12)).",
         "Run a Registrar search to confirm the company's registration number and status, and clear any outstanding annual returns before applying.",
         "Collect the existing registration documents: Certificate of Incorporation, Memorandum and Articles of Association, CR5, CR6 and the latest annual return.",
         "Confirm and update the details of every director, secretary and shareholder (names, ID numbers, dates of birth, addresses, contact details) and reconcile them to the statutory registers and the Register of Beneficial Ownership (Sec 72).",
-        "Review the Memorandum and Articles against the COBE Act and prepare any amendments needed for approval by special resolution.",
+        "Review the Memorandum and Articles against the COBE Act and prepare any amendments needed for approval by special resolution. Amendments follow the ordinary formalities (Secs 79, 81 and 175) and may not be made 'under the guise of' re-registration (Sec 303(11)).",
         "Prepare the board resolution and the members' special resolution approving re-registration, and the signed authority or affidavit the Registrar requires.",
         "Submit the re-registration application on the Registrar's online portal, upload the supporting documents and pay the prescribed fee.",
         "Track the application with the Registrar and respond to any query or rejection until it is approved.",
         "File the new registration certificate, the Registrar's acknowledgment and the updated company documents on the client file, and update the statutory registers and governance calendar.",
     ],
     "Corporate Actions": [
-        "Coordinate board evaluation and drafting of the statutory Solvency and Liquidity Test Certificate (Sec 102) prior to executing distributions or share buybacks (Sec 104).",
-        "Draft special resolutions for constitutional amendments (Sec 16 & 25) or company name changes.",
-        "File mortgage/debenture registration forms with the Registrar within 30 days of creation (Sec 163).",
+        "Coordinate board evaluation and drafting of the statutory Solvency and Liquidity Test acknowledgment (Secs 102 and 138) prior to executing distributions, and obtain general-meeting authority before any share buy-back (Secs 128-129).",
+        "Draft special resolutions for constitutional amendments (memorandum Sec 79, articles Sec 81) or a change of name (Sec 26, with the Registrar's written approval first), give 21 days' notice and lodge a copy with the Registrar within one month (Secs 175 and 178).",
+        "Enter each mortgage, registered security interest or debenture in the Register of Mortgages and Debentures within 14 days (Sec 155(1)(a)) and register the security as Sec 154 requires (Movable Property Security Interest Act or Deeds Registry); confirm any time limit under those Acts.",
         "File the executed solvency certificates, filed special resolutions and registered security extracts.",
     ],
 }
@@ -1694,33 +1701,36 @@ SECRETARIAL_AREA_REFERENCES = {
 # every other engagement type leaves those three columns blank.
 SECRETARIAL_EXECUTION_TASK_DETAILS = {
     "Perform initial search with the Registrar of Companies.": ("Engagement start", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
-    "Reconcile the Memorandum and Articles of Association for borrowing limits (Sec 196) and share capital authorisation.": ("Engagement start", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
+    "Reconcile the Memorandum and Articles of Association for any borrowing limits and for share capital authorisation (Sec 96).": ("Engagement start", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
     "Run the Secretarial Risk Assessment Matrix (see the Risk Assessment tab) to flag overdue filings or missing records.": ("T+14 days from onboarding", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
     "Compile the Client Statutory Diagnostic & Baseline Report.": ("T+14 days from onboarding", "Senior Secretariat", "Client Statutory Diagnostic & Baseline Report"),
     "Draft and circulate the annual governance calendar to board members.": ("FYE + 5 months", "Corporate Secretary", "Annual governance calendar"),
-    "Issue formal Notice of AGM (Sec 170) at least 21 days prior to the meeting.": ("FYE + 5 months", "Corporate Secretary", "Notice Pack & Proxy Forms"),
+    "Issue formal Notice of AGM at least 21 days prior to the meeting (Sec 169(1)); a meeting to pass a special resolution also needs 21 days (Sec 175(1)).": ("FYE + 5 months", "Corporate Secretary", "Notice Pack & Proxy Forms"),
     "Compile, collate and dispatch board packs 7-10 days prior to scheduled meetings.": ("Each board/committee meeting", "Corporate Secretary", "Board pack dispatched"),
-    "Attend meetings, record proceedings, and produce draft minute books (Sec 176) within 5 working days post-meeting.": ("FYE + 6 months (AGM) / each meeting", "Lead Secretary", "Signed AGM/board minutes"),
+    "Attend meetings, record proceedings, and produce draft minutes within 5 working days post-meeting (the Act allows 20 days for members' meetings, Sec 180; board minutes, Sec 205).": ("FYE + 6 months (AGM) / each meeting", "Lead Secretary", "Signed AGM/board minutes"),
     "File the signed board packs, approved minute books and action trackers.": ("Post-meeting", "Minutes Secretary", "Signed Board Packs, Approved Minute Books & Action Trackers"),
-    "Lodge the Annual Return (Form CR11) with the Registrar within 42 days of the AGM (Sec 165).": ("Post-AGM", "Compliance Officer", "Stamped Form CR11 receipt"),
-    "File Form CR6 for any change in directors or secretaries within 14 days (Sec 215).": ("Director/secretary resignation or appointment", "Assistant Secretary", "Certified Form CR6 copy"),
-    "Lodge Form CR5 for changes in registered office address within 14 days (Sec 160).": ("Registered office change", "Assistant Secretary", "Certified Form CR5 copy"),
-    "File returns of allotment of shares within statutory timelines following board approval (Sec 93 & 95).": ("Share allotment approved", "Secretariat Staff", "Stamped Return of Allotment"),
-    "Lodge the Company Summary return introduced under the new COBE Act - reconfirm the prescribed form reference and filing deadline with the Registrar, as these were not yet confirmed when this item was added.": ("Annual - reconfirm trigger/deadline (new COBE requirement)", "Compliance Officer", "Company Summary filing confirmation (reconfirm form reference)"),
+    "Diarise the next AGM so that no more than twelve months pass between annual general meetings (Sec 167(2)), and send members a copy of the financial statements at least 14 days before it where Sec 190(1) applies.": ("After each AGM", "Corporate Secretary", "Updated governance calendar"),
+    "Prepare the annual return certificates: for a private company, the certificate signed by a director and the secretary (no invitation to the public; number of members - Sec 165(3)); have the return certified by a director and the secretary and keep a signed duplicate at the registered office (Sec 165(4)).": ("Before the annual return is lodged", "Compliance Officer", "Signed certificates & duplicate return"),
+    "Lodge the Annual Return with the Registrar within 21 days of the anniversary of the company's incorporation, registration or re-registration (Sec 165(2)), with the private-company certificate where it applies (Sec 165(3)).": ("Anniversary of incorporation / registration / re-registration (+21 days)", "Compliance Officer", "Stamped annual return receipt"),
+    "File Form CR6 for any change in directors or secretaries within one month (Sec 217(4)-(5)).": ("Director/secretary resignation or appointment", "Assistant Secretary", "Certified Form CR6 copy"),
+    "Record any change of registered office or postal address in the constitutive documents and notify the Registrar on Form CR5 (Sec 31; the Act sets no number of days).": ("Registered office change", "Assistant Secretary", "Certified Form CR5 copy"),
+    "File the return of allotments with the Registrar within one month of each allotment (Sec 121(2)).": ("Share allotment approved", "Secretariat Staff", "Stamped Return of Allotment"),
+    "Confirm with the Registrar whether the 'Company Summary' return is the same document as the annual return (Sec 165(1) calls the annual return a summary) or a separate return, and reconfirm its form reference and filing deadline - it is not mentioned in the COBE Act as supplied.": ("Annual - reconfirm trigger/deadline", "Compliance Officer", "Company Summary filing confirmation (reconfirm form reference)"),
     "File the stamped registry certificates and official filing acknowledgments.": ("On receipt from Registrar", "Compliance Officer", "Stamped Registry Certificates & Filing Acknowledgments"),
-    "Maintain and update the Register of Beneficial Ownership (Sec 72), verifying no unapproved nominee shareholding exceeds the 20% statutory cap.": ("Annual review / update within 14 days of change", "Compliance Officer", "Reconciled Register of Beneficial Owners"),
-    "Update the Register of Members (Sec 157) following executed share transfers (Sec 149).": ("Share transfer executed", "Compliance Officer", "Updated Register of Members"),
-    "Reconcile the Register of Charges and Mortgages (Sec 162) against outstanding corporate debt facilities.": ("Debt creation / annual review", "Legal/Secretariat", "Reconciled Register of Charges"),
+    "Maintain and update the Register of Beneficial Owners (Sec 72), file updates with the Registrar within seven days of a material change (Sec 72(2)), and verify any nominee holds only for a beneficial owner with less than 20% (Sec 73(2)(a)).": ("Annual review / update within 7 days of a material change", "Compliance Officer", "Reconciled Register of Beneficial Owners"),
+    "Update the Register of Members (Sec 159) following executed share transfers made on a proper instrument of transfer (Sec 151).": ("Share transfer executed", "Compliance Officer", "Updated Register of Members"),
+    "Reconcile the Register of Mortgages and Debentures (Sec 155) against outstanding corporate debt facilities; each entry is due within 14 days of the hypothecation.": ("Debt creation / annual review", "Legal/Secretariat", "Reconciled Register of Charges"),
+    "Confirm the company has a secretary ordinarily resident in Zimbabwe (Sec 198(1)), at least one director ordinarily resident in Zimbabwe (Sec 195(2)) and the number of directors Sec 195(1) requires, and that the secretary certifies in the annual financial statements whether the returns and notices required by the Act have been filed (Sec 198(3)(f)).": ("Annual / on appointment", "Compliance Officer", "Director and secretary compliance note"),
     "File the up-to-date statutory register file and the annual UBO verification declaration.": ("Annual", "Compliance Officer", "Up-to-date Statutory Register File & Annual UBO Verification Declaration"),
-    "Coordinate board evaluation and drafting of the statutory Solvency and Liquidity Test Certificate (Sec 102) prior to executing distributions or share buybacks (Sec 104).": ("Distribution/buyback proposed", "Engagement Partner", "Signed Board Solvency Declaration"),
-    "Draft special resolutions for constitutional amendments (Sec 16 & 25) or company name changes.": ("Ad-hoc - constitutional amendment", "Corporate Secretary", "Filed Special Resolutions"),
-    "File mortgage/debenture registration forms with the Registrar within 30 days of creation (Sec 163).": ("Debt/charge creation", "Legal/Secretariat", "Stamped Certificate of Mortgage/Charge"),
+    "Coordinate board evaluation and drafting of the statutory Solvency and Liquidity Test acknowledgment (Secs 102 and 138) prior to executing distributions, and obtain general-meeting authority before any share buy-back (Secs 128-129).": ("Distribution/buyback proposed", "Engagement Partner", "Signed Board Solvency Declaration"),
+    "Draft special resolutions for constitutional amendments (memorandum Sec 79, articles Sec 81) or a change of name (Sec 26, with the Registrar's written approval first), give 21 days' notice and lodge a copy with the Registrar within one month (Secs 175 and 178).": ("Ad-hoc - constitutional amendment", "Corporate Secretary", "Filed Special Resolutions"),
+    "Enter each mortgage, registered security interest or debenture in the Register of Mortgages and Debentures within 14 days (Sec 155(1)(a)) and register the security as Sec 154 requires (Movable Property Security Interest Act or Deeds Registry); confirm any time limit under those Acts.": ("Debt/charge creation", "Legal/Secretariat", "Stamped Certificate of Mortgage/Charge"),
     "File the executed solvency certificates, filed special resolutions and registered security extracts.": ("Ad-hoc", "Legal/Secretariat", "Executed Solvency Certificates, Filed Special Resolutions & Registered Security Extracts"),
-    "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current re-registration deadline, fee and document list with the Registrar (these have been extended and revised before).": ("Engagement start", "Senior Secretariat", "Re-registration status note & confirmed deadline/fee"),
+    "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current re-registration deadline, fee and document list with the Registrar (these have been extended and revised before). The Act's own period was twelve months from the effective date (Sec 303(9)); a company not re-registered is struck off (Sec 303(12)).": ("Engagement start", "Senior Secretariat", "Re-registration status note & confirmed deadline/fee"),
     "Run a Registrar search to confirm the company's registration number and status, and clear any outstanding annual returns before applying.": ("Engagement start", "Compliance Officer", "Registrar search report & up-to-date annual returns"),
     "Collect the existing registration documents: Certificate of Incorporation, Memorandum and Articles of Association, CR5, CR6 and the latest annual return.": ("Engagement start", "Assistant Secretary", "Scanned registration document set"),
     "Confirm and update the details of every director, secretary and shareholder (names, ID numbers, dates of birth, addresses, contact details) and reconcile them to the statutory registers and the Register of Beneficial Ownership (Sec 72).": ("Before application", "Compliance Officer", "Verified director/shareholder/beneficial owner schedule"),
-    "Review the Memorandum and Articles against the COBE Act and prepare any amendments needed for approval by special resolution.": ("Before application", "Legal/Secretariat", "Amended Memorandum & Articles (draft)"),
+    "Review the Memorandum and Articles against the COBE Act and prepare any amendments needed for approval by special resolution. Amendments follow the ordinary formalities (Secs 79, 81 and 175) and may not be made 'under the guise of' re-registration (Sec 303(11)).": ("Before application", "Legal/Secretariat", "Amended Memorandum & Articles (draft)"),
     "Prepare the board resolution and the members' special resolution approving re-registration, and the signed authority or affidavit the Registrar requires.": ("Before application", "Corporate Secretary", "Signed board resolution, special resolution & authority/affidavit"),
     "Submit the re-registration application on the Registrar's online portal, upload the supporting documents and pay the prescribed fee.": ("Documents signed and complete", "Compliance Officer", "Submitted application & fee receipt"),
     "Track the application with the Registrar and respond to any query or rejection until it is approved.": ("After submission", "Compliance Officer", "Registrar approval"),
@@ -3782,12 +3792,12 @@ SECRETARIAL_ANALYTICAL_REVIEW_POINTS = [
     ("Board & Governance Activity Trends", "Meeting frequency vs. business events - compare board/committee meeting frequency against major operational events (acquisitions, debt issuances, capital expenditure)."),
     ("Board & Governance Activity Trends", "Attendance & quorum patterns - verify statutory quorum compliance (e.g. independent director presence under Section 206) and identify persistent non-attendance risks."),
     ("Board & Governance Activity Trends", "Resolution volume vs. statutory triggers - track circular/written resolutions vs. physical meetings to check management isn't bypassing formal board deliberation on restricted matters."),
-    ("Ownership & Capital Structure Analytics", "Share allotment vs. authorised capital ratios - variance check between issued share capital, share premium, and authorised limits in the Memorandum/Articles before processing new allotments (Section 93 & 95)."),
-    ("Ownership & Capital Structure Analytics", "Beneficial ownership threshold analysis - analyse voting rights/shareholding aggregation to identify individuals crossing the 20% beneficial ownership threshold (Section 72)."),
+    ("Ownership & Capital Structure Analytics", "Share allotment vs. authorised capital ratios - variance check between issued share capital, share premium, and authorised limits in the Memorandum/Articles before processing new allotments (Sections 96 and 121)."),
+    ("Ownership & Capital Structure Analytics", "Beneficial ownership threshold analysis - analyse voting rights/shareholding aggregation to identify individuals holding more than 20% of the shares or voting rights (Sections 2 and 72)."),
     ("Ownership & Capital Structure Analytics", "Dividend & distribution vs. solvency - cross-analyse cash/reserves against proposed distributions to check compliance with the statutory Solvency and Liquidity Test (Section 102)."),
     ("Statutory Filing & Timeline Variance Analysis", "Filing lag analysis - measure the time gap between corporate triggers (director appointments, share allotments, charge creations) and their actual filing dates with the Registrar."),
-    ("Statutory Filing & Timeline Variance Analysis", "Annual Return vs. financial year-end deadlines - track AGM dates against the statutory requirement (within 6 months of financial year-end) and Annual Return submission deadlines (Section 165)."),
-    ("Charge & Encumbrance Reconciliation", "Debt/security analytics - compare total registered mortgages, charges and debentures in the Register of Charges (Section 162) against outstanding borrowing facilities to identify unregistered or unfiled charges (Section 163-164)."),
+    ("Statutory Filing & Timeline Variance Analysis", "Annual Return and AGM timing - track AGM dates against the statutory requirement (once in every twelve months, Section 167(2)) and Annual Return filing against the 21 days after the anniversary of incorporation, registration or re-registration (Section 165(2))."),
+    ("Charge & Encumbrance Reconciliation", "Debt/security analytics - compare total registered mortgages, charges and debentures in the Register of Mortgages and Debentures (Section 155) against outstanding borrowing facilities to identify unrecorded or unregistered security (Sections 154-155)."),
 ]
 
 # Same non-numeric label+narrative treatment as SECRETARIAL_ANALYTICAL_
@@ -5229,10 +5239,14 @@ class SecretarialPlan(db.Model):
     # preparer can accept by typing it in, same "suggested, never
     # fabricated" pattern as scope_suggestion/suggested_categories
     # elsewhere in this app.
-    draft_financials_target = db.Column(db.Date)  # FYE + 3-4 months
-    agm_notice_target = db.Column(db.Date)  # FYE + 5 months (21 days before AGM, Sec 170)
-    agm_target = db.Column(db.Date)  # FYE + 6 months (Sec 167)
-    annual_return_target = db.Column(db.Date)  # AGM + 42 days (Sec 165, Form CR11/CR23)
+    draft_financials_target = db.Column(db.Date)  # firm target: FYE + 4 months (statements laid before the AGM, Sec 183)
+    agm_notice_target = db.Column(db.Date)  # 21 days before the AGM (Sec 169(1))
+    agm_target = db.Column(db.Date)  # firm target FYE + 6 months; the Act requires an AGM once in every 12 months (Sec 167(2))
+    annual_return_target = db.Column(db.Date)  # 21 days after the anniversary of incorporation / registration / re-registration (Sec 165(2))
+    # The date of incorporation, registration or re-registration whose anniversary the annual return is tied to (Sec 165(2)),
+    # and the date of the last AGM (Sec 167(2): one AGM in every twelve months). Both feed cobe_checks.calendar_suggestions.
+    registration_date = db.Column(db.Date)
+    last_agm_date = db.Column(db.Date)
     compliance_calendar_notes = db.Column(db.Text)
 
     # Pillar 3: Board & Committee Meeting Cycle
@@ -5800,6 +5814,19 @@ def vat_working_paper_by_currency(invoices):
     return out
 
 
+# Why input tax is not deductible, with the VAT Act reference (section 16(2) of the Value Added Tax Act [Chapter 23:12]).
+VAT_DENIAL_GROUNDS = [
+    ("entertainment", "Entertainment", "16(2)(a)"),
+    ("club", "Club, association or society subscription", "16(2)(b)"),
+    ("vehicle", "Motor vehicle (not within the proviso)", "16(2)(d)"),
+    ("export_tax", "Export tax on unbeneficiated minerals / hides", "16(2)(e)"),
+    ("scheme", "Medical scheme or superannuation fund supplies", "16(2)(c)"),
+    ("other", "Other - see the document's notes", "16"),
+]
+VAT_DENIAL_LABELS = {k: label for k, label, _r in VAT_DENIAL_GROUNDS}
+VAT_DENIAL_REFS = {k: r for k, _l, r in VAT_DENIAL_GROUNDS}
+
+
 def vat_working_paper_summary(invoices):
     """Totals for the VAT working paper, each document kind kept SEPARATE:
     {kind_code: {"count", "taxable", "vat"}} plus net Output/Input tax and
@@ -5822,7 +5849,35 @@ def vat_working_paper_summary(invoices):
     out["input_taxable"] = (buckets["input_invoice"]["taxable"] + buckets["bill_of_entry"]["taxable"]
                             - buckets["input_credit_note"]["taxable"])
     out["input_tax"] = buckets["input_invoice"]["vat"] + buckets["bill_of_entry"]["vat"] - buckets["input_credit_note"]["vat"]
-    out["net_position"] = out["output_tax"] - out["input_tax"]
+    # Section 16(2): input tax the Act does not allow. Denied documents stay in the register; their VAT is
+    # taken out of the claimable amount (a denied credit note received is taken out the other way round).
+    denied = 0.0
+    denied_count = 0
+    exempt_taxable = 0.0
+    zero_rated_taxable = 0.0
+    for inv in invoices:
+        code = vat_kind_code(inv.direction, inv.doc_type)
+        if code in ("input_invoice", "bill_of_entry") and getattr(inv, "input_tax_denied", False):
+            denied += inv.vat_amount or 0.0
+            denied_count += 1
+        elif code == "input_credit_note" and getattr(inv, "input_tax_denied", False):
+            denied -= inv.vat_amount or 0.0
+        rt = getattr(getattr(inv, "vat_rate", None), "rate_type", None)
+        sign = -1.0 if code == "output_credit_note" else 1.0
+        if code in ("output_invoice", "output_credit_note"):
+            if rt == "Exempt":
+                exempt_taxable += sign * (inv.taxable_amount or 0.0)
+            elif rt == "Zero-rated":
+                zero_rated_taxable += sign * (inv.taxable_amount or 0.0)
+        elif code == "export_sale":
+            zero_rated_taxable += inv.taxable_amount or 0.0
+    out["input_tax_denied"] = denied
+    out["input_tax_denied_count"] = denied_count
+    out["input_tax_claimable"] = out["input_tax"] - denied
+    out["output_exempt_taxable"] = exempt_taxable      # exempt supplies (section 11) are not taxable supplies
+    out["output_zero_rated_taxable"] = zero_rated_taxable   # zero-rated supplies (section 10) are taxable supplies at 0%
+    out["output_taxable_excl_exempt"] = out["output_taxable"] - exempt_taxable
+    out["net_position"] = out["output_tax"] - out["input_tax_claimable"]
     return out
 
 
@@ -5865,6 +5920,10 @@ class VATInvoice(db.Model):
     source = db.Column(db.String(10), nullable=False, default="manual")
     import_batch_id = db.Column(db.Integer, db.ForeignKey("vat_import_batch.id"))
     notes = db.Column(db.Text)
+    # Input tax the Act does not allow to be deducted (section 16(2)): the document stays in the register
+    # but its VAT is left out of the claimable Input Tax. denial_ground is one of VAT_DENIAL_GROUNDS.
+    input_tax_denied = db.Column(db.Boolean, nullable=False, default=False)
+    denial_ground = db.Column(db.String(30))
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -8291,7 +8350,7 @@ BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS = [
 # this engagement type (see ClientAcceptance.kyc_ubo_satisfactory etc. and
 # items_complete above).
 SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS = [
-    ("KYC & Ultimate Beneficial Ownership", "Who is the Ultimate Beneficial Owner (UBO) holding more than 20-25% of shares or voting rights?"),
+    ("KYC & Ultimate Beneficial Ownership", "Who are the Ultimate Beneficial Owners (UBOs) - natural persons holding more than 20% of the shares or voting rights, able to appoint or remove a majority of the directors, or otherwise in significant control (COBE Act Sec 2)?"),
     ("KYC & Ultimate Beneficial Ownership", "Are any of the directors, shareholders, or UBOs classified as a Politically Exposed Person (PEP) or close associates of a PEP?"),
     ("KYC & Ultimate Beneficial Ownership", "Do any names appear on international sanctions lists, anti-money laundering (AML) watchlists, or terrorist financing databases?"),
     ("KYC & Ultimate Beneficial Ownership", "What is the source of wealth and source of funds being used to capitalize the new company or fund the transaction?"),
@@ -8930,17 +8989,17 @@ BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS = [
 # CHECKLIST_ITEMS / BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS above.
 SECRETARIAL_FINALISATION_CHECKLIST_ITEMS = [
     ("Registry & Reconciliations", "Final registry search executed via Form CR2 (Search Application) to verify all lodgments processed during the period reflect on the public register? [SEC-FIN-01]"),
-    ("Registry & Reconciliations", "Annual/Statutory Return reconciled and stamped - Form CR23 (Statutory/Annual Return) and Form CR17 (Declaration of AGM) filed under Sec 165/166? [SEC-FIN-03]"),
-    ("Registry & Reconciliations", "Director/Secretary changes confirmed - all appointments, resignations, or address changes lodged on Form CR6 under Sec 217/241? [SEC-FIN-04]"),
-    ("Registry & Reconciliations", "Registered office changes verified on Form CR5 (Notice of Registered Office) under Sec 240? [SEC-FIN-05]"),
-    ("Registry & Reconciliations", "Share allotments verified on Form CR11 (Return of Allotments) under Sec 93 & 95?"),
-    ("Registry & Reconciliations", "Company Summary filed with the Registrar under the new COBE Act - form reference and filing deadline reconfirmed against current CIPO guidance (newly introduced requirement, not yet finalised when this item was added)?"),
-    ("Board & Governance Audit Trail", "Board/AGM minutes signed and bound - all draft minutes from Board, Committee, and General Meetings reviewed, signed by the Board Chairperson, and entered into the master minute book (Sec 170 & 176)? [SEC-FIN-02]"),
-    ("Board & Governance Audit Trail", "Special resolutions indexed and filed - Form CR8 returns bear CIPO stamp confirmations for all Special Resolutions passed during the year (Sec 176 & 178)? [SEC-FIN-07]"),
+    ("Registry & Reconciliations", "Annual return reconciled and stamped - filed within 21 days of the anniversary of incorporation, registration or re-registration (Sec 165(2)), and the AGM held within twelve months of the last one (Sec 167(2))? Form CR23 / Form CR17 references to be confirmed against the Registrar's current forms. [SEC-FIN-03]"),
+    ("Registry & Reconciliations", "Director/Secretary changes confirmed - all appointments, resignations, or address changes lodged on Form CR6 within one month (Sec 217(4)-(5))? [SEC-FIN-04]"),
+    ("Registry & Reconciliations", "Registered office and postal address changes verified on Form CR5 (Notice of Registered Office) under Sec 31? [SEC-FIN-05]"),
+    ("Registry & Reconciliations", "Share allotments verified on Form CR11 (Return of Allotments), lodged within one month of each allotment under Sec 121?"),
+    ("Registry & Reconciliations", "Company Summary - confirmed with the Registrar whether it is the same document as the annual return (Sec 165(1) calls the annual return a summary) or a separate return, and filed on the current form and deadline (not mentioned in the COBE Act as supplied)?"),
+    ("Board & Governance Audit Trail", "Board/AGM minutes signed and bound - all draft minutes from Board, Committee, and General Meetings reviewed, signed by the Board Chairperson, and entered into the master minute book (Sec 180 for members' meetings; Sec 205 for the board)? [SEC-FIN-02]"),
+    ("Board & Governance Audit Trail", "Special resolutions indexed and filed - Form CR8 returns bear CIPO stamp confirmations for all Special Resolutions passed during the year, each lodged within one month of being passed (Sec 175 & 178)? [SEC-FIN-07]"),
     ("Board & Governance Audit Trail", "Board action tracker closed out - a final summary of all action items compiled, completed tasks noted and unresolved matters rolled into the next period's planning cycle?"),
-    ("UBO & Capital Reconciliation", "UBO register and declarations reconciled - the confidential Register of Beneficial Ownership (Sec 72) reconciled and Form CR16 (Beneficial Ownership Declaration) confirmed submitted for any natural person holding more than 20% voting rights, direct/indirect interest, or control? [SEC-FIN-06]"),
-    ("UBO & Capital Reconciliation", "Register of Members and capital structure reconciled - share certificates issued or transferred (Sec 149 & 157) reconciled against authorised nominal share capital changes filed via Form CR10 (Increase of Nominal Capital) or Form CR9 (Conversion/Buy-Back of Shares)?"),
-    ("UBO & Capital Reconciliation", "Register of Charges and Debentures reconciled - all charges, mortgages, or satisfactions created or discharged during the year (Sec 162-164) matched against filings on Form CR12 (Satisfaction/Register of Mortgages & Charges)?"),
+    ("UBO & Capital Reconciliation", "UBO register and declarations reconciled - the Register of Beneficial Owners (Sec 72) reconciled and Form CR16 (Beneficial Ownership Declaration) confirmed submitted, with updates within seven days of any material change, for any natural person holding more than 20% voting rights, direct/indirect interest, or control? [SEC-FIN-06]"),
+    ("UBO & Capital Reconciliation", "Register of Members and capital structure reconciled - share certificates issued or transferred (Sec 151 & 159) reconciled against authorised nominal share capital changes filed via Form CR10 (Increase of Nominal Capital, within one month of the special resolution, Sec 141) or Form CR9 (Conversion/Buy-Back of Shares, Sec 140)?"),
+    ("UBO & Capital Reconciliation", "Register of Mortgages and Debentures reconciled - all charges, mortgages, or satisfactions created or discharged during the year (Sec 154-155) matched against filings on Form CR12 (Satisfaction/Register of Mortgages & Charges)?"),
     ("Final Deliverable Reporting Pack", "Annual Corporate Governance & Compliance Report issued (COBE statutory returns completed; governance meeting attendance matrix; solvency and liquidity compliance checks performed under Sec 102; high-risk governance or non-compliance gaps identified)? [SEC-FIN-08]"),
     ("Final Deliverable Reporting Pack", "Secretarial Management Letter issued, documenting administrative weaknesses and corrective action recommendations?"),
     ("Final Deliverable Reporting Pack", "Annual Governance Calendar draft provided to management for the upcoming financial year?"),

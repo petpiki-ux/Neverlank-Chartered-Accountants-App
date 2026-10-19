@@ -1500,29 +1500,62 @@
       <textarea id="constitutional_constraints" name="constitutional_constraints" rows="2">{{ secretarial_plan.constitutional_constraints if secretarial_plan else '' }}</textarea>
 
       <p class="section-title">2. Annual Statutory Compliance Calendar</p>
+      <p class="muted" style="font-size:11.5px;margin-top:0;">Dates follow the Companies and Other Business Entities Act (COBE Act). The annual return is tied to the company's <strong>registration anniversary</strong>, not to the AGM or the year-end (<a href="{{ url_for('tax.act_provision', code='cobe', ref='165(2)') }}">s165(2)</a>); an AGM is needed once in every twelve months (<a href="{{ url_for('tax.act_provision', code='cobe', ref='167(2)') }}">s167(2)</a>). See <a href="{{ url_for('tax.cobe_act_check') }}">the COBE Act beside the Secretarial module</a> for every time limit.</p>
       {% if not engagement.period_end %}
       <p class="muted" style="font-size:11.5px;">Set the engagement's period end (Overview tab) to see suggested dates below - they're a starting point only, never filled in automatically.</p>
       {% endif %}
+      {% macro date_val(d) %}{{ d.strftime('%Y-%m-%d') if d else '' }}{% endmacro %}
       <div class="form-row">
         <div>
-          <label for="draft_financials_target">Draft financial statements target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.draft_financials_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
-          <input type="date" id="draft_financials_target" name="draft_financials_target" value="{{ secretarial_plan.draft_financials_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.draft_financials_target else '' }}">
+          <label for="registration_date">Date of incorporation, registration or re-registration <span class="muted" style="font-weight:normal;">(s165(2), s303)</span></label>
+          <input type="date" id="registration_date" name="registration_date" value="{{ date_val(secretarial_plan.registration_date if secretarial_plan else None) }}">
+          <div class="muted" style="font-size:11px;">The annual return is due within 21 days of each anniversary of this date. Take it from the Certificate of Incorporation (or the re-registration certificate, if later).</div>
         </div>
         <div>
-          <label for="agm_notice_target">AGM notice target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.agm_notice_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
-          <input type="date" id="agm_notice_target" name="agm_notice_target" value="{{ secretarial_plan.agm_notice_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.agm_notice_target else '' }}">
+          <label for="last_agm_date">Date of the last AGM <span class="muted" style="font-weight:normal;">(s167(2))</span></label>
+          <input type="date" id="last_agm_date" name="last_agm_date" value="{{ date_val(secretarial_plan.last_agm_date if secretarial_plan else None) }}">
+          <div class="muted" style="font-size:11px;">The next AGM is due within twelve months of it.</div>
+        </div>
+      </div>
+      {% if secretarial_compliance_suggestions and secretarial_compliance_suggestions.warnings %}
+      <div style="border-left:3px solid #a33;padding:4px 10px;margin:6px 0;font-size:12px;">
+        {% for w in secretarial_compliance_suggestions.warnings %}<div>{{ w }}</div>{% endfor %}
+      </div>
+      {% endif %}
+      {% set sg = secretarial_compliance_suggestions %}
+      <div class="form-row">
+        <div>
+          <label for="draft_financials_target">Draft financial statements target{% if sg %} <span class="muted" style="font-weight:normal;">(suggested: {{ sg.draft_financials_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
+          <input type="date" id="draft_financials_target" name="draft_financials_target" value="{{ date_val(secretarial_plan.draft_financials_target if secretarial_plan else None) }}">
+          {% if sg %}<div class="muted" style="font-size:11px;">{{ sg.basis.draft_financials_target }}</div>{% endif %}
+        </div>
+        <div>
+          <label for="agm_notice_target">AGM notice target{% if sg %} <span class="muted" style="font-weight:normal;">(suggested: {{ sg.agm_notice_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
+          <input type="date" id="agm_notice_target" name="agm_notice_target" value="{{ date_val(secretarial_plan.agm_notice_target if secretarial_plan else None) }}">
+          {% if sg %}<div class="muted" style="font-size:11px;">{{ sg.basis.agm_notice_target }}</div>{% endif %}
         </div>
       </div>
       <div class="form-row">
         <div>
-          <label for="agm_target">AGM target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.agm_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
-          <input type="date" id="agm_target" name="agm_target" value="{{ secretarial_plan.agm_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.agm_target else '' }}">
+          <label for="agm_target">AGM target{% if sg %} <span class="muted" style="font-weight:normal;">(suggested: {{ sg.agm_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
+          <input type="date" id="agm_target" name="agm_target" value="{{ date_val(secretarial_plan.agm_target if secretarial_plan else None) }}">
+          {% if sg %}<div class="muted" style="font-size:11px;">{{ sg.basis.agm_target }} {{ sg.basis.agm_latest }}</div>{% endif %}
         </div>
         <div>
-          <label for="annual_return_target">Annual return (CR11/CR23) filing target{% if secretarial_compliance_suggestions %} <span class="muted" style="font-weight:normal;">(suggested: {{ secretarial_compliance_suggestions.annual_return_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
-          <input type="date" id="annual_return_target" name="annual_return_target" value="{{ secretarial_plan.annual_return_target.strftime('%Y-%m-%d') if secretarial_plan and secretarial_plan.annual_return_target else '' }}">
+          <label for="annual_return_target">Annual return filing target - last day{% if sg and sg.annual_return_target %} <span class="muted" style="font-weight:normal;">(suggested: {{ sg.annual_return_target.strftime('%d %b %Y') }})</span>{% endif %}</label>
+          <input type="date" id="annual_return_target" name="annual_return_target" value="{{ date_val(secretarial_plan.annual_return_target if secretarial_plan else None) }}">
+          {% if sg %}<div class="muted" style="font-size:11px;">{{ sg.basis.annual_return_target }}</div>{% endif %}
         </div>
       </div>
+      <details style="margin:8px 0;"><summary style="cursor:pointer;font-size:12.5px;"><strong>What the COBE Act sets as time limits</strong> (with links to each section)</summary>
+        <table style="font-size:12px;margin-top:6px;">
+          <tr><th style="width:24%;">Matter</th><th style="width:12%;">Sections</th><th>The Act</th></tr>
+          {% for topic, refs, rule, pen in cobe_deadlines %}
+          <tr><td>{{ topic }}</td><td>{% for r in refs %}{{ act_ref(r, text='s' ~ r, code='cobe') }}{% if not loop.last %}, {% endif %}{% endfor %}</td><td>{{ rule }}{% if pen %} <span class="muted">{{ pen }}</span>{% endif %}</td></tr>
+          {% endfor %}
+        </table>
+        <p class="muted" style="font-size:11px;">Taken from the consolidation supplied to the firm; a Partner should confirm against the Gazette. Not marked verified.</p>
+      </details>
       <label for="compliance_calendar_notes">Compliance calendar notes (other statutory deadlines - charges, share allotments, director changes, etc.)</label>
       <textarea id="compliance_calendar_notes" name="compliance_calendar_notes" rows="2">{{ secretarial_plan.compliance_calendar_notes if secretarial_plan else '' }}</textarea>
 
@@ -2857,6 +2890,19 @@
       {% endif %}
     </div>
 
+    {% if vat_return_due %}
+    <div style="margin:8px 0;padding:9px 12px;border:1px solid #d9d2c0;border-radius:6px;font-size:12.5px;background:rgba(184,146,58,.07);">
+      <strong>Return and payment due {{ vat_return_due.strftime('%d %B %Y') }}</strong> <span class="muted">({{ act_ref('28(1)', text='VAT Act s28(1)', code='vat') }}: the 25th of the month after the tax period; a two-month period is due the 25th after its second month, {{ act_ref('27(1)', text='s27', code='vat') }}).</span>
+      {% if vat_month_checks %}
+      <div style="margin-top:6px;"><strong>Points to look at in this month</strong> <span class="muted" style="font-size:11.5px;">(prompts from the VAT Act; nothing is changed for you)</span></div>
+      <ul style="margin:4px 0 0 18px;padding:0;">
+        {% for f in vat_month_checks %}<li style="margin-bottom:3px;{% if f.level == 'note' %}color:#6b6b6b;{% endif %}">{{ f.text }} <span class="muted" style="font-size:11.5px;">[{{ act_ref(f.ref, text='s' ~ f.ref, code='vat') }}]</span></li>{% endfor %}
+      </ul>
+      {% endif %}
+      <div class="muted" style="font-size:11.5px;margin-top:6px;"><a href="{{ url_for('tax.vat_act_check') }}">The VAT Act beside this register</a> &middot; <a href="{{ url_for('tax.act_contents', code='vat') }}">VAT Act, section by section</a></div>
+    </div>
+    {% endif %}
+
     <p class="muted" style="font-size:11.5px;">ZIMRA requires VAT to be accounted for and paid in the currency of trade, so each currency below is its own VAT working paper and net position - ZWG and USD are never added together or set off against each other.</p>
         {% for cur, sm in vat_by_currency.items() %}
     <div class="card" style="margin:12px 0;padding:12px;border-left:4px solid #b8923a;">
@@ -2865,12 +2911,14 @@
       <div class="card" style="flex:1;min-width:160px;padding:10px;">
         <div class="muted" style="font-size:11px;">Net Output Tax</div>
         <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.output_tax) }}</div>
-        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(sm.output_taxable) }} net taxable sales (after credit notes)</div>
+        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(sm.output_taxable_excl_exempt) }} net taxable sales (after credit notes){% if sm.output_zero_rated_taxable %}, of which {{ '%.2f'|format(sm.output_zero_rated_taxable) }} zero-rated{% endif %}</div>
+        {% if sm.output_exempt_taxable %}<div class="muted" style="font-size:11px;">plus {{ '%.2f'|format(sm.output_exempt_taxable) }} exempt sales, not taxable supplies ({{ act_ref('11', text='s11', code='vat') }})</div>{% endif %}
       </div>
       <div class="card" style="flex:1;min-width:160px;padding:10px;">
         <div class="muted" style="font-size:11px;">Net Input Tax</div>
-        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.input_tax) }}</div>
+        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.input_tax_claimable) }}</div>
         <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(sm.input_taxable) }} net taxable purchases &amp; imports (after credit notes)</div>
+        {% if sm.input_tax_denied %}<div class="muted" style="font-size:11px;">{{ '%.2f'|format(sm.input_tax) }} captured less {{ '%.2f'|format(sm.input_tax_denied) }} not deductible ({{ act_ref('16(2)', text='s16(2)', code='vat') }})</div>{% endif %}
       </div>
       <div class="card" style="flex:1;min-width:160px;padding:10px;">
         <div class="muted" style="font-size:11px;">Net VAT position</div>
@@ -2894,7 +2942,9 @@
         <tr><td>Purchase/expense invoices</td><td class="text-right">{{ vb.input_invoice.count }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.vat) }}</td></tr>
         <tr><td>Bills of Entry <span class="muted" style="font-size:11px;">(import VAT{% if vb.bill_of_entry.duty %}; customs duty {{ '%.2f'|format(vb.bill_of_entry.duty) }}{% endif %})</span></td><td class="text-right">{{ vb.bill_of_entry.count }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.vat) }}</td></tr>
         <tr><td>Less: credit notes received</td><td class="text-right">{{ vb.input_credit_note.count }}</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.taxable) }})</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.vat) }})</td></tr>
-        <tr style="font-weight:600;"><td>Net Input Tax</td><td></td><td class="text-right">{{ '%.2f'|format(sm.input_taxable) }}</td><td class="text-right">{{ '%.2f'|format(sm.input_tax) }}</td></tr>
+        <tr style="font-weight:600;"><td>Net Input Tax as captured</td><td></td><td class="text-right">{{ '%.2f'|format(sm.input_taxable) }}</td><td class="text-right">{{ '%.2f'|format(sm.input_tax) }}</td></tr>
+        {% if sm.input_tax_denied %}<tr><td>Less: input tax not deductible <span class="muted" style="font-size:11px;">({{ sm.input_tax_denied_count }} document(s), {{ act_ref('16(2)', text='section 16(2)', code='vat') }})</span></td><td></td><td></td><td class="text-right">({{ '%.2f'|format(sm.input_tax_denied) }})</td></tr>
+        <tr style="font-weight:600;"><td>Input Tax claimable</td><td></td><td></td><td class="text-right">{{ '%.2f'|format(sm.input_tax_claimable) }}</td></tr>{% endif %}
       </tbody>
       <tbody>
         <tr style="font-weight:700;"><td colspan="3">Net VAT {% if sm.net_position > 0 %}payable to ZIMRA in {{ cur }}{% elif sm.net_position < 0 %}refundable{% else %}position (nil){% endif %}</td><td class="text-right">{{ '%.2f'|format(sm.net_position|abs) }}</td></tr>
@@ -2921,8 +2971,12 @@
           {% if ktype == 'Bill of Entry' %}<td>{{ ('%.2f'|format(inv.customs_duty)) if inv.customs_duty is not none else '—' }}</td>{% endif %}
           <td>{{ ('%.2f'|format(inv.vat_rate_percent_used) + '%') if inv.vat_rate_percent_used is not none else '—' }}</td>
           <td>{{ '%.2f'|format(inv.vat_amount) }}</td>
-          <td>{{ '%.2f'|format(inv.total_amount) }}</td>
-          <td class="muted" style="font-size:11px;">{{ inv.source }}</td>
+          <td>{{ '%.2f'|format(inv.total_amount) }}{% if inv.input_tax_denied %}<div style="font-size:11px;color:#a33;">Not deductible: {{ vat_denial_labels.get(inv.denial_ground, 'see notes') }}</div>{% endif %}</td>
+          <td class="muted" style="font-size:11px;">{{ inv.source }}{% if kdir == 'Input' and vat_selected_period and not vat_selected_period.is_done %}
+            <form method="post" action="{{ url_for('tax.set_vat_input_denial', invoice_id=inv.id) }}" class="inline" style="display:block;margin-top:3px;">
+              {% if inv.input_tax_denied %}<input type="hidden" name="action" value="restore"><button type="submit" class="btn small secondary" title="Put this document's VAT back into the Input Tax claim">Claim again</button>
+              {% else %}<select name="ground" title="Input tax the VAT Act (section 16(2)) does not allow">{% for gk, gl, gr in vat_denial_grounds %}<option value="{{ gk }}">{{ gl }} (s{{ gr }})</option>{% endfor %}</select><button type="submit" class="btn small secondary" title="Leave this document's VAT out of the claim">Not deductible</button>{% endif %}
+            </form>{% endif %}</td>
           <td>{% if vat_selected_period.is_done %}{{ inv.currency or vat_default_currency }}{% else %}<form method="post" action="{{ url_for('tax.set_vat_invoice_currency', invoice_id=inv.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change currency of trade">{% for c2 in vat_currencies %}<option value="{{ c2 }}" {% if (inv.currency or vat_default_currency) == c2 %}selected{% endif %}>{{ c2 }}</option>{% endfor %}</select></form>{% endif %}</td>
           <td>{% if vat_selected_period.is_done %}<span class="muted" style="font-size:11px;">Locked</span>{% else %}<form method="post" action="{{ url_for('tax.delete_vat_invoice', invoice_id=inv.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>{% endif %}</td>
         </tr>

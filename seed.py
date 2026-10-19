@@ -201,43 +201,43 @@ FORENSIC_PROGRAM = [
 # (name, type, description, procedure list)
 SECRETARIAL_PROGRAM = [
     # Client acceptance & onboarding
-    ("1. Acceptance & Onboarding", "Complete KYC and identify the ultimate beneficial owners of the client (natural persons holding 20% or more of shares or voting rights)."),
+    ("1. Acceptance & Onboarding", "Complete KYC and identify the ultimate beneficial owners of the client (natural persons holding more than 20% of shares or voting rights, or otherwise in significant control - Sec 2)."),
     ("1. Acceptance & Onboarding", "Complete the Secretarial Client Acceptance Checklist (conflicts, risk profile, capacity) and obtain the Engagement Partner's accept/decline decision."),
     ("1. Acceptance & Onboarding", "Issue the engagement letter setting out the secretarial services, fees and responsibilities, and obtain the client's countersignature."),
     ("1. Acceptance & Onboarding", "Obtain a Registrar of Companies search and confirm the company's name, registration number, status and registered office."),
     ("1. Acceptance & Onboarding", "Obtain the Certificate of Incorporation, Memorandum and Articles of Association, and the latest annual return."),
     ("1. Acceptance & Onboarding", "Record the engagement's Secretarial activities (incorporation, directorship, share capital, meetings, constitutional changes, statutory records, re-registration) so the right workstreams apply."),
     # Constitution and governance
-    ("2. Constitutional Documents & Governance", "Review the Memorandum and Articles for authorised share classes, board powers, borrowing limits (Sec 196) and pre-emption rights."),
-    ("2. Constitutional Documents & Governance", "Confirm the board meets the minimum director requirements for the company type (Sec 195; public companies Sec 206)."),
-    ("2. Constitutional Documents & Governance", "Confirm the company secretary is appointed and the appointment is lodged with the Registrar."),
-    ("2. Constitutional Documents & Governance", "Confirm directors' interests, conflicts and loans to directors or officers are disclosed and approved (Secs 211 and 216)."),
+    ("2. Constitutional Documents & Governance", "Review the Memorandum and Articles for authorised share classes, board powers, borrowing limits and pre-emption rights (Secs 99 and 139)."),
+    ("2. Constitutional Documents & Governance", "Confirm the board meets the director requirements for the company type, including one director ordinarily resident in Zimbabwe (Sec 195; public companies Sec 206)."),
+    ("2. Constitutional Documents & Governance", "Confirm the company secretary is appointed, is ordinarily resident in Zimbabwe, is qualified if the company is public, and that the appointment is notified to the Registrar within one month (Secs 198 and 217)."),
+    ("2. Constitutional Documents & Governance", "Confirm directors' conflicts of interest (Secs 56-57) are disclosed and loans to directors or officers are within the exceptions in Sec 208 and disclosed as Sec 216 requires."),
     # Statutory registers
-    ("3. Statutory Registers", "Update and reconcile the Register of Members (Sec 157) to executed share transfers and allotments."),
-    ("3. Statutory Registers", "Update the Register of Directors and Secretaries (Sec 215) and the Register of Directors' Interests (Sec 211)."),
-    ("3. Statutory Registers", "Update the Register of Beneficial Ownership (Sec 72) and confirm no nominee holding exceeds the 20% cap."),
-    ("3. Statutory Registers", "Update the Register of Mortgages, Debentures and Charges (Sec 162) and reconcile it to outstanding facilities."),
+    ("3. Statutory Registers", "Update and reconcile the Register of Members (Sec 159) to executed share transfers and allotments."),
+    ("3. Statutory Registers", "Update the Register of Directors and Secretaries (Sec 217) and, for a company other than a private company, the Register of Directors' Share Holdings (Sec 213)."),
+    ("3. Statutory Registers", "Update the Register of Beneficial Owners (Sec 72), file updates within seven days of a material change, and confirm nominee holdings meet Sec 73(2)(a)."),
+    ("3. Statutory Registers", "Update the Register of Mortgages and Debentures within 14 days of each hypothecation (Sec 155) and reconcile it to outstanding facilities."),
     ("3. Statutory Registers", "Confirm all registers and the minute books are kept at the registered office and available for inspection."),
     # Meetings
     ("4. Board & General Meetings", "Prepare and circulate the annual governance calendar to the board."),
-    ("4. Board & General Meetings", "Issue the Notice of AGM at least 21 days before the meeting (Sec 170) with proxy forms and the financial statements."),
+    ("4. Board & General Meetings", "Issue the Notice of AGM at least 21 days before the meeting (Sec 169(1)) with proxy forms and the financial statements."),
     ("4. Board & General Meetings", "Dispatch board packs 7-10 days before each scheduled meeting."),
-    ("4. Board & General Meetings", "Attend meetings, record proceedings and issue draft minutes within 5 working days (Sec 176)."),
+    ("4. Board & General Meetings", "Attend meetings, record proceedings and issue draft minutes within 5 working days (the Act allows 20 days for members' meetings, Sec 180; board minutes Sec 205)."),
     ("4. Board & General Meetings", "Obtain signatures on approved minutes and resolutions and file them in the minute books; update the action tracker."),
     # Filings
-    ("5. Annual & Event-driven Filings", "Lodge the Annual Return (Form CR11) with the Registrar within 42 days of the AGM (Sec 165)."),
-    ("5. Annual & Event-driven Filings", "File Form CR6 within 14 days of any change in directors or secretaries (Sec 215)."),
-    ("5. Annual & Event-driven Filings", "File Form CR5 within 14 days of any change of registered office (Sec 160)."),
-    ("5. Annual & Event-driven Filings", "Lodge the Company Summary return required under the COBE Act - reconfirm the prescribed form and deadline with the Registrar."),
+    ("5. Annual & Event-driven Filings", "Lodge the Annual Return with the Registrar within 21 days of the anniversary of the company's incorporation, registration or re-registration (Sec 165(2))."),
+    ("5. Annual & Event-driven Filings", "File Form CR6 within one month of any change in directors or secretaries (Sec 217)."),
+    ("5. Annual & Event-driven Filings", "Record and notify any change of registered office or postal address on Form CR5 (Sec 31; the Act sets no number of days)."),
+    ("5. Annual & Event-driven Filings", "Confirm whether the Company Summary return is the same as the annual return (Sec 165(1)) or a separate return, and reconfirm its prescribed form and deadline with the Registrar."),
     ("5. Annual & Event-driven Filings", "File stamped certificates and Registrar acknowledgments for every filing on the client file."),
     # Share capital and corporate actions
-    ("6. Share Capital & Corporate Actions", "File returns of allotment after board approval of any share issue (Secs 93 and 95)."),
-    ("6. Share Capital & Corporate Actions", "Process share transfers and update the Register of Members (Sec 149)."),
-    ("6. Share Capital & Corporate Actions", "Before any distribution, buyback or financial assistance, obtain the board's Solvency and Liquidity Test certificate (Secs 102 and 104)."),
-    ("6. Share Capital & Corporate Actions", "Draft and file special resolutions for constitutional amendments or name changes (Secs 16 and 25)."),
-    ("6. Share Capital & Corporate Actions", "Register mortgages and debentures with the Registrar within 30 days of creation (Sec 163)."),
+    ("6. Share Capital & Corporate Actions", "File the return of allotments within one month of any share issue (Sec 121)."),
+    ("6. Share Capital & Corporate Actions", "Process share transfers on a proper instrument of transfer and update the Register of Members (Secs 151 and 159)."),
+    ("6. Share Capital & Corporate Actions", "Before any distribution, obtain the board's resolution acknowledging the Solvency and Liquidity Test (Secs 102 and 138); a buy-back also needs general-meeting authority (Secs 128-129)."),
+    ("6. Share Capital & Corporate Actions", "Draft and file special resolutions for constitutional amendments or name changes (Secs 79, 81, 26, 175 and 178); a copy goes to the Registrar within one month."),
+    ("6. Share Capital & Corporate Actions", "Enter mortgages, security interests and debentures in the register within 14 days and register the security as the Act directs (Secs 154-155)."),
     # Re-registration
-    ("7. Company Re-registration (if applicable)", "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current deadline, fee and document list with the Registrar."),
+    ("7. Company Re-registration (if applicable)", "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current deadline, fee and document list with the Registrar (the Act's own period was twelve months from the effective date, Sec 303(9))."),
     ("7. Company Re-registration (if applicable)", "Clear any outstanding annual returns - the Registrar asks for proof they are up to date."),
     ("7. Company Re-registration (if applicable)", "Collect scans of the Certificate of Incorporation, Memorandum and Articles, CR5, CR6 and the latest annual return."),
     ("7. Company Re-registration (if applicable)", "Confirm and update director, secretary, shareholder and beneficial owner details."),
@@ -518,6 +518,46 @@ def migrate_cr_form_codes():
         db.session.commit()
 
 
+def migrate_cobe_wording():
+    """Bring wording already stored in an existing database into line with the corrected Secretarial text (section numbers and
+    time limits checked against the Companies and Other Business Entities Act [Chapter 24:31] - see cobe_checks.py and the
+    pairs in cobe_text_updates.py). Covers the Secretarial entity-understanding questions, Execution Plan tasks (with their
+    trigger and target output), the Secretarial engagement checklist template and the checklists copied from it, analytical
+    review points, client-acceptance questions and finalisation checklists.
+
+    A row is changed ONLY when its text still equals the old text exactly, so anything a staff member has edited by hand,
+    and any answer already given, is left alone. Safe to call on every startup: once a row is updated there is nothing left
+    to match. Run it BEFORE migrate_secretarial_finalisation_company_summary, which looks for the new Company Summary line."""
+    import cobe_text_updates as u
+    from models import (EntityUnderstandingChecklistItem, EngagementChecklistItem, AnalyticalReviewLine,
+                        ClientAcceptanceChecklistItem)
+    changed = False
+
+    def swap(model, column, pairs):
+        nonlocal changed
+        for old, new in pairs:
+            for row in model.query.filter(getattr(model, column) == old).all():
+                setattr(row, column, new)
+                changed = True
+
+    swap(EntityUnderstandingChecklistItem, "item_text", u.ENTITY_PAIRS)
+    swap(ChecklistTemplateItem, "item_text", u.PROGRAM_PAIRS)
+    swap(EngagementChecklistItem, "item_text", u.PROGRAM_PAIRS)
+    swap(AnalyticalReviewLine, "label", u.ANALYTICAL_PAIRS)
+    swap(ClientAcceptanceChecklistItem, "item_text", u.ACCEPTANCE_PAIRS)
+    swap(FinalisationChecklistItem, "item_text", u.FINAL_PAIRS)
+    for old, new, old_trigger, new_trigger, old_output, new_output in u.EXEC_PAIRS:
+        for row in SubstantiveProcedureItem.query.filter_by(procedure_text=old).all():
+            row.procedure_text = new
+            if old_trigger and row.trigger_event == old_trigger:
+                row.trigger_event = new_trigger
+            if old_output and row.target_output == old_output:
+                row.target_output = new_output
+            changed = True
+    if changed:
+        db.session.commit()
+
+
 # The new "Company Summary" line added to SECRETARIAL_FINALISATION_
 # CHECKLIST_ITEMS["Registry & Reconciliations"] in models.py - unlike
 # SubstantiveProcedureItem above, FinalisationChecklistItem rows are only
@@ -528,9 +568,9 @@ def migrate_cr_form_codes():
 # every Secretarial engagement's checklist that's missing it.
 SECRETARIAL_FINALISATION_COMPANY_SUMMARY_ITEM = (
     "Registry & Reconciliations",
-    "Company Summary filed with the Registrar under the new COBE Act - form reference and filing deadline "
-    "reconfirmed against current CIPO guidance (newly introduced requirement, not yet finalised when this item "
-    "was added)?",
+    "Company Summary - confirmed with the Registrar whether it is the same document as the annual return "
+    "(Sec 165(1) calls the annual return a summary) or a separate return, and filed on the current form and "
+    "deadline (not mentioned in the COBE Act as supplied)?",
 )
 
 

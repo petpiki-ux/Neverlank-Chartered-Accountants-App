@@ -49,7 +49,7 @@ from models import (
     TaxReturnRecord, TAX_RETURN_STATUSES,
     TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
     VATRate, VAT_RATE_TYPES,
-    VAT_CURRENCIES, VAT_DEFAULT_CURRENCY, normalize_vat_currency,
+    VAT_CURRENCIES, VAT_DEFAULT_CURRENCY, normalize_vat_currency, VAT_DENIAL_GROUNDS, VAT_DENIAL_LABELS,
     VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_INVOICE_SOURCES,
     VATImportBatch, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, resolve_vat_kind, vat_kind_code,
     VATPeriod, vat_period_key, vat_period_label, vat_period_of, parse_vat_period_key, vat_locked_months_among,
@@ -69,6 +69,7 @@ import legislation_search
 import legislation_index
 import legislation_chunking
 import act_import
+import vat_checks
 
 tax_bp = Blueprint("tax", __name__, url_prefix="/tax")
 
@@ -1334,6 +1335,65 @@ def set_vat_invoice_currency(invoice_id):
     return _tax_redirect(invoice.engagement_id, period_arg)
 
 
+@tax_bp.route("/vat/invoices/<int:invoice_id>/denial", methods=["POST"])
+@login_required
+def set_vat_input_denial(invoice_id):
+    """Mark one input document's VAT as not deductible (VAT Act section 16(2)), or put it back. The document stays in the
+    register; only the claim changes. A completed month is locked like every other change to it."""
+    invoice = VATInvoice.query.get_or_404(invoice_id)
+    _ensure_engagement_access(invoice.engagement)
+    period_arg = _vat_doc_period_arg(invoice.invoice_date)
+    locked = vat_locked_months_among(invoice.engagement_id, [invoice.invoice_date])
+    if locked:
+        flash(_locked_message(locked, "this document's deduction cannot be changed"), "danger")
+        return _tax_redirect(invoice.engagement_id, period_arg)
+    if invoice.direction != "Input":
+        flash("Only input tax (purchases, imports and credit notes received) can be marked as not deductible.", "danger")
+        return _tax_redirect(invoice.engagement_id, period_arg)
+    if request.form.get("action") == "restore":
+        invoice.input_tax_denied = False
+        invoice.denial_ground = None
+        flash("The document's VAT is back in the Input Tax claim.", "success")
+    else:
+        ground = request.form.get("ground") or "other"
+        if ground not in VAT_DENIAL_LABELS:
+            ground = "other"
+        invoice.input_tax_denied = True
+        invoice.denial_ground = ground
+        flash("The document's VAT is left out of the Input Tax claim (%s, section %s of the VAT Act)." % (
+            VAT_DENIAL_LABELS[ground], dict((k, r) for k, _l, r in VAT_DENIAL_GROUNDS)[ground]), "success")
+    db.session.commit()
+    return _tax_redirect(invoice.engagement_id, period_arg)
+
+
+@tax_bp.route("/vat-act")
+@login_required
+def vat_act_check():
+    """The Value Added Tax Act set beside the VAT register: what the Act says (in its own words, from the filed Act), what the register does, and where they differ."""
+    st = act_import.status("vat")
+    counts = {}
+    for f in vat_checks.FINDINGS:
+        counts[f["result"]] = counts.get(f["result"], 0) + 1
+    return render_template("tax/vat_act_check.html", findings=vat_checks.FINDINGS, result_labels=vat_checks.RESULT_LABELS, st=st, counts=counts,
+                           can_load=user_has_permission(current_user, "manage_legislative_updates"))
+
+
+@tax_bp.route("/cobe-act")
+@login_required
+def cobe_act_check():
+    """The Companies and Other Business Entities Act set beside the Secretarial module: what the Act says (in its own words, from the filed Act),
+    what the module does, and where they differ - plus the Act's time limits, the section numbers that were corrected and the civil penalty categories."""
+    import cobe_checks
+    st = act_import.status("cobe")
+    counts = {}
+    for f in cobe_checks.FINDINGS:
+        counts[f["result"]] = counts.get(f["result"], 0) + 1
+    return render_template("tax/cobe_act_check.html", findings=cobe_checks.FINDINGS, result_labels=cobe_checks.RESULT_LABELS, st=st, counts=counts,
+                           deadlines=cobe_checks.DEADLINES, corrections=cobe_checks.SECTION_CORRECTIONS,
+                           penalty_categories=cobe_checks.CIVIL_PENALTY_CATEGORIES, late_table=cobe_checks.LATE_FILING_TABLE,
+                           can_load=user_has_permission(current_user, "manage_legislative_updates"))
+
+
 @tax_bp.route("/vat/import-batches/<int:batch_id>/currency", methods=["POST"])
 @login_required
 def set_vat_import_batch_currency(batch_id):
@@ -2145,7 +2205,7 @@ def act_load(code):
         flash(w, "warning")
     try:
         import prohibited_deductions
-        n = prohibited_deductions.align_with_act()
+        n = prohibited_deductions.align_with_act() if code == "ita" else 0
         if n:
             flash("%d rule%s on the Section 16 rules page were brought into line with the Act's wording (they remain unverified until you tick them)." % (n, "" if n == 1 else "s"), "info")
     except Exception:

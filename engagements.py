@@ -64,7 +64,7 @@ from models import (
     TAX_POSITION_CLASSIFICATIONS, TAX_POSITION_APPROVAL_STATUSES,
     PenaltyInterestRate, PenaltyInterestCalculation, PENALTY_INTEREST_RATE_TYPES,
     VATRate, VAT_RATE_TYPES,
-    VATInvoice, VATPeriod, vat_period_key, vat_period_label, parse_vat_period_key, vat_period_of, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, vat_working_paper_summary, vat_working_paper_by_currency, VAT_CURRENCIES, VAT_DEFAULT_CURRENCY,
+    VATInvoice, VATPeriod, vat_period_key, vat_period_label, parse_vat_period_key, vat_period_of, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, vat_working_paper_summary, vat_working_paper_by_currency, VAT_CURRENCIES, VAT_DEFAULT_CURRENCY, VAT_DENIAL_GROUNDS, VAT_DENIAL_LABELS,
     VATImportBatch,
     TaxInformationRequest, TAX_INFO_REQUEST_STATUSES,
     TaxReturnRecord, TAX_RETURN_STATUSES,
@@ -479,33 +479,25 @@ def delete_engagement(engagement_id):
     return redirect(url_for("clients.view_client", client_id=client_id))
 
 
-def _secretarial_compliance_calendar_suggestions(period_end):
+def _secretarial_compliance_calendar_suggestions(period_end, plan=None):
     """Suggested (never auto-filled) dates for the four Annual Statutory
     Compliance Calendar milestones on the Secretarial Engagement Plan's
-    Pillar 2, anchored on the client's financial year-end - see
-    SecretarialPlan.draft_financials_target etc. Returns None if the
+    Pillar 2 - see SecretarialPlan.draft_financials_target etc. Worked out
+    from the Companies and Other Business Entities Act in cobe_checks.
+    calendar_suggestions: the annual return is due 21 days after the
+    anniversary of the company's incorporation / registration /
+    re-registration (s165(2)), an AGM is needed once in every twelve months
+    (s167(2)) and needs 21 days' notice (s169(1)). Returns None if the
     engagement has no period_end set yet, same "nothing to suggest until
     there's a real date to anchor on" behaviour as elsewhere in this app.
     Purely a hint shown next to each date field; the preparer always types
     (or overrides) the actual date themselves."""
-    if not period_end:
-        return None
-
-    def _add_months(d, months):
-        month = d.month - 1 + months
-        year = d.year + month // 12
-        month = month % 12 + 1
-        day = min(d.day, [31, 29 if year % 4 == 0 and (year % 100 != 0 or year % 400 == 0) else 28,
-                          31, 30, 31, 30, 31, 31, 30, 31, 30, 31][month - 1])
-        return date(year, month, day)
-
-    agm_target = _add_months(period_end, 6)
-    return {
-        "draft_financials_target": _add_months(period_end, 4),
-        "agm_notice_target": agm_target - timedelta(days=21),
-        "agm_target": agm_target,
-        "annual_return_target": agm_target + timedelta(days=42),
-    }
+    import cobe_checks
+    return cobe_checks.calendar_suggestions(
+        period_end,
+        registration_date=plan.registration_date if plan else None,
+        last_agm_date=plan.last_agm_date if plan else None,
+    )
 
 
 @engagements_bp.route("/<int:engagement_id>")
@@ -601,7 +593,7 @@ def view_engagement(engagement_id):
     # with on a Secretarial engagement, exactly like audit_strategy above
     # replaces it for an Investigative Engagement.
     secretarial_plan = SecretarialPlan.query.filter_by(engagement_id=engagement_id).first() if is_secretarial else None
-    secretarial_compliance_suggestions = _secretarial_compliance_calendar_suggestions(engagement.period_end) if is_secretarial else None
+    secretarial_compliance_suggestions = _secretarial_compliance_calendar_suggestions(engagement.period_end, secretarial_plan) if is_secretarial else None
     entity_understanding = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
     # Public-information scans live on the Client (see models.
     # EntityPublicResearch/company_documents.run_public_research) since the
@@ -935,6 +927,16 @@ def view_engagement(engagement_id):
         for cur in vat_by_currency
     }
 
+    # Points to look at in the opened month, each tied to the VAT Act (vat_checks.py). Prompts only.
+    vat_month_checks = []
+    vat_return_due = None
+    if vat_selected_period and vat_selected_key and vat_selected_key != "undated":
+        _ym = parse_vat_period_key(vat_selected_key)
+        if _ym:
+            import vat_checks
+            vat_return_due = vat_checks.return_due_date(*_ym)
+            vat_month_checks = vat_checks.month_checks(vat_selected_docs, _ym[0], _ym[1], is_done=bool(vat_selected_period.get("is_done")))
+
     # ---------- Accounting tab (Financial/Cost/Management Accounting module) ----------
     # Only actually queried when the Accounting tab could be shown - see
     # Engagement.has_accounting_module / the module comment in models.py for
@@ -1124,6 +1126,10 @@ def view_engagement(engagement_id):
         vat_invoices_by_kind=vat_invoices_by_kind,
         engagement_tasks_sorted=engagement_tasks_sorted, ready_to_bill_count=ready_to_bill_count,
         vat_by_currency=vat_by_currency,
+        vat_month_checks=vat_month_checks,
+        vat_return_due=vat_return_due,
+        vat_denial_grounds=VAT_DENIAL_GROUNDS,
+        vat_denial_labels=VAT_DENIAL_LABELS,
         zimra_cases=sorted(engagement.zimra_cases, key=lambda c: (c.is_closed, -(c.id or 0))),
         vat_periods=vat_periods, vat_undated_docs=vat_undated_docs,
         vat_selected_key=vat_selected_key, vat_selected_period=vat_selected_period,
@@ -3044,7 +3050,7 @@ def save_secretarial_plan(engagement_id):
     plan.sector_regulators = request.form.get("sector_regulators", "").strip()
     plan.constitutional_constraints = request.form.get("constitutional_constraints", "").strip()
 
-    for field in ("draft_financials_target", "agm_notice_target", "agm_target", "annual_return_target"):
+    for field in ("registration_date", "last_agm_date", "draft_financials_target", "agm_notice_target", "agm_target", "annual_return_target"):
         raw = request.form.get(field, "").strip()
         setattr(plan, field, datetime.strptime(raw, "%Y-%m-%d").date() if raw else None)
     plan.compliance_calendar_notes = request.form.get("compliance_calendar_notes", "").strip()

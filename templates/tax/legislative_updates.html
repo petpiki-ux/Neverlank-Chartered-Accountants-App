@@ -16,6 +16,8 @@
     words highlighted and a link to the exact passage. Handles word endings, typos and short forms (VAT, QPD, SI 33 of 2024). You can also
     paste a whole client situation and the topics to cover.
     <strong>The Income Tax Act [Chapter 23:06]</strong> is filed section by section: <a href="{{ url_for('tax.act_contents', code='ita') }}">open its contents</a> to go straight to any section or schedule.
+    The <strong>Value Added Tax Act [Chapter 23:12]</strong> is filed the same way: <a href="{{ url_for('tax.act_contents', code='vat') }}">open its contents</a>.
+    The <strong>Companies and Other Business Entities Act [Chapter 24:31]</strong> too: <a href="{{ url_for('tax.act_contents', code='cobe') }}">open its contents</a>, or see how the Secretarial module <a href="{{ url_for('tax.cobe_act_check') }}">compares with it</a>.
   </p>
   <form method="get" action="{{ url_for('tax.search_legislative_updates') }}" class="form-row">
     <div style="flex:4;"><input type="text" name="q" placeholder="Search the filed legislation..." required></div>
