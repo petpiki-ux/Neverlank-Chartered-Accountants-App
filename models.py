@@ -5329,6 +5329,41 @@ TAX_REGISTRATION_RECORD_TYPES = [
 ]
 
 
+class RegistryFormFiling(db.Model):
+    """One filing with the Registrar of Companies on a Secretarial engagement: which CR form (cr_forms.CR_FORMS), what it is
+    about, the date of the event that triggers it, the date it must be lodged by (worked out from the Act's time limit where
+    there is one, or typed by the preparer), and where it stands. A log for the preparer. It does not file anything and nothing
+    in it is marked verified."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, index=True)
+    form_code = db.Column(db.String(10), nullable=False)  # "CR6", "AR", "RR" ...
+    subject = db.Column(db.String(300))  # e.g. "Appointment of J. Moyo as director"
+    event_date = db.Column(db.Date)  # the date the time limit runs from
+    due_date = db.Column(db.Date)
+    lodged_date = db.Column(db.Date)
+    status = db.Column(db.String(30), nullable=False, default="Not started")
+    registrar_reference = db.Column(db.String(100))
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("registry_form_filings", cascade="all, delete-orphan"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    @property
+    def form(self):
+        import cr_forms
+        return cr_forms.CR_FORM_BY_CODE.get(self.form_code)
+
+    @property
+    def is_overdue(self):
+        import cr_forms
+        return cr_forms.is_overdue(self.status, self.due_date)
+
+    def __repr__(self):
+        return f"<RegistryFormFiling {self.form_code} engagement={self.engagement_id}>"
+
+
 class TaxRegistration(db.Model):
     """One row of the Tax Client Profile's registration matrix, tax
     clearance & representation status list, or tax authority portal access
@@ -8988,8 +9023,8 @@ BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS = [
 # entirely for this engagement type, same pattern as FORENSIC_FINALISATION_
 # CHECKLIST_ITEMS / BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS above.
 SECRETARIAL_FINALISATION_CHECKLIST_ITEMS = [
-    ("Registry & Reconciliations", "Final registry search executed via Form CR2 (Search Application) to verify all lodgments processed during the period reflect on the public register? [SEC-FIN-01]"),
-    ("Registry & Reconciliations", "Annual return reconciled and stamped - filed within 21 days of the anniversary of incorporation, registration or re-registration (Sec 165(2)), and the AGM held within twelve months of the last one (Sec 167(2))? Form CR23 / Form CR17 references to be confirmed against the Registrar's current forms. [SEC-FIN-03]"),
+    ("Registry & Reconciliations", "Final registry search made (Form CR35, application to inspect entity documents and registers) to verify all lodgments processed during the period reflect on the public register? [SEC-FIN-01]"),
+    ("Registry & Reconciliations", "Annual return reconciled and stamped - filed within 21 days of the anniversary of incorporation, registration or re-registration (Sec 165(2); the Fourth Schedule form, which has no CR number on the Registrar's list), and the AGM held within twelve months of the last one (Sec 167(2)) with Form CR17 (declaration that the AGM was held) lodged where the Registrar asks for it? For a company other than a private company, check the statutory report went in on Form CR23 within one month of being certified (Sec 166(5)). [SEC-FIN-03]"),
     ("Registry & Reconciliations", "Director/Secretary changes confirmed - all appointments, resignations, or address changes lodged on Form CR6 within one month (Sec 217(4)-(5))? [SEC-FIN-04]"),
     ("Registry & Reconciliations", "Registered office and postal address changes verified on Form CR5 (Notice of Registered Office) under Sec 31? [SEC-FIN-05]"),
     ("Registry & Reconciliations", "Share allotments verified on Form CR11 (Return of Allotments), lodged within one month of each allotment under Sec 121?"),
@@ -8998,8 +9033,8 @@ SECRETARIAL_FINALISATION_CHECKLIST_ITEMS = [
     ("Board & Governance Audit Trail", "Special resolutions indexed and filed - Form CR8 returns bear CIPO stamp confirmations for all Special Resolutions passed during the year, each lodged within one month of being passed (Sec 175 & 178)? [SEC-FIN-07]"),
     ("Board & Governance Audit Trail", "Board action tracker closed out - a final summary of all action items compiled, completed tasks noted and unresolved matters rolled into the next period's planning cycle?"),
     ("UBO & Capital Reconciliation", "UBO register and declarations reconciled - the Register of Beneficial Owners (Sec 72) reconciled and Form CR16 (Beneficial Ownership Declaration) confirmed submitted, with updates within seven days of any material change, for any natural person holding more than 20% voting rights, direct/indirect interest, or control? [SEC-FIN-06]"),
-    ("UBO & Capital Reconciliation", "Register of Members and capital structure reconciled - share certificates issued or transferred (Sec 151 & 159) reconciled against authorised nominal share capital changes filed via Form CR10 (Increase of Nominal Capital, within one month of the special resolution, Sec 141) or Form CR9 (Conversion/Buy-Back of Shares, Sec 140)?"),
-    ("UBO & Capital Reconciliation", "Register of Mortgages and Debentures reconciled - all charges, mortgages, or satisfactions created or discharged during the year (Sec 154-155) matched against filings on Form CR12 (Satisfaction/Register of Mortgages & Charges)?"),
+    ("UBO & Capital Reconciliation", "Register of Members and capital structure reconciled - share certificates issued or transferred (Sec 151 & 159) reconciled against authorised nominal share capital changes filed via Form CR10 (Registration of any increase in shares, within one month, Sec 141) or Form CR9 (Conversion/Buy-Back of Shares, Sec 140)?"),
+    ("UBO & Capital Reconciliation", "Register of Mortgages and Debentures reconciled - all charges, mortgages, or satisfactions created or discharged during the year (Sec 154-155) matched against the entries in the register, and Form CR12 (notice of the place where the register is kept, or of a change to it, within one month - Sec 155(3)) lodged if the register is not at the registered office?"),
     ("Final Deliverable Reporting Pack", "Annual Corporate Governance & Compliance Report issued (COBE statutory returns completed; governance meeting attendance matrix; solvency and liquidity compliance checks performed under Sec 102; high-risk governance or non-compliance gaps identified)? [SEC-FIN-08]"),
     ("Final Deliverable Reporting Pack", "Secretarial Management Letter issued, documenting administrative weaknesses and corrective action recommendations?"),
     ("Final Deliverable Reporting Pack", "Annual Governance Calendar draft provided to management for the upcoming financial year?"),

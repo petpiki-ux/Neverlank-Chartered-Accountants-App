@@ -102,6 +102,9 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}" class="{% if tab=='trial_balance' %}active{% endif %}">Trial Balance{% if trial_balance and trial_balance.lines %} ({{ trial_balance.lines|length }} accounts){% elif trial_balance and trial_balance.not_applicable %} (N/A){% endif %}</a>
   {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}" class="{% if tab=='substantive' %}active{% endif %}">{% if engagement.type == 'Secretarial' %}Execution Plan{% else %}Substantive Procedures{% endif %}{% if substantive_areas %} ({{ substantive_areas|length }}/{{ audit_areas|length }} areas){% endif %}</a>
+  {% if engagement.type == 'Secretarial' %}
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='registry_forms') }}" class="{% if tab=='registry_forms' %}active{% endif %}">Registry Forms{% if registry_filings %} ({{ registry_filings|length }}){% endif %}</a>
+  {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
@@ -4674,6 +4677,107 @@
 
   {{ qmacros.render_queries(engagement, 'finalisation', queries_by_section.get('finalisation', [])) }}
 
+{% endif %}
+{% elif tab == 'registry_forms' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+  {% set overdue_filings = registry_filings|selectattr('is_overdue')|list %}
+  <div class="card" id="filings">
+    <h3 class="mt-0">Registry filing log</h3>
+    <p class="muted" style="font-size:12.5px;">Record each form filed with the Registrar of Companies for this client: the form, what it is about, the date of the event that starts the clock, the last day for lodging, and where it stands. Where the Act sets a time limit the last day is worked out for you when you leave it blank; you can type another date. This is a log for the team. It does not file anything with the Registrar.</p>
+    {% if overdue_filings %}
+    <div class="alert danger" style="font-size:12.5px;"><strong>{{ overdue_filings|length }} filing{{ '' if overdue_filings|length == 1 else 's' }} past the last day for lodging:</strong> {% for f in overdue_filings %}{{ f.form_code }}{% if f.subject %} ({{ f.subject }}){% endif %}, due {{ f.due_date.strftime('%d %b %Y') }}{% if not loop.last %}; {% endif %}{% endfor %}.</div>
+    {% endif %}
+    {% if registry_filings %}
+    <table style="font-size:12.5px;">
+      <tr><th>Form</th><th>About</th><th>Event date</th><th>Last day to lodge</th><th>Status</th><th>Lodged</th><th>Registrar reference</th><th></th></tr>
+      {% for f in registry_filings %}
+      <tr>
+        <td colspan="8" style="padding:0;border:0;">
+          <form method="post" action="{{ url_for('engagements.update_registry_filing', filing_id=f.id) }}" style="display:grid;grid-template-columns:1.2fr 1.6fr 1fr 1fr 1fr 1fr 1.2fr auto;gap:6px;align-items:start;padding:6px 0;border-bottom:1px solid #e5e5e5;">
+            <div><strong>{{ f.form_code }}</strong><div class="muted" style="font-size:11px;">{{ f.form.title if f.form else '' }}</div></div>
+            <input type="text" name="subject" value="{{ f.subject or '' }}" maxlength="300" aria-label="About">
+            <input type="date" name="event_date" value="{{ f.event_date.strftime('%Y-%m-%d') if f.event_date else '' }}" aria-label="Event date">
+            <div><input type="date" name="due_date" value="{{ f.due_date.strftime('%Y-%m-%d') if f.due_date else '' }}" aria-label="Last day to lodge">{% if f.is_overdue %}<div><span class="badge overdue">Overdue</span></div>{% endif %}</div>
+            <select name="status" aria-label="Status">{% for st in registry_form_statuses %}<option value="{{ st }}" {% if f.status == st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select>
+            <input type="date" name="lodged_date" value="{{ f.lodged_date.strftime('%Y-%m-%d') if f.lodged_date else '' }}" aria-label="Lodged on">
+            <input type="text" name="registrar_reference" value="{{ f.registrar_reference or '' }}" maxlength="100" aria-label="Registrar reference">
+            <div style="white-space:nowrap;">
+              <button type="submit" class="btn small">Save</button>
+              <button type="submit" class="btn small secondary" formaction="{{ url_for('engagements.delete_registry_filing', filing_id=f.id) }}" onclick="return confirm('Remove this entry from the filing log?');">Remove</button>
+            </div>
+            <input type="text" name="notes" value="{{ f.notes or '' }}" placeholder="Notes" style="grid-column:2 / span 7;" aria-label="Notes">
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% else %}
+    <div class="empty-state" style="padding:10px 0;">Nothing logged yet. Add the first filing below.</div>
+    {% endif %}
+
+    <h4 style="margin-top:16px;">Add a filing</h4>
+    <form method="post" action="{{ url_for('engagements.add_registry_filing', engagement_id=engagement.id) }}">
+      <div class="form-row" style="display:grid;grid-template-columns:2fr 2fr 1fr 1fr;gap:10px;">
+        <div>
+          <label for="rf_form_code">Form</label>
+          <select id="rf_form_code" name="form_code" required>
+            <option value="">Choose a form</option>
+            {% for g, forms in registry_form_groups %}
+            <optgroup label="{{ g }}">
+              {% for f in forms %}<option value="{{ f.code }}">{{ f.code }} - {{ f.title }}</option>{% endfor %}
+            </optgroup>
+            {% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="rf_subject">What it is about</label>
+          <input type="text" id="rf_subject" name="subject" maxlength="300" placeholder="e.g. Appointment of a new director">
+        </div>
+        <div>
+          <label for="rf_event">Date of the event</label>
+          <input type="date" id="rf_event" name="event_date">
+        </div>
+        <div>
+          <label for="rf_due">Last day to lodge <span class="muted" style="font-weight:normal;">(optional)</span></label>
+          <input type="date" id="rf_due" name="due_date">
+        </div>
+      </div>
+      <div class="form-row" style="display:grid;grid-template-columns:1fr 2fr;gap:10px;margin-top:6px;">
+        <div>
+          <label for="rf_status">Status</label>
+          <select id="rf_status" name="status">{% for st in registry_form_statuses %}<option value="{{ st }}">{{ st }}</option>{% endfor %}</select>
+        </div>
+        <div>
+          <label for="rf_notes">Notes</label>
+          <input type="text" id="rf_notes" name="notes">
+        </div>
+      </div>
+      <button type="submit" class="btn" style="margin-top:8px;">Add to the filing log</button>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">The Registrar's forms (CR1 to CR35)</h3>
+    <p class="muted" style="font-size:12.5px;">The list of forms as supplied by the Managing Partner, with the section of the COBE Act that calls for each one where it could be found and the time limit the Act sets. Forms normally used for the activities chosen on this engagement ({% if registry_activity_keys %}{% for k in registry_activity_keys %}{{ secretarial_activities|selectattr(0, 'equalto', k)|map(attribute=1)|first|default(k) }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}none chosen, so none highlighted{% endif %}) are marked. The annual return (AR) and the re-registration form (RR) are not on the CR list; the Act prescribes the forms themselves (Fourth and Tenth Schedules). Form numbers and wording are to be confirmed by a Partner; nothing here is marked verified.</p>
+    {% for g, forms in registry_form_groups %}
+    <h4 style="margin:14px 0 4px;">{{ g }}</h4>
+    <table style="font-size:12.5px;">
+      <tr><th style="width:7%;">Form</th><th style="width:30%;">Description</th><th>Used when</th><th style="width:12%;">Act</th><th style="width:22%;">Time limit</th></tr>
+      {% for f in forms %}
+      {% set mine = registry_activity_keys and (f.activities|select('in', registry_activity_keys)|list) %}
+      <tr {% if mine %}style="background:#fff8e1;"{% endif %}>
+        <td><strong>{{ f.code }}</strong>{% if mine %}<div class="muted" style="font-size:10.5px;">for this engagement</div>{% endif %}</td>
+        <td>{{ f.title }}{% if f.entity and f.entity != 'All' %}<div class="muted" style="font-size:11px;">{{ f.entity }}</div>{% endif %}</td>
+        <td>{{ f.used_when }}</td>
+        <td>{% for r in f.refs %}{{ act_ref(r, text=('Schedule ' ~ r[3:]) if r.startswith('Sch') else ('s' ~ r), code='cobe') }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+        <td>{{ f.rule_text }}</td>
+      </tr>
+      {% endfor %}
+    </table>
+    {% endfor %}
+  </div>
 {% endif %}
 {% elif tab == 'substantive' %}
 {% if not acceptance_cleared and current_user.role != 'admin' %}

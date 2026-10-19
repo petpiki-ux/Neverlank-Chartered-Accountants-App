@@ -283,12 +283,12 @@ FINDINGS = [
     {
         "topic": "'Company Summary' return", "refs": ["165(1)"], "result": "differs",
         "app": "A task and a finalisation line require a separate 'Company Summary return introduced under the new COBE Act'.",
-        "note": "Neither 'Company Summary' nor any such return appears in the Act as supplied. What the Act calls the annual return is itself 'a summary' in the Fourth Schedule form (s165(1)). The wording now says so and still tells staff to confirm with the Registrar whether the Company Summary is the same document or a separate one. Nothing is marked as confirmed.",
+        "note": "Neither 'Company Summary' nor any such return appears in the Act as supplied, and no form of that name is on the Registrar's CR1 to CR35 list. What the Act calls the annual return is itself 'a summary' in the Fourth Schedule form (s165(1)). The wording now says so and still tells staff to confirm with the Registrar whether the Company Summary is the same document or a separate one. Nothing is marked as confirmed.",
     },
     {
-        "topic": "Form numbers (CR2, CR5, CR6, CR8-CR12, CR16, CR17, CR23)", "refs": ["10", "165(1)"], "result": "differs",
-        "app": "Forms are named throughout the checklists. CR11 is the 'Annual Return' in the programme and plan but the 'Return of Allotments' in the finalisation checklist; the plan said 'CR11/CR23'.",
-        "note": "The Act refers only to 'the prescribed form' (the annual return follows the Fourth Schedule and re-registration the Tenth). The form numbers come from the firm's own lists and cannot be checked against the Act. The annual-return wording no longer names CR11; the rest are left as the firm wrote them. A Partner should confirm the numbers against the Registrar's current forms.",
+        "topic": "Form numbers (CR1 to CR35)", "refs": ["10", "165(1)"], "result": "differs",
+        "app": "Forms were named throughout the checklists without a list to check them against. CR2 was called the registry search, CR12 the satisfaction of mortgages, CR23 the annual return, and CR11 the annual return in one place and the return of allotments in another.",
+        "note": "The Act refers only to 'the prescribed form' (the annual return follows the Fourth Schedule and re-registration the Tenth). The Registrar's list of forms CR1 to CR35 has now been supplied and is on the Registry Forms tab of every Secretarial engagement, tied to the section that calls for each form. Against that list: CR2 is the application for search as to availability of a name (the registry search is CR35, application to inspect entity documents and registers); CR12 is the notice of the place where the register of mortgages and debentures is kept (s155(3)), not a satisfaction form; CR23 is the statutory report (s166), not the annual return; CR17 is the declaration that the AGM was held; CR11 is the return of allotments; CR10 registers an increase in shares and CR9 is the notice of conversion or buy-back of shares. The annual return is not on the list. The checklist wording is corrected. The list and the section links are for a Partner to confirm against the Registrar's current forms; nothing is marked verified.",
     },
     {
         "topic": "Penalties for late filing", "refs": ["294", "Sch9"], "result": "missing",

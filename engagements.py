@@ -17,7 +17,7 @@ from models import (
     RiskItem, Document, EngagementTask, DocumentTemplate, StaffAllocation, TimeSheet, TimeEntry,
     RiskAssessment, MaterialityCalculation, EntityUnderstanding, AuditStrategy, AUDIT_STRATEGY_PHASE_STATUSES,
     QualitativeMaterialityFactor, QUALITATIVE_MATERIALITY_FACTORS, QUALITATIVE_MATERIALITY_RATINGS,
-    SecretarialPlan,
+    SecretarialPlan, RegistryFormFiling,
     AnalyticalReview, AnalyticalReviewLine, SECRETARIAL_ANALYTICAL_REVIEW_POINTS, BUSINESS_IT_ANALYTICAL_REVIEW_POINTS,
     ITChangePlanItem, IT_CHANGE_PLAN_RISK_LEVELS,
     ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
@@ -539,6 +539,8 @@ def view_engagement(engagement_id):
     # still points at it.
     if tab == "trial_balance" and engagement.type == "Secretarial":
         tab = "overview"
+    if tab == "registry_forms" and engagement.type != "Secretarial":
+        tab = "overview"
     # The stand-alone service lines (Whistle-blower / Training) only have the
     # shared Overview / Client Acceptance / Documents / Tasks tabs here - their
     # own workspaces live in whistleblower.py / training.py. Corporate Finance &
@@ -594,6 +596,21 @@ def view_engagement(engagement_id):
     # replaces it for an Investigative Engagement.
     secretarial_plan = SecretarialPlan.query.filter_by(engagement_id=engagement_id).first() if is_secretarial else None
     secretarial_compliance_suggestions = _secretarial_compliance_calendar_suggestions(engagement.period_end, secretarial_plan) if is_secretarial else None
+    # The Registry Forms tab (Secretarial only): the Registrar's CR forms, and this engagement's filing log.
+    registry_form_groups = []
+    registry_filings = []
+    registry_activity_keys = []
+    if is_secretarial:
+        import cr_forms
+        registry_activity_keys = [a for a in (engagement.secretarial_activities or "").split(",") if a]
+        _by_group = {}
+        for _f in sorted(cr_forms.CR_FORMS, key=lambda f: cr_forms.sort_key(f["code"])):
+            _by_group.setdefault(_f["group"], []).append(_f)
+        registry_form_groups = [(g, _by_group[g]) for g in cr_forms.GROUPS if g in _by_group]
+        registry_filings = sorted(
+            RegistryFormFiling.query.filter_by(engagement_id=engagement_id).all(),
+            key=lambda x: (x.status in ("Lodged", "Registered", "Withdrawn"), x.due_date or date.max, x.id),
+        )
     entity_understanding = EntityUnderstanding.query.filter_by(engagement_id=engagement_id).first()
     # Public-information scans live on the Client (see models.
     # EntityPublicResearch/company_documents.run_public_research) since the
@@ -1003,6 +1020,11 @@ def view_engagement(engagement_id):
         audit_strategy_phase_statuses=AUDIT_STRATEGY_PHASE_STATUSES,
         secretarial_plan=secretarial_plan,
         secretarial_compliance_suggestions=secretarial_compliance_suggestions,
+        registry_form_groups=registry_form_groups,
+        registry_filings=registry_filings,
+        registry_activity_keys=registry_activity_keys,
+        registry_form_statuses=(__import__('cr_forms').FORM_STATUSES),
+        registry_today=date.today(),
         secretarial_activities=SECRETARIAL_ACTIVITIES,
         scope_suggestion=scope_suggestion,
         entity_understanding=entity_understanding,
@@ -3076,6 +3098,92 @@ def save_secretarial_plan(engagement_id):
     db.session.commit()
     flash("Secretarial Engagement Plan saved.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="planning"))
+
+
+# ---------- Registry Forms (Secretarial engagements only) - the Registrar's CR forms and a log of what was filed ----------
+
+def _parse_form_date(raw):
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    try:
+        return datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+
+
+def _registry_engagement_or_redirect(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    if engagement.type != "Secretarial":
+        abort(404)
+    return engagement
+
+
+@engagements_bp.route("/<int:engagement_id>/registry-forms/add", methods=["POST"])
+@login_required
+def add_registry_filing(engagement_id):
+    import cr_forms
+    engagement = _registry_engagement_or_redirect(engagement_id)
+    code = request.form.get("form_code", "").strip().upper()
+    back = redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="registry_forms") + "#filings")
+    if code not in cr_forms.CR_FORM_BY_CODE:
+        flash("Choose a form from the list.", "danger")
+        return back
+    event_date = _parse_form_date(request.form.get("event_date"))
+    due_date = _parse_form_date(request.form.get("due_date")) or cr_forms.due_date_for(code, event_date)
+    status = request.form.get("status", "Not started")
+    if status not in cr_forms.FORM_STATUSES:
+        status = "Not started"
+    lodged = _parse_form_date(request.form.get("lodged_date"))
+    if status in ("Lodged", "Registered") and not lodged:
+        lodged = date.today()
+    db.session.add(RegistryFormFiling(
+        engagement_id=engagement_id, form_code=code,
+        subject=request.form.get("subject", "").strip()[:300] or None,
+        event_date=event_date, due_date=due_date, lodged_date=lodged, status=status,
+        registrar_reference=request.form.get("registrar_reference", "").strip()[:100] or None,
+        notes=request.form.get("notes", "").strip() or None,
+        created_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash(f"{code} added to the filing log.", "success")
+    return back
+
+
+@engagements_bp.route("/registry-forms/<int:filing_id>/update", methods=["POST"])
+@login_required
+def update_registry_filing(filing_id):
+    import cr_forms
+    filing = RegistryFormFiling.query.get_or_404(filing_id)
+    _registry_engagement_or_redirect(filing.engagement_id)
+    filing.subject = request.form.get("subject", "").strip()[:300] or None
+    filing.event_date = _parse_form_date(request.form.get("event_date"))
+    due = _parse_form_date(request.form.get("due_date"))
+    filing.due_date = due or cr_forms.due_date_for(filing.form_code, filing.event_date)
+    status = request.form.get("status", filing.status)
+    if status in cr_forms.FORM_STATUSES:
+        filing.status = status
+    filing.lodged_date = _parse_form_date(request.form.get("lodged_date"))
+    if filing.status in ("Lodged", "Registered") and not filing.lodged_date:
+        filing.lodged_date = date.today()
+    filing.registrar_reference = request.form.get("registrar_reference", "").strip()[:100] or None
+    filing.notes = request.form.get("notes", "").strip() or None
+    db.session.commit()
+    flash(f"{filing.form_code} updated.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=filing.engagement_id, tab="registry_forms") + "#filings")
+
+
+@engagements_bp.route("/registry-forms/<int:filing_id>/delete", methods=["POST"])
+@login_required
+def delete_registry_filing(filing_id):
+    filing = RegistryFormFiling.query.get_or_404(filing_id)
+    _registry_engagement_or_redirect(filing.engagement_id)
+    engagement_id, code = filing.engagement_id, filing.form_code
+    db.session.delete(filing)
+    db.session.commit()
+    flash(f"{code} removed from the filing log.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="registry_forms") + "#filings")
 
 
 @engagements_bp.route("/secretarial-plan/<int:plan_id>/review", methods=["POST"])
