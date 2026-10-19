@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ update.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div>
+  <h1 style="font-size:22px;">{{ update.title }}</h1>
+  <div class="subtitle">
+    {% if update.instrument_type %}{{ update.type_label }}{% endif %}{% if update.tax_head %} &middot; {{ update.tax_head }}{% endif %}
+    {% if update.source_reference %} &middot; {{ update.source_reference }}{% endif %}
+    {% if update.effective_date %} &middot; effective {{ update.effective_date.strftime('%d %b %Y') }}{% endif %}
+    {% if update.page_count %} &middot; {{ update.page_count }} pages{% endif %}
+  </div></div>
+  <div>
+    <a href="{{ url_for('tax.search_legislative_updates', q=q) if q else url_for('tax.search_legislative_updates') }}" class="btn secondary">Back to results</a>
+    <a href="{{ url_for('tax.list_legislative_updates') }}#legislative-update-{{ update.id }}" class="btn secondary">In the log</a>
+  </div></div>
+
+<div class="card" style="padding:10px 14px;">
+  <form method="get" class="form-row" style="margin:0;align-items:flex-end;">
+    <div style="flex:4;"><label style="margin:0;">Find in this document</label><input type="text" name="q" value="{{ q }}" placeholder="words, &quot;a phrase&quot;, or section 15" style="margin:0;"></div>
+    <div><button class="btn small" type="submit">Find</button></div>
+  </form>
+  {% if q %}
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">
+    {% if total_matches %}{{ total_matches }} marked word{{ 's' if total_matches != 1 }} in {{ matching_ids|length }} passage{{ 's' if matching_ids|length != 1 }}.
+      {% if best_id %}<a href="#chunk-{{ best_id }}">Jump to the strongest passage</a>.{% endif %}
+      {% if matching_ids|length > 1 %}Passages: {% for cid in matching_ids[:30] %}<a href="#chunk-{{ cid }}">{{ loop.index }}</a>{% if not loop.last %} &middot; {% endif %}{% endfor %}{% endif %}
+    {% else %}None of those words appear in this document's filed text.{% endif %}
+    {{ explain|join(' ') }}</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  {% if update.ai_summary or update.summary %}<p style="font-size:13px;"><strong>Summary:</strong> {{ update.ai_summary or update.summary }}</p>{% endif %}
+  {% if passages %}
+    {% for p in passages %}
+    <div id="chunk-{{ p.chunk.id }}" style="padding:10px 0;border-top:1px solid var(--border);{% if p.matches %}background:#fffdf3;{% endif %}">
+      {% if p.chunk.heading %}<p style="margin:0 0 4px;font-weight:600;font-size:13px;">{{ p.chunk.heading }}</p>{% endif %}
+      <div style="font-size:13px;white-space:pre-wrap;line-height:1.55;">{{ p.html }}</div>
+      <p class="muted" style="font-size:11px;margin:4px 0 0;">Passage {{ p.chunk.chunk_index + 1 }} of {{ passages|length }}{% if p.matches %} &middot; {{ p.matches }} match{{ 'es' if p.matches != 1 }}{% endif %}</p>
+    </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted" style="margin:0;">No filed text for this entry (it was logged as text, or the file was a scan with no selectable text). Its summary and details are searched instead.</p>
+  {% endif %}
+</div>
+<style>mark{background:#ffe58a;padding:0 2px;border-radius:2px;}</style>
+{% endblock %}

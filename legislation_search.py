@@ -50,10 +50,11 @@ from extensions import db
 from models import LegislativeUpdate, LegislativeAskCache
 
 import legislation_chunking
+import legislation_index
 
 DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 REQUEST_TIMEOUT = 90
-MAX_CANDIDATES = 8  # how many filed updates get handed to the model as context
+MAX_CANDIDATES = 12  # how many passages from the filed updates get handed to the model as context
 EXCERPT_CHARS = 3000  # per-chunk slice included in the prompt
 FUZZY_MATCH_THRESHOLD = 0.88  # difflib ratio above which a cached question is treated as "the same question" for recall purposes
 
@@ -110,11 +111,21 @@ def _ensure_all_chunks():
 
 
 def search_candidate_chunks(question, limit=MAX_CANDIDATES):
-    """Score every filed update's individual chunks (falling back to the
-    whole-document blob for anything with no chunks) against the question's
-    keywords, and return the top-scoring (update, chunk) pairs, best first.
-    `chunk` is None when the match came from the whole-document fallback.
-    Returns [] if nothing filed shares any keyword with the question."""
+    """The best (update, chunk) pairs in the filed library for a question or a longer description, best first. Uses the deep-search
+    engine in legislation_index.py (BM25 ranking over every passage of every filed instrument, word-ending and vocabulary tolerance,
+    typo tolerance, key-concept extraction for long descriptions). `chunk` is None when the match came from an update's front matter
+    only (e.g. a text-only log entry). Returns [] if nothing filed shares any word with the question."""
+    if not (question or "").strip():
+        return []
+    try:
+        return legislation_index.rank_chunks(question, limit=limit)
+    except Exception:
+        db.session.rollback()
+        return _search_candidate_chunks_simple(question, limit)
+
+
+def _search_candidate_chunks_simple(question, limit=MAX_CANDIDATES):
+    """The original exact-word scan, kept only as a safety net should the index ever fail."""
     tokens = set(_tokenize(question))
     if not tokens:
         return []
@@ -252,7 +263,7 @@ def _candidate_block(update, chunk=None):
 # ---------------------------------------------------------------- fast-recall cache
 
 def _normalize_question(question):
-    return " ".join((question or "").strip().lower().split())
+    return " ".join((question or "").strip().lower().split())[:500]
 
 
 def _cache_lookup(question):
@@ -403,3 +414,109 @@ def ask(question, asked_by_id=None):
             row = _store_cache(question, "done", answer, citation_ids=[u.id for u in citations], asked_by_id=asked_by_id)
             return "done", {"answer": answer, "citations": citations, "from_cache": False, "cache_id": row.id if row else None}
     return "error", "The model didn't return a structured result - try rephrasing the question."
+
+
+# ---------------------------------------------------------------- advisory brief: a situation and the topics to cover
+
+ADVISE_TOOL = {
+    "name": "advise_from_library",
+    "description": "Set out what the firm's filed legislation and material say about each topic of a client situation, citing the excerpts used and being clear about what they do not cover.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "summary": {"type": "string", "description": "The overall position in 3 to 6 plain sentences, drawn only from the excerpts and the facts given. Say plainly if the filed material is thin."},
+            "sections": {
+                "type": "array",
+                "description": "One section per topic listed, in the order listed (plus one for any important issue the facts raise that is not a listed topic).",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "topic": {"type": "string"},
+                        "finding": {"type": "string", "description": "What the excerpts say that bears on this topic and the facts given, written for a tax practitioner. If they say nothing relevant, say so in one sentence."},
+                        "citation_ids": {"type": "array", "items": {"type": "integer"}, "description": "The [Update #N] ids drawn on. Empty if none."},
+                        "planning_points": {"type": "array", "items": {"type": "string"}, "description": "Practical points or options that follow from the excerpts for these facts. Each must rest on the excerpts, not on general knowledge."},
+                    },
+                    "required": ["topic", "finding", "citation_ids"],
+                },
+            },
+            "not_covered": {"type": "string", "description": "What the filed library does not address that the practitioner must check against the actual law before advising."},
+            "facts_to_confirm": {"type": "array", "items": {"type": "string"}, "description": "Facts about the client's situation that would change the advice and should be confirmed."},
+        },
+        "required": ["summary", "sections", "not_covered"],
+    },
+}
+
+ADVISE_PROMPT = (
+    "You are helping a partner at a Zimbabwean audit, tax and accounting firm prepare advice for a client. You are given (1) the client's "
+    "situation and the topics to cover, written by the partner, and (2) excerpts from the firm's own filed Legislative Update Control "
+    "library. The situation is the partner's own statement of the facts: use it as the facts, but it is not law and not something the "
+    "excerpts confirm. For the law, use ONLY the excerpts: do not use outside knowledge of Zimbabwean law, tax rates, thresholds or dates, "
+    "even if you believe you know them. Go topic by topic. For each, say what the excerpts provide that bears on these facts, cite the "
+    "[Update #N] ids, and add practical planning points only where they rest on the excerpts. Where the excerpts are silent or only "
+    "tangential, say so plainly and put the gap in not_covered rather than filling it in. Weigh each source by its Type as in the excerpt: "
+    "an Act, Notice or SI is primary Zimbabwean law; a Case is binding or persuasive as its authority line says; a Publication is "
+    "commentary and never binding; a News Article is only a signal to be verified. Where the facts raise an issue the topics do not list "
+    "(for example, costs borne by one company while the income is taxed in another), add a section for it, but only to the extent the "
+    "excerpts touch it. Keep it concise and practical. This is a draft for the partner's review, never a final opinion."
+)
+
+
+def advise(brief_text, asked_by_id=None):
+    """Draft advice for a described situation from the filed library alone.
+    Returns (status, payload): "not_configured" (no key), "no_candidates" (nothing filed matches), "error" (payload = message) or
+    "done" with payload {"summary", "sections": [{"topic", "finding", "citations": [updates], "planning_points": [...]}],
+    "not_covered", "facts_to_confirm", "excerpts": [(update, chunk)]}. Searches topic by topic and as a whole so each topic gets its own
+    passages. Never cached, never files anything. Never raises."""
+    brief_text = (brief_text or "").strip()
+    if not brief_text:
+        return "error", "Describe the situation first."
+    if os.environ.get("ANTHROPIC_API_KEY") is None:
+        return "not_configured", None
+    try:
+        topics, facts = legislation_index.split_brief(brief_text)
+        pairs, seen = [], set()
+
+        def take(pair):
+            u, c = pair
+            key = (u.id, c.id if c is not None else None)
+            if key not in seen:
+                seen.add(key)
+                pairs.append(pair)
+
+        for t in topics:
+            for pair in legislation_index.rank_chunks(t, limit=4, per_doc=2):
+                take(pair)
+        for pair in legislation_index.rank_chunks(brief_text, limit=10, per_doc=2):
+            take(pair)
+        pairs = pairs[:26]
+    except Exception as exc:
+        db.session.rollback()
+        return "error", f"The search failed: {str(exc)[:300]}"
+    if not pairs:
+        return "no_candidates", None
+    context = "\n\n---\n\n".join(_candidate_block(u, c) for u, c in pairs)
+    user_message = (f"The partner's description of the situation and the topics to cover:\n\n{brief_text}\n\n=====\n\n"
+                    f"Excerpts from the firm's filed library:\n\n{context}")
+    try:
+        client = _client()
+        response = client.messages.create(
+            model=DEFAULT_MODEL, max_tokens=4000, system=ADVISE_PROMPT, tools=[ADVISE_TOOL],
+            tool_choice={"type": "tool", "name": "advise_from_library"}, messages=[{"role": "user", "content": user_message}],
+        )
+    except Exception as exc:
+        return "error", str(exc)[:2000]
+    by_id = {u.id: u for u, _c in pairs}
+    for block in response.content:
+        if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "advise_from_library":
+            data = block.input or {}
+            sections = []
+            for sec in data.get("sections") or []:
+                ids = [int(i) for i in (sec.get("citation_ids") or []) if str(i).isdigit()]
+                sections.append({"topic": (sec.get("topic") or "").strip(), "finding": (sec.get("finding") or "").strip(),
+                                 "citations": [by_id[i] for i in ids if i in by_id],
+                                 "planning_points": [str(x).strip() for x in (sec.get("planning_points") or []) if str(x).strip()]})
+            if not (data.get("summary") or sections):
+                return "error", "The model didn't return any advice - try again."
+            return "done", {"summary": (data.get("summary") or "").strip(), "sections": sections, "not_covered": (data.get("not_covered") or "").strip(),
+                            "facts_to_confirm": [str(x).strip() for x in (data.get("facts_to_confirm") or []) if str(x).strip()], "excerpts": pairs}
+    return "error", "The model didn't return a structured result - try again."

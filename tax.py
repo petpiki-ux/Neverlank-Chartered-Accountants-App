@@ -66,6 +66,7 @@ from config import Config
 import sanctions_data
 import legislation_summary
 import legislation_search
+import legislation_index
 import legislation_chunking
 
 tax_bp = Blueprint("tax", __name__, url_prefix="/tax")
@@ -2001,6 +2002,91 @@ def ask_legislative_updates():
         ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
         ask_cache_id=payload.get("cache_id"),
     )
+
+
+def _search_filters():
+    """The search filters in the request (form or query string) as legislation_index expects them, plus what to show back in the form."""
+    src = request.values
+    types = [t for t in src.getlist("type") if t in LEGISLATIVE_UPDATE_TYPES]
+    f = {}
+    if types:
+        f["types"] = types
+    if src.get("tax_head") in TAX_HEADS:
+        f["tax_head"] = src.get("tax_head")
+    if src.get("area") in LEGISLATIVE_UPDATE_AREAS:
+        f["area"] = src.get("area")
+    year = src.get("year", type=int)
+    if year and 1900 <= year <= 2100:
+        f["year"] = year
+    if src.get("reviewed") == "1":
+        f["reviewed"] = True
+    return f
+
+
+def _render_search(**extra):
+    q = (request.values.get("q") or "").strip()
+    filters = _search_filters()
+    sort = request.values.get("sort") if request.values.get("sort") in ("relevance", "newest") else "relevance"
+    page = request.values.get("page", type=int) or 1
+    ctx = dict(q=q, filters=filters, sort=sort, page=page, result=None, brief=None, tax_heads=TAX_HEADS, areas=LEGISLATIVE_UPDATE_AREAS,
+               instrument_types=LEGISLATIVE_UPDATE_TYPES, type_labels=LEGISLATIVE_UPDATE_TYPE_LABELS, advice=None, advice_status=None,
+               explain=[], library_size=LegislativeUpdate.query.count(), highlight=legislation_index.highlight, snippet=legislation_index.snippet)
+    if q:
+        if legislation_index.is_brief(q) and sort == "relevance" and page == 1:
+            ctx["brief"] = legislation_index.search_brief(q, filters)
+            ctx["result"] = ctx["brief"]["overall"]
+        else:
+            ctx["result"] = legislation_index.search(q, filters, sort=sort, page=page)
+        ctx["explain"] = legislation_index.describe(ctx["result"].plan)
+    ctx.update(extra)
+    return render_template("tax/legislative_search.html", **ctx)
+
+
+@tax_bp.route("/legislative-updates/search")
+@login_required
+def search_legislative_updates():
+    """Deep search of the whole filed library: every passage of every Act, Notice, SI, case, publication and news article, ranked, with the
+    matching words highlighted and a link into the full text at the right passage (see legislation_index.py). Reads only."""
+    return _render_search()
+
+
+@tax_bp.route("/legislative-updates/advise", methods=["POST"])
+@login_required
+def advise_legislative_updates():
+    """Draft advice for a described situation from the filed library alone (legislation_search.advise): topic by topic, with the sources
+    cited and the gaps named. A draft for a person to review; it never files or changes anything."""
+    q = (request.form.get("q") or "").strip()
+    if not q:
+        flash("Describe the situation first.", "danger")
+        return redirect(url_for("tax.search_legislative_updates"))
+    status, payload = legislation_search.advise(q, asked_by_id=current_user.id)
+    if status == "not_configured":
+        flash("Drafting advice isn't set up yet (ANTHROPIC_API_KEY is not set). The search below still works.", "danger")
+    elif status == "error":
+        flash(f"Couldn't draft that: {payload}", "danger")
+    return _render_search(advice=payload if status == "done" else None, advice_status=status)
+
+
+@tax_bp.route("/legislative-updates/<int:update_id>/read")
+@login_required
+def read_legislative_update(update_id):
+    """The full filed text of one update, section by section, with the words from a search marked and the first matching passage in view."""
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    q = (request.args.get("q") or "").strip()
+    legislation_chunking.ensure_chunks(update)
+    db.session.commit()
+    plan = legislation_index.parse_query(q) if q else None
+    passages = []
+    if plan is not None and not plan.empty:
+        passages = legislation_index.reader_passages(update, plan)
+    else:
+        from legislation_index import Plan
+        plan = Plan()
+        passages = [{"chunk": c, "html": c.text, "matches": 0} for c in update.chunks]
+    matching = [p for p in passages if p["matches"]]
+    best = max(matching, key=lambda p: p["matches"])["chunk"].id if matching else None
+    return render_template("tax/legislative_reader.html", update=update, q=q, passages=passages, total_matches=sum(p["matches"] for p in passages),
+                           matching_ids=[p["chunk"].id for p in matching], best_id=best, explain=legislation_index.describe(plan) if q else [])
 
 
 @tax_bp.route("/legislative-updates/ask/feedback", methods=["POST"])

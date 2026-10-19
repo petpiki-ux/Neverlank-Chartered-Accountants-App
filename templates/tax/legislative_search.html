@@ -1,0 +1,117 @@
+{% extends "base.html" %}
+{% block title %}Search the library - {{ firm_name }}{% endblock %}
+{% block content %}
+{% macro hit(h, q, res) %}
+  <div style="padding:12px 0;border-bottom:1px solid var(--border);" {% if h.partial %}class="partial-hit"{% endif %}>
+    <p style="margin:0;">
+      <a href="{{ url_for('tax.read_legislative_update', update_id=h.update.id, q=q) }}"><strong>{{ highlight(h.update.title, res.plan) }}</strong></a>
+      {% if h.update.instrument_type %}<span class="badge">{{ h.update.type_label }}</span>{% endif %}
+      {% if h.update.tax_head %}<span class="badge">{{ h.update.tax_head }}</span>{% endif %}
+      {% if h.update.is_reviewed %}<span class="badge status-Completed">Reviewed</span>{% endif %}
+    </p>
+    <p class="muted" style="font-size:12px;margin:3px 0;">
+      {% if h.update.gazette_date %}gazetted {{ h.update.gazette_date.strftime('%d %b %Y') }} &middot; {% endif %}
+      effective {{ h.update.effective_date.strftime('%d %b %Y') if h.update.effective_date else '&mdash;'|safe }}
+      {% if h.update.source_reference %}&middot; {{ h.update.source_reference }}{% endif %}
+      {% if h.partial and h.missing_labels %}&middot; <span style="color:#a15c00;">partial match &mdash; no sign of: {{ h.missing_labels[:6]|join(', ') }}</span>{% endif %}
+      {% if res.scenario and h.matched_labels %}&middot; covers {{ h.matched_labels|length }} of {{ res.plan.groups|length }} key concepts{% endif %}
+    </p>
+    {% for chunk, score, cg in h.passages %}
+      <p style="font-size:13px;margin:6px 0 0;padding-left:10px;border-left:3px solid #d9cfae;">
+        {% if chunk.heading %}<span class="muted" style="font-size:11.5px;">{{ chunk.heading }}</span><br>{% endif %}
+        {{ snippet(chunk.text, res.plan) }}
+        <a href="{{ url_for('tax.read_legislative_update', update_id=h.update.id, q=q, _anchor='chunk-%d' % chunk.id) }}" style="font-size:12px;white-space:nowrap;">open this passage &rarr;</a>
+      </p>
+    {% else %}
+      {% set sm = h.update.ai_summary or h.update.summary %}
+      {% if sm %}<p style="font-size:13px;margin:6px 0 0;padding-left:10px;border-left:3px solid #d9cfae;">{{ snippet(sm, res.plan) }}</p>
+      <p class="muted" style="font-size:11.5px;margin:2px 0 0;">Matched on the title, summary or details; no filed text to search for this entry.</p>{% endif %}
+    {% endfor %}
+  </div>
+{% endmacro %}
+
+<div class="page-header"><div><h1>Search the library</h1>
+  <div class="subtitle">Searches every passage of every filed Act, Notice, Statutory Instrument, case, publication and news article ({{ library_size }} filed). Word endings, typos and the firm's short forms (VAT, QPD, SI, TCC ...) are handled. Use "quotes" for an exact phrase, -word to leave a word out, deprec* for a stem. Paste a whole situation or an outline of topics and it picks out the key concepts.</div></div>
+  <div><a href="{{ url_for('tax.list_legislative_updates') }}" class="btn secondary">Back to the log</a></div></div>
+
+<div class="card">
+  <form method="get" action="{{ url_for('tax.search_legislative_updates') }}">
+    <textarea name="q" rows="{{ 7 if q and q|length > 160 else 2 }}" placeholder='e.g. "input tax" invoice   or   SI 33 of 2024   or paste a situation and the topics to cover' style="width:100%;" id="q">{{ q }}</textarea>
+    <div class="form-row" style="margin-top:8px;align-items:flex-end;flex-wrap:wrap;">
+      <div><label style="margin:0;">Type</label><div style="font-size:12.5px;">
+        {% for t in instrument_types %}<label style="font-weight:400;margin-right:8px;"><input type="checkbox" name="type" value="{{ t }}" style="width:auto;" {% if t in (filters.types or []) %}checked{% endif %}> {{ type_labels[t] }}</label>{% endfor %}</div></div>
+      <div><label style="margin:0;">Tax head</label><select name="tax_head" style="margin:0;"><option value="">Any</option>{% for t in tax_heads %}<option {% if filters.tax_head == t %}selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+      <div><label style="margin:0;">Practice area</label><select name="area" style="margin:0;"><option value="">Any</option>{% for a in areas %}<option {% if filters.area == a %}selected{% endif %}>{{ a }}</option>{% endfor %}</select></div>
+      <div style="width:90px;"><label style="margin:0;">Year</label><input type="number" name="year" min="1900" max="2100" value="{{ filters.year or '' }}" style="margin:0;"></div>
+      <div><label style="font-weight:400;margin:0;"><input type="checkbox" name="reviewed" value="1" style="width:auto;" {% if filters.reviewed %}checked{% endif %}> reviewed only</label></div>
+      <div><label style="margin:0;">Order</label><select name="sort" style="margin:0;"><option value="relevance" {% if sort == 'relevance' %}selected{% endif %}>Best match</option><option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest first</option></select></div>
+    </div>
+    <div style="margin-top:10px;">
+      <button class="btn gold" type="submit">Search</button>
+      {% if q %}<button class="btn secondary" type="submit" formaction="{{ url_for('tax.advise_legislative_updates') }}" formmethod="post" title="Draft advice topic by topic, using only what is filed in the library (needs the AI key)">Draft advice from the library</button>{% endif %}
+    </div>
+  </form>
+</div>
+
+{% if advice_status == 'no_candidates' %}
+<div class="card"><p class="muted" style="margin:0;">Nothing filed in the library matches this situation, so no advice could be drafted from it.</p></div>
+{% endif %}
+{% if advice %}
+<div class="card" style="border-left:4px solid #2e7d4f;">
+  <h3 class="mt-0">Draft advice from the filed library</h3>
+  <p class="muted" style="font-size:12px;">A draft for your review. It uses only the filed material below and your description of the facts; where the library is silent it says so. Check it against the actual law before it goes to the client.</p>
+  <p style="font-size:13.5px;">{{ advice.summary }}</p>
+  {% for sec in advice.sections %}
+  <div style="margin-top:12px;">
+    <p style="margin:0;"><strong>{{ sec.topic }}</strong></p>
+    <p style="font-size:13px;margin:3px 0;white-space:pre-wrap;">{{ sec.finding }}</p>
+    {% if sec.planning_points %}<ul style="font-size:13px;margin:2px 0;">{% for pt in sec.planning_points %}<li>{{ pt }}</li>{% endfor %}</ul>{% endif %}
+    {% if sec.citations %}<p class="muted" style="font-size:12px;margin:2px 0;">Sources: {% for u in sec.citations %}<a href="{{ url_for('tax.read_legislative_update', update_id=u.id, q=q) }}">{{ u.title }}</a>{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+  </div>
+  {% endfor %}
+  {% if advice.not_covered %}<p style="font-size:13px;margin-top:14px;"><strong>Not covered by the filed library &mdash; check before advising:</strong> {{ advice.not_covered }}</p>{% endif %}
+  {% if advice.facts_to_confirm %}<p style="font-size:13px;margin:8px 0 2px;"><strong>Facts to confirm with the client:</strong></p><ul style="font-size:13px;margin-top:0;">{% for f in advice.facts_to_confirm %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% endif %}
+
+{% if q %}
+  {% if explain %}<div class="card" style="padding:8px 14px;"><p class="muted" style="font-size:12px;margin:0;">{{ explain|join(' ') }}</p></div>{% endif %}
+  {% if result and result.scenario %}
+  <div class="card" style="padding:8px 14px;">
+    <p class="muted" style="font-size:12.5px;margin:0;"><strong>Read as a description.</strong> Key concepts searched: {{ result.plan.concepts|join(', ') }}.
+      {% if result.plan.dropped %}No trace in the library of: {{ result.plan.dropped[:12]|join(', ') }}.{% endif %}
+      Nothing is required to match; documents covering most of the picture come first.</p>
+  </div>
+  {% endif %}
+
+  {% if brief %}
+    {% for t in brief.topics %}
+    <div class="card">
+      <h3 class="mt-0">{{ loop.index }}. {{ t.title }}</h3>
+      {% if t.result.hits %}{% for h in t.result.hits %}{{ hit(h, t.title, t.result) }}{% endfor %}
+        {% if t.result.total > t.result.hits|length %}<p style="margin:8px 0 0;font-size:12.5px;"><a href="{{ url_for('tax.search_legislative_updates', q=t.title) }}">All {{ t.result.total }} matches for this topic &rarr;</a></p>{% endif %}
+      {% else %}<p class="muted" style="margin:0;font-size:13px;">Nothing filed matches this topic.</p>{% endif %}
+    </div>
+    {% endfor %}
+    <div class="card"><h3 class="mt-0">The whole situation</h3><p class="muted" style="font-size:12.5px;margin-top:0;">Documents that bear on the facts as a whole, whichever topic they fall under.</p>
+  {% else %}
+    <div class="card">
+  {% endif %}
+  {% set result = (brief.overall if brief else result) %}
+  {% if result and result.hits %}
+    <p class="muted" style="font-size:12.5px;margin:0 0 4px;">{{ result.total }} document{{ 's' if result.total != 1 }} found{% if result.facets and not brief %} &middot; {% for t, n in result.facets.items() %}{{ type_labels.get(t, 'Other') if t else 'Log entries' }} {{ n }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}.</p>
+    {% for h in result.hits %}
+      {% if result.partial_from is not none and loop.index0 == result.partial_from %}<p style="margin:14px 0 0;font-weight:600;font-size:13px;">Partial matches &mdash; some of your words are missing</p>{% endif %}
+      {{ hit(h, q, result) }}
+    {% endfor %}
+    {% if result.pages > 1 %}
+    <p style="margin:12px 0 0;font-size:13px;">Page {{ result.page }} of {{ result.pages }}
+      {% if result.page > 1 %}&middot; <a href="{{ url_for('tax.search_legislative_updates', q=q, sort=sort, page=result.page - 1, type=filters.types, tax_head=filters.tax_head, area=filters.area, year=filters.year, reviewed=1 if filters.reviewed else None) }}">&larr; previous</a>{% endif %}
+      {% if result.page < result.pages %}&middot; <a href="{{ url_for('tax.search_legislative_updates', q=q, sort=sort, page=result.page + 1, type=filters.types, tax_head=filters.tax_head, area=filters.area, year=filters.year, reviewed=1 if filters.reviewed else None) }}">next &rarr;</a>{% endif %}</p>
+    {% endif %}
+  {% elif result and not advice %}
+    <p class="muted" style="margin:0;">Nothing filed matches that. Try fewer or different words, a stem such as deprec*, or remove a filter. {% if filters %}<a href="{{ url_for('tax.search_legislative_updates', q=q) }}">Clear the filters</a>.{% endif %}</p>
+  {% endif %}
+  </div>
+{% endif %}
+{% endblock %}
