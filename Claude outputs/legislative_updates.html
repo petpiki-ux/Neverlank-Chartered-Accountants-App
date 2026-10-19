@@ -1,0 +1,254 @@
+{% extends "base.html" %}
+{% block title %}Legislative Updates - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Legislative Update Control</h1>
+    <div class="subtitle">Firm-wide log of legislative/practice changes, case law, professional publications and news articles - file an Act, Government Notice, Statutory Instrument, court Case, Publication or News article for an automatic AI summary, or just log an update as text. Tag the clients each one affects, then pull it into a Tax Advisory engagement's Technical Research Log with one click.</div>
+  </div>
+  <div><a href="{{ url_for('tax.legislative_updates_calendar') }}" class="btn secondary">Calendar view</a></div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Search the library</h3>
+  <p class="muted" style="font-size:12px;">
+    Deep search through every passage of every filed Act, Notice, SI, case, publication and news article &mdash; ranked, with the matching
+    words highlighted and a link to the exact passage. Handles word endings, typos and short forms (VAT, QPD, SI 33 of 2024). You can also
+    paste a whole client situation and the topics to cover.
+    <strong>The Income Tax Act [Chapter 23:06]</strong> is filed section by section: <a href="{{ url_for('tax.act_contents', code='ita') }}">open its contents</a> to go straight to any section or schedule.
+    The <strong>Value Added Tax Act [Chapter 23:12]</strong> is filed the same way: <a href="{{ url_for('tax.act_contents', code='vat') }}">open its contents</a>.
+  </p>
+  <form method="get" action="{{ url_for('tax.search_legislative_updates') }}" class="form-row">
+    <div style="flex:4;"><input type="text" name="q" placeholder="Search the filed legislation..." required></div>
+    <div><button type="submit" class="btn gold">Search</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Ask the library</h3>
+  <p class="muted" style="font-size:12px;">
+    Ask a plain-English question and get an answer drawn only from what's actually filed below, with a
+    link back to the specific update(s) it came from - e.g. "what's the current VAT threshold" or "any
+    recent notice about clearing agent registration".
+  </p>
+  <form method="post" action="{{ url_for('tax.ask_legislative_updates') }}" class="form-row">
+    <div style="flex:4;"><input type="text" name="question" placeholder="Ask a question about what's filed..." value="{{ ask_question or '' }}" required></div>
+    <div><button type="submit" class="btn gold">Ask</button></div>
+  </form>
+
+  {% if ask_status == 'no_candidates' %}
+  <p class="muted" style="font-size:12.5px;margin-top:10px;">Nothing filed in the library shares any keywords with that question - it may not be covered yet, or try rephrasing.</p>
+  {% elif ask_status == 'no_answer' %}
+  <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;">
+    {% if ask_from_cache %}<p class="muted" style="font-size:11.5px;margin:0 0 6px;">&#8635; Reused from an earlier, very similar question{% if ask_cache_hit_count %} (asked {{ ask_cache_hit_count }} time{{ 's' if ask_cache_hit_count != 1 else '' }}){% endif %} - not re-searched just now.</p>{% endif %}
+    <p style="font-size:13px;margin:0;">{{ ask_answer }}</p>
+    {% if ask_candidates %}
+    <p class="muted" style="font-size:12px;margin:8px 0 2px;">Closest matches considered (none clearly answered it - worth checking by hand):</p>
+    <ul style="margin-top:0;font-size:12.5px;">
+      {% for u in ask_candidates %}<li><a href="#legislative-update-{{ u.id }}">{{ u.title }}</a></li>{% endfor %}
+    </ul>
+    {% endif %}
+  </div>
+  {% elif ask_status == 'done' %}
+  <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;">
+    {% if ask_from_cache %}<p class="muted" style="font-size:11.5px;margin:0 0 6px;">&#8635; Reused from an earlier, very similar question{% if ask_cache_hit_count %} (asked {{ ask_cache_hit_count }} time{{ 's' if ask_cache_hit_count != 1 else '' }}){% endif %} - not re-searched just now.</p>{% endif %}
+    <p style="font-size:13px;margin:0;">{{ ask_answer }}</p>
+    {% if ask_citations %}
+    <p class="muted" style="font-size:12px;margin:8px 0 2px;">Sources:</p>
+    <ul style="margin-top:0;font-size:12.5px;">
+      {% for u in ask_citations %}<li><a href="#legislative-update-{{ u.id }}">{{ u.title }}</a>{% if u.source_reference %} <span class="muted">({{ u.source_reference }})</span>{% endif %}</li>{% endfor %}
+    </ul>
+    {% endif %}
+    {% include "tax/_ask_feedback.html" %}
+  </div>
+  {% elif ask_status == 'verified' %}
+  <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;border-left:4px solid #2e7d4f;">
+    <p class="muted" style="font-size:11.5px;margin:0 0 6px;"><strong>Verified by the firm</strong>{% if ask_lesson.decided_by %} - approved by {{ ask_lesson.decided_by.name }}{% if ask_lesson.decided_at %} on {{ ask_lesson.decided_at.strftime('%d %b %Y') }}{% endif %}{% endif %}{% if ask_lesson.review_due %}; to be re-checked by {{ ask_lesson.review_due.strftime('%d %b %Y') }}{% endif %}. Not re-searched just now - if the law has changed, tell us it is not right.</p>
+    <p style="font-size:13px;margin:0;white-space:pre-wrap;">{{ ask_answer }}</p>
+    {% include "tax/_ask_feedback.html" %}
+  </div>
+  {% endif %}
+</div>
+
+<div class="card">
+  {% if updates %}
+  {% for u in updates %}
+  <div id="legislative-update-{{ u.id }}" style="padding:10px 0;border-bottom:1px solid var(--border);">
+    <p style="margin:0;">
+      <strong>{{ u.title }}</strong>
+      {% if u.instrument_type %}<span class="badge">{{ u.type_label }}</span>{% endif %}
+      {% if u.tax_head %}<span class="badge">{{ u.tax_head }}</span>{% endif %}
+      {% if u.is_reviewed %}<span class="badge status-Completed">Reviewed</span>{% endif %}
+    </p>
+    <p class="muted" style="font-size:12.5px;margin:4px 0;">
+      {% if u.instrument_type == 'Case' %}
+        {% if u.case_court %}{{ u.case_court }}{% endif %}{% if u.case_jurisdiction %} ({{ u.case_jurisdiction }}){% endif %}
+        {% if u.case_citation %}&middot; {{ u.case_citation }}{% endif %}
+        {% if u.case_court or u.case_citation %}&middot; {% endif %}
+      {% else %}
+        {% if u.gazette_date %}gazetted {{ u.gazette_date.strftime('%d %b %Y') }} &middot; {% endif %}
+      {% endif %}
+      Effective {{ u.effective_date.strftime('%d %b %Y') if u.effective_date else '—' }}
+      {% if u.source_reference %}&middot; {{ u.source_reference }}{% endif %}
+      &middot; logged by {{ u.created_by.name if u.created_by else '—' }} on {{ (u.created_at|cat).strftime('%d %b %Y') }}
+    </p>
+    {% if u.instrument_type == 'Case' %}
+      {% set authority_label = u.authority_label or u.ai_authority_label %}
+      {% if authority_label %}
+      <p style="margin:2px 0;">
+        <span class="badge{% if u.case_authority_status == 'not_relevant' or (not u.case_authority_status and u.ai_case_authority_status == 'not_relevant') %} status-Overdue{% elif u.case_authority_status == 'binding' or (not u.case_authority_status and u.ai_case_authority_status == 'binding') %} status-Completed{% endif %}">{{ authority_label }}</span>
+        {% if not u.case_authority_status %}<span class="muted" style="font-size:11.5px;">(AI suggestion - not yet confirmed)</span>{% endif %}
+      </p>
+      {% endif %}
+    {% endif %}
+    {% if u.summary %}<p style="font-size:13px;"><strong>Summary:</strong> {{ u.summary }}</p>{% endif %}
+
+    {% if u.has_source %}
+    <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin:8px 0;">
+      {% if u.ai_status == 'done' %}
+      <p style="font-size:12.5px;"><strong>AI summary:</strong> {{ u.ai_summary }}</p>
+      {% if u.ai_key_changes %}
+      <p style="font-size:12.5px;margin-bottom:2px;"><strong>{{ 'Key holdings:' if u.instrument_type == 'Case' else 'Key changes:' }}</strong></p>
+      <ul style="margin-top:0;font-size:12.5px;">
+        {% for change in u.ai_key_changes %}<li>{{ change }}</li>{% endfor %}
+      </ul>
+      {% endif %}
+      {% if u.instrument_type == 'Case' and u.ai_case_authority_reasoning %}
+      <p style="font-size:12.5px;"><strong>AI authority assessment{% if u.ai_authority_label %} ({{ u.ai_authority_label }}){% endif %}:</strong> {{ u.ai_case_authority_reasoning }}</p>
+      {% endif %}
+      {% elif u.ai_status == 'skipped' %}
+      <p class="muted" style="font-size:12px;">{{ u.ai_error }}</p>
+      {% elif u.ai_status == 'not_configured' %}
+      <p class="muted" style="font-size:12px;">Automatic summarisation isn't set up yet ({{ u.ai_error }}).{% if can_edit and u.instrument_type != 'Act' %} <form method="post" action="{{ url_for('tax.reprocess_legislative_update', update_id=u.id) }}" class="inline"><button type="submit" class="btn small secondary">Reprocess</button></form>{% endif %}</p>
+      {% elif u.ai_status == 'error' %}
+      <p class="muted" style="font-size:12px;">Automatic summarisation failed ({{ u.ai_error }}).{% if can_edit and u.instrument_type != 'Act' %} <form method="post" action="{{ url_for('tax.reprocess_legislative_update', update_id=u.id) }}" class="inline"><button type="submit" class="btn small secondary">Reprocess</button></form>{% endif %}</p>
+      {% endif %}
+      {% if u.has_file %}
+      <a href="{{ url_for('tax.download_legislative_update', update_id=u.id) }}" class="btn small secondary">Download filed instrument</a>
+      {% elif u.article_url %}
+      <a href="{{ u.article_url }}" target="_blank" rel="noopener">Read original article &#8599;</a>
+      {% endif %}
+    </div>
+
+    <form method="post" action="{{ url_for('tax.save_legislative_update_areas', update_id=u.id) }}" style="margin-bottom:10px;">
+      {% if u.instrument_type == 'Case' %}
+      <div class="form-row" style="margin-bottom:8px;">
+        <div><label style="font-size:12px;">Citation</label><input type="text" name="case_citation" value="{{ u.case_citation or '' }}" style="font-size:12.5px;"></div>
+        <div><label style="font-size:12px;">Court</label><input type="text" name="case_court" value="{{ u.case_court or '' }}" style="font-size:12.5px;"></div>
+        <div><label style="font-size:12px;">Jurisdiction</label><input type="text" name="case_jurisdiction" value="{{ u.case_jurisdiction or '' }}" style="font-size:12.5px;"></div>
+      </div>
+      <label style="font-size:12.5px;">Authority for Zimbabwean practice{% if u.ai_authority_label %} <span class="muted" style="font-weight:normal;">(AI suggested: {{ u.ai_authority_label }})</span>{% endif %}</label>
+      <select name="case_authority_status" style="margin:4px 0 8px;">
+        <option value="">— not yet confirmed —</option>
+        {% for status in case_authority_statuses %}
+        <option value="{{ status }}" {% if u.case_authority_status == status %}selected{% endif %}>{{ case_authority_labels.get(status, status) }}</option>
+        {% endfor %}
+      </select>
+      {% endif %}
+      <label style="font-size:12.5px;">Practice areas{% if u.ai_suggested_areas %} <span class="muted" style="font-weight:normal;">(AI suggested: {{ u.ai_suggested_areas|join(', ') }})</span>{% endif %}</label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;margin:4px 0;">
+        {% for area in areas %}
+        <label style="font-size:12px;font-weight:normal;white-space:nowrap;">
+          <input type="checkbox" name="areas" value="{{ area }}" {% if area in u.areas %}checked{% endif %}> {{ area }}
+        </label>
+        {% endfor %}
+      </div>
+      <button type="submit" class="btn small secondary">{{ 'Save authority & areas' if u.instrument_type == 'Case' else 'Save areas' }}</button>
+    </form>
+    {% endif %}
+
+    <div style="margin-bottom:10px;">
+      <label style="font-size:12.5px;">Clients tagged as affected</label>
+      {% if u.client_links %}
+      <ul style="margin-top:4px;font-size:12.5px;">
+        {% for link in u.client_links %}
+        <li>
+          <a href="{{ url_for('clients.view_client', client_id=link.client_id) }}">{{ link.client.name }}</a>{% if link.notes %} &mdash; <span class="muted">{{ link.notes }}</span>{% endif %}
+          <form method="post" action="{{ url_for('tax.unlink_client_from_update', link_id=link.id) }}" class="inline" onsubmit="return confirm('Remove this client tag?');">
+            <button type="submit" class="btn small danger" style="padding:1px 6px;">Untag</button>
+          </form>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted" style="font-size:12px;margin:4px 0;">No clients tagged yet.</p>
+      {% endif %}
+      <form method="post" action="{{ url_for('tax.link_client_to_update') }}" class="form-row" style="flex-wrap:wrap;align-items:flex-end;margin-top:6px;">
+        <input type="hidden" name="update_id" value="{{ u.id }}">
+        <div>
+          <select name="client_id" required>
+            <option value="">Tag a client...</option>
+            {% for c in clients %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><input type="text" name="notes" placeholder="Why it's relevant (optional)"></div>
+        <div><button type="submit" class="btn small gold">Tag</button></div>
+      </form>
+    </div>
+
+    <form method="post" action="{{ url_for('tax.review_legislative_update', update_id=u.id) }}" class="form-row">
+      <div style="flex:3;"><input type="text" name="impact_assessment" placeholder="Impact assessment" value="{{ u.impact_assessment or '' }}"></div>
+      <div><button type="submit" class="btn small gold">Save &amp; mark reviewed</button></div>
+    </form>
+    {% if u.is_reviewed %}<p class="muted" style="font-size:11px;">Reviewed by {{ u.reviewed_by.name if u.reviewed_by else '—' }} on {{ (u.reviewed_at|cat).strftime('%d %b %Y') if u.reviewed_at else '—' }}.</p>{% endif %}
+    {% if can_edit %}
+    <form method="post" action="{{ url_for('tax.delete_legislative_update', update_id=u.id) }}" onsubmit="return confirm('Delete this update?')"><button type="submit" class="btn small danger">Delete</button></form>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% else %}
+  <div class="empty-state">No legislative updates logged yet.</div>
+  {% endif %}
+</div>
+
+{% if can_edit %}
+<div class="card">
+  <h3 class="mt-0">File an instrument, or log an update</h3>
+  <p class="muted" style="font-size:12px;">
+    Attach the actual Act, Government Notice, Statutory Instrument, court Case or Publication (PDF, JPG or PNG) to
+    get an automatic AI summary below - or leave the file blank and just log the update as text, as before. A Case
+    can be Zimbabwean or foreign - the AI assesses a foreign judgment (e.g. South African) for persuasive authority
+    rather than dismissing it for not being Zimbabwean law; you confirm the final authority classification. A
+    Publication is a journal article or technical note (e.g. a SAIT Tax Chronicles Monthly issue) rather than
+    Zimbabwean legislation or a judgment - it's summarised as commentary/analysis on its own terms, not forced
+    into a legislative framing; use Source / reference for its citation (e.g. "Tax Chronicles Monthly, Issue 90,
+    January 2026, SAIT"). A News article is filed by pasting its URL instead of a file - the app fetches the page
+    itself and summarises it as ordinary news reporting on a possible development, not as confirmed law or
+    professional analysis.
+  </p>
+  <form method="post" action="{{ url_for('tax.add_legislative_update') }}" enctype="multipart/form-data">
+    <div class="form-row" style="flex-wrap:wrap;">
+      <div>
+        <label for="instrument_type">Instrument type</label>
+        <select id="instrument_type" name="instrument_type">
+          <option value="">Text log only (no instrument type)</option>
+          {% for t in instrument_types %}<option value="{{ t }}">{{ type_labels.get(t, t) }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="tax_head">Tax head</label>
+        <select id="tax_head" name="tax_head">
+          <option value="">General</option>
+          {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="title">Title *</label><input type="text" id="title" name="title" required></div>
+    </div>
+    <div class="form-row" style="flex-wrap:wrap;">
+      <div><label for="gazette_date">Gazette date</label><input type="date" id="gazette_date" name="gazette_date"></div>
+      <div><label for="effective_date">Effective date</label><input type="date" id="effective_date" name="effective_date"></div>
+      <div><label for="source_reference">Source / reference</label><input type="text" id="source_reference" name="source_reference"></div>
+    </div>
+    <label for="file">Filed instrument (PDF, JPG or PNG - optional, not used for a News entry)</label>
+    <input type="file" id="file" name="file" accept=".pdf,.png,.jpg,.jpeg">
+    <label for="article_url">News article URL (for a News entry, instead of a file - the app fetches and summarises the page itself)</label>
+    <input type="url" id="article_url" name="article_url" placeholder="https://...">
+    <label for="summary">Summary (used if no file/URL is attached, or the AI summary isn't available)</label>
+    <textarea id="summary" name="summary" rows="2"></textarea>
+    <label for="impact_assessment">Impact assessment</label>
+    <textarea id="impact_assessment" name="impact_assessment" rows="2"></textarea>
+    <button type="submit" class="btn gold">Log / file update</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

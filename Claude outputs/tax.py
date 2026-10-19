@@ -1,0 +1,2696 @@
+"""Tax Advisory module - the "Tax" tab shown on any
+engagement with Engagement.has_tax_module True (a Tax Advisory engagement -
+the single umbrella type for all tax work - or any other engagement type
+with a Tax service turned on - see models.TAX_SERVICES).
+
+Everything that already had a natural home elsewhere in this app is
+reused rather than duplicated - see the module comment at the top of the
+"Tax Advisory & Tax Compliance module" section in models.py for the full
+list (Risk Register -> RiskItem, Execution Plan -> SubstantiveProcedureArea/
+Item, CIT/Deferred Tax computations -> the existing working papers, Tax
+Opinion/Health Check -> WorkpaperNarrative, Documents -> the existing
+Documents/Filing Index). This file only adds the CRUD routes for the
+genuinely new pieces: the entity profile, registrations/clearances/portal
+access, the statutory calendar, the analytical review, the tax risk
+register entries, the position register, the penalty & interest engine,
+information requests, return records, the advisory workflow (research
+log/structuring/disputes), the compliance checklist, and the firm-wide
+legislative update log and penalty/interest rate table.
+"""
+import os
+import re
+import csv
+import io
+import json
+import uuid
+import calendar as calendar_module
+
+from datetime import datetime, date
+
+import requests
+import openpyxl
+from bs4 import BeautifulSoup
+
+from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_from_directory
+from flask_login import login_required, current_user
+from werkzeug.utils import secure_filename
+
+from extensions import db
+from models import visible_clients
+from models import (
+    Engagement, User, RiskItem, Client,
+    TaxEntityProfile, TAX_ENTITY_CLASSIFICATIONS,
+    TaxRegistration, TAX_REGISTRATION_RECORD_TYPES,
+    TaxDeadline,
+    TaxAnalyticalReview,
+    TaxPosition, TAX_POSITION_CLASSIFICATIONS, TAX_POSITION_APPROVAL_STATUSES,
+    PenaltyInterestRate, PenaltyInterestCalculation, PENALTY_INTEREST_RATE_TYPES,
+    TaxInformationRequest, TAX_INFO_REQUEST_STATUSES,
+    TaxReturnRecord, TAX_RETURN_STATUSES,
+    TaxResearchLogEntry, TaxStructuringOption, TaxDispute, TAX_DISPUTE_STAGES,
+    VATRate, VAT_RATE_TYPES,
+    VAT_CURRENCIES, VAT_DEFAULT_CURRENCY, normalize_vat_currency, VAT_DENIAL_GROUNDS, VAT_DENIAL_LABELS,
+    VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_INVOICE_SOURCES,
+    VATImportBatch, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, resolve_vat_kind, vat_kind_code,
+    VATPeriod, vat_period_key, vat_period_label, vat_period_of, parse_vat_period_key, vat_locked_months_among,
+    LegislativeUpdate, LegislativeUpdateClientLink, LegislativeProvision,
+    LEGISLATIVE_UPDATE_TYPES, LEGISLATIVE_UPDATE_TYPE_LABELS, LEGISLATIVE_UPDATE_AREAS,
+    CASE_AUTHORITY_STATUSES, CASE_AUTHORITY_LABELS,
+    StatutoryDeadline,
+    TaxChecklistItem, DEFAULT_TAX_CHECKLIST_ITEMS,
+    TAX_HEADS, PARTNER_SIGNOFF_ROLES, REVIEWER_ROLES,
+    user_has_permission,
+)
+from engagements import _ensure_engagement_access
+from config import Config
+import sanctions_data
+import legislation_summary
+import legislation_search
+import legislation_index
+import legislation_chunking
+import act_import
+import vat_checks
+
+tax_bp = Blueprint("tax", __name__, url_prefix="/tax")
+
+LEGISLATIVE_UPDATE_FILE_EXTENSIONS = {"pdf", "png", "jpg", "jpeg"}
+LEGISLATIVE_UPDATE_IMAGE_EXTENSIONS = {"png", "jpg", "jpeg"}
+
+
+def _legislative_updates_dir():
+    directory = Config.LEGISLATIVE_UPDATES_DATA_DIR
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+NEWS_FETCH_TIMEOUT = 20  # seconds - a slow/unresponsive news site should never hang the request
+NEWS_MAX_TEXT_CHARS = 60000  # matches legislation_summary.MAX_TEXT_CHARS; keeps a very long page bounded before it even reaches the AI step
+NEWS_FETCH_HEADERS = {
+    # Some news sites block the default python-requests user agent outright;
+    # a plain browser-like UA is enough to get past that without doing
+    # anything deceptive - the app identifies itself honestly to the extent
+    # any browser does.
+    "User-Agent": "Mozilla/5.0 (compatible; NeverlankAuditApp/1.0; +https://neverlank-audit-app.onrender.com)"
+}
+
+
+def _fetch_and_extract_news_article(url):
+    """Fetch a news article by URL and extract its readable text, for a News
+    Legislative Update entry (instrument_type == "News") filed by pasting a
+    link rather than uploading a file - see models.LegislativeUpdate's
+    docstring. Returns (text, error): on success, text is a non-empty
+    string and error is None; on failure, text is None and error is a
+    short, person-readable message suitable for a flash message. Never
+    raises - a bad/unreachable URL should degrade cleanly, the same way a
+    bad PDF upload degrades to an extraction_status rather than a crash.
+
+    Extraction is deliberately simple (strip script/style/nav/footer/header
+    tags, then take the page's visible text) rather than a full
+    readability/boilerplate-removal algorithm - good enough for an AI
+    summarisation step that only needs the article's substance, not a
+    publication-quality reformatting of it."""
+    if not url:
+        return None, "No URL was provided."
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return None, "That doesn't look like a valid web address - it should start with http:// or https://."
+    try:
+        response = requests.get(url, headers=NEWS_FETCH_HEADERS, timeout=NEWS_FETCH_TIMEOUT)
+        response.raise_for_status()
+    except Exception as exc:
+        return None, f"Couldn't fetch that page: {exc}"[:500]
+
+    try:
+        soup = BeautifulSoup(response.content, "html.parser")
+        for tag in soup(["script", "style", "nav", "footer", "header", "aside", "noscript"]):
+            tag.decompose()
+        text = soup.get_text(separator="\n")
+        lines = [line.strip() for line in text.splitlines()]
+        text = "\n".join(line for line in lines if line)
+    except Exception as exc:
+        return None, f"Couldn't read that page's content: {exc}"[:500]
+
+    if not text or len(text) < 50:
+        return None, "Couldn't find any readable article text on that page - it may require a login, or not be a plain article page."
+    return text[:NEWS_MAX_TEXT_CHARS], None
+
+
+def legislative_update_editor_required(f):
+    """Filing/reprocessing/deleting a Legislative Update Control entry (with
+    or without an attached instrument) is gated by the configurable "Manage
+    Legislative Update Control" permission (Team > Permissions) - defaults
+    to partner/admin only, the same governed-library treatment as
+    Regulatory Notices, since this now files actual source documents rather
+    than just a free-text log anyone could add to. Viewing, confirming
+    practice areas, tagging a client as affected, and importing into a Tax
+    Advisory Research Log stay open to anyone logged in."""
+    from functools import wraps
+
+    @wraps(f)
+    def wrapped(*args, **kwargs):
+        if not user_has_permission(current_user, "manage_legislative_updates"):
+            abort(403)
+        return f(*args, **kwargs)
+    return wrapped
+
+
+def _tax_redirect(engagement_id, vat_period=None):
+    """Back to the Tax tab; `vat_period` ('2026-09' or 'undated') reopens the
+    VAT month the person was working in rather than the month list."""
+    if vat_period:
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax", vat_period=vat_period))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax"))
+
+
+def _vat_doc_period_arg(day):
+    """The ?vat_period= value for a document dated `day`."""
+    return vat_period_key(*vat_period_of(day)) if day else "undated"
+
+
+def _locked_message(months, what):
+    """Plain-language refusal for touching a VAT month marked 'Computation done'."""
+    names = ", ".join(vat_period_label(y, m) for y, m in months)
+    many = len(months) > 1
+    return (f"{names} {'are' if many else 'is'} marked 'Computation done' and locked, so {what}. "
+            f"A Supervisor, Partner or Admin can reopen {'them' if many else 'it'} from the VAT months list on the Tax tab.")
+
+
+def _parse_date(value):
+    return datetime.strptime(value, "%Y-%m-%d").date() if value else None
+
+
+def _parse_float(value):
+    try:
+        return float(value) if value not in (None, "") else None
+    except ValueError:
+        return None
+
+
+def _get_tax_engagement(engagement_id):
+    """Fetch + access-check an engagement for a Tax route, and make sure the
+    Tax tab is actually turned on for it - every route below is a no-op
+    "flash and bounce back" rather than a hard 404/403 if it isn't, since a
+    stale bookmark/back-button to a since-disabled Tax service shouldn't
+    look like a broken link."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    return engagement
+
+
+def _require_tax_module(engagement):
+    if not engagement.has_tax_module:
+        flash("Turn on a Tax service for this engagement (Edit Engagement) before using the Tax tab.", "danger")
+        return False
+    return True
+
+
+# ---------- Tax Entity Profile (Module 2) ----------
+
+@tax_bp.route("/<int:engagement_id>/profile/save", methods=["POST"])
+@login_required
+def save_entity_profile(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    profile = TaxEntityProfile.query.filter_by(engagement_id=engagement_id).first()
+    if not profile:
+        profile = TaxEntityProfile(engagement_id=engagement_id)
+        db.session.add(profile)
+    profile.tax_classification = request.form.get("tax_classification", "").strip()
+    profile.tax_year_end = _parse_date(request.form.get("tax_year_end"))
+    profile.regulatory_matrix_notes = request.form.get("regulatory_matrix_notes", "").strip()
+    profile.notes = request.form.get("notes", "").strip()
+    profile.completed_by_id = current_user.id
+    profile.completed_at = datetime.utcnow()
+    profile.reviewed_by_id = None
+    profile.reviewed_at = None
+    profile.partner_signed_by_id = None
+    profile.partner_signed_at = None
+    db.session.commit()
+    flash("Tax entity profile saved.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/profile/<int:profile_id>/review", methods=["POST"])
+@login_required
+def review_entity_profile(profile_id):
+    profile = TaxEntityProfile.query.get_or_404(profile_id)
+    _ensure_engagement_access(profile.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if profile.completed_by_id == current_user.id:
+        flash("You can't review a tax entity profile you prepared yourself.", "danger")
+        return _tax_redirect(profile.engagement_id)
+    profile.reviewed_by_id = current_user.id
+    profile.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Tax entity profile marked as reviewed.", "success")
+    return _tax_redirect(profile.engagement_id)
+
+
+@tax_bp.route("/profile/<int:profile_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_entity_profile(profile_id):
+    profile = TaxEntityProfile.query.get_or_404(profile_id)
+    _ensure_engagement_access(profile.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if profile.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a tax entity profile you prepared yourself.", "danger")
+        return _tax_redirect(profile.engagement_id)
+    profile.partner_signed_by_id = current_user.id
+    profile.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return _tax_redirect(profile.engagement_id)
+
+
+# ---------- Registrations / Clearances / Portal Access (Module 1) ----------
+
+@tax_bp.route("/<int:engagement_id>/registrations/add", methods=["POST"])
+@login_required
+def add_registration(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    record = TaxRegistration(
+        engagement_id=engagement_id,
+        record_type=request.form.get("record_type", "registration"),
+        tax_head=request.form.get("tax_head", "").strip() or None,
+        identifier=request.form.get("identifier", "").strip(),
+        status=request.form.get("status", "").strip(),
+        issue_date=_parse_date(request.form.get("issue_date")),
+        expiry_date=_parse_date(request.form.get("expiry_date")),
+        portal_username=request.form.get("portal_username", "").strip() or None,
+        notes=request.form.get("notes", "").strip(),
+        created_by_id=current_user.id,
+    )
+    db.session.add(record)
+    db.session.commit()
+    flash("Record added.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/registrations/<int:record_id>/update", methods=["POST"])
+@login_required
+def update_registration(record_id):
+    record = TaxRegistration.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
+    record.tax_head = request.form.get("tax_head", "").strip() or None
+    record.identifier = request.form.get("identifier", "").strip()
+    record.status = request.form.get("status", "").strip()
+    record.issue_date = _parse_date(request.form.get("issue_date"))
+    record.expiry_date = _parse_date(request.form.get("expiry_date"))
+    record.portal_username = request.form.get("portal_username", "").strip() or None
+    record.notes = request.form.get("notes", "").strip()
+    db.session.commit()
+    flash("Record updated.", "success")
+    return _tax_redirect(record.engagement_id)
+
+
+@tax_bp.route("/registrations/<int:record_id>/delete", methods=["POST"])
+@login_required
+def delete_registration(record_id):
+    record = TaxRegistration.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
+    engagement_id = record.engagement_id
+    db.session.delete(record)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- Statutory Tax Calendar (Module 2) ----------
+
+@tax_bp.route("/<int:engagement_id>/deadlines/add", methods=["POST"])
+@login_required
+def add_deadline(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    due_date = _parse_date(request.form.get("due_date"))
+    if not due_date:
+        flash("Please enter a due date.", "danger")
+        return _tax_redirect(engagement_id)
+    deadline = TaxDeadline(
+        engagement_id=engagement_id,
+        tax_head=request.form.get("tax_head", "").strip() or None,
+        description=request.form.get("description", "").strip(),
+        due_date=due_date,
+        notes=request.form.get("notes", "").strip(),
+        created_by_id=current_user.id,
+    )
+    db.session.add(deadline)
+    db.session.commit()
+    flash("Deadline added to the calendar.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/deadlines/<int:deadline_id>/update", methods=["POST"])
+@login_required
+def update_deadline(deadline_id):
+    deadline = TaxDeadline.query.get_or_404(deadline_id)
+    _ensure_engagement_access(deadline.engagement)
+    deadline.tax_head = request.form.get("tax_head", "").strip() or None
+    deadline.description = request.form.get("description", "").strip()
+    due_date = _parse_date(request.form.get("due_date"))
+    if due_date:
+        deadline.due_date = due_date
+    deadline.status = request.form.get("status", deadline.status)
+    deadline.filed_date = _parse_date(request.form.get("filed_date"))
+    deadline.notes = request.form.get("notes", "").strip()
+    db.session.commit()
+    flash("Deadline updated.", "success")
+    return _tax_redirect(deadline.engagement_id)
+
+
+@tax_bp.route("/deadlines/<int:deadline_id>/delete", methods=["POST"])
+@login_required
+def delete_deadline(deadline_id):
+    deadline = TaxDeadline.query.get_or_404(deadline_id)
+    _ensure_engagement_access(deadline.engagement)
+    engagement_id = deadline.engagement_id
+    db.session.delete(deadline)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- Tax Analytical Review & Historical Exposure (Module 3) ----------
+
+@tax_bp.route("/<int:engagement_id>/analytical/save", methods=["POST"])
+@login_required
+def save_analytical_review(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    review = TaxAnalyticalReview.query.filter_by(engagement_id=engagement_id).first()
+    if not review:
+        review = TaxAnalyticalReview(engagement_id=engagement_id)
+        db.session.add(review)
+    review.is_necessary = request.form.get("is_necessary") == "on"
+    review.not_necessary_reason = request.form.get("not_necessary_reason", "").strip()
+    review.effective_tax_rate_percent = _parse_float(request.form.get("effective_tax_rate_percent"))
+    review.expected_tax_rate_percent = _parse_float(request.form.get("expected_tax_rate_percent"))
+    review.etr_variance_notes = request.form.get("etr_variance_notes", "").strip()
+    review.multi_year_trend_notes = request.form.get("multi_year_trend_notes", "").strip()
+    review.vat_analytics_notes = request.form.get("vat_analytics_notes", "").strip()
+    review.paye_reconciliation_notes = request.form.get("paye_reconciliation_notes", "").strip()
+    review.red_flags_notes = request.form.get("red_flags_notes", "").strip()
+    review.completed_by_id = current_user.id
+    review.completed_at = datetime.utcnow()
+    review.reviewed_by_id = None
+    review.reviewed_at = None
+    review.partner_signed_by_id = None
+    review.partner_signed_at = None
+    db.session.commit()
+    flash("Tax analytical review saved.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/analytical/<int:review_id>/review", methods=["POST"])
+@login_required
+def review_analytical_review(review_id):
+    review = TaxAnalyticalReview.query.get_or_404(review_id)
+    _ensure_engagement_access(review.engagement)
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    if review.completed_by_id == current_user.id:
+        flash("You can't review a tax analytical review you prepared yourself.", "danger")
+        return _tax_redirect(review.engagement_id)
+    review.reviewed_by_id = current_user.id
+    review.reviewed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Tax analytical review marked as reviewed.", "success")
+    return _tax_redirect(review.engagement_id)
+
+
+@tax_bp.route("/analytical/<int:review_id>/partner-sign", methods=["POST"])
+@login_required
+def partner_sign_analytical_review(review_id):
+    review = TaxAnalyticalReview.query.get_or_404(review_id)
+    _ensure_engagement_access(review.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    if review.completed_by_id == current_user.id:
+        flash("You can't give the partner sign-off on a tax analytical review you prepared yourself.", "danger")
+        return _tax_redirect(review.engagement_id)
+    review.partner_signed_by_id = current_user.id
+    review.partner_signed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Partner sign-off recorded.", "success")
+    return _tax_redirect(review.engagement_id)
+
+
+# ---------- Tax Risk Register (Module 4 - reuses RiskItem, module="tax") ----------
+
+@tax_bp.route("/<int:engagement_id>/risks/add", methods=["POST"])
+@login_required
+def add_tax_risk(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    risk = RiskItem(
+        engagement_id=engagement_id,
+        module="tax",
+        category=request.form.get("category", "").strip(),
+        risk_description=request.form.get("risk_description", "").strip(),
+        likelihood=int(request.form.get("likelihood", 3) or 3),
+        impact=int(request.form.get("impact", 3) or 3),
+        mitigation=request.form.get("mitigation", "").strip(),
+        owner_id=request.form.get("owner_id") or None,
+        status=request.form.get("status", "Open"),
+        created_by_id=current_user.id,
+    )
+    db.session.add(risk)
+    db.session.commit()
+    flash("Tax risk added to the register.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/risks/<int:risk_id>/update", methods=["POST"])
+@login_required
+def update_tax_risk(risk_id):
+    risk = RiskItem.query.get_or_404(risk_id)
+    _ensure_engagement_access(risk.engagement)
+    risk.category = request.form.get("category", "").strip()
+    risk.risk_description = request.form.get("risk_description", "").strip()
+    risk.likelihood = int(request.form.get("likelihood", risk.likelihood) or risk.likelihood)
+    risk.impact = int(request.form.get("impact", risk.impact) or risk.impact)
+    risk.mitigation = request.form.get("mitigation", "").strip()
+    risk.owner_id = request.form.get("owner_id") or None
+    risk.status = request.form.get("status", risk.status)
+    db.session.commit()
+    flash("Tax risk updated.", "success")
+    return _tax_redirect(risk.engagement_id)
+
+
+@tax_bp.route("/risks/<int:risk_id>/delete", methods=["POST"])
+@login_required
+def delete_tax_risk(risk_id):
+    risk = RiskItem.query.get_or_404(risk_id)
+    _ensure_engagement_access(risk.engagement)
+    engagement_id = risk.engagement_id
+    db.session.delete(risk)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- Tax Position Register (Module 4) ----------
+
+@tax_bp.route("/<int:engagement_id>/positions/add", methods=["POST"])
+@login_required
+def add_tax_position(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    position = TaxPosition(
+        engagement_id=engagement_id,
+        tax_head=request.form.get("tax_head", "").strip() or None,
+        position_description=request.form.get("position_description", "").strip(),
+        classification=request.form.get("classification", "Possible"),
+        estimated_exposure=_parse_float(request.form.get("estimated_exposure")),
+        notes=request.form.get("notes", "").strip(),
+        created_by_id=current_user.id,
+    )
+    db.session.add(position)
+    db.session.commit()
+    flash("Tax position added to the register.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/positions/<int:position_id>/update", methods=["POST"])
+@login_required
+def update_tax_position(position_id):
+    position = TaxPosition.query.get_or_404(position_id)
+    _ensure_engagement_access(position.engagement)
+    position.tax_head = request.form.get("tax_head", "").strip() or None
+    position.position_description = request.form.get("position_description", "").strip()
+    position.classification = request.form.get("classification", position.classification)
+    position.estimated_exposure = _parse_float(request.form.get("estimated_exposure"))
+    position.notes = request.form.get("notes", "").strip()
+    db.session.commit()
+    flash("Tax position updated.", "success")
+    return _tax_redirect(position.engagement_id)
+
+
+@tax_bp.route("/positions/<int:position_id>/approve", methods=["POST"])
+@login_required
+def approve_tax_position(position_id):
+    position = TaxPosition.query.get_or_404(position_id)
+    _ensure_engagement_access(position.engagement)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    action = request.form.get("action", "Approved")
+    if action not in TAX_POSITION_APPROVAL_STATUSES:
+        abort(400)
+    position.approval_status = action
+    position.approved_by_id = current_user.id
+    position.approved_at = datetime.utcnow()
+    db.session.commit()
+    flash(f"Tax position marked {action}.", "success")
+    return _tax_redirect(position.engagement_id)
+
+
+@tax_bp.route("/positions/<int:position_id>/delete", methods=["POST"])
+@login_required
+def delete_tax_position(position_id):
+    position = TaxPosition.query.get_or_404(position_id)
+    _ensure_engagement_access(position.engagement)
+    engagement_id = position.engagement_id
+    db.session.delete(position)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- Penalty & Interest Engine (Module 4) ----------
+# Rates (firm-wide) are managed from their own settings screen; the
+# calculator itself is engagement-scoped.
+
+@tax_bp.route("/penalty-interest-rates")
+@login_required
+def list_penalty_interest_rates():
+    rates = PenaltyInterestRate.query.order_by(PenaltyInterestRate.tax_head, PenaltyInterestRate.rate_type, PenaltyInterestRate.effective_from.desc()).all()
+    return render_template(
+        "tax/penalty_interest_rates.html", rates=rates, tax_heads=TAX_HEADS,
+        rate_types=PENALTY_INTEREST_RATE_TYPES,
+        can_manage=user_has_permission(current_user, "manage_checklist_templates"),
+    )
+
+
+@tax_bp.route("/penalty-interest-rates/add", methods=["POST"])
+@login_required
+def add_penalty_interest_rate(engagement_id=None):
+    if not user_has_permission(current_user, "manage_checklist_templates"):
+        abort(403)
+    effective_from = _parse_date(request.form.get("effective_from"))
+    rate_percent = _parse_float(request.form.get("rate_percent"))
+    if not effective_from or rate_percent is None:
+        flash("Please enter both an effective date and a rate.", "danger")
+        return redirect(url_for("tax.list_penalty_interest_rates"))
+    rate = PenaltyInterestRate(
+        tax_head=request.form.get("tax_head", "").strip(),
+        rate_type=request.form.get("rate_type", "Penalty"),
+        rate_percent=rate_percent,
+        effective_from=effective_from,
+        effective_to=_parse_date(request.form.get("effective_to")),
+        notes=request.form.get("notes", "").strip(),
+        entered_by_id=current_user.id,
+    )
+    db.session.add(rate)
+    db.session.commit()
+    flash("Rate added.", "success")
+    return redirect(url_for("tax.list_penalty_interest_rates"))
+
+
+@tax_bp.route("/penalty-interest-rates/<int:rate_id>/delete", methods=["POST"])
+@login_required
+def delete_penalty_interest_rate(rate_id):
+    if not user_has_permission(current_user, "manage_checklist_templates"):
+        abort(403)
+    rate = PenaltyInterestRate.query.get_or_404(rate_id)
+    db.session.delete(rate)
+    db.session.commit()
+    return redirect(url_for("tax.list_penalty_interest_rates"))
+
+
+@tax_bp.route("/<int:engagement_id>/penalty-interest/calculate", methods=["POST"])
+@login_required
+def calculate_penalty_interest(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    principal = _parse_float(request.form.get("principal_amount"))
+    days_late = int(request.form.get("days_late", 0) or 0)
+    rate_id = request.form.get("rate_id") or None
+    rate = PenaltyInterestRate.query.get(int(rate_id)) if rate_id else None
+    if principal is None:
+        flash("Please enter a principal amount.", "danger")
+        return _tax_redirect(engagement_id)
+    # Plain simple-interest/flat-penalty arithmetic on the preparer-selected
+    # rate - see the module comment above PenaltyInterestRate on why no
+    # rate is ever hardcoded or pre-selected here.
+    rate_percent = rate.rate_percent if rate else _parse_float(request.form.get("rate_percent_override"))
+    computed = None
+    if rate_percent is not None:
+        if rate and rate.rate_type == "Interest":
+            computed = principal * (rate_percent / 100.0) * (days_late / 365.0)
+        else:
+            computed = principal * (rate_percent / 100.0)
+    calc = PenaltyInterestCalculation(
+        engagement_id=engagement_id,
+        tax_head=request.form.get("tax_head", "").strip() or None,
+        principal_amount=principal,
+        days_late=days_late,
+        rate_id=rate.id if rate else None,
+        rate_percent_used=rate_percent,
+        computed_amount=computed,
+        notes=request.form.get("notes", "").strip(),
+        calculated_by_id=current_user.id,
+    )
+    db.session.add(calc)
+    db.session.commit()
+    flash("Penalty/interest calculation saved.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/penalty-interest/<int:calc_id>/delete", methods=["POST"])
+@login_required
+def delete_penalty_interest_calculation(calc_id):
+    calc = PenaltyInterestCalculation.query.get_or_404(calc_id)
+    _ensure_engagement_access(calc.engagement)
+    engagement_id = calc.engagement_id
+    db.session.delete(calc)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- VAT Invoice Register & Input/Output Tax Working Paper ----------
+# Requested by the user: capture sales (Output) and purchase/expense (Input)
+# invoices, compute Input Tax and Output Tax, allow a rate lower than the
+# standard rate to be captured, and import an already-prepared Output/Input
+# Tax schedule. Rates (firm-wide) are managed from their own settings screen,
+# exactly like Penalty & Interest rates above; invoice capture and schedule
+# import are engagement-scoped. See models.py's module comment above VATRate
+# for why rates are never hardcoded.
+
+def _vat_imports_dir():
+    directory = Config.VAT_IMPORTS_DATA_DIR
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+def _resolve_vat_amount_and_rate(taxable_amount, vat_rate, vat_amount_input):
+    """Given the selected firm-wide VATRate (or None) and whatever the
+    preparer typed into the VAT amount field (or None if left blank),
+    returns (vat_amount, rate_percent_used) to save on the VATInvoice.
+    Prefers the invoice's own stated VAT amount when one was entered - a
+    real invoice's VAT can differ from a plain rate x amount calculation by
+    a cent or two of rounding, and this is a register of what the invoice
+    actually says - but still records a rate_percent_used either way (the
+    selected rate, or the rate implied by the entered amounts) so the
+    working paper can always show which invoices used less than the
+    standard rate."""
+    if vat_amount_input is not None:
+        if vat_rate is not None:
+            rate_percent_used = vat_rate.rate_percent
+        elif taxable_amount:
+            rate_percent_used = round((vat_amount_input / taxable_amount) * 100, 4)
+        else:
+            rate_percent_used = None
+        return vat_amount_input, rate_percent_used
+    if vat_rate is not None:
+        return round((taxable_amount or 0.0) * (vat_rate.rate_percent / 100.0), 2), vat_rate.rate_percent
+    return 0.0, None
+
+
+@tax_bp.route("/vat-rates")
+@login_required
+def list_vat_rates():
+    rates = VATRate.query.order_by(VATRate.rate_type, VATRate.effective_from.desc()).all()
+    return render_template(
+        "tax/vat_rates.html", rates=rates, rate_types=VAT_RATE_TYPES,
+        can_manage=user_has_permission(current_user, "manage_checklist_templates"),
+    )
+
+
+@tax_bp.route("/vat-rates/add", methods=["POST"])
+@login_required
+def add_vat_rate():
+    if not user_has_permission(current_user, "manage_checklist_templates"):
+        abort(403)
+    effective_from = _parse_date(request.form.get("effective_from"))
+    rate_percent = _parse_float(request.form.get("rate_percent"))
+    if not effective_from or rate_percent is None:
+        flash("Please enter both an effective date and a rate.", "danger")
+        return redirect(url_for("tax.list_vat_rates"))
+    rate = VATRate(
+        rate_type=request.form.get("rate_type") or "Standard",
+        rate_percent=rate_percent,
+        effective_from=effective_from,
+        effective_to=_parse_date(request.form.get("effective_to")),
+        notes=request.form.get("notes", "").strip(),
+        entered_by_id=current_user.id,
+    )
+    db.session.add(rate)
+    db.session.commit()
+    flash("VAT rate added.", "success")
+    return redirect(url_for("tax.list_vat_rates"))
+
+
+@tax_bp.route("/vat-rates/<int:rate_id>/delete", methods=["POST"])
+@login_required
+def delete_vat_rate(rate_id):
+    if not user_has_permission(current_user, "manage_checklist_templates"):
+        abort(403)
+    rate = VATRate.query.get_or_404(rate_id)
+    db.session.delete(rate)
+    db.session.commit()
+    return redirect(url_for("tax.list_vat_rates"))
+
+
+@tax_bp.route("/<int:engagement_id>/vat/invoices/add", methods=["POST"])
+@login_required
+def add_vat_invoice(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    resolved = resolve_vat_kind(request.form.get("kind"), request.form.get("direction"))
+    if not resolved:
+        flash("Please choose what you are capturing - a sales invoice, export sale, credit note, purchase invoice or Bill of Entry.", "danger")
+        return _tax_redirect(engagement_id)
+    direction, doc_type = resolved
+    taxable_amount = _parse_float(request.form.get("taxable_amount"))
+    if taxable_amount is None:
+        flash("Please enter the taxable amount (excluding VAT).", "danger")
+        return _tax_redirect(engagement_id)
+    rate_id = request.form.get("vat_rate_id") or None
+    vat_rate = VATRate.query.get(int(rate_id)) if rate_id else None
+    vat_amount_input = _parse_float(request.form.get("vat_amount"))
+    if doc_type == "Export Sale":
+        # Exports are zero-rated: the value is reported, the VAT is always 0.
+        zero_rate = (VATRate.query.filter_by(rate_type="Zero-rated")
+                     .order_by(VATRate.effective_from.desc()).first())
+        vat_rate = zero_rate
+        vat_amount, rate_percent_used = 0.0, 0.0
+    else:
+        vat_amount, rate_percent_used = _resolve_vat_amount_and_rate(taxable_amount, vat_rate, vat_amount_input)
+    if doc_type == "Credit Note":
+        # Figures are captured as printed on the credit note and subtracted in
+        # the totals - so never let a minus sign double-count.
+        taxable_amount, vat_amount = abs(taxable_amount), abs(vat_amount or 0.0)
+    invoice_date = _parse_date(request.form.get("invoice_date"))
+    locked = vat_locked_months_among(engagement_id, [invoice_date])
+    if locked:
+        flash(_locked_message(locked, "a document dated in it cannot be added"), "danger")
+        return _tax_redirect(engagement_id, _vat_doc_period_arg(invoice_date))
+    invoice = VATInvoice(
+        engagement_id=engagement_id,
+        direction=direction,
+        doc_type=doc_type,
+        currency=normalize_vat_currency(request.form.get("currency"), VAT_DEFAULT_CURRENCY),
+        related_reference=request.form.get("related_reference", "").strip() or None,
+        customs_duty=_parse_float(request.form.get("customs_duty")) if doc_type == "Bill of Entry" else None,
+        invoice_date=invoice_date,
+        invoice_number=request.form.get("invoice_number", "").strip() or None,
+        counterparty_name=request.form.get("counterparty_name", "").strip() or None,
+        description=request.form.get("description", "").strip() or None,
+        taxable_amount=taxable_amount,
+        vat_rate_id=vat_rate.id if vat_rate else None,
+        vat_rate_percent_used=rate_percent_used,
+        vat_amount=vat_amount,
+        source="manual",
+        created_by_id=current_user.id,
+    )
+    db.session.add(invoice)
+    db.session.commit()
+    flash(f"{VAT_KIND_LABELS.get(invoice.kind) or VAT_INVOICE_DIRECTION_LABELS.get(direction, direction)} captured.", "success")
+    return _tax_redirect(engagement_id, _vat_doc_period_arg(invoice_date))
+
+
+@tax_bp.route("/vat/invoices/<int:invoice_id>/delete", methods=["POST"])
+@login_required
+def delete_vat_invoice(invoice_id):
+    invoice = VATInvoice.query.get_or_404(invoice_id)
+    _ensure_engagement_access(invoice.engagement)
+    engagement_id = invoice.engagement_id
+    period_arg = _vat_doc_period_arg(invoice.invoice_date)
+    locked = vat_locked_months_among(engagement_id, [invoice.invoice_date])
+    if locked:
+        flash(_locked_message(locked, "this document cannot be deleted"), "danger")
+        return _tax_redirect(engagement_id, period_arg)
+    db.session.delete(invoice)
+    db.session.commit()
+    return _tax_redirect(engagement_id, period_arg)
+
+
+# The fields a VAT Output/Input Tax schedule import can populate, and the
+# header-name synonyms used to suggest a mapping for each one - the same
+# "heuristic suggests, person confirms" pattern as
+# financials.suggest_fs_category, never applied on its own (see
+# _suggest_vat_column_mapping and models.VATImportBatch's docstring).
+VAT_SCHEDULE_FIELDS = [
+    ("invoice_date", "Invoice date"),
+    ("invoice_number", "Invoice number"),
+    ("counterparty_name", "Customer / supplier name"),
+    ("description", "Description"),
+    ("taxable_amount", "Taxable amount (excl. VAT)"),
+    ("vat_amount", "VAT amount"),
+    ("rate_percent", "VAT rate % (only used to compute the VAT amount when that column is blank)"),
+    ("related_reference", "Original invoice # (credit notes) / customs or export entry ref"),
+    ("customs_duty", "Customs duty (Bills of Entry only)"),
+    ("currency", "Currency column (ZWG / USD) - optional, overrides the currency chosen at upload"),
+]
+VAT_SCHEDULE_REQUIRED_FIELDS = {"taxable_amount"}
+
+VAT_SCHEDULE_FIELD_SYNONYMS = {
+    "invoice_date": ["invoice date", "date", "trans date", "transaction date", "tax point", "tax point date"],
+    "invoice_number": ["bill of entry no", "bill of entry number", "boe no", "boe number", "boe #", "credit note no", "credit note number", "credit note #", "cn no", "cn number", "export invoice no", "invoice no", "invoice number", "inv no", "invoice #", "reference", "ref", "ref no", "document no", "doc no"],
+    "counterparty_name": ["customer", "customer name", "client", "client name", "supplier", "supplier name", "vendor", "vendor name", "counterparty", "name", "trading name"],
+    "description": ["description", "particulars", "details", "narrative", "goods/services", "nature of supply"],
+    "taxable_amount": ["taxable value", "vat exclusive", "exclusive amount", "excl. vat", "ex vat", "nett", "net value", "net sales", "net purchases", "customs value", "vat value", "taxable amount", "amount excl vat", "amount excluding vat", "net amount", "excl vat", "net", "value excl vat", "sales excl vat", "purchases excl vat", "amount (excl. vat)"],
+    "vat_amount": ["vat amt", "vat value", "output tax", "input tax", "import vat", "vat paid", "vat amount", "vat", "tax amount", "output vat", "input vat", "vat charged", "vat claimed", "tax"],
+    "rate_percent": ["vat rate", "rate", "vat %", "tax rate", "rate %", "vat rate %"],
+    "related_reference": ["original invoice", "original invoice no", "against invoice", "credited invoice", "related invoice", "customs entry no", "entry reference", "customs entry", "export entry", "export reference", "customs reference", "mrn"],
+    "customs_duty": ["customs duty", "duty", "import duty", "duty paid"],
+    "currency": ["currency", "currency code", "ccy", "curr", "trade currency"],
+}
+
+
+def _suggest_vat_column_mapping(headers):
+    """Best-effort column-name matching for an uploaded Output/Input Tax
+    schedule - never guaranteed correct, and never itself imports anything;
+    the preparer reviews/adjusts every suggestion on the confirmation
+    screen before any VATInvoice row is created. Prefers an exact (case-
+    insensitive) header match over a mere substring match, and never
+    suggests the same column for two different fields."""
+    lower_headers = {h: h.strip().lower() for h in headers if h and str(h).strip()}
+    mapping = {}
+    used = set()
+    for field, _ in VAT_SCHEDULE_FIELDS:
+        synonyms = VAT_SCHEDULE_FIELD_SYNONYMS[field]
+        best = None
+        for h, lh in lower_headers.items():
+            if h in used:
+                continue
+            if lh in synonyms:
+                best = h
+                break
+        if not best:
+            for h, lh in lower_headers.items():
+                if h in used:
+                    continue
+                if any(s in lh for s in synonyms):
+                    best = h
+                    break
+        mapping[field] = best
+        if best:
+            used.add(best)
+    return mapping
+
+
+def _vat_header_score(cells):
+    """How many of a row's non-empty cells look like VAT schedule column
+    headings (date / invoice no / customer / amount excl. VAT / VAT ...). Used
+    to find the real header row in a schedule that has a title, company name
+    or blank lines above it - which a schedule exported from an accounting
+    system nearly always does."""
+    score = 0
+    for c in cells:
+        text = str(c).strip().lower() if c is not None else ""
+        if not text:
+            continue
+        for synonyms in VAT_SCHEDULE_FIELD_SYNONYMS.values():
+            if text in synonyms or any(len(s) > 3 and s in text for s in synonyms):
+                score += 1
+                break
+    return score
+
+
+def _vat_rows_to_table(all_rows):
+    """(headers, rows, score) from a sheet's raw rows (list of lists): finds
+    the header row (the earliest row among the first 40 that looks most like
+    VAT column headings; failing that the first row with 2+ filled cells),
+    de-duplicates repeated headings, and returns each later row as a
+    {heading: value} dict, skipping completely empty rows."""
+    best_i, best_score = None, 0
+    for i, row in enumerate(all_rows[:40]):
+        filled = [c for c in row if c is not None and str(c).strip() != ""]
+        if len(filled) < 2:
+            continue
+        score = _vat_header_score(filled)
+        if score > best_score:
+            best_i, best_score = i, score
+    if best_i is None:
+        for i, row in enumerate(all_rows[:40]):
+            if len([c for c in row if c is not None and str(c).strip() != ""]) >= 2:
+                best_i = i
+                break
+    if best_i is None:
+        return [], [], 0
+    headers, seen = [], {}
+    for c in all_rows[best_i]:
+        h = str(c).strip() if c is not None else ""
+        if h and h in seen:
+            seen[h] += 1
+            h = f"{h} ({seen[h]})"
+        elif h:
+            seen[h] = 1
+        headers.append(h)
+    rows = []
+    for row in all_rows[best_i + 1:]:
+        if all(c is None or str(c).strip() == "" for c in row):
+            continue
+        rows.append({h: v for h, v in zip(headers, row) if h})
+    return [h for h in headers if h], rows, best_score
+
+
+def _read_vat_schedule_rows(filepath, filename):
+    """Returns (headers, rows): the file's own column headers in order, and
+    a list of {header: value} dicts, for an uploaded Output/Input Tax
+    schedule already saved to `filepath`. Tolerates what real exports look
+    like: title/company lines or blank rows above the headings (the header
+    row is found, not assumed to be row 1), several worksheets (the one with
+    the best-looking headings wins), old .xls files, and semicolon/tab
+    delimited CSVs. Raises ValueError with a plain-English message if
+    nothing usable is found."""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext == "csv":
+        with open(filepath, "r", encoding="utf-8-sig", errors="replace", newline="") as f:
+            text = f.read()
+        # Pick the delimiter that actually separates columns on most of the
+        # first lines (a title line above the headings defeats csv.Sniffer).
+        sample_lines = text.splitlines()[:40]
+        delimiter = max(",;\t|", key=lambda d: sum(1 for ln in sample_lines if ln.count(d) >= 2))
+        if not any(ln.count(delimiter) >= 2 for ln in sample_lines):
+            delimiter = ","
+        all_rows = [row for row in csv.reader(io.StringIO(text), delimiter=delimiter)]
+        sheets = [all_rows]
+    elif ext == "xlsx":
+        workbook = openpyxl.load_workbook(filepath, data_only=True)
+        sheets = [list(ws.iter_rows(values_only=True)) for ws in workbook.worksheets]
+    elif ext == "xls":
+        try:
+            import xlrd
+        except ImportError:
+            raise ValueError("Old Excel (.xls) files need one extra step on this server - please open the file in Excel, choose Save As > Excel Workbook (.xlsx) (or CSV), and upload that instead.")
+        try:
+            book = xlrd.open_workbook(filepath)
+        except Exception:
+            raise ValueError("That .xls file could not be read - please open it in Excel and Save As an Excel Workbook (.xlsx) or CSV, then upload that.")
+        sheets = []
+        for sh in book.sheets():
+            sheet_rows = []
+            for r in range(sh.nrows):
+                row = []
+                for c in range(sh.ncols):
+                    cell = sh.cell(r, c)
+                    value = cell.value
+                    if cell.ctype == xlrd.XL_CELL_DATE:
+                        try:
+                            value = xlrd.xldate.xldate_as_datetime(value, book.datemode)
+                        except Exception:
+                            pass
+                    elif cell.ctype in (xlrd.XL_CELL_EMPTY, xlrd.XL_CELL_BLANK):
+                        value = None
+                    row.append(value)
+                sheet_rows.append(row)
+            sheets.append(sheet_rows)
+    else:
+        raise ValueError("Please upload an Excel (.xlsx/.xls) or CSV file.")
+
+    best = ([], [], -1)
+    for sheet_rows in sheets:
+        if not sheet_rows:
+            continue
+        table = _vat_rows_to_table(sheet_rows)
+        # prefer the sheet whose headings look most like a VAT schedule; on a
+        # tie keep the earlier sheet; a sheet with data beats one without
+        if (table[2], len(table[1]) > 0) > (best[2], len(best[1]) > 0):
+            best = table
+    headers, rows, _score = best
+    if not headers:
+        raise ValueError("Could not find a header row in that file - somewhere near the top there should be a row of column headings (e.g. Date, Invoice No, Customer, Amount excl. VAT, VAT).")
+    return headers, rows
+
+
+_VAT_TOTAL_ROW = re.compile(r"^\s*(grand\s+|sub[\s-]*|net\s+|report\s+)?totals?\s*(for\b.*|carried\s+forward|c/?f|b/?f)?\s*[:\-]?\s*$", re.IGNORECASE)
+
+
+def _is_vat_total_row(row):
+    """A 'Total' / 'Sub-total' / 'Grand total' line at the foot of a
+    schedule - never a real document, and importing it would double-count
+    every figure above it."""
+    return any(isinstance(v, str) and _VAT_TOTAL_ROW.match(v) for v in row.values())
+
+
+def _parse_vat_schedule_amount(value):
+    """Parses one spreadsheet cell into a float, tolerant of blanks,
+    currency-formatted text ("$1,234.50", "USD 1 234.50", "ZWG1,234.50"),
+    bracketed or trailing-minus negatives ("(1,234.50)", "1,234.50-") and
+    non-breaking spaces - a schedule from another system is never
+    guaranteed to hand back plain numbers. Returns None (never raises) if
+    it can't be read as a number at all."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    text = str(value).replace("\u00a0", " ").strip()
+    if not text:
+        return None
+    negative = (text.startswith("(") and text.endswith(")")) or text.endswith("-") or text.startswith("-")
+    cleaned = re.sub(r"[^0-9.]", "", text.replace(",", ""))
+    if not cleaned or cleaned.count(".") > 1:
+        return None
+    try:
+        amount = abs(float(cleaned))
+    except ValueError:
+        return None
+    return -amount if negative else amount
+
+
+def _norm_vat_header(text):
+    """Header text normalised for matching: case, runs of whitespace
+    (including line breaks inside a wrapped Excel heading) ignored."""
+    return " ".join(str(text or "").split()).lower()
+
+
+def _resolve_vat_mapping_header(posted, headers):
+    """The real file header a posted <select> value stands for, or None.
+    Browsers normalise line breaks and the server strips whitespace, so an
+    exact comparison can miss a heading like "Amount\n(excl. VAT)"; match
+    exactly first, then on normalised text."""
+    if not posted:
+        return None
+    if posted in headers:
+        return posted
+    wanted = _norm_vat_header(posted)
+    for h in headers:
+        if _norm_vat_header(h) == wanted:
+            return h
+    return None
+
+
+def _parse_vat_schedule_date(value):
+    """Parses one spreadsheet cell into a date - openpyxl already hands
+    back a real datetime/date object for a genuine Excel date cell; this
+    only has to additionally handle a CSV's plain text date in a few common
+    layouts. Returns None (never raises) if it can't be read as a date."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    text = str(value).strip()
+    if not text:
+        return None
+    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%d %b %Y", "%d %B %Y", "%m/%d/%Y"):
+        try:
+            return datetime.strptime(text, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _require_vat_schedule_permission():
+    """Uploading/mapping/confirming/deleting a VAT schedule import needs the
+    "manage_vat_schedules" permission (Supervisor, Partner and Admin by
+    default; an admin can change this per role or person)."""
+    if not user_has_permission(current_user, "manage_vat_schedules"):
+        abort(403, description=(
+            "Your account is not allowed to upload or change VAT schedules. This is limited to Supervisors, "
+            "Partners and Admins by default - an Admin can grant it to you under Team > Permissions or your Access Rights."
+        ))
+
+
+def _render_vat_mapping_screen(engagement, direction, doc_type, staged_name, original_name, headers, rows, mapping, problem=None, currency=VAT_DEFAULT_CURRENCY):
+    """The "confirm column mapping" screen. Used for the first look at an
+    uploaded file AND to send the preparer straight back to it - with their
+    choices intact and the staged file kept - when the confirm step can't
+    import anything, so a bad mapping never just dumps them back on the tab
+    with their upload gone."""
+    code = vat_kind_code(direction, doc_type)
+    return render_template(
+        "tax/vat_import_confirm.html",
+        engagement=engagement, direction=direction, kind=code,
+        direction_label=VAT_KIND_LABELS.get(code) or VAT_INVOICE_DIRECTION_LABELS.get(direction, direction),
+        staged_filename=staged_name, original_filename=original_name,
+        headers=headers, preview_rows=rows[:10], total_row_count=len(rows),
+        schedule_fields=VAT_SCHEDULE_FIELDS, suggested_mapping=mapping, problem=problem,
+        currency=currency,
+    )
+
+
+@tax_bp.route("/<int:engagement_id>/vat/import/stage", methods=["POST"])
+@login_required
+def stage_vat_schedule_import(engagement_id):
+    """Step 1 of the schedule import: save the upload, read its headers,
+    suggest a column mapping, and show the preparer a confirmation screen -
+    nothing is imported yet. See models.VATImportBatch's docstring for why
+    this is a two-step flow."""
+    _require_vat_schedule_permission()
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    resolved = resolve_vat_kind(request.form.get("kind"), request.form.get("direction"))
+    if not resolved:
+        flash("Please choose what kind of schedule this is - sales invoices, export sales, credit notes, purchase invoices or Bills of Entry.", "danger")
+        return _tax_redirect(engagement_id)
+    direction, doc_type = resolved
+    raw_currency = request.form.get("currency", "").strip()
+    currency = normalize_vat_currency(raw_currency, VAT_DEFAULT_CURRENCY if not raw_currency else None)
+    if not currency:
+        flash("Please choose the currency of trade this schedule is in (ZWG or USD) - ZIMRA requires VAT to be accounted for in the currency of trade.", "danger")
+        return _tax_redirect(engagement_id)
+    file = request.files.get("file")
+    if not file or not file.filename:
+        flash("Please choose a file to import.", "danger")
+        return _tax_redirect(engagement_id)
+    ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+    if ext not in ("xlsx", "xls", "csv"):
+        flash("Only Excel (.xlsx/.xls) or CSV files are accepted for a schedule import.", "danger")
+        return _tax_redirect(engagement_id)
+
+    original_name = secure_filename(file.filename)
+    staged_name = f"vatstage_{engagement_id}_{uuid.uuid4().hex[:8]}_{original_name}"
+    staged_path = os.path.join(_vat_imports_dir(), staged_name)
+    file.save(staged_path)
+
+    try:
+        headers, rows = _read_vat_schedule_rows(staged_path, original_name)
+    except ValueError as exc:
+        os.remove(staged_path)
+        flash(str(exc), "danger")
+        return _tax_redirect(engagement_id)
+
+    if not rows:
+        os.remove(staged_path)
+        flash("That file has a header row but no data rows to import.", "danger")
+        return _tax_redirect(engagement_id)
+
+    return _render_vat_mapping_screen(
+        engagement, direction, doc_type, staged_name, original_name, headers, rows,
+        _suggest_vat_column_mapping(headers), currency=currency,
+    )
+
+
+@tax_bp.route("/<int:engagement_id>/vat/import/confirm", methods=["POST"])
+@login_required
+def confirm_vat_schedule_import(engagement_id):
+    """Step 2: the preparer's confirmed (or corrected) column mapping is
+    actually applied, row by row, and a VATImportBatch + one VATInvoice per
+    readable row are created. Re-reads the staged file rather than trusting
+    anything posted from the browser about its contents."""
+    _require_vat_schedule_permission()
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    resolved = resolve_vat_kind(request.form.get("kind"), request.form.get("direction"))
+    direction, doc_type = resolved if resolved else ("", "Invoice")
+    currency = normalize_vat_currency(request.form.get("currency"), VAT_DEFAULT_CURRENCY)
+    staged_filename = secure_filename(request.form.get("staged_filename", "").strip())
+    original_filename = request.form.get("original_filename", "").strip()
+    staged_path = os.path.join(_vat_imports_dir(), staged_filename) if staged_filename else ""
+    if not resolved or not staged_filename or not os.path.exists(staged_path):
+        flash("That import session has expired or the staged file could not be found - please upload the file again.", "danger")
+        return _tax_redirect(engagement_id)
+
+    try:
+        headers, rows = _read_vat_schedule_rows(staged_path, original_filename or staged_filename)
+    except ValueError as exc:
+        os.remove(staged_path)
+        flash(str(exc), "danger")
+        return _tax_redirect(engagement_id)
+
+    posted = {field: (request.form.get(f"map_{field}", "").strip() or None) for field, _ in VAT_SCHEDULE_FIELDS}
+    mapping = {field: _resolve_vat_mapping_header(value, headers) for field, value in posted.items()}
+
+    def _back_to_mapping(message):
+        # keep the staged file and the preparer's choices; explain what to fix
+        return _render_vat_mapping_screen(
+            engagement, direction, doc_type, staged_filename, original_filename or staged_filename,
+            headers, rows, mapping, problem=message, currency=currency,
+        )
+
+    missing_required = [label for field, label in VAT_SCHEDULE_FIELDS if field in VAT_SCHEDULE_REQUIRED_FIELDS and not mapping.get(field)]
+    if missing_required:
+        return _back_to_mapping(f"Please choose which column holds: {', '.join(missing_required)} - it is required to import a schedule.")
+
+    # Dry run first: nothing is saved unless at least one row is readable.
+    readable = [r for r in rows if not _is_vat_total_row(r) and _parse_vat_schedule_amount(r.get(mapping["taxable_amount"])) is not None]
+    if not readable:
+        sample = next((r.get(mapping["taxable_amount"]) for r in rows if r.get(mapping["taxable_amount"]) not in (None, "")), None)
+        hint = f' The first value found in the "{mapping["taxable_amount"]}" column is "{sample}".' if sample is not None else f' The "{mapping["taxable_amount"]}" column is empty in every row.'
+        return _back_to_mapping(
+            f"Nothing was imported: none of the {len(rows)} row(s) has a readable number in the column mapped to Taxable amount.{hint} "
+            "Check that Taxable amount is the column holding the amount excluding VAT, then confirm again."
+        )
+
+    # A schedule can't put documents into a month that is already marked
+    # 'Computation done'. Checked BEFORE anything is saved, and the staged file
+    # is kept so the preparer can reopen the month (or fix the file) and retry.
+    if mapping.get("invoice_date"):
+        row_dates = [_parse_vat_schedule_date(r.get(mapping["invoice_date"])) for r in readable]
+        locked = vat_locked_months_among(engagement_id, row_dates)
+        if locked:
+            return _back_to_mapping(
+                "Nothing was imported. " + _locked_message(locked, "this schedule cannot be imported because it has documents dated in "
+                                                                  + ("those months" if len(locked) > 1 else "that month"))
+                + " Reopen the month (or remove those rows from the file and upload it again), then confirm.")
+
+    # Move the staged file into a permanent, engagement-scoped name for the
+    # audit trail rather than leaving it under its transient staging name -
+    # the same "keep the original filed document" approach as every other
+    # upload in this app.
+    stored_name = f"vat{engagement_id}_{uuid.uuid4().hex[:8]}_{secure_filename(original_filename or staged_filename)}"
+    stored_path = os.path.join(_vat_imports_dir(), stored_name)
+    os.replace(staged_path, stored_path)
+
+    batch = VATImportBatch(
+        engagement_id=engagement_id,
+        direction=direction,
+        doc_type=doc_type,
+        currency=currency,
+        original_filename=original_filename or staged_filename,
+        stored_filename=stored_name,
+        column_mapping_json=json.dumps(mapping),
+        imported_by_id=current_user.id,
+    )
+    db.session.add(batch)
+    db.session.flush()  # assign batch.id before creating its invoices
+
+    imported = 0
+    skipped = 0
+    for row in rows:
+        if _is_vat_total_row(row):
+            skipped += 1
+            continue
+        taxable_amount = _parse_vat_schedule_amount(row.get(mapping["taxable_amount"])) if mapping.get("taxable_amount") else None
+        if taxable_amount is None:
+            skipped += 1
+            continue
+        vat_amount = _parse_vat_schedule_amount(row.get(mapping["vat_amount"])) if mapping.get("vat_amount") else None
+        rate_percent = _parse_vat_schedule_amount(row.get(mapping["rate_percent"])) if mapping.get("rate_percent") else None
+        if vat_amount is None and rate_percent is not None:
+            vat_amount = round(taxable_amount * (rate_percent / 100.0), 2)
+        if doc_type == "Export Sale":
+            vat_amount, rate_percent = 0.0, 0.0  # zero-rated, whatever the file says
+        if doc_type == "Credit Note":
+            taxable_amount, vat_amount = abs(taxable_amount), abs(vat_amount or 0.0)  # subtracted in the totals
+
+        def _mapped_text(field):
+            col = mapping.get(field)
+            if not col:
+                return None
+            value = row.get(col)
+            return str(value).strip() or None if value not in (None, "") else None
+
+        invoice = VATInvoice(
+            engagement_id=engagement_id,
+            direction=direction,
+            doc_type=doc_type,
+            currency=normalize_vat_currency(row.get(mapping["currency"]), currency) if mapping.get("currency") else currency,
+            related_reference=_mapped_text("related_reference"),
+            customs_duty=(_parse_vat_schedule_amount(row.get(mapping["customs_duty"])) if (doc_type == "Bill of Entry" and mapping.get("customs_duty")) else None),
+            invoice_date=_parse_vat_schedule_date(row.get(mapping["invoice_date"])) if mapping.get("invoice_date") else None,
+            invoice_number=_mapped_text("invoice_number"),
+            counterparty_name=_mapped_text("counterparty_name"),
+            description=_mapped_text("description"),
+            taxable_amount=taxable_amount,
+            vat_rate_percent_used=rate_percent,
+            vat_amount=vat_amount or 0.0,
+            source="import",
+            import_batch_id=batch.id,
+            created_by_id=current_user.id,
+        )
+        db.session.add(invoice)
+        imported += 1
+
+    batch.row_count = imported
+    batch.skipped_row_count = skipped
+    db.session.commit()
+
+    if skipped:
+        flash(f"Imported {imported} {VAT_KIND_LABELS.get(vat_kind_code(direction, doc_type), direction).lower()} row(s) - {skipped} row(s) were skipped (no readable taxable amount).", "warning")
+    else:
+        flash(f"Imported {imported} {VAT_KIND_LABELS.get(vat_kind_code(direction, doc_type), direction).lower()} row(s).", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/vat/invoices/<int:invoice_id>/currency", methods=["POST"])
+@login_required
+def set_vat_invoice_currency(invoice_id):
+    """Re-tag one VAT document's currency of trade (e.g. a row captured
+    before currencies were recorded, which are treated as USD)."""
+    invoice = VATInvoice.query.get_or_404(invoice_id)
+    _ensure_engagement_access(invoice.engagement)
+    period_arg = _vat_doc_period_arg(invoice.invoice_date)
+    locked = vat_locked_months_among(invoice.engagement_id, [invoice.invoice_date])
+    if locked:
+        flash(_locked_message(locked, "this document's currency cannot be changed"), "danger")
+        return _tax_redirect(invoice.engagement_id, period_arg)
+    currency = normalize_vat_currency(request.form.get("currency"))
+    if currency:
+        invoice.currency = currency
+        db.session.commit()
+        flash(f"Document moved to the {currency} VAT working paper.", "success")
+    return _tax_redirect(invoice.engagement_id, period_arg)
+
+
+@tax_bp.route("/vat/invoices/<int:invoice_id>/denial", methods=["POST"])
+@login_required
+def set_vat_input_denial(invoice_id):
+    """Mark one input document's VAT as not deductible (VAT Act section 16(2)), or put it back. The document stays in the
+    register; only the claim changes. A completed month is locked like every other change to it."""
+    invoice = VATInvoice.query.get_or_404(invoice_id)
+    _ensure_engagement_access(invoice.engagement)
+    period_arg = _vat_doc_period_arg(invoice.invoice_date)
+    locked = vat_locked_months_among(invoice.engagement_id, [invoice.invoice_date])
+    if locked:
+        flash(_locked_message(locked, "this document's deduction cannot be changed"), "danger")
+        return _tax_redirect(invoice.engagement_id, period_arg)
+    if invoice.direction != "Input":
+        flash("Only input tax (purchases, imports and credit notes received) can be marked as not deductible.", "danger")
+        return _tax_redirect(invoice.engagement_id, period_arg)
+    if request.form.get("action") == "restore":
+        invoice.input_tax_denied = False
+        invoice.denial_ground = None
+        flash("The document's VAT is back in the Input Tax claim.", "success")
+    else:
+        ground = request.form.get("ground") or "other"
+        if ground not in VAT_DENIAL_LABELS:
+            ground = "other"
+        invoice.input_tax_denied = True
+        invoice.denial_ground = ground
+        flash("The document's VAT is left out of the Input Tax claim (%s, section %s of the VAT Act)." % (
+            VAT_DENIAL_LABELS[ground], dict((k, r) for k, _l, r in VAT_DENIAL_GROUNDS)[ground]), "success")
+    db.session.commit()
+    return _tax_redirect(invoice.engagement_id, period_arg)
+
+
+@tax_bp.route("/vat-act")
+@login_required
+def vat_act_check():
+    """The Value Added Tax Act set beside the VAT register: what the Act says (in its own words, from the filed Act), what the register does, and where they differ."""
+    st = act_import.status("vat")
+    counts = {}
+    for f in vat_checks.FINDINGS:
+        counts[f["result"]] = counts.get(f["result"], 0) + 1
+    return render_template("tax/vat_act_check.html", findings=vat_checks.FINDINGS, result_labels=vat_checks.RESULT_LABELS, st=st, counts=counts,
+                           can_load=user_has_permission(current_user, "manage_legislative_updates"))
+
+
+@tax_bp.route("/vat/import-batches/<int:batch_id>/currency", methods=["POST"])
+@login_required
+def set_vat_import_batch_currency(batch_id):
+    """Re-tag a whole imported schedule (and every row it produced) with the
+    right currency of trade - e.g. a ZWG schedule uploaded as USD."""
+    _require_vat_schedule_permission()
+    batch = VATImportBatch.query.get_or_404(batch_id)
+    _ensure_engagement_access(batch.engagement)
+    locked = vat_locked_months_among(batch.engagement_id, [i.invoice_date for i in batch.invoices])
+    if locked:
+        flash(_locked_message(locked, "this schedule's currency cannot be changed (it has documents dated in "
+                                      + ("those months" if len(locked) > 1 else "that month") + ")"), "danger")
+        return _tax_redirect(batch.engagement_id)
+    currency = normalize_vat_currency(request.form.get("currency"))
+    if currency:
+        batch.currency = currency
+        for inv in batch.invoices:
+            inv.currency = currency
+        db.session.commit()
+        flash(f"Imported schedule moved to the {currency} VAT working paper ({len(batch.invoices)} document(s)).", "success")
+    return _tax_redirect(batch.engagement_id)
+
+
+@tax_bp.route("/vat/import/cancel", methods=["POST"])
+@login_required
+def cancel_vat_schedule_import():
+    """Discards a staged file the preparer decided not to import after all
+    (e.g. they picked the wrong file), rather than leaving it orphaned in
+    Config.VAT_IMPORTS_DATA_DIR."""
+    _require_vat_schedule_permission()
+    engagement_id = request.form.get("engagement_id")
+    staged_filename = secure_filename(request.form.get("staged_filename", "").strip())
+    if staged_filename:
+        staged_path = os.path.join(_vat_imports_dir(), staged_filename)
+        if os.path.exists(staged_path):
+            try:
+                os.remove(staged_path)
+            except OSError:
+                pass
+    if engagement_id:
+        return _tax_redirect(int(engagement_id))
+    return redirect(url_for("engagements.list_engagements"))
+
+
+@tax_bp.route("/vat/import-batches/<int:batch_id>/delete", methods=["POST"])
+@login_required
+def delete_vat_import_batch(batch_id):
+    """Reverses a mistaken schedule import in one action - deletes the
+    batch record and, via the cascade on VATImportBatch.invoices (see
+    models.py), every VATInvoice row it produced."""
+    _require_vat_schedule_permission()
+    batch = VATImportBatch.query.get_or_404(batch_id)
+    _ensure_engagement_access(batch.engagement)
+    engagement_id = batch.engagement_id
+    locked = vat_locked_months_among(engagement_id, [i.invoice_date for i in batch.invoices])
+    if locked:
+        flash(_locked_message(locked, "this import cannot be deleted (it has documents dated in "
+                                      + ("those months" if len(locked) > 1 else "that month") + ")"), "danger")
+        return _tax_redirect(engagement_id)
+    if batch.stored_filename:
+        stored_path = os.path.join(_vat_imports_dir(), batch.stored_filename)
+        if os.path.exists(stored_path):
+            try:
+                os.remove(stored_path)
+            except OSError:
+                pass
+    db.session.delete(batch)
+    db.session.commit()
+    flash("Import batch and its invoices removed.", "success")
+    return _tax_redirect(engagement_id)
+
+
+# ---------- Monthly VAT computations ----------
+# A VAT month is "In progress" until someone marks its computation as done; a
+# done month is locked (see VATPeriod in models.py and _locked_message above).
+
+@tax_bp.route("/<int:engagement_id>/vat/periods/<period_key>/done", methods=["POST"])
+@login_required
+def mark_vat_period_done(engagement_id, period_key):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    parsed = parse_vat_period_key(period_key)
+    if not parsed:
+        abort(404)
+    year, month = parsed
+    docs = [i for i in VATInvoice.query.filter_by(engagement_id=engagement_id).all() if vat_period_of(i.invoice_date) == parsed]
+    label = vat_period_label(year, month)
+    if not docs:
+        flash(f"There are no VAT documents dated in {label}, so there is nothing to mark as done.", "danger")
+        return _tax_redirect(engagement_id)
+    row = VATPeriod.query.filter_by(engagement_id=engagement_id, year=year, month=month).first()
+    if row is not None and row.is_done:
+        flash(f"The {label} computation is already marked as done.", "info")
+        return _tax_redirect(engagement_id, period_key)
+    if row is None:
+        row = VATPeriod(engagement_id=engagement_id, year=year, month=month)
+        db.session.add(row)
+    row.is_done = True
+    row.completed_by_id = current_user.id
+    row.completed_at = datetime.utcnow()
+    db.session.commit()
+    undated = VATInvoice.query.filter_by(engagement_id=engagement_id, invoice_date=None).count()
+    note = (f" Note: {undated} document(s) have no date and are not part of any month - give them a date first if they belong here."
+            if undated else "")
+    flash(f"{label} VAT computation marked as done and locked. Documents dated in {label} can no longer be added, "
+          f"deleted or imported until it is reopened.{note}", "success")
+    return _tax_redirect(engagement_id, period_key)
+
+
+@tax_bp.route("/<int:engagement_id>/vat/periods/<period_key>/reopen", methods=["POST"])
+@login_required
+def reopen_vat_period(engagement_id, period_key):
+    engagement = _get_tax_engagement(engagement_id)
+    if not user_has_permission(current_user, "reopen_vat_periods"):
+        abort(403, description=(
+            "Your account is not allowed to reopen a completed VAT month. This is limited to Supervisors, Partners "
+            "and Admins by default - an Admin can grant it to you under Team > Permissions or your Access Rights."))
+    parsed = parse_vat_period_key(period_key)
+    if not parsed:
+        abort(404)
+    year, month = parsed
+    label = vat_period_label(year, month)
+    row = VATPeriod.query.filter_by(engagement_id=engagement_id, year=year, month=month).first()
+    if row is None or not row.is_done:
+        flash(f"The {label} computation is not marked as done, so there is nothing to reopen.", "info")
+        return _tax_redirect(engagement_id, period_key)
+    reason = request.form.get("reason", "").strip()
+    if not reason:
+        flash(f"Please give a reason for reopening {label} (it is kept on file).", "danger")
+        return _tax_redirect(engagement_id, period_key)
+    row.is_done = False
+    row.reopened_by_id = current_user.id
+    row.reopened_at = datetime.utcnow()
+    row.reopen_reason = reason[:300]
+    row.times_reopened = (row.times_reopened or 0) + 1
+    db.session.commit()
+    flash(f"{label} reopened - it is back to 'In progress' and documents dated in it can be changed again. "
+          "Mark it as done again once the computation is final.", "info")
+    return _tax_redirect(engagement_id, period_key)
+
+
+# ---------- Dynamic Information Request List (Module 5) ----------
+
+@tax_bp.route("/<int:engagement_id>/info-requests/add", methods=["POST"])
+@login_required
+def add_information_request(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    item = TaxInformationRequest(
+        engagement_id=engagement_id,
+        tax_head=request.form.get("tax_head", "").strip() or None,
+        item_description=request.form.get("item_description", "").strip(),
+        requested_from=request.form.get("requested_from", "").strip(),
+        date_requested=_parse_date(request.form.get("date_requested")) or date.today(),
+        notes=request.form.get("notes", "").strip(),
+        created_by_id=current_user.id,
+    )
+    db.session.add(item)
+    db.session.commit()
+    flash("Information request added.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/info-requests/<int:item_id>/update", methods=["POST"])
+@login_required
+def update_information_request(item_id):
+    item = TaxInformationRequest.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
+    item.status = request.form.get("status", item.status)
+    if item.status == "Received" and not item.date_received:
+        item.date_received = date.today()
+    item.notes = request.form.get("notes", item.notes)
+    db.session.commit()
+    flash("Information request updated.", "success")
+    return _tax_redirect(item.engagement_id)
+
+
+@tax_bp.route("/info-requests/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_information_request(item_id):
+    item = TaxInformationRequest.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
+    engagement_id = item.engagement_id
+    db.session.delete(item)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- Tax Return Records (Module 7 + Module 10's e-filing/assessment recon) ----------
+
+@tax_bp.route("/<int:engagement_id>/returns/add", methods=["POST"])
+@login_required
+def add_return_record(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    record = TaxReturnRecord(
+        engagement_id=engagement_id,
+        tax_head=request.form.get("tax_head", TAX_HEADS[0]),
+        period_label=request.form.get("period_label", "").strip(),
+        due_date=_parse_date(request.form.get("due_date")),
+        amount_due=_parse_float(request.form.get("amount_due")),
+        reference=request.form.get("reference", "").strip(),
+        notes=request.form.get("notes", "").strip(),
+        created_by_id=current_user.id,
+    )
+    db.session.add(record)
+    db.session.commit()
+    flash("Return record added.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/returns/<int:record_id>/update", methods=["POST"])
+@login_required
+def update_return_record(record_id):
+    record = TaxReturnRecord.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
+    record.status = request.form.get("status", record.status)
+    record.filed_date = _parse_date(request.form.get("filed_date"))
+    record.amount_due = _parse_float(request.form.get("amount_due"))
+    record.amount_paid = _parse_float(request.form.get("amount_paid"))
+    record.assessed_amount = _parse_float(request.form.get("assessed_amount"))
+    record.reference = request.form.get("reference", record.reference)
+    record.reconciliation_notes = request.form.get("reconciliation_notes", "").strip()
+    record.notes = request.form.get("notes", record.notes)
+    db.session.commit()
+    flash("Return record updated.", "success")
+    return _tax_redirect(record.engagement_id)
+
+
+@tax_bp.route("/returns/<int:record_id>/delete", methods=["POST"])
+@login_required
+def delete_return_record(record_id):
+    record = TaxReturnRecord.query.get_or_404(record_id)
+    _ensure_engagement_access(record.engagement)
+    engagement_id = record.engagement_id
+    db.session.delete(record)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- Tax Advisory Workflow (Module 7B - advisory-only) ----------
+
+def _require_tax_advisory(engagement):
+    if not engagement.has_tax_advisory:
+        flash("The Tax Advisory service isn't on for this engagement.", "danger")
+        return False
+    return True
+
+
+@tax_bp.route("/<int:engagement_id>/research/add", methods=["POST"])
+@login_required
+def add_research_log_entry(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_advisory(engagement):
+        return _tax_redirect(engagement_id)
+    entry = TaxResearchLogEntry(
+        engagement_id=engagement_id,
+        topic=request.form.get("topic", "").strip(),
+        question=request.form.get("question", "").strip(),
+        research_notes=request.form.get("research_notes", "").strip(),
+        conclusion=request.form.get("conclusion", "").strip(),
+        references=request.form.get("references", "").strip(),
+        prepared_by_id=current_user.id,
+    )
+    db.session.add(entry)
+    db.session.commit()
+    flash("Research log entry added.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/research/<int:entry_id>/delete", methods=["POST"])
+@login_required
+def delete_research_log_entry(entry_id):
+    entry = TaxResearchLogEntry.query.get_or_404(entry_id)
+    _ensure_engagement_access(entry.engagement)
+    engagement_id = entry.engagement_id
+    db.session.delete(entry)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/<int:engagement_id>/structuring/add", methods=["POST"])
+@login_required
+def add_structuring_option(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_advisory(engagement):
+        return _tax_redirect(engagement_id)
+    option = TaxStructuringOption(
+        engagement_id=engagement_id,
+        option_name=request.form.get("option_name", "").strip(),
+        description=request.form.get("description", "").strip(),
+        estimated_tax_impact=_parse_float(request.form.get("estimated_tax_impact")),
+        risk_rating=request.form.get("risk_rating", "Medium"),
+        notes=request.form.get("notes", "").strip(),
+        created_by_id=current_user.id,
+    )
+    db.session.add(option)
+    db.session.commit()
+    flash("Structuring option added.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/structuring/<int:option_id>/recommend", methods=["POST"])
+@login_required
+def recommend_structuring_option(option_id):
+    option = TaxStructuringOption.query.get_or_404(option_id)
+    _ensure_engagement_access(option.engagement)
+    # Only one option can be "the" recommendation at a time - clear any
+    # other recommended flag on the same engagement first.
+    TaxStructuringOption.query.filter_by(engagement_id=option.engagement_id).update({"recommended": False})
+    option.recommended = True
+    db.session.commit()
+    flash(f'"{option.option_name}" marked as the recommended option.', "success")
+    return _tax_redirect(option.engagement_id)
+
+
+@tax_bp.route("/structuring/<int:option_id>/delete", methods=["POST"])
+@login_required
+def delete_structuring_option(option_id):
+    option = TaxStructuringOption.query.get_or_404(option_id)
+    _ensure_engagement_access(option.engagement)
+    engagement_id = option.engagement_id
+    db.session.delete(option)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/<int:engagement_id>/disputes/add", methods=["POST"])
+@login_required
+def add_dispute(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_advisory(engagement):
+        return _tax_redirect(engagement_id)
+    dispute = TaxDispute(
+        engagement_id=engagement_id,
+        tax_head=request.form.get("tax_head", "").strip() or None,
+        issue_description=request.form.get("issue_description", "").strip(),
+        amount_in_dispute=_parse_float(request.form.get("amount_in_dispute")),
+        next_action=request.form.get("next_action", "").strip(),
+        next_action_date=_parse_date(request.form.get("next_action_date")),
+        notes=request.form.get("notes", "").strip(),
+        created_by_id=current_user.id,
+    )
+    db.session.add(dispute)
+    db.session.commit()
+    flash("Dispute added.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/disputes/<int:dispute_id>/update", methods=["POST"])
+@login_required
+def update_dispute(dispute_id):
+    dispute = TaxDispute.query.get_or_404(dispute_id)
+    _ensure_engagement_access(dispute.engagement)
+    dispute.stage = request.form.get("stage", dispute.stage)
+    dispute.amount_in_dispute = _parse_float(request.form.get("amount_in_dispute"))
+    dispute.next_action = request.form.get("next_action", "").strip()
+    dispute.next_action_date = _parse_date(request.form.get("next_action_date"))
+    dispute.notes = request.form.get("notes", "").strip()
+    db.session.commit()
+    flash("Dispute updated.", "success")
+    return _tax_redirect(dispute.engagement_id)
+
+
+@tax_bp.route("/disputes/<int:dispute_id>/delete", methods=["POST"])
+@login_required
+def delete_dispute(dispute_id):
+    dispute = TaxDispute.query.get_or_404(dispute_id)
+    _ensure_engagement_access(dispute.engagement)
+    engagement_id = dispute.engagement_id
+    db.session.delete(dispute)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- Tax Head Checklists / Quality Gates (Module 8) ----------
+
+@tax_bp.route("/<int:engagement_id>/checklist/seed", methods=["POST"])
+@login_required
+def seed_tax_checklist(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    if TaxChecklistItem.query.filter_by(engagement_id=engagement_id).count() > 0:
+        flash("The tax checklist already has items on it.", "info")
+        return _tax_redirect(engagement_id)
+    for order, (tax_head, item_text) in enumerate(DEFAULT_TAX_CHECKLIST_ITEMS):
+        db.session.add(TaxChecklistItem(
+            engagement_id=engagement_id, tax_head=tax_head, item_text=item_text,
+            order=order, created_by_id=current_user.id,
+        ))
+    db.session.commit()
+    flash("The firm's default tax checklist has been added.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/<int:engagement_id>/checklist/add", methods=["POST"])
+@login_required
+def add_tax_checklist_item(engagement_id):
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_module(engagement):
+        return _tax_redirect(engagement_id)
+    max_order = db.session.query(db.func.max(TaxChecklistItem.order)).filter_by(engagement_id=engagement_id).scalar() or 0
+    item = TaxChecklistItem(
+        engagement_id=engagement_id,
+        tax_head=request.form.get("tax_head", "").strip() or None,
+        item_text=request.form.get("item_text", "").strip(),
+        order=max_order + 1,
+        created_by_id=current_user.id,
+    )
+    db.session.add(item)
+    db.session.commit()
+    flash("Checklist item added.", "success")
+    return _tax_redirect(engagement_id)
+
+
+@tax_bp.route("/checklist/<int:item_id>/update", methods=["POST"])
+@login_required
+def update_tax_checklist_item(item_id):
+    item = TaxChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
+    item.response = request.form.get("response", "")
+    item.comment = request.form.get("comment", "").strip()
+    item.completed_by_id = current_user.id
+    item.completed_at = datetime.utcnow()
+    db.session.commit()
+    flash("Checklist item updated.", "success")
+    return _tax_redirect(item.engagement_id)
+
+
+@tax_bp.route("/checklist/<int:item_id>/delete", methods=["POST"])
+@login_required
+def delete_tax_checklist_item(item_id):
+    item = TaxChecklistItem.query.get_or_404(item_id)
+    _ensure_engagement_access(item.engagement)
+    engagement_id = item.engagement_id
+    db.session.delete(item)
+    db.session.commit()
+    return _tax_redirect(engagement_id)
+
+
+# ---------- Firm-wide Legislative Update Control (Module 8) ----------
+#
+# Started as a manually-typed log (title/summary/tax_head/effective_date/
+# source_reference/impact_assessment - still exactly how "Log an update
+# only" works below). add_legislative_update now also accepts an optional
+# filed instrument (an Act/Notice/SI, a court Case, or a professional
+# Publication, as a PDF or image): its text is extracted the same way as a
+# Regulatory Notice and then analysed by AI (see legislation_summary.py)
+# into ai_summary/ai_key_changes - a Case additionally gets a citation/
+# court/jurisdiction and an authority assessment (see
+# models.CASE_AUTHORITY_STATUSES), while a Publication (not Zimbabwean
+# legislation and not a court judgment - e.g. a SAIT journal issue) is
+# summarised on its own terms, see legislation_summary.PUBLICATION_SYSTEM_PROMPT.
+# From there, a
+# person confirms which practice areas it touches and tags the clients it
+# affects (see LegislativeUpdateClientLink) - each tagged client then shows
+# it on their own page, and a Tax Advisory engagement can pull the summary
+# straight into its Technical Research Log with one click (see
+# import_research_log_entry_from_legislative_update below).
+
+def _render_legislative_updates(**extra):
+    updates = LegislativeUpdate.query.order_by(LegislativeUpdate.effective_date.desc().nullslast(), LegislativeUpdate.created_at.desc()).all()
+    context = dict(
+        updates=updates, tax_heads=TAX_HEADS,
+        can_edit=user_has_permission(current_user, "manage_legislative_updates"),
+        instrument_types=LEGISLATIVE_UPDATE_TYPES, type_labels=LEGISLATIVE_UPDATE_TYPE_LABELS,
+        areas=LEGISLATIVE_UPDATE_AREAS, clients=visible_clients(current_user),
+        case_authority_statuses=CASE_AUTHORITY_STATUSES, case_authority_labels=CASE_AUTHORITY_LABELS,
+        ask_question=None, ask_status=None, ask_answer=None, ask_citations=None, ask_candidates=None,
+        ask_from_cache=False, ask_cache_hit_count=None, ask_cache_id=None, ask_lesson=None,
+    )
+    context.update(extra)
+    return render_template("tax/legislative_updates.html", **context)
+
+
+@tax_bp.route("/legislative-updates")
+@login_required
+def list_legislative_updates():
+    return _render_legislative_updates()
+
+
+@tax_bp.route("/legislative-updates/calendar")
+@login_required
+def legislative_updates_calendar():
+    """A month-at-a-glance calendar of every filed instrument's own dates -
+    effective_date (when it takes/took effect) and gazette_date (when it
+    was gazetted) - drawn straight from what's already filed in
+    Legislative Update Control (including anything bulk-imported from
+    ZIMRA's Public Notices, see zimra_notices.py; a "Notice" instrument is
+    filed exactly like any other). Deliberately just plots the two dates
+    that are already there and already reliable, rather than having AI
+    guess at a filing/compliance deadline buried in a notice's text - see
+    the "Ask the library" box on the main list page for that kind of
+    open-ended question instead. A logged entry with neither date set
+    (a plain text-only log, or a file still missing both dates) simply
+    never appears here; it's still on the main list.
+
+    Also plots the firm-maintained StatutoryDeadline list (QPD/VAT/PAYE/etc
+    dates a person typed in, not computed - see StatutoryDeadline's own
+    docstring in models.py) as a third kind of event, managed from a list/
+    add/delete panel on this same page."""
+    today = date.today()
+    try:
+        year = int(request.args.get("year", today.year))
+        month = int(request.args.get("month", today.month))
+    except (TypeError, ValueError):
+        year, month = today.year, today.month
+    # clamp a stray/hand-edited query string back onto a real month rather than 500ing
+    if month < 1 or month > 12 or year < 1900 or year > 2200:
+        year, month = today.year, today.month
+
+    first_day = date(year, month, 1)
+    days_in_month = calendar_module.monthrange(year, month)[1]
+    last_day = date(year, month, days_in_month)
+
+    if month == 1:
+        prev_year, prev_month = year - 1, 12
+    else:
+        prev_year, prev_month = year, month - 1
+    if month == 12:
+        next_year, next_month = year + 1, 1
+    else:
+        next_year, next_month = year, month + 1
+
+    events_by_day = {}
+
+    def _add_event(day, kind, label, detail, link):
+        # A plain dict with plain string keys ("label"/"detail"/"link"),
+        # deliberately NOT keyed by an attribute name that collides with one
+        # of dict's own built-in methods (an earlier version used "update"
+        # as a key, and `ev.update` in the Jinja template silently resolved
+        # to dict's own bound .update() method instead of doing a lookup).
+        events_by_day.setdefault(day, []).append({"kind": kind, "label": label, "detail": detail, "link": link})
+
+    for u in LegislativeUpdate.query.filter(
+        LegislativeUpdate.effective_date >= first_day, LegislativeUpdate.effective_date <= last_day,
+    ).order_by(LegislativeUpdate.title).all():
+        detail = f"{u.title} (Effective{', ' + u.type_label if u.instrument_type else ''})"
+        _add_event(u.effective_date.day, "Effective", u.title, detail, url_for("tax.list_legislative_updates") + f"#legislative-update-{u.id}")
+
+    for u in LegislativeUpdate.query.filter(
+        LegislativeUpdate.gazette_date >= first_day, LegislativeUpdate.gazette_date <= last_day,
+    ).order_by(LegislativeUpdate.title).all():
+        detail = f"{u.title} (Gazetted{', ' + u.type_label if u.instrument_type else ''})"
+        _add_event(u.gazette_date.day, "Gazetted", u.title, detail, url_for("tax.list_legislative_updates") + f"#legislative-update-{u.id}")
+
+    deadlines_this_month = StatutoryDeadline.query.filter(
+        StatutoryDeadline.due_date >= first_day, StatutoryDeadline.due_date <= last_day,
+    ).order_by(StatutoryDeadline.due_date, StatutoryDeadline.description).all()
+    for d in deadlines_this_month:
+        detail = f"{d.description}{' - ' + d.tax_head if d.tax_head else ''} (due {d.due_date.strftime('%d %b %Y')})"
+        _add_event(d.due_date.day, "Deadline", d.description, detail, url_for("tax.legislative_updates_calendar", year=year, month=month) + f"#statutory-deadline-{d.id}")
+
+    for day_events in events_by_day.values():
+        day_events.sort(key=lambda e: e["label"])
+
+    weeks = calendar_module.Calendar(firstweekday=0).monthdayscalendar(year, month)  # Monday-first, 0 = outside this month
+
+    # Every upcoming (and this-year's) deadline for the management panel,
+    # regardless of which month is currently being viewed - not just the
+    # ones falling in this month's grid above.
+    all_deadlines = StatutoryDeadline.query.order_by(StatutoryDeadline.due_date, StatutoryDeadline.description).all()
+
+    return render_template(
+        "tax/legislative_updates_calendar.html",
+        year=year, month=month, month_label=first_day.strftime("%B %Y"),
+        weeks=weeks, events_by_day=events_by_day,
+        prev_year=prev_year, prev_month=prev_month, next_year=next_year, next_month=next_month,
+        today=today, event_count=sum(len(v) for v in events_by_day.values()),
+        all_deadlines=all_deadlines, tax_heads=TAX_HEADS,
+        can_manage_deadlines=(current_user.role in REVIEWER_ROLES),
+    )
+
+
+@tax_bp.route("/legislative-updates/calendar/deadlines/add", methods=["POST"])
+@login_required
+def add_statutory_deadline():
+    """Add one entry to the firm-maintained Statutory Deadlines list (see
+    StatutoryDeadline in models.py). Gated the same way as raising an
+    engagement Query (REVIEWER_ROLES) rather than the looser
+    manage_checklist_templates permission some other firm-wide reference
+    data uses - this is a compliance date the whole firm relies on, not a
+    template."""
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    description = (request.form.get("description") or "").strip()
+    due_date_str = request.form.get("due_date") or ""
+    tax_head = (request.form.get("tax_head") or "").strip()
+    notes = (request.form.get("notes") or "").strip()
+    try:
+        due_date = datetime.strptime(due_date_str, "%Y-%m-%d").date()
+    except ValueError:
+        flash("Enter a valid due date.", "danger")
+        return redirect(url_for("tax.legislative_updates_calendar"))
+    if not description:
+        flash("Enter a description for the deadline.", "danger")
+        return redirect(url_for("tax.legislative_updates_calendar"))
+    db.session.add(StatutoryDeadline(
+        tax_head=tax_head or None, description=description, due_date=due_date,
+        notes=notes or None, created_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash("Statutory deadline added.", "success")
+    return redirect(url_for("tax.legislative_updates_calendar", year=due_date.year, month=due_date.month))
+
+
+@tax_bp.route("/legislative-updates/calendar/deadlines/<int:deadline_id>/delete", methods=["POST"])
+@login_required
+def delete_statutory_deadline(deadline_id):
+    """Remove one Statutory Deadline entry - same REVIEWER_ROLES gate as
+    adding one. Preserves whichever month was being viewed (passed through
+    as hidden year/month fields) rather than bouncing back to the current
+    month."""
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    deadline = StatutoryDeadline.query.get_or_404(deadline_id)
+    db.session.delete(deadline)
+    db.session.commit()
+    flash("Statutory deadline removed.", "success")
+    try:
+        year = int(request.form.get("year") or date.today().year)
+        month = int(request.form.get("month") or date.today().month)
+    except (TypeError, ValueError):
+        year, month = date.today().year, date.today().month
+    return redirect(url_for("tax.legislative_updates_calendar", year=year, month=month))
+
+
+@tax_bp.route("/legislative-updates/ask", methods=["POST"])
+@login_required
+def ask_legislative_updates():
+    """"Ask the library" - a plain-English question answered from the
+    firm's own filed Legislative Update Control library (see
+    legislation_search.py), never from the model's general knowledge. Open
+    to any logged-in user, same as viewing the list itself - it only reads,
+    it never files or changes anything."""
+    question = request.form.get("question", "").strip()
+    if not question:
+        flash("Please enter a question to ask.", "danger")
+        return _render_legislative_updates()
+
+    status, payload = legislation_search.ask(question, asked_by_id=current_user.id)
+    if status == "not_configured":
+        flash("Automatic question-answering isn't set up yet (ANTHROPIC_API_KEY is not set) - see the README.", "danger")
+        return _render_legislative_updates(ask_question=question, ask_status=status)
+    if status == "no_candidates":
+        return _render_legislative_updates(ask_question=question, ask_status=status)
+    if status == "verified":
+        return _render_legislative_updates(ask_question=question, ask_status=status, ask_answer=payload["answer"],
+                                           ask_lesson=payload["lesson"])
+    if status == "no_answer":
+        return _render_legislative_updates(
+            ask_question=question, ask_status=status,
+            ask_answer=payload["answer"], ask_candidates=payload["candidates"],
+            ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
+        )
+    if status == "error":
+        flash(f"Couldn't answer that: {payload}", "danger")
+        return _render_legislative_updates(ask_question=question, ask_status=status)
+    # status == "done"
+    return _render_legislative_updates(
+        ask_question=question, ask_status=status,
+        ask_answer=payload["answer"], ask_citations=payload["citations"],
+        ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
+        ask_cache_id=payload.get("cache_id"),
+    )
+
+
+def _search_filters():
+    """The search filters in the request (form or query string) as legislation_index expects them, plus what to show back in the form."""
+    src = request.values
+    types = [t for t in src.getlist("type") if t in LEGISLATIVE_UPDATE_TYPES]
+    f = {}
+    if types:
+        f["types"] = types
+    if src.get("tax_head") in TAX_HEADS:
+        f["tax_head"] = src.get("tax_head")
+    if src.get("area") in LEGISLATIVE_UPDATE_AREAS:
+        f["area"] = src.get("area")
+    year = src.get("year", type=int)
+    if year and 1900 <= year <= 2100:
+        f["year"] = year
+    if src.get("reviewed") == "1":
+        f["reviewed"] = True
+    return f
+
+
+def _render_search(**extra):
+    q = (request.values.get("q") or "").strip()
+    filters = _search_filters()
+    sort = request.values.get("sort") if request.values.get("sort") in ("relevance", "newest") else "relevance"
+    page = request.values.get("page", type=int) or 1
+    ctx = dict(q=q, filters=filters, sort=sort, page=page, result=None, brief=None, tax_heads=TAX_HEADS, areas=LEGISLATIVE_UPDATE_AREAS,
+               instrument_types=LEGISLATIVE_UPDATE_TYPES, type_labels=LEGISLATIVE_UPDATE_TYPE_LABELS, advice=None, advice_status=None,
+               explain=[], library_size=LegislativeUpdate.query.count(), highlight=legislation_index.highlight, snippet=legislation_index.snippet)
+    if q:
+        if legislation_index.is_brief(q) and sort == "relevance" and page == 1:
+            ctx["brief"] = legislation_index.search_brief(q, filters)
+            ctx["result"] = ctx["brief"]["overall"]
+        else:
+            ctx["result"] = legislation_index.search(q, filters, sort=sort, page=page)
+        ctx["explain"] = legislation_index.describe(ctx["result"].plan)
+    ctx.update(extra)
+    return render_template("tax/legislative_search.html", **ctx)
+
+
+@tax_bp.route("/legislative-updates/search")
+@login_required
+def search_legislative_updates():
+    """Deep search of the whole filed library: every passage of every Act, Notice, SI, case, publication and news article, ranked, with the
+    matching words highlighted and a link into the full text at the right passage (see legislation_index.py). Reads only."""
+    return _render_search()
+
+
+@tax_bp.route("/legislative-updates/advise", methods=["POST"])
+@login_required
+def advise_legislative_updates():
+    """Draft advice for a described situation from the filed library alone (legislation_search.advise): topic by topic, with the sources
+    cited and the gaps named. A draft for a person to review; it never files or changes anything."""
+    q = (request.form.get("q") or "").strip()
+    if not q:
+        flash("Describe the situation first.", "danger")
+        return redirect(url_for("tax.search_legislative_updates"))
+    status, payload = legislation_search.advise(q, asked_by_id=current_user.id)
+    if status == "not_configured":
+        flash("Drafting advice isn't set up yet (ANTHROPIC_API_KEY is not set). The search below still works.", "danger")
+    elif status == "error":
+        flash(f"Couldn't draft that: {payload}", "danger")
+    return _render_search(advice=payload if status == "done" else None, advice_status=status)
+
+
+@tax_bp.route("/legislative-updates/<int:update_id>/read")
+@login_required
+def read_legislative_update(update_id):
+    """The full filed text of one update, section by section, with the words from a search marked and the first matching passage in view."""
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    q = (request.args.get("q") or "").strip()
+    legislation_chunking.ensure_chunks(update)
+    db.session.commit()
+    plan = legislation_index.parse_query(q) if q else None
+    passages = []
+    if plan is not None and not plan.empty:
+        passages = legislation_index.reader_passages(update, plan)
+    else:
+        from legislation_index import Plan
+        plan = Plan()
+        passages = [{"chunk": c, "html": c.text, "matches": 0} for c in update.chunks]
+    matching = [p for p in passages if p["matches"]]
+    best = max(matching, key=lambda p: p["matches"])["chunk"].id if matching else None
+    return render_template("tax/legislative_reader.html", update=update, q=q, passages=passages, total_matches=sum(p["matches"] for p in passages),
+                           matching_ids=[p["chunk"].id for p in matching], best_id=best, explain=legislation_index.describe(plan) if q else [])
+
+
+# ----------------------------------------------------------------- the Act, section by section
+
+def _act_or_404(code):
+    if code not in act_import.ACTS:
+        abort(404)
+    return act_import.ACTS[code]
+
+
+@tax_bp.route("/act/<code>")
+@login_required
+def act_contents(code):
+    """Contents of an Act that has been filed section by section: Parts, sections and schedules, each opening at its own number."""
+    cfg = _act_or_404(code)
+    st = act_import.status(code)
+    sections, schedules = [], []
+    if st["loaded"]:
+        rows = LegislativeProvision.query.filter_by(act_code=code).order_by(LegislativeProvision.sort_order).all()
+        sections = [r for r in rows if r.kind == "section"]
+        schedules = [r for r in rows if r.kind == "schedule"]
+    parts = []
+    for r in sections:
+        if not parts or parts[-1]["part"] != r.part:
+            parts.append({"part": r.part, "title": r.part_title, "rows": []})
+        parts[-1]["rows"].append(r)
+    return render_template("tax/act_contents.html", cfg=cfg, st=st, parts=parts, schedules=schedules, code=code,
+                           can_load=user_has_permission(current_user, "manage_legislative_updates"))
+
+
+@tax_bp.route("/act/<code>/load", methods=["POST"])
+@login_required
+@legislative_update_editor_required
+def act_load(code):
+    """File (or refresh) the Act section by section from the copy bundled with the app, or from a text file uploaded here."""
+    _act_or_404(code)
+    text = None
+    f = request.files.get("file")
+    if f and f.filename:
+        if not f.filename.lower().endswith(".txt"):
+            flash("Upload the Act as a .txt file (or leave the box empty to use the copy supplied with the app).", "danger")
+            return redirect(url_for("tax.act_contents", code=code))
+        text = f.read().decode("utf-8", errors="replace")
+    try:
+        res = act_import.load_act(code, text=text, user_id=current_user.id)
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("tax.act_contents", code=code))
+    msg = "%s filed: %d sections and %d schedules, in %d searchable passages." % (act_import.ACTS[code]["title"], res["sections"], res["schedules"], res["chunks"])
+    if not res["created"]:
+        msg += " The earlier copy of this Act in the library was replaced."
+    flash(msg, "success")
+    for w in res["warnings"][:5]:
+        flash(w, "warning")
+    try:
+        import prohibited_deductions
+        n = prohibited_deductions.align_with_act() if code == "ita" else 0
+        if n:
+            flash("%d rule%s on the Section 16 rules page were brought into line with the Act's wording (they remain unverified until you tick them)." % (n, "" if n == 1 else "s"), "info")
+    except Exception:
+        db.session.rollback()
+    return redirect(url_for("tax.act_contents", code=code))
+
+
+@tax_bp.route("/act/<code>/<path:ref>")
+@login_required
+def act_provision(code, ref):
+    """One section or schedule of the Act in its own words. A reference with a paragraph - 16(1)(m) - shows that paragraph first, with the whole section below."""
+    cfg = _act_or_404(code)
+    found = act_import.paragraph_text(ref, code)
+    if found is None:
+        st = act_import.status(code)
+        if not st["loaded"]:
+            flash("The %s has not been filed section by section yet. Use 'File the Act' on this page." % cfg["short"], "warning")
+            return redirect(url_for("tax.act_contents", code=code))
+        flash("Couldn't find '%s' in the %s." % (ref, cfg["short"]), "warning")
+        return redirect(url_for("tax.act_contents", code=code))
+    row = LegislativeProvision.query.get(found["provision_id"])
+    prev_row = LegislativeProvision.query.filter(LegislativeProvision.act_code == code, LegislativeProvision.sort_order < row.sort_order).order_by(LegislativeProvision.sort_order.desc()).first()
+    next_row = LegislativeProvision.query.filter(LegislativeProvision.act_code == code, LegislativeProvision.sort_order > row.sort_order).order_by(LegislativeProvision.sort_order).first()
+    q = (request.args.get("q") or "").strip()
+    html = None
+    if q:
+        plan = legislation_index.parse_query(q)
+        if not plan.empty:
+            html = legislation_index.highlight(row.text, plan)
+    if found["kind"] == "schedule" and found["path"]:
+        sub = ", paragraph " + found["path"][0] + "".join("(%s)" % x for x in found["path"][1:])
+    elif found["path"]:
+        sub = ", " + "".join("(%s)" % x for x in found["path"])
+    else:
+        sub = ""
+    return render_template("tax/act_provision.html", cfg=cfg, code=code, found=found, row=row, sub=sub, prev_row=prev_row, next_row=next_row, q=q,
+                           html=html, canonical=act_import.canonical, update=row.legislative_update)
+
+
+@tax_bp.route("/legislative-updates/ask/feedback", methods=["POST"])
+@login_required
+def ask_legislative_feedback():
+    """Tell the app whether an "Ask the library" answer was right. Helpful answers can be put forward as the firm's
+    verified answer; a wrong answer is dropped from the recall cache so it is never reused, and the person's correction
+    (if given) is put forward as a lesson. Nothing becomes the firm's verified answer until a Partner or Admin approves
+    it under Firm Learning (see learning.py)."""
+    import learning
+    from models import LegislativeAskCache, FirmLesson
+    f = request.form
+    verdict = f.get("verdict")
+    question = f.get("question", "").strip()
+    correction = f.get("correction", "").strip()
+    row = LegislativeAskCache.query.get(f.get("cache_id", type=int)) if f.get("cache_id", type=int) else None
+    lesson = FirmLesson.query.get(f.get("lesson_id", type=int)) if f.get("lesson_id", type=int) else None
+    back = redirect(url_for("tax.list_legislative_updates"))
+
+    if verdict == "helpful":
+        if row is not None:
+            row.helpful_count = (row.helpful_count or 0) + 1
+        if lesson is not None and lesson.status == "Approved":
+            lesson.helpful_count = (lesson.helpful_count or 0) + 1
+        db.session.commit()
+        flash("Thanks - noted.", "success")
+    elif verdict == "verify":
+        if row is None or row.status != "done":
+            flash("Only a library answer that cites filed material can be put forward.", "danger")
+            return back
+        cited = [u.title for u in legislation_search._row_to_payload(row).get("citations", [])]
+        new, err = learning.propose("library", "Verified answer", row.question_original, row.answer, current_user,
+                                    evidence="Answer drawn from: " + "; ".join(cited) if cited else None,
+                                    source_kind="library_answer", source_id=row.id)
+        if new is None:
+            flash(err, "danger")
+        elif err == "duplicate":
+            flash("That answer is already with the Partners or approved.", "info")
+        else:
+            db.session.commit()
+            flash("Put forward as the firm's verified answer. A Partner will review it; until then nothing changes.", "success")
+    elif verdict == "not_right":
+        if row is not None:
+            row.unhelpful_count = (row.unhelpful_count or 0) + 1
+            db.session.delete(row)     # a wrong answer is never recalled again
+        if lesson is not None and lesson.status == "Approved":
+            lesson.unhelpful_count = (lesson.unhelpful_count or 0) + 1
+        made = False
+        if correction and question:
+            new, err = learning.propose("library", "Verified answer", question, correction, current_user,
+                                        evidence="Put forward as the correction to an answer the app gave.",
+                                        source_kind="library_answer", source_id=row.id if row is not None else None)
+            made = new is not None and err != "duplicate"
+        db.session.commit()
+        flash("Thanks - that answer will not be reused." + (" Your correction has gone to the Partners to approve." if made else ""),
+              "success")
+    else:
+        flash("Nothing to record.", "info")
+    return back
+
+
+@tax_bp.route("/legislative-updates/add", methods=["POST"])
+@login_required
+@legislative_update_editor_required
+def add_legislative_update(engagement_id=None):
+    title = request.form.get("title", "").strip()
+    if not title:
+        flash("Please enter a title.", "danger")
+        return redirect(url_for("tax.list_legislative_updates"))
+
+    instrument_type = request.form.get("instrument_type", "").strip() or None
+    if instrument_type and instrument_type not in LEGISLATIVE_UPDATE_TYPES:
+        instrument_type = None
+
+    update = LegislativeUpdate(
+        tax_head=request.form.get("tax_head", "").strip() or None,
+        title=title,
+        summary=request.form.get("summary", "").strip(),
+        effective_date=_parse_date(request.form.get("effective_date")),
+        source_reference=request.form.get("source_reference", "").strip(),
+        impact_assessment=request.form.get("impact_assessment", "").strip(),
+        instrument_type=instrument_type,
+        gazette_date=_parse_date(request.form.get("gazette_date")),
+        created_by_id=current_user.id,
+    )
+    db.session.add(update)
+
+    file = request.files.get("file")
+    if instrument_type == "News":
+        # A News entry is filed by pasting a URL rather than uploading a
+        # file - the app fetches the page itself and extracts its text. See
+        # _fetch_and_extract_news_article and models.LegislativeUpdate's
+        # docstring.
+        article_url = request.form.get("article_url", "").strip()
+        if not article_url:
+            flash("Please paste the news article's URL - a News entry is filed by URL rather than an uploaded file. The update was logged without a source.", "warning")
+        else:
+            db.session.flush()  # assign update.id without committing yet
+            text, fetch_error = _fetch_and_extract_news_article(article_url)
+            update.article_url = article_url
+            update.extraction_status = "extracted" if text else "no_text_found"
+            if text:
+                update.extracted_text = text
+            db.session.commit()  # save the fetched article itself before attempting the AI call, so a slow/failed AI step never loses it
+
+            if text:
+                result, ai_status, ai_error = legislation_summary.summarize_news_update(text, article_url)
+                update.ai_status = ai_status
+                update.ai_error = ai_error
+                update.ai_processed_at = datetime.utcnow()
+                if ai_status == "done":
+                    update.ai_summary = result["summary"]
+                    update.set_ai_key_changes(result["key_changes"])
+                    update.set_ai_suggested_areas(result["suggested_areas"])
+                legislation_chunking.ensure_chunks(update)
+            else:
+                update.ai_status = "error"
+                update.ai_error = fetch_error
+                update.ai_processed_at = datetime.utcnow()
+    elif file and file.filename:
+        ext = file.filename.rsplit(".", 1)[-1].lower() if "." in file.filename else ""
+        if ext not in LEGISLATIVE_UPDATE_FILE_EXTENSIONS:
+            flash("Only PDF, JPG and PNG files are accepted for a filed instrument - the update was logged without a file.", "warning")
+        else:
+            db.session.flush()  # assign update.id without committing yet
+            original_name = secure_filename(file.filename)
+            is_image = ext in LEGISLATIVE_UPDATE_IMAGE_EXTENSIONS
+            stored_name = f"leg{update.id}_{uuid.uuid4().hex[:8]}_{original_name}"
+            filepath = os.path.join(_legislative_updates_dir(), stored_name)
+            file.save(filepath)
+            update.original_filename = original_name
+            update.stored_filename = stored_name
+
+            if is_image:
+                update.extraction_status = None  # not applicable - no PDF text layer to try
+            else:
+                text, extraction_status, page_count = sanctions_data.extract_pdf_text(filepath)
+                update.extracted_text = text
+                update.extraction_status = extraction_status
+                update.page_count = page_count
+
+            db.session.commit()  # save the upload itself before attempting the AI call, so a slow/failed AI step never loses the file
+
+            if instrument_type == "Case":
+                # A court judgment gets analysed as case law, not as
+                # legislation - see legislation_summary.CASE_SYSTEM_PROMPT
+                # for why (a foreign case, especially South African, is
+                # assessed for persuasive authority rather than dismissed
+                # outright for not being Zimbabwean legislation).
+                result, ai_status, ai_error = legislation_summary.summarize_case_law_update(
+                    filepath, is_image, update.extracted_text, update.extraction_status,
+                )
+                update.ai_status = ai_status
+                update.ai_error = ai_error
+                update.ai_processed_at = datetime.utcnow()
+                if ai_status == "done":
+                    update.ai_summary = result["summary"]
+                    update.set_ai_key_changes(result["key_holdings"])
+                    update.set_ai_suggested_areas(result["suggested_areas"])
+                    update.case_citation = result["citation"] or None
+                    update.case_court = result["court"] or None
+                    update.case_jurisdiction = result["jurisdiction"] or None
+                    update.ai_case_authority_status = result["authority_status"]
+                    update.ai_case_authority_reasoning = result["authority_reasoning"] or None
+            elif instrument_type == "Pub":
+                # A professional publication/journal article gets analysed
+                # as what it is - not Zimbabwean legislation and not a court
+                # judgment - see legislation_summary.PUBLICATION_SYSTEM_PROMPT
+                # for why (a South African tax journal issue, for instance,
+                # has nowhere honest to go under the legislation-only prompt
+                # and comes back mis-framed as though it were a Zimbabwean
+                # statutory instrument).
+                result, ai_status, ai_error = legislation_summary.summarize_publication_update(
+                    filepath, is_image, update.extracted_text, update.extraction_status,
+                )
+                update.ai_status = ai_status
+                update.ai_error = ai_error
+                update.ai_processed_at = datetime.utcnow()
+                if ai_status == "done":
+                    update.ai_summary = result["summary"]
+                    update.set_ai_key_changes(result["key_changes"])
+                    update.set_ai_suggested_areas(result["suggested_areas"])
+            else:
+                skip_reason = legislation_summary.skip_summary_reason(instrument_type)
+                if skip_reason:
+                    update.ai_status = "skipped"
+                    update.ai_error = skip_reason
+                    update.ai_processed_at = datetime.utcnow()
+                else:
+                    result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
+                        filepath, is_image, update.extracted_text, update.extraction_status,
+                    )
+                    update.ai_status = ai_status
+                    update.ai_error = ai_error
+                    update.ai_processed_at = datetime.utcnow()
+                    if ai_status == "done":
+                        update.ai_summary = result["summary"]
+                        update.set_ai_key_changes(result["key_changes"])
+                        update.set_ai_suggested_areas(result["suggested_areas"])
+
+            if update.extracted_text:
+                legislation_chunking.ensure_chunks(update)
+
+    db.session.commit()
+
+    if update.ai_status == "done" and instrument_type == "Case":
+        flash(f"'{update.title}' filed - AI analysis generated below, including a suggested authority assessment. Confirm the authority status and practice areas, then tag any clients it affects.", "success")
+    elif update.ai_status == "done":
+        flash(f"'{update.title}' filed - AI summary generated below. Confirm which practice areas it touches, then tag any clients it affects.", "success")
+    elif update.ai_status == "skipped":
+        flash(f"'{update.title}' filed - {update.ai_error} Confirm which practice areas it touches, then tag any clients it affects.", "info")
+    elif update.ai_status == "not_configured":
+        flash(f"'{update.title}' filed, but automatic summarisation isn't set up yet ({update.ai_error}) - add a summary manually below, or reprocess once it's configured.", "warning")
+    elif update.ai_status == "error":
+        flash(f"'{update.title}' filed, but automatic summarisation failed ({update.ai_error}) - add a summary manually below, or use \"Reprocess\" to try again.", "warning")
+    else:
+        flash("Legislative update logged.", "success")
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/legislative-updates/<int:update_id>/reprocess", methods=["POST"])
+@login_required
+@legislative_update_editor_required
+def reprocess_legislative_update(update_id):
+    """Re-run AI summarisation against an already-filed instrument, without
+    re-uploading the file - for when the API key wasn't configured yet at
+    filing time, or the previous attempt failed transiently."""
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    skip_reason = legislation_summary.skip_summary_reason(update.instrument_type)
+    if skip_reason:
+        flash(f"This entry isn't auto-summarised - {skip_reason}", "info")
+        return redirect(url_for("tax.list_legislative_updates"))
+
+    if update.instrument_type == "News":
+        # A News entry has no uploaded file to reprocess from - it
+        # re-fetches the article fresh from article_url instead, in case the
+        # page has changed or the previous fetch/AI attempt failed.
+        if not update.article_url:
+            flash("This entry has no article URL to fetch - it was only ever logged as text.", "danger")
+            return redirect(url_for("tax.list_legislative_updates"))
+        text, fetch_error = _fetch_and_extract_news_article(update.article_url)
+        update.extraction_status = "extracted" if text else "no_text_found"
+        if text:
+            update.extracted_text = text
+            result, ai_status, ai_error = legislation_summary.summarize_news_update(text, update.article_url)
+            update.ai_status = ai_status
+            update.ai_error = ai_error
+            update.ai_processed_at = datetime.utcnow()
+            if ai_status == "done":
+                update.ai_summary = result["summary"]
+                update.set_ai_key_changes(result["key_changes"])
+                update.set_ai_suggested_areas(result["suggested_areas"])
+            legislation_chunking.ensure_chunks(update)
+        else:
+            update.ai_status = "error"
+            update.ai_error = fetch_error
+            update.ai_processed_at = datetime.utcnow()
+        db.session.commit()
+        if update.ai_status == "done":
+            flash("Reprocessed - the article was re-fetched and the AI summary below has been refreshed.", "success")
+        else:
+            flash(f"Reprocessing failed: {update.ai_error}", "danger")
+        return redirect(url_for("tax.list_legislative_updates"))
+
+    if not update.has_file:
+        flash("This entry has no filed instrument to reprocess - it was only ever logged as text.", "danger")
+        return redirect(url_for("tax.list_legislative_updates"))
+    filepath = os.path.join(_legislative_updates_dir(), update.stored_filename or "")
+    if not os.path.exists(filepath):
+        flash("The original file can no longer be found on disk - re-file the instrument.", "danger")
+        return redirect(url_for("tax.list_legislative_updates"))
+
+    is_image = update.file_ext in LEGISLATIVE_UPDATE_IMAGE_EXTENSIONS
+    if update.instrument_type == "Case":
+        result, ai_status, ai_error = legislation_summary.summarize_case_law_update(
+            filepath, is_image, update.extracted_text, update.extraction_status,
+        )
+        update.ai_status = ai_status
+        update.ai_error = ai_error
+        update.ai_processed_at = datetime.utcnow()
+        if ai_status == "done":
+            update.ai_summary = result["summary"]
+            update.set_ai_key_changes(result["key_holdings"])
+            update.set_ai_suggested_areas(result["suggested_areas"])
+            update.case_citation = result["citation"] or None
+            update.case_court = result["court"] or None
+            update.case_jurisdiction = result["jurisdiction"] or None
+            update.ai_case_authority_status = result["authority_status"]
+            update.ai_case_authority_reasoning = result["authority_reasoning"] or None
+    elif update.instrument_type == "Pub":
+        result, ai_status, ai_error = legislation_summary.summarize_publication_update(
+            filepath, is_image, update.extracted_text, update.extraction_status,
+        )
+        update.ai_status = ai_status
+        update.ai_error = ai_error
+        update.ai_processed_at = datetime.utcnow()
+        if ai_status == "done":
+            update.ai_summary = result["summary"]
+            update.set_ai_key_changes(result["key_changes"])
+            update.set_ai_suggested_areas(result["suggested_areas"])
+    else:
+        result, ai_status, ai_error = legislation_summary.summarize_legislative_update(
+            filepath, is_image, update.extracted_text, update.extraction_status,
+        )
+        update.ai_status = ai_status
+        update.ai_error = ai_error
+        update.ai_processed_at = datetime.utcnow()
+        if ai_status == "done":
+            update.ai_summary = result["summary"]
+            update.set_ai_key_changes(result["key_changes"])
+            update.set_ai_suggested_areas(result["suggested_areas"])
+    db.session.commit()
+    if ai_status == "done":
+        flash("Reprocessed - the AI summary below has been refreshed.", "success")
+    else:
+        flash(f"Reprocessing failed: {ai_error}", "danger")
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/legislative-updates/<int:update_id>/areas", methods=["POST"])
+@login_required
+def save_legislative_update_areas(update_id):
+    """Confirm/edit which practice areas this update actually touches - open
+    to anyone logged in, same as tagging a client below, since this is
+    ordinary practice-relevance judgement rather than governance of the
+    library's raw content. Nothing is ever saved here except what a person
+    actually submits, even though the form starts pre-ticked from the AI's
+    suggested_areas."""
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    submitted = request.form.getlist("areas")
+    update.set_areas([a for a in submitted if a in LEGISLATIVE_UPDATE_AREAS])
+    message = "Practice areas updated."
+    if update.instrument_type == "Case":
+        authority_status = request.form.get("case_authority_status", "").strip()
+        update.case_authority_status = authority_status if authority_status in CASE_AUTHORITY_STATUSES else None
+        update.case_citation = request.form.get("case_citation", "").strip() or None
+        update.case_court = request.form.get("case_court", "").strip() or None
+        update.case_jurisdiction = request.form.get("case_jurisdiction", "").strip() or None
+        message = "Practice areas and authority assessment updated."
+    db.session.commit()
+    flash(message, "success")
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/legislative-updates/download/<int:update_id>")
+@login_required
+def download_legislative_update(update_id):
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    directory = _legislative_updates_dir()
+    if not update.stored_filename or not os.path.exists(os.path.join(directory, update.stored_filename)):
+        abort(404)
+    return send_from_directory(directory, update.stored_filename, as_attachment=True)
+
+
+@tax_bp.route("/legislative-updates/<int:update_id>/review", methods=["POST"])
+@login_required
+def review_legislative_update(update_id):
+    if current_user.role not in REVIEWER_ROLES:
+        abort(403)
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    update.reviewed_by_id = current_user.id
+    update.reviewed_at = datetime.utcnow()
+    update.impact_assessment = request.form.get("impact_assessment", update.impact_assessment)
+    db.session.commit()
+    flash("Legislative update marked as reviewed.", "success")
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/legislative-updates/<int:update_id>/delete", methods=["POST"])
+@login_required
+@legislative_update_editor_required
+def delete_legislative_update(update_id):
+    update = LegislativeUpdate.query.get_or_404(update_id)
+    if update.stored_filename:
+        path = os.path.join(_legislative_updates_dir(), update.stored_filename)
+        if os.path.exists(path):
+            os.remove(path)
+    db.session.delete(update)
+    db.session.commit()
+    flash("Legislative update deleted.", "info")
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+# ---------- Legislative Update Control: taggable relevance to clients ----------
+
+@tax_bp.route("/legislative-updates/link-client", methods=["POST"])
+@login_required
+def link_client_to_update():
+    """Tag a client as affected by a logged/filed update - open to anyone
+    logged in (see legislative_update_editor_required's docstring above).
+    Both the update and the client are taken from the form so the same
+    route serves the Legislative Updates library page (choose a client per
+    update) and a client's own page (choose an update per client) - an
+    optional redirect_client_id form field sends the person back to the
+    client's page instead of the library when called from there."""
+    update_id = request.form.get("update_id", "").strip()
+    update = LegislativeUpdate.query.get(int(update_id)) if update_id.isdigit() else None
+    redirect_client_id = request.form.get("redirect_client_id", "").strip()
+    client_id = request.form.get("client_id", "").strip()
+    client = Client.query.get(int(client_id)) if client_id.isdigit() else None
+    if not update or not client:
+        flash("Choose both an update and a client to tag.", "danger")
+    else:
+        existing = LegislativeUpdateClientLink.query.filter_by(
+            legislative_update_id=update.id, client_id=client.id,
+        ).first()
+        if existing:
+            flash(f"{client.name} is already tagged against '{update.title}'.", "info")
+        else:
+            db.session.add(LegislativeUpdateClientLink(
+                legislative_update_id=update.id,
+                client_id=client.id,
+                notes=request.form.get("notes", "").strip() or None,
+                linked_by_id=current_user.id,
+            ))
+            db.session.commit()
+            flash(f"{client.name} tagged as affected by '{update.title}'.", "success")
+    if redirect_client_id.isdigit():
+        return redirect(url_for("clients.view_client", client_id=int(redirect_client_id)))
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/legislative-updates/link/<int:link_id>/delete", methods=["POST"])
+@login_required
+def unlink_client_from_update(link_id):
+    link = LegislativeUpdateClientLink.query.get_or_404(link_id)
+    redirect_client_id = request.form.get("redirect_client_id", "").strip()
+    db.session.delete(link)
+    db.session.commit()
+    if redirect_client_id.isdigit():
+        return redirect(url_for("clients.view_client", client_id=int(redirect_client_id)))
+    return redirect(url_for("tax.list_legislative_updates"))
+
+
+@tax_bp.route("/<int:engagement_id>/research/import-from-legislative-update", methods=["POST"])
+@login_required
+def import_research_log_entry_from_legislative_update(engagement_id):
+    """One-click pull of a filed/logged legislative update's summary into a
+    Tax Advisory engagement's Technical Research Log, instead of retyping
+    it - pre-fills a new TaxResearchLogEntry from the chosen LegislativeUpdate
+    (its AI summary/key changes when it has one, otherwise its manually-typed
+    summary), still fully editable afterwards like any other entry."""
+    engagement = _get_tax_engagement(engagement_id)
+    if not _require_tax_advisory(engagement):
+        return _tax_redirect(engagement_id)
+    update_id = request.form.get("update_id", "").strip()
+    update = LegislativeUpdate.query.get(int(update_id)) if update_id.isdigit() else None
+    if not update:
+        flash("Choose a legislative update to import.", "danger")
+        return _tax_redirect(engagement_id)
+
+    reference_bits = [b for b in [update.type_label, update.source_reference] if b]
+    conclusion_bits = [update.ai_summary or update.summary or ""]
+    if update.ai_key_changes:
+        conclusion_bits.append("\n".join(f"- {c}" for c in update.ai_key_changes))
+    db.session.add(TaxResearchLogEntry(
+        engagement_id=engagement_id,
+        topic=update.title,
+        question=f"How does '{update.title}' affect this engagement?",
+        research_notes=update.ai_summary or update.summary or "",
+        conclusion="\n\n".join(b for b in conclusion_bits if b),
+        references=" - ".join(reference_bits) if reference_bits else update.title,
+        prepared_by_id=current_user.id,
+    ))
+    db.session.commit()
+    flash(f"'{update.title}' imported into the Technical Research Log - edit it below as needed.", "success")
+    return _tax_redirect(engagement_id)

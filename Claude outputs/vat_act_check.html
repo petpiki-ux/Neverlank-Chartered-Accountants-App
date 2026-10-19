@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}The VAT Act beside the VAT register - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div>
+  <h1 style="font-size:22px;">The VAT Act beside the VAT register</h1>
+  <div class="subtitle">Value Added Tax Act [Chapter 23:12] &middot; what the Act says, what the register does, and where they differ</div></div>
+  <div>
+    <a href="{{ url_for('tax.act_contents', code='vat') }}" class="btn secondary">VAT Act, section by section</a>
+    <a href="{{ url_for('tax.list_vat_rates') }}" class="btn secondary">VAT rates</a>
+    <a href="{{ url_for('tax.search_legislative_updates') }}" class="btn secondary">Search the library</a>
+  </div></div>
+
+{% if not st.loaded %}
+<div class="card">
+  <strong>The VAT Act is not filed section by section yet,</strong> so the Act's words below are missing and the section numbers are not links.
+  {% if can_load %}
+  <form method="post" action="{{ url_for('tax.act_load', code='vat') }}" enctype="multipart/form-data" style="margin-top:8px;">
+    <button class="btn" type="submit">File the VAT Act now</button>
+  </form>
+  {% else %}Ask a Partner or Admin to file it from <a href="{{ url_for('tax.act_contents', code='vat') }}">the VAT Act page</a>.{% endif %}
+</div>
+{% endif %}
+
+<div class="card" style="font-size:12.5px;">
+  <p style="margin:0 0 6px;">The text of the Act is the consolidation updated to 1 December 2024 that was supplied to the firm. Where the Act leaves a figure to regulations or to the Charging Act, this page says so rather than stating a number. <strong>Nothing here is marked verified:</strong> a Partner should confirm each line against the Gazette, the VAT (General) Regulations and the latest Finance Act before relying on it.</p>
+  <p style="margin:0;">
+    {% for k, label in result_labels.items() %}{% if counts.get(k) %}<span class="badge" style="margin-right:6px;{% if k == 'differs' %}background:#a33;color:#fff;{% elif k == 'missing' %}background:#8a6d1d;color:#fff;{% elif k == 'updated' %}background:#2e6f95;color:#fff;{% else %}background:#2e7d32;color:#fff;{% endif %}">{{ counts[k] }} &middot; {{ label }}</span>{% endif %}{% endfor %}
+  </p>
+</div>
+
+{% for f in findings %}
+<div class="card" id="f{{ loop.index }}">
+  <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline;">
+    <h3 style="margin:0;font-size:15px;">{{ f.topic }}
+      <span class="muted" style="font-size:12px;font-weight:400;">
+        {% for r in f.refs %}{{ act_ref(r, text='s' ~ r, code='vat') }}{% if not loop.last %}, {% endif %}{% endfor %}
+      </span></h3>
+    <span class="badge" style="{% if f.result == 'differs' %}background:#a33;color:#fff;{% elif f.result == 'missing' %}background:#8a6d1d;color:#fff;{% elif f.result == 'updated' %}background:#2e6f95;color:#fff;{% else %}background:#2e7d32;color:#fff;{% endif %}">{{ result_labels[f.result] }}</span>
+  </div>
+  {% for r in f.refs %}{% set w = act_words(r, 650, code='vat') %}{% if w %}
+  <blockquote style="margin:8px 0 0;padding:6px 12px;border-left:3px solid #b8923a;font-size:12.5px;color:#444;"><span class="muted" style="font-size:11px;">The Act, section {{ r }}:</span> {{ w }}</blockquote>
+  {% endif %}{% endfor %}
+  <p style="margin:8px 0 2px;font-size:13px;"><strong>The register:</strong> {{ f.app }}</p>
+  <p style="margin:2px 0 0;font-size:13px;">{{ f.note }}</p>
+</div>
+{% endfor %}
+{% endblock %}
