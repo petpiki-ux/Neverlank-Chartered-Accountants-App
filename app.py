@@ -292,6 +292,8 @@ def _add_missing_columns():
                        ("disp_cash_account_id", "INTEGER"), ("disp_cash_entry_id", "INTEGER")],
         "firm_year_end": [("cash_manual", "BOOLEAN DEFAULT 0 NOT NULL"), ("tax_manual", "BOOLEAN DEFAULT 0 NOT NULL"), ("tax_loss_bf", "FLOAT")],
         "income_tax_adjustment_line": [("source", "VARCHAR(30)")],
+        "firm_tax_asset_rule": [("sia_first_percent", "FLOAT")],
+        "prohibited_deduction_setup": [("assoc_fee_a", "FLOAT"), ("assoc_fee_b", "FLOAT"), ("assoc_fee_c", "FLOAT"), ("assoc_fee_pretrade", "BOOLEAN DEFAULT 0")],
         # helpful/unhelpful feedback on cached "Ask the library" answers (learning.py)
         "legislative_ask_cache": [("helpful_count", "INTEGER DEFAULT 0"), ("unhelpful_count", "INTEGER DEFAULT 0")],
         # doc_type/related_reference/customs_duty - see models.VAT_DOC_TYPES:
@@ -879,6 +881,9 @@ def create_app():
     app.jinja_env.filters["cat"] = to_cat
     app.jinja_env.globals["now_cat"] = now_cat
     app.jinja_env.globals["today_cat"] = today_cat
+    import act_import
+    app.jinja_env.globals["act_words"] = act_import.words
+    app.jinja_env.globals["act_ref"] = act_import.ref_link   # {{ act_ref('16(1)(m)') }}: links a section reference to the Act's own wording
 
     def _cash_choices():
         import cashbook

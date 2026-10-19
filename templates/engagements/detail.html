@@ -2132,6 +2132,7 @@
 {% if profit_before_tax is none %}
   <div class="card"><div class="empty-state">Profit before tax isn't available yet - complete the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab first, then come back here.</div></div>
 {% else %}
+  {% include "tax/_act_links.html" %}
   <div class="card">
     <h3 class="mt-0">Income Tax Computation</h3>
     <p class="muted" style="font-size:12.5px;">
@@ -2153,7 +2154,7 @@
   </div>
 
   <div class="card" style="border-left:4px solid #b8923a;">
-    <h3 class="mt-0" style="font-size:14px;">Section 16(1) prohibited deductions</h3>
+    <h3 class="mt-0" style="font-size:14px;">Section 16(1) prohibited deductions ({{ act_ref('16', text='read section 16') }})</h3>
     <p class="muted" style="font-size:12.5px;margin-top:0;">Test this client's expenses against section 16(1), see the add-backs by clause with voucher references, and post them here as add-back lines. Lines posted that way are marked below and are replaced if you post again.</p>
     <a href="{{ url_for('prohibited.page', engagement_id=engagement.id) }}" class="btn gold small">Open the prohibited deductions schedule</a>
   </div>

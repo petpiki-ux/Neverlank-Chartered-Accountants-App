@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block title %}{{ cfg.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div>
+  <h1 style="font-size:22px;">{{ cfg.title }}</h1>
+  <div class="subtitle">Section by section &middot; {{ cfg.consolidated_note }}</div></div>
+  <div>
+    <a href="{{ url_for('tax.search_legislative_updates') }}" class="btn secondary">Search the library</a>
+    <a href="{{ url_for('tax.list_legislative_updates') }}" class="btn secondary">Legislative updates</a>
+  </div></div>
+
+{% if not st.loaded %}
+<div class="card">
+  <h3 style="margin-top:0;">The {{ cfg.short }} is not filed section by section yet</h3>
+  <p>Filing it opens every section and schedule by its number (for example <em>16(1)(m)</em> or <em>Fourth Schedule, paragraph 3</em>), lets the tax pages show the Act's own words beside each rule, and makes every section searchable in Deep Search.</p>
+  {% if st.existing_other_copy %}
+  <p class="muted" style="font-size:13px;">The library already holds an earlier copy, <strong>{{ st.existing_other_copy.title }}</strong>. Filing replaces its text with this consolidation, so searches never read two versions.</p>
+  {% endif %}
+  {% if can_load %}
+  <form method="post" action="{{ url_for('tax.act_load', code=code) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
+    <div><button class="btn" type="submit">File the {{ cfg.short }} now</button></div>
+  </form>
+  {% else %}<p class="muted">Ask a Partner or Admin to file it (it needs the Manage Legislative Update Control permission).</p>{% endif %}
+</div>
+{% else %}
+<div class="card" style="padding:10px 14px;">
+  <form method="get" action="{{ url_for('tax.search_legislative_updates') }}" class="form-row" style="margin:0;align-items:flex-end;">
+    <div style="flex:4;"><label style="margin:0;">Search the Act (and the rest of the library)</label><input type="text" name="q" placeholder="e.g. wear and tear, &quot;passenger motor vehicle&quot;, assessed loss" style="margin:0;"></div>
+    <div><button class="btn small" type="submit">Search</button></div>
+  </form>
+  <form method="get" onsubmit="var v=this.ref.value.trim(); if(v){location.href='{{ url_for('tax.act_contents', code=code) }}/'+encodeURIComponent(v);} return false;" class="form-row" style="margin:10px 0 0;align-items:flex-end;">
+    <div style="flex:4;"><label style="margin:0;">Go to a section</label><input type="text" name="ref" placeholder="e.g. 15(2)(c), 16(1)(m), 36G, sch4.3" style="margin:0;"></div>
+    <div><button class="btn small secondary" type="submit">Go</button></div>
+  </form>
+  <p class="muted" style="font-size:12px;margin:8px 0 0;">{{ st.sections }} sections and {{ st.schedules }} schedules filed
+    {% if st.act_update %} &middot; <a href="{{ url_for('tax.read_legislative_update', update_id=st.act_update.id) }}">read it straight through</a>{% endif %}.
+    {% if can_load %}
+    <details style="display:inline;margin-left:8px;"><summary style="cursor:pointer;display:inline;">Refresh from a newer text</summary>
+      <form method="post" action="{{ url_for('tax.act_load', code=code) }}" enctype="multipart/form-data" class="form-row" style="margin-top:6px;align-items:flex-end;">
+        <div><label style="margin:0;">Text file of the consolidated Act (leave empty to use the copy supplied with the app)</label><input type="file" name="file" accept=".txt" style="margin:0;"></div>
+        <div><button class="btn small" type="submit">Refresh</button></div>
+      </form></details>
+    {% endif %}</p>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Schedules</h3>
+  <ul style="columns:2;font-size:13px;margin:0;padding-left:18px;">
+    {% for r in schedules %}<li><a href="{{ url_for('tax.act_provision', code=code, ref='sch' ~ r.number) }}">{{ r.label }}</a>{% if r.title %} <span class="muted">- {{ r.title|truncate(80) }}</span>{% endif %}</li>{% endfor %}
+  </ul>
+</div>
+
+{% for p in parts %}
+<div class="card">
+  <h3 style="margin-top:0;">{{ p.part or 'Sections' }}{% if p.title %} &middot; {{ p.title }}{% endif %}</h3>
+  <ul style="columns:2;font-size:13px;margin:0;padding-left:18px;">
+    {% for r in p.rows %}<li>{% if r.is_repealed %}<span class="muted">{{ r.number }}. [Repealed]</span>{% else %}<a href="{{ url_for('tax.act_provision', code=code, ref=r.number) }}"><strong>{{ r.number }}</strong> {{ r.title }}</a>{% endif %}</li>{% endfor %}
+  </ul>
+</div>
+{% endfor %}
+{% endif %}
+{% endblock %}

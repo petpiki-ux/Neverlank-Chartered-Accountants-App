@@ -12,13 +12,14 @@
   <form method="post" action="{{ url_for('firmfs.tax_rules_assets_save') }}">
     <input type="hidden" name="ye" value="{{ ye.id if ye else '' }}">
     <div class="tbl-scroll"><table>
-      <thead><tr><th>Class</th><th>Method</th><th class="num">Wear and tear %</th><th class="num">SIA %</th><th class="num">SIA years</th><th class="num">Cost cap</th><th>First-year by months</th><th>Note</th><th>Verified</th></tr></thead>
+      <thead><tr><th>Class</th><th>Method</th><th class="num">Wear and tear %</th><th class="num">SIA %</th><th class="num">SIA year-1 %</th><th class="num">SIA years</th><th class="num">Cost cap</th><th>First-year by months</th><th>Note</th><th>Verified</th></tr></thead>
       <tbody>
       {% for c in classes %}{% set r = rules[c.id] %}
         <tr><td>{{ c.name }}</td>
           <td><select name="method_{{ c.id }}">{% for k, l in methods %}<option value="{{ k }}" {% if r.method == k %}selected{% endif %}>{{ l }}</option>{% endfor %}</select></td>
           <td><input type="number" step="any" min="0" max="100" name="wt_{{ c.id }}" value="{{ r.wt_rate_percent or 0 }}" style="width:80px;"></td>
           <td><input type="number" step="any" min="0" max="100" name="sia_{{ c.id }}" value="{{ r.sia_percent if r.sia_percent is not none else 25 }}" style="width:80px;"></td>
+          <td><input type="number" step="any" min="0" max="100" name="first_{{ c.id }}" value="{{ r.sia_first_percent if r.sia_first_percent is not none else '' }}" placeholder="same" style="width:70px;"></td>
           <td><input type="number" step="1" min="0" name="years_{{ c.id }}" value="{{ r.sia_years if r.sia_years is not none else 4 }}" style="width:64px;"></td>
           <td><input type="number" step="any" min="0" name="cap_{{ c.id }}" value="{{ r.cost_cap or '' }}" placeholder="none" style="width:100px;"></td>
           <td style="text-align:center;"><input type="checkbox" name="prorata_{{ c.id }}" value="1" style="width:auto;" {% if r.prorata_first_year %}checked{% endif %}></td>
@@ -26,10 +27,21 @@
           <td style="text-align:center;"><input type="checkbox" name="verified_{{ c.id }}" value="1" style="width:auto;" {% if r.verified %}checked{% endif %}>{% if not r.verified %}<div class="muted" style="font-size:11px;">not verified</div>{% endif %}</td></tr>
       {% endfor %}
       </tbody></table></div>
-    <p class="muted" style="font-size:12px;">SIA: the percentage of cost claimed each year for the number of years. Wear and tear: straight-line on cost, or reducing balance on the tax value. Cost cap: allowances are worked on no more than this cost (passenger vehicles). Changing a rule clears its "verified" tick; tick it again and save once you have checked it.</p>
+    <p class="muted" style="font-size:12px;">SIA: the percentage of cost claimed each year for the number of years; "year-1 %" is the first year's rate when it differs from the later years (the Act's pattern is 50% then 25% for two more years: year-1 50, SIA 25, years 3). Wear and tear: straight-line on cost, or reducing balance on the tax value. Cost cap: allowances are worked on no more than this cost (passenger vehicles). Changing a rule clears its "verified" tick; tick it again and save once you have checked it.</p>
     <button class="btn gold" type="submit">Save asset rules</button>
   </form>
   {% else %}<p>No asset classes yet. <a href="{{ url_for('firmfs.asset_classes') }}">Add classes</a> in the Asset register first.</p>{% endif %}
+</div>
+<div class="card" style="font-size:12.5px;">
+  <h3 style="margin-top:0;font-size:14px;">What the Income Tax Act says about these allowances</h3>
+  <ul style="margin:0 0 6px 18px;padding:0;">
+    <li><strong>Buildings</strong> ({{ act_ref('sch4.6', text='Fourth Schedule, para 6') }}): a commercial building gets 2.5% of cost a year from the year it is first used. Farm improvements, industrial buildings, railway lines, staff housing and tobacco barns get 5% of cost, or 25% of cost from the year after first use if a special initial allowance was claimed. Land gets nothing.</li>
+    <li><strong>Machinery, equipment, furniture, computers, vehicles</strong> ({{ act_ref('sch4.7', text='para 7') }}): wear and tear is "such sum as the Commissioner thinks reasonable" unless a special initial allowance was claimed, when it is 25% of cost from the year after first use. The 10%, 20% and 25% starter rates here are practice, not figures written in the Act. No wear and tear is allowed in the year an SIA is claimed ({{ act_ref('sch4.3', text='para 3(2)') }}).</li>
+    <li><strong>Special initial allowance</strong> ({{ act_ref('sch4.9', text='para 9') }}): the rate depends on the year of assessment, and has changed several times - 50% for years from 1 January 2001; for years from 1 January 2014, 25% with 50% in the first year of claiming and 25% in each of the next two years; 100% for a licensed investor from 1 January 2017; small and medium enterprises on their own terms. Read the paragraph and set the rate that applies to the year-end you are working on.</li>
+    <li><strong>Passenger motor vehicles</strong> ({{ act_ref('sch4.14', text='para 14') }}): for vehicles bought from 1 January 2009 the cost above US$10,000 is disregarded. Enter that as the vehicle class's cost cap.</li>
+    <li><strong>Scrapping and sale</strong> ({{ act_ref('sch4.4', text='para 4') }}): a scrapped asset gets cost less allowances already made and any amount received; the full text of all of these is in the <a href="{{ url_for('tax.act_contents', code='ita') }}">Income Tax Act</a>.</li>
+  </ul>
+  {% if not act_words('sch4.9') %}<span class="muted">The Act is not filed section by section yet, so these references are not links - <a href="{{ url_for('tax.act_contents', code='ita') }}">file it</a>.</span>{% endif %}
 </div>
 <div class="card">
   <h3 style="margin-top:0;">Expense deductibility</h3>
@@ -44,7 +56,7 @@
           <td><input type="text" name="note_{{ loop.index0 }}" maxlength="250" value="{{ cnotes.get(cat) or '' }}" style="min-width:260px;"></td></tr>
       {% endfor %}
       </tbody></table></div>
-    <p class="muted" style="font-size:12px;">The percentage is added back to profit in the computation whenever the category has expenses. For a one-off item use a line on the computation instead. See also the Section 16(1) prohibited deductions rules used for client engagements.</p>
+    <p class="muted" style="font-size:12px;">The percentage is added back to profit in the computation whenever the category has expenses. For a one-off item use a line on the computation instead. See also the Section 16(1) prohibited deductions rules used for client engagements, and {{ act_ref('16', text='section 16 of the Act') }} itself (entertainment, for example, is refused by {{ act_ref('16(1)(m)') }}).</p>
     <button class="btn gold" type="submit">Save expense rules</button>
   </form>
 </div>

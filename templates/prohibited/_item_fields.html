@@ -9,12 +9,11 @@
   <div><label>Voucher ref</label><input name="voucher_ref" value="{{ it.voucher_ref or '' if it else '' }}" style="width:130px;"></div>
   <div><label>Date</label><input name="entry_date" type="date" value="{{ it.entry_date.isoformat() if it and it.entry_date else '' }}"></div>
   <div><label>Disallowed % <span class="muted" style="font-weight:normal;">(if part only)</span></label><input name="prohibited_percent" type="number" step="0.01" min="0" max="100" value="{{ it.prohibited_percent if it and it.prohibited_percent is not none else '' }}" style="width:100px;"></div>
-  <div><label>Vehicle cost <span class="muted" style="font-weight:normal;">(PMV)</span></label><input name="vehicle_cost" type="number" step="0.01" value="{{ it.vehicle_cost if it and it.vehicle_cost is not none else '' }}" style="width:120px;"></div>
+  <div><label>Vehicle lease cost to date <span class="muted" style="font-weight:normal;">(PMV lease: include this amount)</span></label><input name="vehicle_cost" type="number" step="0.01" value="{{ it.vehicle_cost if it and it.vehicle_cost is not none else '' }}" style="width:120px;"></div>
   <div><label>Recovered under insurance</label><input name="reimbursed_amount" type="number" step="0.01" value="{{ it.reimbursed_amount if it and it.reimbursed_amount else '' }}" style="width:120px;"></div>
 </div>
 <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12.5px;margin:4px 0 8px;">
   <label style="font-weight:normal;"><input type="checkbox" name="charged_to_pl" value="1" style="width:auto;" {% if not it or it.charged_to_pl %}checked{% endif %}> Charged to profit or loss</label>
   <label style="font-weight:normal;"><input type="checkbox" name="is_insured" value="1" style="width:auto;" {% if it and it.is_insured %}checked{% endif %}> Insured</label>
-  <label style="font-weight:normal;"><input type="checkbox" name="business_necessity" value="1" style="width:auto;" {% if it and it.business_necessity %}checked{% endif %}> Business necessity (travel between trades)</label>
   <label style="font-weight:normal;"><input type="checkbox" name="linked_to_exempt" value="1" style="width:auto;" {% if it and it.linked_to_exempt %}checked{% endif %}> Directly linked to exempt income</label>
 </div>

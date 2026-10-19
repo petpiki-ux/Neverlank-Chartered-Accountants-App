@@ -53,7 +53,7 @@ from models import (
     VATInvoice, VAT_INVOICE_DIRECTIONS, VAT_INVOICE_DIRECTION_LABELS, VAT_INVOICE_SOURCES,
     VATImportBatch, VAT_DOCUMENT_KINDS, VAT_KIND_LABELS, resolve_vat_kind, vat_kind_code,
     VATPeriod, vat_period_key, vat_period_label, vat_period_of, parse_vat_period_key, vat_locked_months_among,
-    LegislativeUpdate, LegislativeUpdateClientLink,
+    LegislativeUpdate, LegislativeUpdateClientLink, LegislativeProvision,
     LEGISLATIVE_UPDATE_TYPES, LEGISLATIVE_UPDATE_TYPE_LABELS, LEGISLATIVE_UPDATE_AREAS,
     CASE_AUTHORITY_STATUSES, CASE_AUTHORITY_LABELS,
     StatutoryDeadline,
@@ -68,6 +68,7 @@ import legislation_summary
 import legislation_search
 import legislation_index
 import legislation_chunking
+import act_import
 
 tax_bp = Blueprint("tax", __name__, url_prefix="/tax")
 
@@ -2087,6 +2088,101 @@ def read_legislative_update(update_id):
     best = max(matching, key=lambda p: p["matches"])["chunk"].id if matching else None
     return render_template("tax/legislative_reader.html", update=update, q=q, passages=passages, total_matches=sum(p["matches"] for p in passages),
                            matching_ids=[p["chunk"].id for p in matching], best_id=best, explain=legislation_index.describe(plan) if q else [])
+
+
+# ----------------------------------------------------------------- the Act, section by section
+
+def _act_or_404(code):
+    if code not in act_import.ACTS:
+        abort(404)
+    return act_import.ACTS[code]
+
+
+@tax_bp.route("/act/<code>")
+@login_required
+def act_contents(code):
+    """Contents of an Act that has been filed section by section: Parts, sections and schedules, each opening at its own number."""
+    cfg = _act_or_404(code)
+    st = act_import.status(code)
+    sections, schedules = [], []
+    if st["loaded"]:
+        rows = LegislativeProvision.query.filter_by(act_code=code).order_by(LegislativeProvision.sort_order).all()
+        sections = [r for r in rows if r.kind == "section"]
+        schedules = [r for r in rows if r.kind == "schedule"]
+    parts = []
+    for r in sections:
+        if not parts or parts[-1]["part"] != r.part:
+            parts.append({"part": r.part, "title": r.part_title, "rows": []})
+        parts[-1]["rows"].append(r)
+    return render_template("tax/act_contents.html", cfg=cfg, st=st, parts=parts, schedules=schedules, code=code,
+                           can_load=user_has_permission(current_user, "manage_legislative_updates"))
+
+
+@tax_bp.route("/act/<code>/load", methods=["POST"])
+@login_required
+@legislative_update_editor_required
+def act_load(code):
+    """File (or refresh) the Act section by section from the copy bundled with the app, or from a text file uploaded here."""
+    _act_or_404(code)
+    text = None
+    f = request.files.get("file")
+    if f and f.filename:
+        if not f.filename.lower().endswith(".txt"):
+            flash("Upload the Act as a .txt file (or leave the box empty to use the copy supplied with the app).", "danger")
+            return redirect(url_for("tax.act_contents", code=code))
+        text = f.read().decode("utf-8", errors="replace")
+    try:
+        res = act_import.load_act(code, text=text, user_id=current_user.id)
+    except ValueError as exc:
+        db.session.rollback()
+        flash(str(exc), "danger")
+        return redirect(url_for("tax.act_contents", code=code))
+    msg = "%s filed: %d sections and %d schedules, in %d searchable passages." % (act_import.ACTS[code]["title"], res["sections"], res["schedules"], res["chunks"])
+    if not res["created"]:
+        msg += " The earlier copy of this Act in the library was replaced."
+    flash(msg, "success")
+    for w in res["warnings"][:5]:
+        flash(w, "warning")
+    try:
+        import prohibited_deductions
+        n = prohibited_deductions.align_with_act()
+        if n:
+            flash("%d rule%s on the Section 16 rules page were brought into line with the Act's wording (they remain unverified until you tick them)." % (n, "" if n == 1 else "s"), "info")
+    except Exception:
+        db.session.rollback()
+    return redirect(url_for("tax.act_contents", code=code))
+
+
+@tax_bp.route("/act/<code>/<path:ref>")
+@login_required
+def act_provision(code, ref):
+    """One section or schedule of the Act in its own words. A reference with a paragraph - 16(1)(m) - shows that paragraph first, with the whole section below."""
+    cfg = _act_or_404(code)
+    found = act_import.paragraph_text(ref, code)
+    if found is None:
+        st = act_import.status(code)
+        if not st["loaded"]:
+            flash("The %s has not been filed section by section yet. Use 'File the Act' on this page." % cfg["short"], "warning")
+            return redirect(url_for("tax.act_contents", code=code))
+        flash("Couldn't find '%s' in the %s." % (ref, cfg["short"]), "warning")
+        return redirect(url_for("tax.act_contents", code=code))
+    row = LegislativeProvision.query.get(found["provision_id"])
+    prev_row = LegislativeProvision.query.filter(LegislativeProvision.act_code == code, LegislativeProvision.sort_order < row.sort_order).order_by(LegislativeProvision.sort_order.desc()).first()
+    next_row = LegislativeProvision.query.filter(LegislativeProvision.act_code == code, LegislativeProvision.sort_order > row.sort_order).order_by(LegislativeProvision.sort_order).first()
+    q = (request.args.get("q") or "").strip()
+    html = None
+    if q:
+        plan = legislation_index.parse_query(q)
+        if not plan.empty:
+            html = legislation_index.highlight(row.text, plan)
+    if found["kind"] == "schedule" and found["path"]:
+        sub = ", paragraph " + found["path"][0] + "".join("(%s)" % x for x in found["path"][1:])
+    elif found["path"]:
+        sub = ", " + "".join("(%s)" % x for x in found["path"])
+    else:
+        sub = ""
+    return render_template("tax/act_provision.html", cfg=cfg, code=code, found=found, row=row, sub=sub, prev_row=prev_row, next_row=next_row, q=q,
+                           html=html, canonical=act_import.canonical, update=row.legislative_update)
 
 
 @tax_bp.route("/legislative-updates/ask/feedback", methods=["POST"])

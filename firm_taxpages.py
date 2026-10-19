@@ -205,13 +205,16 @@ def tax_rules_assets_save():
         sia, ok2 = _num(f.get(f"sia_{cid}"))
         yrs, ok3 = _num(f.get(f"years_{cid}"))
         cap, ok4 = _num(f.get(f"cap_{cid}"))
-        if not (ok1 and ok2 and ok3 and ok4) or min(wt, sia, yrs, cap) < 0 or wt > 100 or sia > 100:
+        first_raw = (f.get(f"first_{cid}") or "").strip()
+        first, ok5 = _num(first_raw) if first_raw else (None, True)
+        if not (ok1 and ok2 and ok3 and ok4 and ok5) or min(wt, sia, yrs, cap) < 0 or wt > 100 or sia > 100 or (first is not None and not 0 <= first <= 100):
             errors.append(rule.asset_class.name if rule.asset_class else str(cid))
             continue
         changed = (rule.method != method or (rule.wt_rate_percent or 0) != wt or (rule.sia_percent or 0) != sia
-                   or (rule.sia_years or 0) != int(yrs) or (rule.cost_cap or 0) != cap
+                   or (rule.sia_years or 0) != int(yrs) or (rule.cost_cap or 0) != cap or rule.sia_first_percent != first
                    or bool(rule.prorata_first_year) != bool(f.get(f"prorata_{cid}")))
         rule.method, rule.wt_rate_percent, rule.sia_percent, rule.sia_years = method, wt, sia, int(yrs)
+        rule.sia_first_percent = first
         rule.cost_cap = cap if cap > 0 else None
         rule.prorata_first_year = bool(f.get(f"prorata_{cid}"))
         rule.note = (f.get(f"note_{cid}") or "").strip()[:250] or None

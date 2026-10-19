@@ -47,8 +47,10 @@ TREATMENTS = OrderedDict([
     ("apportion", "Disallow the entered percentage (100% if none entered)"),
     ("insured", "Disallow the amount recovered under insurance"),
     ("travel_conditional", "Disallow unless there is a business necessity"),
-    ("pmv_cap", "Disallow the part above the passenger-motor-vehicle cap"),
-    ("mining_fee", "Disallow only for a local mining operation of a foreign parent"),
+    ("pmv_lease", "Disallow lease cost above the 16(1)(k) cap (cumulative for the vehicle)"),
+    ("assoc_fee", "Disallow fees to an associated company above the 16(1)(r) limit"),
+    ("pmv_cap", "Disallow the part above the passenger-motor-vehicle cap (vehicle cost basis - older reading)"),
+    ("mining_fee", "Disallow only for a local mining operation of a foreign parent (older reading)"),
     ("review", "Add back and flag for a Partner decision"),
     ("none", "Allowable - no add-back"),
 ])
@@ -62,34 +64,35 @@ RULE_DEFAULTS = [
     ("personal_establishment", "Maintenance of the taxpayer's establishment", "Personal and domestic", "16(1)(a)", "full", ""),
     ("domestic_private_expense", "Domestic or private expense", "Personal and domestic", "16(1)(b)", "full", ""),
     ("home_to_work_travel", "Travel between home and place of work", "Personal and domestic", "16(1)(b)", "full", ""),
-    ("inter_trade_travel", "Travel between two places of trade", "Personal and domestic", "16(1)(b)", "travel_conditional",
-     "Not in ZIMRA's published summary; treated as private unless a business necessity is recorded. Confirm."),
+    ("inter_trade_travel", "Travel between two places of trade", "Personal and domestic", "16(1)(b)", "full",
+     "Named in section 16(1)(b): travel between the places where a taxpayer carries on two or more distinct trades is not deductible. The paragraph has no business-necessity exception."),
     # B. losses, taxes and reserves
     ("loss_or_damage", "Loss or damage (insurable)", "Losses, taxes and reserves", "16(1)(c)", "insured",
      "Only the part recovered or recoverable under insurance or an indemnity is added back."),
     ("corporate_income_tax", "Income tax", "Losses, taxes and reserves", "16(1)(d)", "full", ""),
     ("capital_gains_tax", "Capital gains tax", "Losses, taxes and reserves", "16(1)(d)", "full", ""),
-    ("carbon_tax", "Carbon tax", "Losses, taxes and reserves", "16(1)(d)", "full", ""),
+    ("carbon_tax", "Carbon tax", "Losses, taxes and reserves", "16(1)(d)", "review",
+     "Section 16(1)(d) refuses tax 'upon the income of the taxpayer'. Carbon tax (section 36E) is a charge on emissions and is not named. Added back pending a Partner decision."),
     ("presumptive_tax", "Presumptive tax", "Losses, taxes and reserves", "16(1)(d)", "full", ""),
     ("withholding_tax", "Withholding tax borne by the taxpayer", "Losses, taxes and reserves", "16(1)(d)", "full", ""),
-    ("vat_expense", "Value added tax as a stand-alone tax charge", "Losses, taxes and reserves", "16(1)(d)", "full",
-     "Irrecoverable VAT that forms part of the cost of an expense belongs to that expense, not here. Confirm the treatment."),
-    ("paye_expense", "PAYE as a stand-alone tax charge", "Losses, taxes and reserves", "16(1)(d)", "full",
-     "PAYE withheld from staff is not the employer's expense (the gross salary is). Use only for tax the employer itself bears. Confirm."),
-    ("imtt_expense", "Intermediated money transfer tax", "Losses, taxes and reserves", "16(1)(d)", "full",
-     "ZIMRA's summary prints this separately as '16(d)(1)' (tax under section 22G). Correct the label once checked."),
-    ("tax_penalties", "Tax penalties", "Losses, taxes and reserves", "16(1)(d)", "full",
-     "Not named in ZIMRA's summary of (d); penalties are usually disallowed under the general deduction test as well. Confirm."),
+    ("vat_expense", "Value added tax as a stand-alone tax charge", "Losses, taxes and reserves", "16(1)(d)", "review",
+     "Section 16(1)(d) refuses tax 'upon the income of the taxpayer'; VAT is not named. Irrecoverable VAT that forms part of the cost of an expense belongs to that expense, not here. A stand-alone VAT charge is added back pending a Partner decision."),
+    ("paye_expense", "PAYE as a stand-alone tax charge", "Losses, taxes and reserves", "16(1)(d)", "review",
+     "PAYE withheld from staff is not the employer's expense (the gross salary is). Tax the employer bears for staff is part of their pay and is not tax upon the taxpayer's own income. Added back pending a Partner decision."),
+    ("imtt_expense", "Intermediated money transfer tax", "Losses, taxes and reserves", "16(1)(d1)", "full",
+     "Section 16(1)(d1): any amount of Intermediated Money Transfer Tax charged under section 36G."),
+    ("tax_penalties", "Tax penalties", "Losses, taxes and reserves", "16(1)(d)", "review",
+     "Section 16(1)(d) covers tax on income and interest payable on it. It does not name penalties, so a penalty is tested under section 15(2)(a). Added back pending a Partner decision."),
     ("tax_interest", "Interest on tax", "Losses, taxes and reserves", "16(1)(d)", "full", ""),
     ("transfer_to_reserve", "Transfer to a reserve", "Losses, taxes and reserves", "16(1)(e)", "full",
      "Added back only if it was charged to profit or loss."),
     ("capitalized_expense", "Capitalised expense", "Losses, taxes and reserves", "16(1)(e)", "full",
      "Added back only if it was charged to profit or loss; capital allowances are claimed separately."),
     # C. exempt income, funds, capital costs
-    ("exempt_income_cost", "Cost of earning exempt income", "Exempt income, funds and capital costs", "16(1)(f)", "apportion",
-     "Not named in ZIMRA's summary. Where an expense is shared, enter the percentage that relates to exempt income."),
-    ("contribution_unapproved_fund", "Contribution to a fund not approved by the Commissioner", "Exempt income, funds and capital costs", "16(1)(g)", "full",
-     "Not named in ZIMRA's summary. Confirm."),
+    ("exempt_income_cost", "Cost of earning exempt or non-Zimbabwe income", "Exempt income, funds and capital costs", "16(1)(f)", "apportion",
+     "Section 16(1)(f): expenditure or loss incurred in producing income that is exempt under Part III or not derived from sources within Zimbabwe, and in operations that would have produced such income. It includes an assessed loss of an earlier year to that extent. Where an expense is shared, enter the percentage that relates to that income."),
+    ("contribution_unapproved_fund", "Contribution to a pension or benefit fund (not otherwise allowed)", "Exempt income, funds and capital costs", "16(1)(g)", "full",
+     "Section 16(1)(g) refuses employer contributions to a fund providing pensions, annuities or sickness, accident or unemployment benefits, 'save as otherwise expressly provided'. Contributions to approved funds are allowed by section 15(2)(h) and the Sixth Schedule: use the ordinary expense type for those."),
     ("notional_capital_interest", "Notional interest on capital employed", "Exempt income, funds and capital costs", "16(1)(h)", "full", ""),
     ("non_trade_premises_rent", "Rent of premises not used for trade", "Exempt income, funds and capital costs", "16(1)(i)", "apportion", "The part used for trade is allowable: enter the disallowed percentage."),
     ("non_trade_repairs", "Repairs of premises not used for trade", "Exempt income, funds and capital costs", "16(1)(i)", "apportion", "The part used for trade is allowable: enter the disallowed percentage."),
@@ -97,25 +100,26 @@ RULE_DEFAULTS = [
     # D. specialised business restrictions
     ("sole_selling_rights", "Cost of securing sole selling rights", "Specialised business and corporate", "16(1)(j)", "full", ""),
     ("restraint_of_trade", "Restraint of trade payment", "Specialised business and corporate", "", "review",
-     "ZIMRA's summary lists (j) as sole selling rights, not restraint of trade. A restraint payment is usually capital. Added back pending a Partner decision."),
-    ("pmv_lease", "Passenger motor vehicle lease cost", "Specialised business and corporate", "16(1)(k)", "pmv_cap",
-     "Needs the vehicle's cost and the cap entered in the setup. Applies to leases as published."),
+     "Section 16(1)(j) is about obligations that restrain another person from selling goods other than the taxpayer's; it is not a restraint of trade rule. A restraint payment is usually capital and fails section 15(2)(a). Added back pending a Partner decision."),
+    ("pmv_lease", "Passenger motor vehicle lease cost", "Specialised business and corporate", "16(1)(k)", "pmv_lease",
+     "Section 16(1)(k)(vi): lease cost of a passenger motor vehicle is refused to the extent that it, added to the lease cost of the same vehicle in earlier years, exceeds the cap (US$50,000, or the Zimbabwe dollar equivalent at the prevailing rate, for a lease first made from 1 January 2009). Enter the cap in the setup and, on the line, the vehicle's lease cost to date including this amount."),
     ("pmv_operating_cost", "Passenger motor vehicle running cost", "Specialised business and corporate", "16(1)(k)", "none",
-     "As published, (k) caps lease costs only. Switch this rule to the PMV cap if your reading of the current Act differs."),
+     "Section 16(1)(k) limits only the cost of LEASING a passenger motor vehicle. Running costs are not capped by it. (The cost of buying one is limited for capital allowances by paragraph 14 of the Fourth Schedule.)"),
     ("share_award_expense", "Shares awarded to an employee or director", "Specialised business and corporate", "16(1)(l)", "full", "Check the timing and any other treatment of the award."),
     ("client_entertainment", "Entertainment", "Specialised business and corporate", "16(1)(m)", "full", ""),
     ("business_lunch", "Business lunch (hospitality)", "Specialised business and corporate", "16(1)(m)", "full", "Hospitality is within entertainment as published."),
     ("hospitality_allowance", "Hospitality allowance", "Specialised business and corporate", "16(1)(m)", "full", ""),
-    ("expense_earning_stocks_shares_income", "Cost of earning income from shares or stock", "Specialised business and corporate", "16(1)(n)", "full", ""),
+    ("expense_earning_stocks_shares_income", "Cost of earning foreign interest or dividends on company shares or stock", "Specialised business and corporate", "16(1)(n)", "full",
+     "Section 16(1)(n) refuses the cost of producing the income described in the first proviso to section 12(2): amounts from a source outside Zimbabwe by way of interest or dividends on securities that are stocks or shares issued by a company."),
     ("expense_earning_local_fi_interest", "Cost of earning interest from a local financial institution", "Specialised business and corporate", "16(1)(o)", "full",
      "This is the cost of EARNING such interest, not interest paid."),
     # E. foreign and related party
-    ("foreign_management_fee", "Management or administration fee to a foreign parent", "Foreign and related party", "16(1)(r)", "mining_fee",
-     "Applies to a local mining operation of a foreign parent; set that on the engagement setup."),
+    ("foreign_management_fee", "Fees, administration and management paid to an associated company", "Foreign and related party", "16(1)(r)", "assoc_fee",
+     "Section 16(1)(r): fees, administration and management in favour of a company of which the taxpayer is an associated enterprise (or, for a foreign company, its local branch) are allowed only up to 1% (0.75% before trade or income starts, or in a period of non-production) of A - (B + C), where A is total expenditure qualifying under section 15, B is such fees paid outside Zimbabwe and C is expenditure under section 15(2)(f)(i). Enter A, B and C in the setup; the limit applies to all such fees together."),
     ("foreign_loan_interest_excess", "Foreign loan interest above the ordinary rate", "Foreign and related party", "16(1)(s)", "full",
-     "Enter only the EXCESS over what would have been payable at the ordinary rate. ZIMRA's summary prints this as '16(s)'."),
+     "Section 16(1)(s): interest on foreign loans above what would have been payable at the exchange rate the lender ordinarily offers its other clients on the date of the transaction. Enter only the EXCESS."),
     ("thin_capitalisation", "Thin capitalisation (interest on related-party debt above the debt : equity limit)", "Foreign and related party", "16(1)(q)", "full",
-     "Driven by the engagement setup, not by individual expenses. Covers debt advanced or guaranteed by an associate or foreign parent; equity is paid-up capital, share premium, retained earnings and non-distributable capital reserves (excluding unrealised revaluation reserves) - confirm against the current Act."),
+     "Driven by the engagement setup, not by individual expenses. Section 16(1)(q) covers a local branch or subsidiary of a foreign company, and a local company or its subsidiary, for debt contracted in connection with producing income beyond a debt to equity ratio of three to one. 'Equity' is issued and paid-up capital, unappropriated profits, reserves, realised reserves and interest-free loans from shareholders. It does not apply to debt contracted with a locally domiciled financial institution or other person ordinarily resident in Zimbabwe who is not an associate (and has not colluded), nor to debt through a Government credit facility by a public entity."),
 ]
 NON_ITEM_CODES = {"thin_capitalisation"}   # rules that are applied from the setup, not chosen for an expense
 
@@ -140,6 +144,53 @@ def ensure_rules():
             added = True
     if added:
         db.session.commit()
+
+
+# What the Act's own text (as filed in the Legislative Updates library) changes in the starting rules. Each entry lists the value the
+# rule was first seeded with and the Act-based value. A rule is brought into line ONLY while it still holds the seeded value, so
+# anything a Partner has edited is left alone; and a rule that changes is no longer "verified" (it has to be ticked again).
+ACT_ALIGN = {
+    "inter_trade_travel": {"treatment": ("travel_conditional", "full")},
+    "carbon_tax": {"treatment": ("full", "review")},
+    "vat_expense": {"treatment": ("full", "review")},
+    "paye_expense": {"treatment": ("full", "review")},
+    "tax_penalties": {"treatment": ("full", "review")},
+    "imtt_expense": {"clause_label": ("16(1)(d)", "16(1)(d1)")},
+    "pmv_lease": {"treatment": ("pmv_cap", "pmv_lease")},
+    "foreign_management_fee": {"treatment": ("mining_fee", "assoc_fee"),
+                               "name": ("Management or administration fee to a foreign parent", "Fees, administration and management paid to an associated company")},
+    "exempt_income_cost": {"name": ("Cost of earning exempt income", "Cost of earning exempt or non-Zimbabwe income")},
+    "contribution_unapproved_fund": {"name": ("Contribution to a fund not approved by the Commissioner", "Contribution to a pension or benefit fund (not otherwise allowed)")},
+    "expense_earning_stocks_shares_income": {"name": ("Cost of earning income from shares or stock", "Cost of earning foreign interest or dividends on company shares or stock")},
+}
+
+
+def align_with_act():
+    """Bring unedited starting rules into line with the Act's wording. Returns how many rules changed."""
+    ensure_rules()
+    defaults = {d[0]: d for d in RULE_DEFAULTS}
+    changed = 0
+    for code, fields in ACT_ALIGN.items():
+        r = ProhibitedDeductionRule.query.filter_by(code=code).first()
+        if r is None:
+            continue
+        touched = False
+        for field, (old, new) in fields.items():
+            if (getattr(r, field) or "") == old:
+                setattr(r, field, new)
+                touched = True
+                if field in ("treatment", "clause_label"):
+                    r.verified_by_id = r.verified_at = r.verified_note = None
+        d = defaults.get(code)
+        # the explanatory note follows the Act whenever the rule's treatment or clause moved, or it still reads as the seeded text
+        if d is not None and (touched or not (r.note or "").strip()):
+            r.note = d[5]
+        if touched:
+            changed += 1
+    if changed:
+        reevaluate_all()
+    db.session.commit()
+    return changed
 
 
 def rules_by_code():
@@ -225,6 +276,30 @@ def evaluate(item, rule, setup=None):
             notes.append(f"Vehicle cost {cost:,.2f} exceeds the cap {cap:,.2f}: {ratio * 100:.2f}% allowable")
         else:
             notes.append("Vehicle cost is within the cap")
+    elif treatment == "pmv_lease":
+        cap = _f(getattr(setup, "pmv_cap", None)) if setup is not None else 0.0
+        to_date = _f(item.vehicle_cost) or amount      # lease cost of this vehicle to date, this amount included
+        if cap <= 0:
+            notes.append("Enter the passenger-motor-vehicle lease cap in the setup to test this line (section 16(1)(k))")
+        elif to_date > cap:
+            disallowed = max(0.0, min(amount, to_date - cap))
+            notes.append(f"Lease cost of this vehicle to date {to_date:,.2f} exceeds the cap {cap:,.2f} by {to_date - cap:,.2f}")
+        else:
+            notes.append("Lease cost to date is within the cap")
+    elif treatment == "assoc_fee":
+        a, b, c = (_f(getattr(setup, k, None)) for k in ("assoc_fee_a", "assoc_fee_b", "assoc_fee_c")) if setup is not None else (0.0, 0.0, 0.0)
+        base = a - (b + c)
+        if base <= 0:
+            notes.append("Enter A (total expenditure qualifying under section 15), B and C in the setup to test this fee (section 16(1)(r))")
+        else:
+            rate = 0.0075 if getattr(setup, "assoc_fee_pretrade", False) else 0.01
+            limit = base * rate
+            total = _f(getattr(setup, "assoc_fee_total", None)) or amount
+            if total > limit + 0.005 and total > 0:
+                disallowed = amount * (total - limit) / total
+                notes.append(f"Fees to associated companies {total:,.2f} exceed the limit {limit:,.2f} ({rate * 100:g}% of {base:,.2f})")
+            else:
+                notes.append(f"Fees to associated companies are within the limit {limit:,.2f} ({rate * 100:g}% of {base:,.2f})")
     elif treatment == "mining_fee":
         if setup is not None and getattr(setup, "mining_foreign_parent", False):
             disallowed = amount
@@ -292,10 +367,21 @@ def thin_cap(setup):
     return out
 
 
+def _prepare_setup(setup, items, rules):
+    """The associated-company fee limit (16(1)(r)) applies to all such fees together, so the total is worked out once
+    and carried on the setup for each line to share."""
+    if setup is None:
+        return
+    setup.assoc_fee_total = sum(_f(i.amount) for i in items if getattr(rules.get(i.expense_type), "treatment", None) == "assoc_fee"
+                                and getattr(rules.get(i.expense_type), "is_active", True))
+
+
 def reevaluate_engagement(engagement_id, rules=None):
     rules = rules or rules_by_code()
     setup = get_setup(engagement_id)
-    for it in ProhibitedDeductionItem.query.filter_by(engagement_id=engagement_id).all():
+    all_items = ProhibitedDeductionItem.query.filter_by(engagement_id=engagement_id).all()
+    _prepare_setup(setup, all_items, rules)
+    for it in all_items:
         res = evaluate(it, rules.get(it.expense_type), setup)
         it.status, it.clause_label = res["status"], res["clause"]
         it.addback_amount, it.disallowed_amount = res["addback"], res["disallowed"]
@@ -650,7 +736,8 @@ def save_setup(engagement_id):
     s = get_setup(engagement_id, create=True)
     f = request.form
     s.pmv_cap = _num(f.get("pmv_cap"))
-    s.mining_foreign_parent = bool(f.get("mining_foreign_parent"))
+    s.assoc_fee_a, s.assoc_fee_b, s.assoc_fee_c = _num(f.get("assoc_fee_a")), _num(f.get("assoc_fee_b")), _num(f.get("assoc_fee_c"))
+    s.assoc_fee_pretrade = bool(f.get("assoc_fee_pretrade"))
     s.thin_cap_ratio = _num(f.get("thin_cap_ratio"))
     s.related_debt = _num(f.get("related_debt")) or 0.0
     s.qualifying_equity = _num(f.get("qualifying_equity")) or 0.0
@@ -697,9 +784,7 @@ def add_item(engagement_id):
         return _back(engagement_id)
     db.session.add(it)
     db.session.flush()
-    res = evaluate(it, rules.get(it.expense_type), get_setup(engagement_id))
-    it.status, it.clause_label, it.addback_amount, it.disallowed_amount, it.eval_note, it.rule_verified = (
-        res["status"], res["clause"], res["addback"], res["disallowed"], res["note"], res["verified"])
+    reevaluate_engagement(engagement_id, rules)    # re-tests every line: the section 16(1)(r) limit is shared by all the fees
     db.session.commit()
     flash(f"Added - {it.status.replace('_', ' ').lower()}" + (f", add back {it.addback_amount:,.2f}" if it.addback_amount else "") + ".", "success")
     return _back(engagement_id)
@@ -715,9 +800,8 @@ def update_item(item_id):
     if err:
         flash(err, "danger")
         return _back(it.engagement_id)
-    res = evaluate(it, rules.get(it.expense_type), get_setup(it.engagement_id))
-    it.status, it.clause_label, it.addback_amount, it.disallowed_amount, it.eval_note, it.rule_verified = (
-        res["status"], res["clause"], res["addback"], res["disallowed"], res["note"], res["verified"])
+    db.session.flush()
+    reevaluate_engagement(it.engagement_id, rules)
     db.session.commit()
     flash("Updated.", "success")
     return _back(it.engagement_id)
@@ -730,6 +814,8 @@ def delete_item(item_id):
     _access(it.engagement_id)
     eid = it.engagement_id
     db.session.delete(it)
+    db.session.flush()
+    reevaluate_engagement(eid)
     db.session.commit()
     flash("Removed.", "info")
     return _back(eid)

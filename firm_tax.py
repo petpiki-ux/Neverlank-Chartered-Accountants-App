@@ -61,7 +61,7 @@ def default_rule(class_name):
     if any(w in n for w in ("land", "work in progress", "wip")):
         return dict(method="NONE", wt=0.0, note="Land and work in progress: no capital allowance")
     if "building" in n:
-        return dict(method="NONE", wt=0.0, note="Check whether the building qualifies (e.g. industrial building) before claiming")
+        return dict(method="WT_SL", wt=2.5, note="Commercial building: 2.5% of cost a year (Fourth Schedule para 6(1)(a)); industrial buildings and farm improvements are 5% (para 6(1)(b)). Check the building qualifies")
     if any(w in n for w in ("plant", "machinery")):
         return dict(method="SIA", wt=0.0, note="Starter rule: special initial allowance")
     if "vehicle" in n:
@@ -89,9 +89,9 @@ def ensure_rules():
 
 def rule_dict(r):
     if r is None:
-        return dict(method="NONE", wt=0.0, sia=25.0, sia_years=4, cap=None, prorata=False, verified=False)
+        return dict(method="NONE", wt=0.0, sia=25.0, sia_years=4, sia_first=None, cap=None, prorata=False, verified=False)
     return dict(method=r.method, wt=r.wt_rate_percent or 0.0, sia=r.sia_percent if r.sia_percent is not None else 25.0,
-                sia_years=r.sia_years if r.sia_years is not None else 4, cap=(r.cost_cap if r.cost_cap and r.cost_cap > 0 else None),
+                sia_years=r.sia_years if r.sia_years is not None else 4, sia_first=r.sia_first_percent, cap=(r.cost_cap if r.cost_cap and r.cost_cap > 0 else None),
                 prorata=bool(r.prorata_first_year), verified=bool(r.verified))
 
 
@@ -125,7 +125,8 @@ def simulate_asset(asset, rule, ref_end, target_end):
             break
         if method == "SIA":
             if k < int(rule.get("sia_years") or 0):
-                row["allowance"] = min(tcost * rule["sia"] / 100.0, start_tv)
+                pct = rule["sia_first"] if (k == 0 and rule.get("sia_first") is not None) else rule["sia"]
+                row["allowance"] = min(tcost * pct / 100.0, start_tv)
         elif method in ("WT_SL", "WT_RB"):
             f = 1.0
             if k == 0 and rule.get("prorata"):

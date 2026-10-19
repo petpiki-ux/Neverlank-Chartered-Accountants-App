@@ -6684,6 +6684,40 @@ class LegislativeUpdateChunk(db.Model):
         return f"<LegislativeUpdateChunk {self.legislative_update_id}#{self.chunk_index}>"
 
 
+class LegislativeProvision(db.Model):
+    """One numbered section or schedule of an Act that has been filed in
+    section-by-section form (see act_import.py), kept as its own row so a
+    tax working paper can link straight to "section 16(1)(m)" and show the
+    Act's own words - without a search. The same text is also in the
+    parent LegislativeUpdate's chunks (one chunk per section, long ones
+    split), which is what Deep Search and Ask the library read. `act_code`
+    is a short slug ("ita" = Income Tax Act [Chapter 23:06]) used in
+    links; `number` is the section number as printed ("15", "36G") or the
+    schedule number ("4" for the Fourth Schedule) - kind says which."""
+    __tablename__ = "legislative_provision"
+    id = db.Column(db.Integer, primary_key=True)
+    legislative_update_id = db.Column(db.Integer, db.ForeignKey("legislative_update.id"), nullable=False, index=True)
+    act_code = db.Column(db.String(20), nullable=False, index=True)
+    kind = db.Column(db.String(10), nullable=False)  # "section" or "schedule"
+    number = db.Column(db.String(12), nullable=False)
+    label = db.Column(db.String(40), nullable=False)  # "Section 15" / "Fourth Schedule"
+    title = db.Column(db.String(300))
+    part = db.Column(db.String(30))
+    part_title = db.Column(db.String(200))
+    refers_to = db.Column(db.String(120))  # a schedule's "(Section 15(2)(c))" note
+    sort_order = db.Column(db.Integer, default=0)
+    text = db.Column(db.Text, nullable=False)
+    is_repealed = db.Column(db.Boolean, default=False)
+
+    legislative_update = db.relationship(
+        "LegislativeUpdate",
+        backref=db.backref("provisions", lazy=True, cascade="all, delete-orphan", order_by="LegislativeProvision.sort_order"),
+    )
+
+    def __repr__(self):
+        return f"<LegislativeProvision {self.act_code} {self.label}>"
+
+
 class LegislativeAskCache(db.Model):
     """A fast-recall cache of "Ask the library" question/answer pairs (see
     legislation_search.py) - asking the same or a very similar question
@@ -10807,7 +10841,11 @@ class ProhibitedDeductionSetup(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
     pmv_cap = db.Column(db.Float)                 # leave blank until entered; the Act's figure is amended from time to time
-    mining_foreign_parent = db.Column(db.Boolean, default=False)
+    mining_foreign_parent = db.Column(db.Boolean, default=False)   # older reading of 16(1)(r); no longer used
+    assoc_fee_a = db.Column(db.Float)        # 16(1)(r): A = total expenditure qualifying for deduction under section 15
+    assoc_fee_b = db.Column(db.Float)        # B = fees, administration and management paid outside Zimbabwe
+    assoc_fee_c = db.Column(db.Float)        # C = expenditure qualifying under section 15(2)(f)(i)
+    assoc_fee_pretrade = db.Column(db.Boolean, default=False)   # 0.75% instead of 1% before trade starts / in a period of non-production
     thin_cap_ratio = db.Column(db.Float)          # debt : equity limit (3 under the rule as published) - entered, not assumed
     related_debt = db.Column(db.Float, default=0.0)        # debt advanced or guaranteed by an associate or foreign parent
     qualifying_equity = db.Column(db.Float, default=0.0)
@@ -11102,6 +11140,7 @@ class FirmTaxAssetRule(db.Model):
     wt_rate_percent = db.Column(db.Float, default=0.0)       # wear and tear, per annum
     sia_percent = db.Column(db.Float, default=25.0)          # special initial allowance, per annum
     sia_years = db.Column(db.Integer, default=4)
+    sia_first_percent = db.Column(db.Float)                  # optional: the first year's SIA rate when it differs (Fourth Schedule para 9: 50% then 25% twice)
     cost_cap = db.Column(db.Float)                           # allowances are worked on no more than this cost (e.g. passenger vehicles)
     prorata_first_year = db.Column(db.Boolean, default=False, nullable=False)  # wear and tear in the year of purchase by months owned
     verified = db.Column(db.Boolean, default=False, nullable=False)

@@ -15,6 +15,7 @@
     Deep search through every passage of every filed Act, Notice, SI, case, publication and news article &mdash; ranked, with the matching
     words highlighted and a link to the exact passage. Handles word endings, typos and short forms (VAT, QPD, SI 33 of 2024). You can also
     paste a whole client situation and the topics to cover.
+    <strong>The Income Tax Act [Chapter 23:06]</strong> is filed section by section: <a href="{{ url_for('tax.act_contents', code='ita') }}">open its contents</a> to go straight to any section or schedule.
   </p>
   <form method="get" action="{{ url_for('tax.search_legislative_updates') }}" class="form-row">
     <div style="flex:4;"><input type="text" name="q" placeholder="Search the filed legislation..." required></div>

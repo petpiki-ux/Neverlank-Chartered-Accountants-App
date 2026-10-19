@@ -1,0 +1,15 @@
+{# Where the Income Tax Act says so: the provisions behind a tax computation, each opening the Act's own words. Plain text until the Act is filed. #}
+<div class="card" style="font-size:12.5px;">
+  <h3 class="mt-0" style="font-size:14px;">Where the Income Tax Act says so</h3>
+  <div style="columns:2;column-gap:28px;line-height:1.6;">
+    <div><strong>Deductions:</strong> the general test, {{ act_ref('15(2)(a)') }}; the list, {{ act_ref('15', text='section 15') }}; nothing may be deducted for what {{ act_ref('16(1)') }} names (entertainment {{ act_ref('16(1)(m)') }}, thin capitalisation {{ act_ref('16(1)(q)') }}, associated-company fees {{ act_ref('16(1)(r)') }}).</div>
+    <div><strong>Capital allowances:</strong> {{ act_ref('15(2)(c)') }} and the {{ act_ref('sch4', text='Fourth Schedule') }} - special initial allowance {{ act_ref('sch4.2', text='para 2') }} and {{ act_ref('sch4.9', text='para 9') }}, wear and tear {{ act_ref('sch4.3', text='para 3') }}, scrapping {{ act_ref('sch4.4', text='para 4') }}, passenger vehicles {{ act_ref('sch4.14', text='para 14') }}.</div>
+    <div><strong>Assessed losses:</strong> {{ act_ref('15(3)') }} - carried forward and used earliest first; a loss first made more than six years before is not deducted (except mining), proviso (iv)(b).</div>
+    <div><strong>Hire purchase and credit sales:</strong> {{ act_ref('17', text='section 17') }} and {{ act_ref('18', text='section 18') }}.</div>
+    <div><strong>Income:</strong> gross income {{ act_ref('8', text='section 8') }}; deemed source {{ act_ref('12', text='section 12') }}; exemptions {{ act_ref('14', text='section 14') }}.</div>
+    <div><strong>Rates:</strong> not in this Act - the "charging Act" ({{ act_ref('2', text='section 2') }}) fixes them each year; {{ act_ref('6', text='section 6') }} levies the tax.</div>
+    <div><strong>Provisional tax and payment:</strong> {{ act_ref('72', text='section 72') }}; self assessment {{ act_ref('37A') }}; records {{ act_ref('37B') }}; interest {{ act_ref('97B') }}.</div>
+    <div><strong>Related parties and avoidance:</strong> associates {{ act_ref('2A') }}; {{ act_ref('98', text='section 98') }} tax avoidance; {{ act_ref('98B', text='section 98B') }} and the {{ act_ref('sch35', text='Thirty-Fifth Schedule') }} (transfer pricing).</div>
+  </div>
+  {% if not act_words('15(2)(a)') %}<p class="muted" style="margin:6px 0 0;">The Act is not filed section by section yet, so these are not links. <a href="{{ url_for('tax.act_contents', code='ita') }}">File the Income Tax Act</a>.</p>{% endif %}
+</div>

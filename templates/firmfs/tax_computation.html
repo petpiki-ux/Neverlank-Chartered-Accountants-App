@@ -9,6 +9,7 @@
 {% include "firmfs/_taxmanual.html" %}
 {% else %}
 {% set c = tax.comp %}
+{% include "tax/_act_links.html" %}
 <div class="card">
   <p class="muted" style="margin-top:0;font-size:12.5px;">Starts from the profit before tax in the income statement, then applies the depreciation, capital allowances, expense deductibility rules and any lines you add. Rate {{ '%g'|format(ye.tax_rate_percent) if ye.tax_rate_percent is not none else 'not set' }}% (income tax and AIDS levy combined; change it in the <a href="{{ url_for('firmfs.year_end', ye_id=ye.id) }}">year-end settings</a>).</p>
   <div class="tbl-scroll"><table style="max-width:760px;">
