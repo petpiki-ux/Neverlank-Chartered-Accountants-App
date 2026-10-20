@@ -35,6 +35,29 @@ def _ensure_payroll_access():
         abort(403)
 
 
+def can_see_internal_payroll(user=None):
+    """Neverlank's OWN staff payroll (scope "internal": employees, periods and payslips) is visible to the Managing Partner only. The
+    firm has one Managing Partner and signs in as an Admin, so the rule is: Admin role. Partners, Supervisors and Staff are locked out
+    even when they have the "manage_payroll" permission (which they need for the client payroll service), and even for their own
+    payslip. Client payroll (scope "client") is unaffected."""
+    user = user or current_user
+    return bool(getattr(user, "is_authenticated", False) and user.role == "admin")
+
+
+def _ensure_scope_access(scope):
+    """403 for anything that is not client payroll unless the user may see the firm's own staff payroll."""
+    if scope != "client" and not can_see_internal_payroll():
+        abort(403, description="Neverlank's own staff payroll and payslips can only be seen by the Managing Partner.")
+
+
+def _ensure_period_access(period):
+    _ensure_scope_access(period.scope)
+
+
+def _ensure_payslip_access(payslip):
+    _ensure_scope_access(payslip.period.scope if payslip.period else "internal")
+
+
 def _get_tax_settings():
     settings = PayrollTaxSettings.query.get(1)
     if not settings:
@@ -102,17 +125,18 @@ guard_blueprint(payroll_bp, {
 @login_required
 def dashboard():
     _ensure_payroll_access()
+    show_internal = can_see_internal_payroll()
     internal_periods = (
         PayrollPeriod.query.filter_by(scope="internal")
         .order_by(PayrollPeriod.period_start.desc().nullslast(), PayrollPeriod.id.desc())
         .limit(8).all()
-    )
+    ) if show_internal else []
     client_periods = (
         restrict_to_visible_clients(PayrollPeriod.query.filter_by(scope="client"), PayrollPeriod.client_id)
         .order_by(PayrollPeriod.period_start.desc().nullslast(), PayrollPeriod.id.desc())
         .limit(8).all()
     )
-    internal_employee_count = PayrollEmployee.query.filter_by(scope="internal", is_active=True).count()
+    internal_employee_count = PayrollEmployee.query.filter_by(scope="internal", is_active=True).count() if show_internal else 0
     client_employee_count = restrict_to_visible_clients(
         PayrollEmployee.query.filter_by(scope="client", is_active=True), PayrollEmployee.client_id).count()
     clients_with_payroll = restrict_to_visible_clients(
@@ -131,7 +155,7 @@ def dashboard():
     bands_missing = bool(frequencies_missing_bands)
     return render_template(
         "payroll/dashboard.html",
-        internal_periods=internal_periods, client_periods=client_periods,
+        internal_periods=internal_periods, client_periods=client_periods, show_internal=show_internal,
         internal_employee_count=internal_employee_count, client_employee_count=client_employee_count,
         clients_with_payroll=clients_with_payroll, settings=settings, bands_missing=bands_missing,
         frequencies_missing_bands=frequencies_missing_bands,
@@ -215,6 +239,7 @@ def delete_tax_band(band_id):
 def list_employees():
     _ensure_payroll_access()
     scope = request.args.get("scope", "internal")
+    _ensure_scope_access(scope)
     client_id = request.args.get("client_id", type=int)
     query = PayrollEmployee.query.filter_by(scope=scope)
     if scope == "client":
@@ -234,7 +259,8 @@ def list_employees():
 @login_required
 def new_employee():
     _ensure_payroll_access()
-    scope = request.args.get("scope", request.form.get("scope", "internal"))
+    scope = request.args.get("scope", request.form.get("scope", "internal" if can_see_internal_payroll() else "client"))
+    _ensure_scope_access(request.form.get("scope", scope) if request.method == "POST" else scope)
     clients = visible_clients(current_user)
     staff_users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
 
@@ -293,6 +319,7 @@ def new_employee():
 def edit_employee(employee_id):
     _ensure_payroll_access()
     employee = PayrollEmployee.query.get_or_404(employee_id)
+    _ensure_scope_access(employee.scope)
     clients = visible_clients(current_user)
     staff_users = User.query.filter_by(is_active_flag=True).order_by(User.name).all()
 
@@ -328,6 +355,7 @@ def edit_employee(employee_id):
 def delete_employee(employee_id):
     _ensure_payroll_access()
     employee = PayrollEmployee.query.get_or_404(employee_id)
+    _ensure_scope_access(employee.scope)
     scope, client_id = employee.scope, employee.client_id
     if employee.payslips:
         # Preserve payroll history - deactivate rather than delete an
@@ -349,6 +377,7 @@ def delete_employee(employee_id):
 def list_periods():
     _ensure_payroll_access()
     scope = request.args.get("scope", "internal")
+    _ensure_scope_access(scope)
     client_id = request.args.get("client_id", type=int)
     query = PayrollPeriod.query.filter_by(scope=scope)
     if scope == "client":
@@ -367,7 +396,8 @@ def list_periods():
 @login_required
 def new_period():
     _ensure_payroll_access()
-    scope = request.args.get("scope", request.form.get("scope", "internal"))
+    scope = request.args.get("scope", request.form.get("scope", "internal" if can_see_internal_payroll() else "client"))
+    _ensure_scope_access(request.form.get("scope", scope) if request.method == "POST" else scope)
     clients = visible_clients(current_user)
 
     if request.method == "POST":
@@ -409,6 +439,7 @@ def new_period():
 def view_period(period_id):
     _ensure_payroll_access()
     period = PayrollPeriod.query.get_or_404(period_id)
+    _ensure_period_access(period)
     covered_employee_ids = {p.employee_id for p in period.payslips}
     eligible_query = PayrollEmployee.query.filter_by(scope=period.scope, is_active=True)
     if period.scope == "client":
@@ -422,6 +453,7 @@ def view_period(period_id):
 def generate_payslips(period_id):
     _ensure_payroll_access()
     period = PayrollPeriod.query.get_or_404(period_id)
+    _ensure_period_access(period)
     if period.status == "Finalized":
         flash("This period is finalized - reopen it before generating more payslips.", "danger")
         return redirect(url_for("payroll.view_period", period_id=period.id))
@@ -475,6 +507,7 @@ def generate_payslips(period_id):
 def finalize_period(period_id):
     _ensure_payroll_access()
     period = PayrollPeriod.query.get_or_404(period_id)
+    _ensure_period_access(period)
     period.status = "Finalized" if period.status != "Finalized" else "Draft"
     db.session.commit()
     flash(f"Period marked {period.status}.", "success")
@@ -491,6 +524,7 @@ def backfill_apwcs(period_id):
     finalized period too."""
     _ensure_payroll_access()
     period = PayrollPeriod.query.get_or_404(period_id)
+    _ensure_period_access(period)
     settings = _get_tax_settings()
     pct = settings.apwcs_pct or 0.0
     if pct <= 0:
@@ -513,6 +547,7 @@ def backfill_apwcs(period_id):
 def delete_period(period_id):
     _ensure_payroll_access()
     period = PayrollPeriod.query.get_or_404(period_id)
+    _ensure_period_access(period)
     scope, client_id = period.scope, period.client_id
     db.session.delete(period)
     db.session.commit()
@@ -527,6 +562,7 @@ def delete_period(period_id):
 def view_payslip(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
+    _ensure_payslip_access(payslip)
     timesheet_summary = _timesheet_summary_for(payslip.employee, payslip.period)
     # Annual/Vacation Leave is the one leave type the firm tracks a running
     # balance for (see leave_calc.sync_all_balances_for_employee) - shown on
@@ -545,6 +581,7 @@ def view_payslip(payslip_id):
 def recalculate_payslip(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
+    _ensure_payslip_access(payslip)
     if payslip.period.status == "Finalized":
         flash("This payslip's period is finalized - reopen it first.", "danger")
         return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
@@ -570,6 +607,7 @@ def recalculate_payslip(payslip_id):
 def update_payslip(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
+    _ensure_payslip_access(payslip)
     if payslip.period.status == "Finalized":
         flash("This payslip's period is finalized - reopen it first.", "danger")
         return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
@@ -599,6 +637,7 @@ def update_payslip(payslip_id):
 def add_payslip_item(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
+    _ensure_payslip_access(payslip)
     if payslip.period.status == "Finalized":
         flash("This payslip's period is finalized - reopen it first.", "danger")
         return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
@@ -635,6 +674,7 @@ def add_payslip_item(payslip_id):
 def delete_payslip_item(item_id):
     _ensure_payroll_access()
     item = PayslipItem.query.get_or_404(item_id)
+    _ensure_payslip_access(item.payslip)
     payslip_id = item.payslip_id
     if item.payslip.period.status == "Finalized":
         flash("This payslip's period is finalized - reopen it first.", "danger")
@@ -650,6 +690,7 @@ def delete_payslip_item(item_id):
 def delete_payslip(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
+    _ensure_payslip_access(payslip)
     period_id = payslip.period_id
     if payslip.period.status == "Finalized":
         flash("This payslip's period is finalized - reopen it first.", "danger")
@@ -665,6 +706,7 @@ def delete_payslip(payslip_id):
 def download_payslip_docx(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
+    _ensure_payslip_access(payslip)
     leave_balances = leave_calc.sync_all_balances_for_employee(payslip.employee) if payslip.employee else []
     buf = payroll_documents.generate_payslip_docx(payslip, leave_balances=leave_balances)
     filename = f"Payslip_{payslip.employee.full_name.replace(' ', '_')}_{payslip.period.name.replace(' ', '_')}.docx"
@@ -679,6 +721,7 @@ def download_payslip_docx(payslip_id):
 def download_payslip_pdf(payslip_id):
     _ensure_payroll_access()
     payslip = Payslip.query.get_or_404(payslip_id)
+    _ensure_payslip_access(payslip)
     leave_balances = leave_calc.sync_all_balances_for_employee(payslip.employee) if payslip.employee else []
     buf = payroll_documents.generate_payslip_pdf(payslip, leave_balances=leave_balances)
     filename = f"Payslip_{payslip.employee.full_name.replace(' ', '_')}_{payslip.period.name.replace(' ', '_')}.pdf"

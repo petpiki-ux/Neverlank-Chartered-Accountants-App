@@ -22,6 +22,14 @@
 <div class="flash warning">{{ caveat }}</div>
 
 <div class="form-row" style="align-items:stretch;">
+  {% if not show_internal %}
+  <div class="card">
+    <div class="page-header" style="margin-bottom:10px;">
+      <h2 style="margin:0;font-size:17px;">Neverlank Staff Payroll</h2>
+    </div>
+    <div class="empty-state">&#128274; Neverlank's own staff payroll and payslips can only be seen by the Managing Partner.</div>
+  </div>
+  {% else %}
   <div class="card">
     <div class="page-header" style="margin-bottom:10px;">
       <h2 style="margin:0;font-size:17px;">Neverlank Staff Payroll</h2>
@@ -49,6 +57,7 @@
     <div class="empty-state">No internal payroll periods yet.</div>
     {% endif %}
   </div>
+  {% endif %}
 
   <div class="card">
     <div class="page-header" style="margin-bottom:10px;">

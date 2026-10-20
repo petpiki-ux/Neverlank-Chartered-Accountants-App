@@ -140,20 +140,23 @@ TAX_CGT_PROGRAM = [
     ("Engagement Setup", "Agree scope of advice (e.g. CGT computation, transaction structuring)"),
     ("Engagement Setup", "Issue engagement letter"),
 
-    ("Fact Finding", "Obtain details of the asset(s)/transaction(s) in question"),
-    ("Fact Finding", "Obtain proof of original cost/base cost and acquisition date"),
-    ("Fact Finding", "Obtain details of improvements/capital expenditure incurred"),
-    ("Fact Finding", "Confirm disposal proceeds and disposal date"),
+    ("Fact Finding", "Obtain details of the asset(s)/transaction(s) in question; confirm each is a specified asset (immovable property, a marketable security or a registered right - CGT Act s2(1), s8(1)) and whether the disposal is a sale or a deemed sale (s8(2))"),
+    ("Fact Finding", "Obtain proof of original cost/base cost and acquisition date (CGT Act s11(2)(a): inherited assets at the estate valuation; assets acquired before 1 August 1981 at fair market value; leave out cost already deducted for income tax)"),
+    ("Fact Finding", "Obtain details of improvements/capital expenditure incurred (CGT Act s11(2)(b))"),
+    ("Fact Finding", "Confirm disposal proceeds and disposal date; for an instalment or suspensive sale, the agreement date and the amounts still to come (CGT Act s18, s19)"),
 
-    ("Computation & Technical Analysis", "Determine applicable CGT rate and any exemptions/rollover relief"),
-    ("Computation & Technical Analysis", "Compute capital gain/loss and inflation allowance where applicable"),
-    ("Computation & Technical Analysis", "Consider withholding tax on disposal, where applicable"),
-    ("Computation & Technical Analysis", "Review any relevant double tax treaty implications"),
+    ("Computation & Technical Analysis", "Determine the CGT rate (the Act leaves it to the Finance Act, s7), any exemption (s10) and any rollover or reinvestment election (s15 to s17, s21, s22), each made no later than the date the return is submitted"),
+    ("Computation & Technical Analysis", "Compute capital gain/loss: proceeds less cost, improvements, inflation allowance (s11(2)(c) - a Consumer Price Index formula, not a flat rate), selling expenses, the small-gain deduction (s11(2)(h)) and last year's assessed capital loss (s11(3))"),
+    ("Computation & Technical Analysis", "Consider capital gains withholding tax on the disposal (CGT Act Part IIIA): due to ZIMRA by the 3rd working day from payment unless a clearance certificate is issued first (s22C to s22E); credit it against the tax (s22J)"),
+    ("Computation & Technical Analysis", "Review any relevant double tax treaty implications and relief from double taxation (CGT Act s28, applying Income Tax Act s91)"),
+    ("Computation & Technical Analysis", "Where the asset is a mining title, consider the special capital gains tax on its transfer (CGT Act s30B: 20% of the value, or 5% with ministerial approval; payable within 30 days)"),
 
     ("Compliance & Filing", "Prepare the CGT return / computation schedule"),
     ("Compliance & Filing", "Confirm supporting documents are retained for ZIMRA"),
-    ("Compliance & Filing", "File the return within the statutory deadline"),
-    ("Compliance & Filing", "Confirm payment of tax due"),
+    ("Compliance & Filing", "File the return by the date ZIMRA requires (CGT Act s23 applies the return and assessment sections of the Income Tax Act, from s37)"),
+    ("Compliance & Filing", "Confirm payment of tax due: within 30 days of title being formally transferred (30 days from the agreement date for an instalment or suspensive sale), or on the earlier withholding date; interest runs on late payment (CGT Act s26)"),
+    ("Compliance & Filing", "Where the asset is registered (deeds office or share registry), confirm ZIMRA's certificate that the CGT has been paid is on file before the transfer is registered (CGT Act s30A)"),
+    ("Compliance & Filing", "Diarise the 30 days to object to an assessment or a listed decision (CGT Act s25)"),
 
     ("Advisory & Sign-off", "Document the technical position/opinion for the client file"),
     ("Advisory & Sign-off", "Communicate the outcome and obligations to the client in writing"),
@@ -554,6 +557,35 @@ def migrate_cobe_wording():
             if old_output and row.target_output == old_output:
                 row.target_output = new_output
             changed = True
+    if changed:
+        db.session.commit()
+
+
+def migrate_cgt_wording():
+    """Bring the "Tax / CGT Advisory" checklist already stored in an existing database into line with the Capital Gains Tax Act
+    [Chapter 23:01] (see cgt_checks.PROGRAM_PAIRS): the template's lines and the checklists already copied from it are reworded, and the
+    template gets the lines added in cgt_checks.NEW_PROGRAM_ITEMS. A line is changed ONLY when it still equals the old text exactly, so
+    anything a person edited, and any ticks already made, are left alone. Checklists already copied to an engagement do not get the new
+    lines (they are only added to the template for engagements started from now on). Safe on every startup."""
+    import cgt_checks as c
+    from models import EngagementChecklistItem
+    changed = False
+    for old, new in c.PROGRAM_PAIRS:
+        for model in (ChecklistTemplateItem, EngagementChecklistItem):
+            for row in model.query.filter(model.item_text == old).all():
+                row.item_text = new
+                changed = True
+    for template in ChecklistTemplate.query.filter_by(name="Tax / CGT Advisory").all():
+        have = {i.item_text for i in template.items}
+        # only top up a template that already carries the reworded lines (so a firm that replaced the template is left alone)
+        if not any(new in have for _o, new in c.PROGRAM_PAIRS):
+            continue
+        nxt = (db.session.query(db.func.max(ChecklistTemplateItem.order)).filter(ChecklistTemplateItem.template_id == template.id).scalar() or 0) + 1
+        for section, text in c.NEW_PROGRAM_ITEMS:
+            if text not in have:
+                db.session.add(ChecklistTemplateItem(template_id=template.id, section=section, item_text=text, order=nxt))
+                nxt += 1
+                changed = True
     if changed:
         db.session.commit()
 

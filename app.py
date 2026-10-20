@@ -1038,6 +1038,9 @@ def create_app():
         # must run after the CR-code migration above and before the Company Summary one below.
         migrate_cobe_wording()
         migrate_secretarial_finalisation_company_summary()
+        # The Tax / CGT Advisory checklist reworded against the Capital Gains Tax Act (see cgt_checks.py).
+        from seed import migrate_cgt_wording
+        migrate_cgt_wording()
         # Payroll PAYE bands: seed_payroll_tax_bands() only ever populates a
         # pay frequency that currently has ZERO PayrollTaxBand rows of its
         # own, so it's safe/cheap to call on every startup (like

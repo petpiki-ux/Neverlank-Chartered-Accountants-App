@@ -1,0 +1,2008 @@
+                                  Chapter 23:01
+                              CAPITAL GAINS TAX ACT
+  Acts 54/1981, 29/1998; 21/99, 22/1999; 18/2000; 22/01, 27/2001; 15/2002; 10/2003;
+   17/04, 18/04, 29/2004; 2/05, 8/05, 11/2005; 6/06, 12/2006; 16/2007; 3/09, 5/2009;
+   1/2014; 2/2017; 1/19, 7/19, 13/2019; 8/20, 10/2020; 7/2021; 8/2022; and 13/2023.
+                                      SI 211/2022.
+                                  ARRANGEMENT OF SECTIONS
+                                           PART I
+                                        PRELIMINARY
+Section
+
+1 Short title
+2 Interpretation
+                                       PART II
+                                  ADMINISTRATION
+3 Delegation of functions by Commissioner
+4 …
+                            Repealed by the Revenue Authority Act.
+
+5 …
+
+                             Repealed by the Finance Act 27/2001.
+
+                                          PART III
+                                     CAPITAL GAINS TAX
+6 Charging of capital gains tax
+7 Calculation of capital gains tax
+8 Interpretation of terms relating to capital gains tax
+9 When capital amount deemed to have accrued
+10 Exemptions from capital gains tax
+11 Deductions allowed in determination of capital gain
+12 Circumstances in which no deductions may be made
+13 Damage to or destruction of specified asset
+14 Determination of fair market price of specified assets
+15 Transfers of specified assets between companies under the same control
+16 Transfers of specified assets between spouses
+17 Transfer of business property by individual to company under his control
+18 Provisions for sales of immovable property under suspensive conditions
+
+                                         Page 1 of 46
+19 Provisions relating to credit sales where ownership passes
+20 Provisions for the reductions in costs of specified assets
+21 Provision for sales of principal private residences
+22 Substitution of business property
+                                       PART IIIA
+                            CAPITAL GAINS WITHHOLDING TAX
+22A Interpretation in Part IIIA
+22B Capital gains withholding tax
+22C Depositaries to withhold tax
+22D Agents to withhold tax not withheld by depositaries
+22E Payee to pay tax not withheld by depositary or agent
+22F Exemptions
+22FA Registration of depositaries
+22G Depositaries to furnish returns
+22H Penalty for non-payment of tax
+22I Refund of overpayments
+22J Credit where tax has been withheld
+22K Application of Part IIIA to sales concluded before 1.1.1999
+22L Suspension of provisions of Part IIIA relating to marketable securities
+                                          PART IV
+                                RETURNS & ASSESSMENTS
+23 Application of provisions of Taxes Act relating to returns and assessments
+                                          PART V
+                              REPRESENTATIVE TAXPAYERS
+24 Application of provisions of Taxes Act relating to representative taxpayer
+                                          PART VI
+                                   OBJECTIONS & APPEALS
+25 Objections and appeals
+                                    PART VII
+                           PAYMENT & RECOVERY OF TAX
+26 Day and place for payment of tax
+                                         PART VIII
+                                        GENERAL
+27 Application of provisions of Taxes Act relating to offences, evidence, forms and
+regulations
+28 Application of provisions of Taxes Act relating to relief from double taxation
+
+                                         Page 2 of 46
+29 Application of provisions of Taxes Act relating to tax avoidance
+30 Transitional provision re capital gains and losses of married women
+30A Capital gains tax not withheld in terms of Part IIIA to be paid before transfer of
+specified asset
+30B Special capital gains tax on entities acquiring mining title or any interest therein
+31 Returns by Registrar of Deeds, financial institutions and other persons
+32 Capital gains tax not withheld in terms of Part IIIA to be paid before transfer of specified asset
+                                                ACT
+AN ACT to provide for the raising of a tax on capital gains, and to make provision for matters
+ancillary or incidental thereto.
+                         [Date of Commencement: 1st August, 1981.]
+                                             PART I
+                                          PRELIMINARY
+1 Short title
+This Act may be cited as the Capital Gains Tax Act [Chapter 23:01].
+
+2 Interpretation
+  Section 57 of the Finance Act 2009 gazetted on the 23rd April, 2009, is published below for ease of
+                                              reference: -
+                          “References to old currency system in enactments”
+Every amount in an enactment expressed in terms of the old currency system shall, on and after the
+            31st January, 2009, be construed in accordance with the new currency system.
+ In this section “new currency system” and “old currency system” have the meanings given to those
+  terms in section 2(1) of the Presidential Powers (Temporary Measures) (Currency Revaluation and
+  Issue of New Currency) Regulations, 2009, published in the since -lapsed Statutory Instrument 6 of
+                                            2009.- SI 6/2009.
+
+(1) In this Act—
+    Administration assigned to the Minister of Finance, Economic Development and Investment
+                        Promotion by SI 197/2023 w.e.f. 20th October, 2023.
+
+        “approved employee housing trust fund” means an arrangement embodied in a
+               notarised trust deed which satisfies the Commissioner-General that its
+               dominant purpose or effect is to enable a company or group of companies
+               to finance and construct housing for its employees on terms that will
+               eventually allow the employees to acquire ownership of their homes from
+               the trust;
+                Inserted by Act 6 of 2006 with effect from the 1st September, 2006.
+
+        “assessed capital loss” means the amount by which the sum of the deductions to
+                be made under subsections (2) and (3) of section eleven from the capital
+                amount (as defined in Part III) of any taxpayer exceeds such capital amount:
+
+
+
+                                            Page 3 of 46
+         Provided that where the total amount of the assessed capital loss of a
+                person in respect of sales in any year of assessment is [zw$50 000
+                or] US$ 100 or less the assessed capital loss arising from such sales
+                shall be reduced by such amount;
+
+               This amount was amended into US$ by Act 5 of 2009;
+redesignated from US$ to zw$ by Finance (No.2) Act 7/2019 w.e.f. 21st August,2019;
+               amended by Act 13/2019 w.e.f. 31st December, 2019;
+           increased by Finance Act 10/2020 w.e.f. 31st December, 2020.
+            amended by Finance Act 7/2021 w.e.f. 31 December, 2021;
+              total increased by Act 8/2022 w.e.f. 24th October, 2022;
+                further by Act 13/2023 w.e.f. 29th December, 2023.
+
+“deed of sale” means an agreement in respect of a specified asset the effect of
+       which is that ownership of the specified asset shall pass to a person upon or
+       after payment by him of the whole or a certain portion of the amount
+       payable under the agreement;
+“marketable security” means—
+         (a) any bond capable of being sold in a share market or exchange; or
+         (b) any—
+                  (i) debenture, share or stock; or
+                  (ii) right possessed by reason of a person’s participation in any
+                           unit trust;
+         whether or not capable of being sold in a share market or exchange;
+“share” includes a member’s interest in a private business corporation;
+“specified asset” means—
+         (a) immovable property; or
+         (b) any marketable security; or
+         (c) any right or title to property whether tangible or intangible that is
+                registered or required to be registered in—
+                  (i) the Mines and Minerals Act [Chapter 21:05]. or
+                  (ii) the Patents Act [Chapter 26:03]; or
+                  (iii) the Trade Marks Act [Chapter 26:04]; or
+                  (iv) the Industrial Designs Act [Chapter 26:02]; or
+                  (v) the Copyright and Neighbouring Rights Act [Chapter 26:05]; or
+                  (vi) the Brands Act [Chapter 19:03]; or
+                  (vii) the Geographical Indications Act [Chapter 26:06]; or
+                  (viii) the Integrated Circuit Layout-Designs Act [Chapter 26:07];
+
+
+                                   Page 4 of 46
+Para (c) substituted by Finance Act 2 of 2017 gazetted on 23rd March, 2017 backdated to 1st January,
+                                                2017.
+
+        “tax” means tax leviable in terms of this Act;
+        “Taxes Act” means the Income Tax Act [Chapter 23:06].
+(2) For the purposes of this Act—
+        (a) an expression to which a meaning is assigned in section (2)(1), 2A and 2B of the
+               Taxes Act in relation to the gross income, income or taxable income of a
+               person or the making of any assessment or the furnishing of any return
+               shall, unless the expression is otherwise defined in this Act, have the same
+               meaning in this Act in relation to the gross capital amount, capital amount
+               or capital gain, respectively, of a person or to the making of any assessment
+               or the furnishing of any return under this Act;
+
+                        Amended by Act 8/2022 w.e.f. 24th October, 2022.
+
+        (b) an expression to which a meaning is otherwise assigned in subsection (1) of
+               section 2 of the Taxes Act shall, unless the expression is otherwise defined
+               in this Act, have the same meaning in this Act.
+(3) For the purposes of this Act—
+        (a) a company shall be deemed to be under the control of an individual if the
+               majority of voting rights attaching to all classes of shares in the company is
+               controlled, directly or indirectly, by the individual;
+        (b) an individual and his nominee shall be deemed to be 1 individual.
+(4) Any expression defined for the purposes of Part IIIA shall bear the same meaning when
+used elsewhere in this Act.
+           Subsection 2(4) inserted by Act 1/2014 with effect from the 1st January, 2014.
+
+                                           PART II
+                                        ADMINISTRATION
+3 Delegation of functions by Commissioner
+The Minister of Finance and Economic Development was assigned by SI 218/2018 w.e.f.19th October,
+                                            2018.
+
+Section 3 of the Taxes Act relating to the delegation of functions shall apply, mutatis
+mutandis, in relation to this Act for the purposes of providing for and giving effect to the
+matters concerned in relation to this Act.
+  Sections 3 and 4 repealed and this section 3 substituted by the Revenue Authority Act [Chapter
+                          23:11] with effect from the 19th January, 2001.
+
+4 …
+         Sections 4 repealed by the Finance Act No.27 of 2001 from the 1st January, 2002.
+
+
+                                           Page 5 of 46
+5 …
+         Sections 5 repealed by the Finance Act No.27 of 2001 from the 1st January, 2002.
+
+                                            PART III
+                                       CAPITAL GAINS TAX
+6 Charging of capital gains tax
+There shall be charged, levied and collected throughout Zimbabwe for the benefit of the
+Consolidated Revenue Fund a capital gains tax in respect of the capital gains, as defined in
+this Part, received by or accrued to or in favour of any person during any year of
+assessment, other than a capital gain so received or accrued prior to the 1st August, 1981.
+
+7 Calculation of capital gains tax
+Subject to section twenty-one, the capital gains tax with which a person is chargeable shall
+be calculated in accordance with the Finance Act [Chapter 23:04] by reference to—
+        (a) the capital gains of the person in the year of assessment; and
+        (b) the rate of capital gains tax fixed from time to time in that Act.
+  Zimra not permitted to refuse to assess and issue a CGT certificate once tax is paid Sabeta. M v
+                            Commissioner General: Zimra 12-HH-079.
+
+8 Interpretation of terms relating to capital gains tax
+(1) For the purpose of this Part—
+        (a) “gross capital amount” means the total amount received by or accrued to or in
+               favour of a person or deemed to have been received by or to have accrued
+               to or in favour of a person in any year of assessment from a source within
+               Zimbabwe from the sale on or after the 1st August, 1981, of specified
+               assets excluding any amount so received or accrued which is proved by the
+               taxpayer to constitute “gross income” as defined in subsection (1) of
+               section 8 of the Taxes Act and includes any amount allowed to be deducted
+               in terms of subsection (2) of section eleven which has been recovered or
+               recouped:
+                          Provided that in the case of bodies referred to in subparagraphs (a),
+                          (c) and (f) of paragraph 2 of the Third Schedule to the Taxes Act an
+                          amount so received or accrued shall, notwithstanding that it is so
+                          proved to constitute “gross income” as so defined, constitute a
+                          gross capital amount;
+ Proceeds of shares sold by employees to meet PAYE obligations from an Indigenisation Employees
+      Share Trust scheme constitutes an amount liable for CGT- Old Mutual Zimbabwe Ltd v
+                       Commissioner-General of Zimra & ZIMRA 16-HH-143.
+
+        (b) “capital amount” means the amount remaining of the gross capital amount of
+               any person, after deducting therefrom any amounts exempt from capital
+               gains tax under this Act;
+
+
+                                           Page 6 of 46
+        (c) “capital gain” means the amount remaining, after deducting from the capital
+               amount of any person all the amounts allowed to be deducted from a
+               capital amount under this Act.
+(2) For the purposes of the definition of “gross capital amount” in subsection (1)—
+        (a) when owing to a variation in the rate of exchange of currency between
+              Zimbabwe and any other country, the amount received, expressed in
+              Zimbabwean currency, differs from the amount that had accrued prior to
+              the variation in the rate of exchange—
+                 (i) the amount to be included in the gross capital amount shall be the said
+                         amount received, expressed in Zimbabwean currency; and
+                 (ii) if the receipt and the accrual occur in different years of assessment,
+                           effect shall be given to the increase or reduction in the gross capital
+                           amount in the year of assessment in which the amount accrued;
+        (b) where a person disposes of a specified asset otherwise than by way of sale
+              such disposal shall be deemed to be a sale and an amount which, in the
+              opinion of the Commissioner, is equal to the fair market price of such asset
+              at the time of disposal shall be deemed to have accrued to such person at
+              such time;
+                                   R (Pvt) Ltd v Zimra 19-HH-792
+
+                 Provided that this paragraph does not apply to the donation by a company
+                 or group of companies of immovable property to an approved employee
+                 housing trust fund;
+   Proviso inserted by section 20 of the Finance Act No.6 of 2006 w.e.f. the 1st September, 2006.
+
+        (c) where a specified asset is expropriated such specified asset shall be deemed to
+              have been sold for an amount equal to the amount paid by way of
+              compensation for the expropriation of such specified asset:
+                 Provided that this paragraph does not apply to any person listed in
+                 Schedule 1 to the Global Compensation Deed who receives the amount
+                 paid by way of compensation for the expropriation of a specified asset;
+
+               Para (c) substituted by Finance Act 13/2023 w.e.f. 1st January, 2024.
+
+        (d) where a specified asset is sold in execution of the order of a court, the amount
+              for which it was sold shall be deemed to have accrued to the person on
+              whose behalf it was sold;
+        (e) where an amount accrues to a person by reason of the maturity or redemption
+              of a specified asset, or in circumstances which in the opinion of the
+              Commissioner are of a similar nature, such asset shall at the date of such
+              accrual be deemed to have been sold by such person for such amount;
+        (f) where a person transfers to another person his rights under a deed of sale in
+               respect of the passing of ownership of the specified asset which is the
+
+                                           Page 7 of 46
+                 subject of the deed of sale, he shall be deemed to have sold the specified
+                 asset to that other person for an amount equal to the whole amount
+                 received by or accruing to him as a result of the transfer;
+        (g) where a person transfers to another person his or her rights in a residential,
+              commercial or industrial stand, whether or not the stand is serviced and
+              whether or not his or her title to the stand is registered under the Deeds
+              Registries Act [Chapter 20:05], he or she shall be deemed to have sold a
+              specified asset to that other person for an amount to equal to the whole
+              amount received by or accruing to him or her as a result of the transfer;
+        (h) where a person relinquishes a membership interest in a condominium in
+              favour of another person, he or she shall be deemed to have sold a
+              specified asset to that other person for an amount equal to the whole
+              amount received by or accruing to him or her as a result of the
+              relinquishment.
+                 Paras (g) and (h) inserted by Act 1/2014 w.e.f. 1st January, 2014.
+
+9 When capital amount deemed to have accrued
+A capital amount shall be deemed to have accrued to a person in the circumstances set out
+in subsections (1) and (2) of section 10 of the Taxes Act, the provisions of which shall, for the
+purposes concerned, apply mutatis mutandis in relation to this Act.
+
+10 Exemptions from capital gains tax
+There shall be exempt from capital gains tax—
+        (a) the receipts and accruals of bodies referred to in paragraphs 1, 2 and 3 of the
+               Third Schedule to the Taxes Act, other than those referred to in
+               subparagraphs (a), (c) and (f) of paragraph 2;
+        (b) amounts received or accrued on the realization or distribution by the executor
+              of a deceased estate of a specified asset forming part of such estate;
+        (c) amounts received or accrued on the sale of any marketable security being any
+              bond or stock in respect of any loan to—
+                 (i) the State or any company all the shares of which are owned by the
+                         State;
+                 (ii) a local authority;
+                 (iii) a statutory corporation;
+                        Commissioner of Taxes v C W (Pvt) Ltd 89-ZLR-361
+                                  Ellis N.O. v CoT 92-SC-001
+
+        (d) amounts received or accrued on the sale, by a person carrying on life
+              insurance business as defined in subparagraph (1) of paragraph 1 of the
+              Eighth Schedule to the Taxes Act, of specified assets which are investments
+              in Zimbabwe for the purposes of factor F or G in the formula in paragraph 6
+              of that Schedule;
+
+                                           Page 8 of 46
+        (e) amounts received or accrued on the sale of any shares in the Infrastructure
+              Development Bank of Zimbabwe established by section 3 of the
+              Infrastructure Development Bank of Zimbabwe Act [Chapter 24:14].where
+              such sale is by an institutional shareholder as defined in that Act who is not
+              ordinarily resident in Zimbabwe;
+
+                        amended by Act 11 of 2005 from 24th March, 2006.
+
+        (f) amounts received or accrued on the sale by a petroleum operator, approved
+              by the Minister by notice in the Gazette, of immovable property used for
+              the purposes of petroleum operations, to another petroleum operator, if
+              the Commissioner is satisfied that the property is to be used for such
+              purposes by the purchaser;
+        (g) the receipts and accruals of a licensed investor from the sale of a specified
+               asset forming the whole or part of the investment to which his investment
+               licence relates.
+        (h) the receipts and accruals of an industrial park developer from the sale of a
+               specified asset that forms part of or is connected with his industrial park.
+                inserted by the Finance Act 22 of 1999 with effect from 7 July 1999.
+
+        (i) amounts received or accrued on the sale or disposal of any shares withheld by
+               an insurance company in the circumstances described in subparagraph (2)
+               of paragraph 6 of the Twenty-Seventh Schedule to the Income Tax Act
+               [Chapter 23:06].
+                         inserted by Act 18 of 2000 from 1st January, 1999.
+
+        (j)
+inserted by Act 27 of 2001 from 1st January, 2002 and repealed by Act 2 of 2005 with effect from the
+                                       1st September, 2005.
+
+        (k) amounts received by or accruing to an employee from the sale or disposal of
+              his shares or interest in an approved employee share ownership trust
+              where such sale or disposal is to the trust.
+
+                   inserted by Act 15 of 2002 with effect from 1st January, 2003.
+
+        (l) amounts received by a person on the sale of his or her principal private
+               residence as defined in subsection (1) of section twenty-one if such person
+               was, on the date of the sale, of or over the age of *55 years;
+
+                inserted by section 32 of Act 29 of 2004 w.e.f. 1st December, 2004 –
+    containing 2 errors corrected by the Editor as to the effective date and the reference to the
+                             definition of principal private residence .
+                    Age reduced from *59 years by section 18 of Act 5 of 2009.
+
+        (m) amounts received by or accruing to a person who is of or over the age of *55
+              years on the sale of any marketable security, other than a marketable
+              security referred to in paragraph (j), in respect of the first [zw$2340 000 or]
+
+                                            Page 9 of 46
+                 US$ 1 800 received by or accruing to him or her in the year of assessment
+                 concerned.
+        Inserted by Act 29 of 2004 from the 1st December, 2004 corrected by the Editor;
+amended into US$ at the same time as the age was reduced from *59 years by section 18 of Act 5 of
+                                             2009;
+  Amount redesignated from US$ to zw$ by Finance (No.2) Act 7/2019 w.e.f. 21st August,2019;
+                      amended by Act 13/2019 w.e.f. 31st December, 2019;
+                 increased by Finance Act 10/2020 w.e.f. 31st December, 2020;
+                   amended by Finance Act 7/2021 w.e.f. 31 December, 2021;
+                       further by Act 13/2023 w.e.f. 29th December, 2023.
+
+        (n) amounts received by or accruing to a person on the sale of any marketable
+              security which was subjected to withholding tax in terms of section 39(c) of
+              the Charging Act;
+                 Provided that this exemption does not apply in the case of a sale of a
+                        marketable security referred to in section 38 (“Rates of capital
+                        gains tax”)(b)(iii) of the Charging Act.
+        Inserted by section 14 of Act 5 of 2009 with deemed effect from 1st February, 2009;
+                    amended by Finance Act 7/2021 w.e.f. 31 December, 2021;
+                     proviso inserted by Act 8/2022 w.e.f. 24th October, 2022.
+
+        (o) the amount by which the fair market price of shares sold to an indigenisation
+               partner or community share ownership trust or scheme exceeds the actual
+               price at which those shares were sold ;
+                 For the purposes of this paragraph—
+                         “community share ownership trust or scheme” means such a
+                               scheme approved in terms of the Indigenisation and
+                               Economic Empowerment (General) Regulations, 2010,
+                               published in SI 21/2010;
+                         “indigenisation partner” means an indigenous person who benefits
+                                 (whether as an employee or in any other capacity) under
+                                 an indigenisation implementation plan approved in terms
+                                 of the Indigenisation and Economic Empowerment
+                                 (General) Regulations, 2010, published in SI 21/2010.
+
+         Para (o) inserted by Act 1/2014 with retrospective effect from 1st January, 2013.
+
+        (p) the disposal by way of donation of immoveable property consisting of one or
+               more housing units to any local authority, approved employee share
+               ownership trust or community share ownership trust or scheme.
+                 For the purposes of this paragraph—
+                         “community share ownership trust or scheme” means such a
+                               scheme approved in terms of the Indigenisation and
+                               Economic Empowerment (General) Regulations, 2010,
+
+
+                                          Page 10 of 46
+                                   published in SI 21/2010, or any other law that may be
+                                   substituted for the same.
+Para (p) inserted by the corrected Finance Act No.2 of 2017 gazetted on 23rd March,2017 backdated
+                                      to the 1st January, 2017.
+
+        (q) amounts received or accrued on the sale or disposal of any shares or other
+              marketable securities to the Sovereign Wealth Fund established by the
+              Sovereign Wealth Fund of Zimbabwe [Chapter 22:20].
+            Para (q) inserted by the Finance (No.2) Act 7/2019 w.e.f. 1st January, 2019.
+
+        (r) amounts received or accrued on the sale or disposal of any shares or other
+              marketable securities listed on the Victoria Falls Stock Exchange as defined
+              in paragraph 4(f) of the Third Schedule to the Taxes Act.
+ Para (r) inserted by section 16 of Act 8 of 2020 gazetted on the 28th October,2020 w.e.f. beginning
+                                         the 1st August, 2020.
+
+11 Deductions allowed in determination of capital gain
+(1) For the purposes of determining the capital gain of any person there shall be deducted
+from the capital amount of such person the amounts allowed to be deducted in terms of
+this section:
+        Provided that when, owing to a variation in the rate of exchange of currency
+        between Zimbabwe and any other country, the amount actually paid in
+        Zimbabwean currency differs from the amount of the liability that had been
+        incurred prior to the variation in the rate of exchange—
+                 (a) the amount to be deducted shall be the amount actually paid in
+                 Zimbabwean currency;
+                 (b) if the incurring of the liability and the payment therefor occur in
+                 different years of assessment, effect shall be given to the increase or
+                 reduction in the amount in the year of assessment in which the liability was
+                 incurred.
+(2) The deductions which shall be allowed for the purposes of subsection (1) shall be—
+
+   See the inflationary allowance deductible in terms of Section 39A Para 9(b) of the Finance Act
+                           [Chapter 23:04] since 30th January,2009 – Editor.
+
+        (a) expenditure to the extent to which it is incurred on the acquisition or
+               construction of such specified assets as are sold during the year of
+               assessment other than expenditure in respect of which a deduction is
+               allowable in the determination of the seller's taxable income as defined in
+               subsection (1) of section 8 of the Taxes Act.
+        For the purposes of this paragraph where a person has acquired a specified asset—
+                 (i) by way of inheritance, he shall be deemed to have incurred
+                         expenditure on such acquisition to an amount which is equal to the
+
+
+                                           Page 11 of 46
+                           amount at which the specified asset was valued in the deceased
+                           estate concerned;
+                  (ii) otherwise than by way of purchase or inheritance—
+                           A. prior to the 1st August, 1981, he shall be deemed to have
+                                  incurred expenditure on such acquisition to an amount
+                                  which is equal to an amount proved to the satisfaction of
+                                  the Commissioner to be the fair market value of the
+                                  specified asset at the time it was so acquired;
+                           B. on or after the 1st August, 1981, he shall be deemed to have
+                                  incurred expenditure on such acquisition to an amount
+                                  equal to the amount, if any, included in respect of the
+                                  specified asset—
+                                    I. for the purposes of this Act, in the gross capital amount
+                                    of the person disposing of the specified asset; or
+                                    II. for the purposes of the Taxes Act, in the gross income, as
+                                    defined in subsection (1) of section 8 of that Act, of the
+                                    person disposing of the specified asset;
+         (b) expenditure to the extent to which it is incurred on additions, alterations or
+                improvements to specified assets referred to in paragraph (a) other than
+                expenditure in respect of which a deduction is allowable in the
+                determination of the seller’s taxable income as defined in subsection (1) of
+                section 8 of the Taxes Act.
+                  For the purposes of this paragraph, in the case of a capital amount arising
+                          from the sale of shares in a company which owns immovable
+                          property, any expenditure incurred by the seller on additions or
+                          alterations to the property shall be deemed to be expenditure
+                          incurred on additions to the shares;
+         (c) in respect of the year of assessment, an amount determined in accordance
+                 with the following formula:
+substituted by Act 29 of 2004 w.e.f. 1st January, 2005 and further substituted by Act 12 of 2006 w.e.f.
+                                          the 1st January, 2007.
+              Repealed & substituted by Finance Act 7/2021 w.e.f. 31 December, 2021.
+
+
+
+
+                           [Formula as printed: (A - B) / C x C]
+                           where
+                           A represents the figure for the All Items Consumer Price Index
+                                 issued by the Central Statistics Office at the time of
+                                 disposal of the property;
+                           B represents the figure for the All Items Consumer Price Index
+                                 issued by the Central Statistics Office in the month of
+
+                                            Page 12 of 46
+                         effecting improvements or month of purchase of the
+                         property;
+                C represents the purchase price of the property or revalued
+                      amount after including cost of improvements or alterations
+                      or improvements.
+(d) any expenditure to the extent that it is directly incurred for the purposes of or
+       in connection with the sale of a specified asset;
+(e) the amount of any debts due to the taxpayer to the extent to which they are
+       proved to the satisfaction of the Commissioner to be bad, if such amount is
+       included in the current year of assessment or was included in any previous
+       year of assessment in the taxpayer’s capital amount in terms of this Act;
+(f) the amount of any costs, taxed by the Registrar of the High Court during the
+        year of assessment and not recovered from any source whatsoever,
+        incurred by the taxpayer in connection with an appeal to the High Court or
+        the Special Court in terms of Part VI, if—
+        (i) the appeal is allowed in full; or
+        (ii) the appeal is allowed to a substantial degree and the High Court or the
+                Special Court, as the case may be, directs that such costs shall be
+                allowed as a deduction in terms of this paragraph:
+        Provided that—
+                (i) if any determination of the High Court or the Special Court is
+                reversed, affirmed or amended by the Supreme Court, no
+                deduction shall be made in terms of this paragraph unless the
+                decision of the Supreme Court is wholly or substantially favourable
+                to the taxpayer and the Supreme Court directs that such costs shall
+                be allowed as a deduction in terms of this paragraph;
+                (ii) no deduction shall be made in terms of this paragraph until
+                the time for noting an appeal against the determination to the
+                Supreme Court has lapsed or any appeal so noted has been heard
+                and determined, and any costs shall be deemed not to have taxed
+                until such lapse or determination
+(g) the amount of any costs, taxed by the Registrar of the Supreme Court during
+       the year of assessment and not recovered from any source whatsoever,
+       incurred by the taxpayer in connection with an appeal to the Supreme
+       Court in terms of Part VI, if—
+        (i) the decision of the Supreme Court is wholly or substantially favourable
+                to the taxpayer; and
+        (ii) the Supreme Court directs that such costs shall be allowed as a
+                deduction in terms of this paragraph;
+
+
+
+                                 Page 13 of 46
+        (h) where, after the application of the above paragraphs, the total amount of the
+              capital gains of a person in any year of assessment is [zw$25 000 or] US$ 50
+              or less, an amount equal to such total amount.
+
+                          Amount amended into US$ by Act 5 of 2009;
+   further amended; then redesignated from US$ to zw$ by Finance (No.2) Act 7/2019 w.e.f. 21st
+                                          August, 2019;
+                      amended by Act 13/2019 w.e.f. 31st December, 2019;
+                  increased by Finance Act 10/2020 w.e.f. 31st December, 2020;
+                    amended by Finance Act 7/2021 w.e.f. 31 December, 2021;
+                 zw$ amount increased by Act 8/2022 w.e.f. 24th October, 2022;
+                       further by Act 13/2023 w.e.f. 29th December, 2023.
+
+(3) From the amount of the capital amount remaining after the deductions referred to in
+subsection (2) have been made there shall be deducted any assessed capital loss
+determined in respect of the previous year of assessment:
+        Provided that—
+        (i) if during any year of assessment there is a change in the shareholding of a
+                 company with an assessed capital loss or in the shareholding of any
+                 company which directly or indirectly controls any company with an
+                 assessed capital loss and the Commissioner is satisfied that such change has
+                 been effected solely or mainly in pursuance of or in connection with any
+                 scheme for taking advantage of such assessed capital loss, no assessed
+                 capital loss incurred prior to that change shall be deductible.
+                For the purposes of this subparagraph a company shall be deemed to be
+                controlled by another company if the majority of the voting rights attaching
+                to all classes of its shares are held directly or indirectly by such other
+                company;
+        (ii) no taxpayer who—
+                (a) has been adjudged or otherwise declared or become insolvent; or
+                (b) has made an assignment of his property or estate for the benefit of his
+                       creditors;
+                shall be entitled to carry forward an assessed capital loss incurred before
+                the date he was adjudged or otherwise declared or became insolvent or
+                made the assignment, as the case may be;
+        (iii) where—
+                (a) a company which is incorporated under the Companies and Other
+                       Business Entities Act [Chapter 24:31] and which has an assessed
+                       capital loss is converted into a private business corporation; or
+                (b) a private business corporation with an assessed capital loss is
+                       converted into a company in terms of the Companies and Other
+                       Business Entities Act [Chapter 24:31 ];
+
+
+
+                                         Page 14 of 46
+                the new private business corporation or the new company, as the case may
+                be, shall be allowed the assessed capital loss as a deduction after the
+                conversion.
+(4) Where, in respect of any amount, a deduction would, but for this subsection, be
+allowable under more than 1 provision of this Act and whether it would be so allowable in
+respect of the same or different years of assessment, the taxpayer shall not be entitled to
+claim that such amount shall be deducted more than once and, where the deduction would,
+but for this subsection, be allowable under more than 1 provision of this Act in respect of
+the same year of assessment, the taxpayer shall elect under which one of those provisions
+he wishes to claim such amount as a deduction.
+(5) Where the owner of immovable property has, as the lessor of such property, been
+charged to income tax in terms of paragraph (e) of the definition of “gross income” in
+subsection (1) of section 8 of the Taxes Act, he shall be deemed to have incurred
+expenditure in terms of paragraph (a) or (b) of subsection (2) in relation to such immovable
+property equal to the amount so included in his taxable income at the time of such
+inclusion.
+(6) Where a person transfers to another person his rights under a deed of sale in respect
+of the passing of ownership of the specified asset which is the subject of the deed of sale, he
+shall be deemed for the purposes of this section to have acquired the specified asset from
+the person with whom he entered into the deed of sale for an amount equal to the amount
+payable by him under the deed of sale.
+
+12 Circumstances in which no deductions may be made
+Notwithstanding the provisions of section eleven, no deduction shall be made in respect of
+expenditure on or in relation to specified assets the sale of which is exempt from tax.
+
+13 Damage to or destruction of specified asset
+(1) Subject to subsections (2) and (3), where a specified asset is damaged or destroyed it
+shall for the purposes of the definition of “gross capital amount” in subsection (1) of section
+eight be deemed to have been sold for an amount equal to the amount of any receipt or
+accrual in respect of such damage or destruction.
+(2) Where the amount referred to in subsection (1) does not exceed the total of the
+amounts referred to in paragraphs (a) and (b) of subsection (2) of section eleven in respect
+of that asset—
+        (a) such asset shall not be deemed to have been sold; and
+        (b) such total amount shall be deemed to be reduced accordingly with effect from
+               the commencement of the year of assessment in which the receipt or
+               accrual occurs; and
+        (c) the amount of any subsequent deductions in terms of paragraph (c) of that
+               subsection shall be calculated in relation to such reduced total amount.
+(3) Where a specified asset is damaged or destroyed and the Commissioner is satisfied
+that the whole or part of any receipt or accrual in respect of such damage or destruction has
+
+
+                                         Page 15 of 46
+been or will be expended, within 2 years from the date on which the specified asset was
+damaged or destroyed, on—
+        (a) the purchase or construction of a further specified asset of a like nature in
+               replacement of the damaged or destroyed specified asset; or
+        (b) the repair of the specified asset, where the specified asset was damaged;
+        the provisions of subsections (1) and (2)—
+                (i) shall not apply in relation to the amount so expended;
+                (ii) shall apply, with effect from the year of assessment in which the
+                damage or destruction occurred or such later year of assessment as the
+                Commissioner may determine, in relation to any part of the receipt or
+                accrual not so expended.
+(4) Expenditure to which subsection (3) relates shall not be allowable as a deduction in
+terms of section eleven upon the subsequent sale of the specified asset concerned.
+
+14 Determination of fair market price of specified assets
+Where a person purchases a specified asset from any other person at a price in excess of the
+fair market price or where he sells a specified asset to any other person at a price less than
+the fair market price the Commissioner may, for the purpose of determining the capital gain
+or assessed capital loss, as the case may be, of such first-mentioned person, determine the
+fair market price at which such purchase or sale shall be taken into his accounts or returns
+for assessment.
+                           Sommer Ranching (Pvt) Ltd v COT 99-SC-065
+ Zimra refused to issued CGT clearance to owner because fair market price had devalued so much
+        over 15 years, so owner could not pass transfer Sibanda G v Masanga L 24-SC-090
+
+15 Transfers of specified assets between companies under the same control
+(1) If the ownership of any specified asset is transferred from one company to another in
+any of the following circumstances—
+        (a) where the Commissioner is satisfied that—
+                (i) the company that transfers the specified asset—
+                         A. is incorporated outside Zimbabwe; and
+                         B. has carried on its principal business inside Zimbabwe; and
+                         C. is about to be wound up voluntarily in its country of
+                                 incorporation for the purpose of the transfer of the whole
+                                 of its business and property wherever situate to the
+                                 company to which the specified asset is transferred;
+                         and
+                (ii) the sole consideration for the transfer will be the issue, to the
+                        members of the company transferring the specified asset, of shares
+
+
+                                         Page 16 of 46
+                         in the company to which the specified asset is transferred, in
+                         proportion to their holdings in the first-mentioned company; and
+                (iii) no shares in the company to which the specified asset is transferred
+                        will be available for issue to any persons other than members of
+                        the company transferring the specified asset;
+                or
+        (b) the transfer is effected from one company to another under the same control,
+               in the course of or in furtherance of a scheme of reconstruction of a group
+               of companies or a merger or other business operation which, in the opinion
+               of the Commissioner, is of a similar nature;
+                or
+        (c) the transfer is effected—
+                (i) from a company incorporated under the Companies and Other Business
+                        Entities Act [Chapter 24:31] to a private business corporation into
+                        which the company has been converted in terms of the Companies
+                        and Other Business Entities Act [Chapter 24:31] or
+                (ii) from a private business corporation to a company into which the
+                        private business corporation has been converted in terms of the
+                        Companies and Other Business Entities Act [Chapter 24:31] in the
+                        course of or in furtherance of that conversion;
+        the transferor and the transferee may elect that, notwithstanding the terms of any
+        agreement of sale, the selling price of the asset shall, in relation to the transferor,
+        be deemed, for the purposes of this Act, to be an amount equal to the sum of the
+        deductions allowable to the transferor in respect of the specified asset in terms of
+        paragraphs (a), (b), (c) and (d) of subsection (2) of section eleven at the date of the
+        transfer:
+                Provided that, if the specified asset is subsequently sold, otherwise than to
+                a company under the same control, the capital gain or capital loss in the
+                hands of the seller shall be calculated as if the asset had at all times
+                remained in the ownership of the first transferor in respect of whom the
+                election was made in terms of this section.
+(2) Where in the circumstances referred to in paragraph (a) or (b) of subsection (1), a
+marketable security issued by a company involved in the scheme, merger or operation is
+transferred from one person to another for no cash consideration, in exchange for a
+marketable security issued by another such company, the transferor may elect that,
+notwithstanding the terms of any agreement of sale, the marketable security transferred by
+him shall be deemed to have been sold for an amount equal to the sum of the deductions
+allowable to him at the date of transfer in terms of paragraphs (a), (b), (c) and (d) of
+subsection (2) of section eleven in respect of the marketable security transferred by him.
+(3) An election in terms of subsection (2) shall be made not later than the date on which
+the person making the election submits a return for the assessment of his capital gain for
+the purposes of this Act.
+                                         Page 17 of 46
+16 Transfers of specified assets between spouses
+(1) In this section—
+        “principal private residence” has the meaning given to it in section twenty-one.
+(2) Where—
+        (a) the ownership of any specified asset is transferred from a person to his or her
+               spouse; or
+        (b) a person transfers the ownership of a specified asset which is his principal
+               private residence to his former spouse in compliance with an order of a
+               court providing for the maintenance of the former spouse or dividing,
+               apportioning or distributing the assets of the former spouses on or after the
+               dissolution of their marriage;
+        the transferor and the transferee may elect that, notwithstanding the terms of any
+        agreement of sale, the selling price of the specified asset shall in relation to the
+        transferor be deemed, for the purposes of this Act, to be an amount equal to the
+        sum of the deductions allowable to the transferor in respect of the specified asset in
+        terms of paragraphs (a), (b), (c) and (d) of subsection (2) of section eleven at the
+        date of transfer:
+                Provided that, if after the transfer such asset is sold to a person who is not
+                the spouse of the seller, the capital gain or assessed capital loss in the
+                hands of the seller shall be calculated as if the asset had at all times
+                remained in the ownership of the first transferor to whom this section
+                applies.
+(3) An election in terms of subsection (2) shall be made not later than the date on which
+the person making the election submits a return for the assessment of his capital gain for
+the purposes of this Act.
+
+17 Transfer of business property by individual to company under his control
+If the ownership of any immovable property is transferred on or after the 1st April, 1991,
+from an individual to a company in circumstances where the Commissioner is satisfied
+that—
+        (a) the immovable property was previously used by the individual for the purposes
+               of his trade; and
+        (b) the company will continue to use the immovable property for the purposes of
+               its trade; and
+        (c) the individual controls the company, whether through holding a majority of the
+               company’s shares or otherwise;
+        the transferor and the transferee may elect that, notwithstanding the terms of any
+        agreement of sale, the selling price of the immovable property shall, in relation to
+        the transferor, be deemed, for the purposes of this Act, to be an amount equal to
+        the sum of the deductions allowable to the transferor in respect of the immovable
+
+
+                                        Page 18 of 46
+        property in terms of paragraphs (a), (b), (c) and (d) of subsection (2) of section
+        eleven at the date of the transfer:
+                Provided that, if after the transfer the immovable property is sold,
+                otherwise than to a company under the same control, the capital gain or
+                assessed capital loss in the hands of the seller shall be calculated as if the
+                property had at all times remained in the hands of the first transferor to
+                whom this section applies.
+(2) An election in terms of subsection (1) shall be made not later than the date on which
+the person making the election submits a return for the assessment of his capital gain for
+the purposes of this Act.
+
+18 Provisions for sales of immovable property under suspensive conditions
+(1) If any taxpayer has entered into any agreement with any other person in respect of any
+specified asset the effect of which is that ownership shall pass from the taxpayer to that
+other person upon or after receipt by the taxpayer of the whole or a certain portion of the
+amount payable to the taxpayer under the agreement, the whole of the amount shall, for
+the purposes of this Act, be deemed to have accrued to the taxpayer on the date on which
+the agreement was entered into:
+        Provided that—
+        (i) the Commissioner shall deduct an allowance determined by applying the
+                formula—
+
+
+
+                [Formula: A x (B - C) / D]
+                         in which—
+                A represents that portion of the amount deemed to have accrued under
+                      the agreement which is not receivable at the end of the year of
+                      assessment;
+                B represents the capital amount deemed to have accrued under the
+                      agreement;
+                C represents the aggregate of the sums deductible in respect of such
+                      specified asset in terms of paragraphs (a), (b), (c) and (d) of
+                      subsection (2) of section eleven;
+                D represents the amount deemed to have accrued under the agreement;
+        (ii) any allowance so deducted shall be included by the taxpayer as a capital
+                amount in his return for the following year of assessment and shall form
+                part of the capital amount of the said taxpayer;
+        (iii) if any such agreement is ceded or otherwise disposed of by the taxpayer no
+                  such allowance shall be made by the Commissioner in the year of
+                  assessment in which such cession or disposal takes place.
+
+
+
+                                         Page 19 of 46
+(2) Where any agreement referred to in subsection (1) is cancelled there shall be included
+in the capital amount or assessed capital loss, as the case may be, of the seller in the year of
+assessment in which such cancellation takes place an amount equal to the difference
+between the total of the amounts received by the seller in terms of the agreement and the
+total of the amounts included in the capital gains of the seller in terms of that subsection,
+and that subsection shall cease to have effect after that year of assessment.
+(3) Where the capital amount of a person for any year of assessment includes any amount
+to which this section relates no deduction shall be allowed in respect of the amount
+referred to in paragraph (h) of subsection (2) of section eleven.
+(4) Where a person transfers to another person his rights under a deed of sale in respect
+of the passing of ownership of the specified asset which is the subject of the deed of sale, he
+shall be deemed for the purposes of this section to have entered into an agreement in
+respect of the specified asset the effect of which is that ownership shall pass from him to
+the other person concerned, and this section shall apply, mutatis mutandis, accordingly.
+
+19 Provisions relating to credit sales where ownership passes
+(1) If any taxpayer has entered into any agreement with any other person in respect of any
+specified asset the effect of which is that—
+        (a) the ownership shall pass to that other person on delivery of the specified
+               asset; and
+        (b) the amount payable to the taxpayer under the agreement shall be paid in
+               instalments;
+        the whole of that amount shall, for the purposes of this Act, be deemed to have
+        accrued to the taxpayer on the date on which the agreement was entered into:
+                 Provided that—
+                 (i) the Commissioner, taking into consideration any deduction under
+                 paragraph (e) of subsection (2) of section eleven, may deduct such further
+                 allowance as seems to him reasonable in respect of all amounts which are
+                 deemed to have accrued under such agreement but are not receivable at
+                 the end of the year of assessment;
+                 (ii) any allowance so deducted shall he included by the taxpayer as a
+                 capital amount in his return for the following year of assessment and shall
+                 form part of the capital amount of the taxpayer.
+(2) Where the capital amount of a person for any year of assessment includes any amount
+to which this section relates, no deduction shall be allowed in respect of the amount
+referred to in paragraph (h) of subsection (2) of section eleven.
+
+20 Provisions for the reductions in costs of specified assets
+Where an amount is received or accrues, whether by way of recovery or of recoupment or
+otherwise, relating to the cost or deemed cost of a specified asset which has not been
+sold—
+
+
+                                         Page 20 of 46
+       (a) if such amount exceeds the total of the amounts referred to in paragraphs (a)
+               and (b) of subsection (2) of section eleven in respect of that asset, such
+               asset shall be deemed to have been sold for an amount equal to the
+               amount so received or accrued;
+       (b) if such amount does not exceed the total of the amounts referred to m
+               paragraphs (a) and (b) of subsection (2) of section eleven in respect of that
+               asset—
+               (i) such total amount shall be deemed to be reduced accordingly with
+                      effect from the commencement of the year of assessment in which
+                      the receipt or accrual occurs; and
+               (ii) the amount of any subsequent deductions in terms of paragraph (c) of
+                       that subsection shall be calculated in relation to such reduced total
+                       amount;
+       and the asset shall be deemed to have been sold on the date of the final such
+               receipt or accrual.
+
+21 Provision for sales of principal private residences
+(1) In this section—
+       “dwelling” means a building, or any part of a building, which is used wholly or
+               mainly for the purpose of residential accommodation;
+       “principal private residence”, in relation to an individual, means—
+               (a) a dwelling which is proved to the satisfaction of the Commissioner—
+                       (i) to have been that individual’s sole or main residence
+                               throughout the period that he owned it; or
+                       (ii) to have been that individual’s sole or main residence for a
+                                period of 4 years or more immediately before the date of
+                                its sale, or for such shorter period immediately before the
+                                date of its sale as the Commissioner considers reasonable
+                                in all the circumstances; or
+                       (iii) to have been regarded by that individual as his sole or main
+                                residence, even though he was prevented from residing in
+                                it as provided in subparagraph (i) or (ii) in consequence of
+                                his employment or for such other cause as the
+                                Commissioner considers reasonable in all the
+                                circumstances;
+               and
+               (b) subject to subsection (5), any land, whether or not it is a piece of land
+                      registered as a separate entity in a Deeds Registry, which—
+                       (i) is owned by the individual concerned; and
+
+
+
+                                       Page 21 of 46
+                          (ii) surrounds or is adjacent to the dwelling referred to in
+                                  paragraph (a); and
+                          (iii) is used by the individual concerned primarily for private or
+                                    domestic purposes in association with the dwelling
+                                    referred to in paragraph (a);
+                          (iv) does not exceed 2 hectares or such larger area as the
+                                 Commissioner having regard to the size and character of
+                                 the dwelling referred to in (a),is satisfied for the reasonable
+                                 enjoyment of the dwelling as a principal private residence:
+                 and
+                 (c) subject to subjection (5), any garage, storeroom or other building or
+                        structure which—
+                          (i) is owned by the individual concerned; and
+                          (ii) forms part of or is attached to or otherwise associated with
+                                  the dwelling referred to in paragraph (a); and
+                          iii) is used by the individual concerned primarily for private or
+                                   domestic purposes in association with the dwelling
+                                   referred to in paragraph (a).
+        “residential stand”, in relation to an individual, any land, whether or not it is a piece
+                of land registered as a separate entity in a Deeds Registry,
+
+            Definition inserted by Act 12 of 2006 with effect from the 1st January, 2007.
+
+                 which—
+                          (a) is owned by the individual concerned; and
+                          (b) is proved to the satisfaction of the Commissioner to be
+                                  intended for the building of a principal private residence
+                                  thereon;
+(2) An individual may elect that, where a capital gain has been received by or has accrued
+to him or her on or after the 1st April, 1988, in respect of the sale by him or her of his or her
+principal private residence or residential stand (hereinafter in this section called the “old
+principal private residence or old residential stand”) and the Commissioner is satisfied that,
+before the end of the year of assessment next following the sale, an amount equal to the
+whole or part of the consideration received or accrued in respect of the sale has been or will
+be expended on the purchase or construction, on land owned by him or her in Zimbabwe, of
+another principal private residence or residential stand (hereinafter in this section called the
+“new principal private residence or new residential stand”) for the individual concerned—
+    subsection (2) substituted by the Finance Act 1 of 2019 gazetted on the 20th February 2019
+                                backdated to the 1st January, 2007.
+
+        (a) capital gains tax shall not be chargeable, if the amount of the consideration so
+               received or accrued is equal to or less than the amount so expended; and
+
+                                           Page 22 of 46
+        (b) capital gains tax shall be chargeable, if the amount of the consideration so
+               received or accrued exceeds the amount so expended, on a proportion of
+               the capital gain determined by applying the following formula—
+
+
+
+
+                 [Formula: A x C / B]
+                 in which—
+                 A represents that portion of the amount of the consideration received or
+                       accrued on the sale of the old principal private residence or old
+                       residential stand not so expended on the purchase or construction
+                       of the new principal private residence or new residential stand;
+                 B represents the total amount of the consideration received or accrued on
+                       the sale of the old principal private residence or old residential
+                       stand;
+                 C represents the capital gain in respect of the sale of the old principal
+                       private residence or old residential stand.
+(2a) An election in terms of subsection (2) shall be made not later than the date on which
+the individual making the election submits a return for the assessment of his capital gain for
+the purposes of this Act.
+Subsection (2a) inserted by Finance Act (No. 2) 21 of 1999 w.e.f.1 January 2000. Not affected by Act
+                                         1 of 2019 ?- Editor
+
+(3) Where an amount is not chargeable to capital gains tax in terms of subsection (2), such
+amount shall be deducted from the amount referred to in section eleven(2)(a) when
+determining the capital gain in respect of the new principal private residence or new
+residential stand, with effect from the year of assessment in which the new principal private
+residence or new residential stand was acquired.
+subsection (3) substituted by the Finance Act 1 of 2019 gazetted on the 20th February 2019 w.e.f. the
+                                          1st January, 2007.
+
+(4) For the purposes of this section, where—
+        (a) a building owned by a company, partnership or other association of persons
+               consists of or contains 1 or more flats, apartments or other units of
+               residential accommodation; and
+        (b) the members of the company, partnership or association, as the case may be,
+               have the right, by virtue of their membership, to occupy particular flats,
+               apartments or units of residential accommodation in the building;
+        an individual who, by becoming or ceasing to be a member of the company,
+        partnership or association concerned, acquires or relinquishes such a right of
+        occupation, shall be deemed to have purchased or sold, as the case may be, the flat,
+        apartment or unit of residential accommodation concerned.
+(5) Where—
+
+                                           Page 23 of 46
+        (a) land referred to in paragraph (b) of the definition of “principal private
+               residence” in subsection (1); or
+        (b) a garage, storeroom or other structure referred to in paragraph (c) of the
+               definition of “principal private residence” in subsection (1);
+        is disposed of separately from the dwelling in association with which it was used,
+        this section shall not apply in relation to its disposal.
+(6) Where a principal private residence is sold together with or as part of other immovable
+property which is not used wholly or mainly for the purposes of residential accommodation,
+the proportion of—
+        (a) the gross capital amount in the hands of the transferor; or
+        (b) the cost of acquisition in the hands of the transferee;
+        received or accruing in respect of the sale of the principal private residence shall be
+        deemed to be—
+                (i) such proportion as may be specified by both the parties to the sale in a
+                joint written statement which is submitted to the Commissioner and which
+                is accepted by him; or
+                (ii) where no statement has been submitted to the Commissioner in terms
+                of paragraph (i) or where the Commissioner has not accepted such a
+                statement, such proportion as may be determined by the Commissioner to
+                be fair and reasonable.
+
+22 Substitution of business property
+(1) A taxpayer may elect that, where a capital gain has been received by or accrued to him
+on or after the 1st April, 1991, in respect of the sale by him of immovable property
+previously used for the purposes of his trade (hereinafter in this section called the “old
+property”) and the Commissioner is satisfied that, before the end of the year of assessment
+next following the sale, an amount equal to the whole or part of the consideration received
+or accrued in respect of the sale has been or will be expended on the purchase or
+construction of other immovable property (hereinafter in this section called the “new
+property”) to be used for the purposes of his trade—
+        (a) capital gains tax shall not be chargeable, if the amount of the consideration so
+               received or accrued is equal to or less than the amount so expended; and
+        (b) capital gains tax shall be chargeable, if the amount of the consideration so
+               received or accrued exceeds the amount so expended, on a proportion of
+               the capital gain determined by applying the following formula—
+
+
+
+
+                 [Formula: A x C / B]
+                in which—
+
+
+
+
+                                         Page 24 of 46
+                A represents that portion of the amount of the consideration received or
+                      accrued on the sale of the old property not so expended on the
+                      purchase or construction of the new property;
+                B represents the total amount of the consideration received or accrued on
+                      the sale of the old property;
+                C represents the capital gain in respect of the sale of the old property.
+(1a) An election in terms of subsection (1) shall be made not later than the date on which
+the taxpayer making the election submits a return for the assessment of his capital gain for
+the purposes of this Act.
+
+                 inserted by Finance Act (No. 2) 21 of 1999 from 1 January 2000
+
+(2) Where an amount is not chargeable to capital gains tax in terms of subsection (1), such
+amount shall be deducted from the amount referred to in paragraph (a) of sub-section (2) of
+section eleven when determining the capital gain in respect of the new property, with effect
+from the year of assessment in which the new property was acquired.
+                                         PART IIIA
+                              CAPITAL GAINS WITHHOLDING TAX
+22A Interpretation in Part IIIA
+In this Part—
+all definitions, (except “payee” and “depositary” which was amended also ), inserted by Act 1/2014
+                                       w.e.f. 1st January, 2014
+
+        “business of a land developer” means the business of doing any one or more of the
+               following things for profit—
+                (a) the acquisition of land for subdivision into more than 3 stands for
+                       residential , commercial or industrial purposes; or
+                (b) the acquisition of stands for servicing for residential, commercial or
+                       industrial purposes; or
+                (c) the selling of stands serviced by the land developer; or
+                (d) the servicing of stands acquired by another person for residential,
+                       commercial, or industrial purposes;
+        “cession of a stand” in relation to a stand that is part of a land development
+                scheme, means the transfer to another person (“the cessionary”) for
+                money or other valuable consideration of all rights in respect of the stand
+                (including rights of possession, occupation and, ultimately, of registration of
+                title over the stand in the name of the cedent upon fulfilment of the agreed
+                conditions) acquired by the cedent under the agreement by which he or she
+                took possession of the stand from the local authority or the land developer
+                (whether or not the cedent is an original beneficiary under a land
+                development scheme or is himself or herself a cessionary of a previous
+                cession of the stand);
+
+                                          Page 25 of 46
+      “condominium” means any company, partnership or other association of persons
+            —
+               (a)   that owns any immovable property consisting of 1 or more flats,
+                        apartments or other units of residential accommodation; and
+               (b)   the members of which have the right, by virtue of their
+                       membership—
+                       (i) to occupy particular flats, apartments or units of residential
+                               accommodation comprising the immovable property; or
+                       (ii) to a time-sharing interest in particular flats, apartments
+                       (iii) or units of residential accommodation pursuant to a property
+                                time-sharing scheme;
+      “depositary” means—
+               (a) a conveyancer, legal practitioner, estate agent or other person who
+                       (i) on behalf of any party to a sale of immovable property, holds
+                               the whole or any part of the price paid or payable in
+                               respect of the sale; and
+                       (ii) is required, on completion of the sale or on transfer of the
+                                property, to pay the whole or any part of the amount he
+                                holds to the seller of the immovable property or to some
+                                other person for the seller’s credit; or
+               (b) a building society registered in terms of the Building Societies Act
+                      [Chapter 24:02]; or
+               (c) the Sheriff or Master of the High Court; or
+               (d) a stockbroker, financial institution or other person who
+                       (i) on behalf of any party to a sale of a marketable security, holds
+                               the whole or any part of the price paid or payable in
+                               respect of the sale; and
+                       (ii) is required, on completion of the sale or on transfer of the
+                                marketable security, to pay the whole or any part of the
+                                amount he holds to the seller of the marketable security or
+                                to some other person for the seller’s credit;
+amended by Finance Act 10 of 2003 with effect from the year of assessment beginning 1 January
+                                           2004
+
+               (e) in relation to a cession of a stand
+                       (i) the cedent, whether or not he or she is liable to pay the whole
+                               or any part of the amount he or she holds to the land
+                               developer; or
+
+
+
+                                       Page 26 of 46
+                       (ii) the local authority which, or land developer who, on behalf of
+                               a cedent or cessionary, holds the whole or any part of the
+                               price paid or payable in respect of the cession; or
+                       (iii) any person referred to in paragraph (a), (b), (c) or (d) who
+                               mediates a cession of a stand;
+                    para (e) inserted by Act 1/2014 w.e.f. 1st January, 2014
+
+               or
+               (f) in relation to the acquisition or relinquishment of a membership
+                       interest in a condominium
+                       (i) the owner of the condominium; or
+                       (ii) the custodian of the register of membership interests in the
+                               condominium; or
+                       (iii) any person referred to in paragraph (a), (b), (c) or (d) who
+                               mediates such acquisition or relinquishment.
+
+                    para (f) inserted by Act 1/2014 w.e.f. 1st January, 2014
+
+               (g) the registrar or other registering official by whatever name called
+                      responsible for registering rights, titles and transfers or
+                      amendments thereof in terms of any of the following Acts
+                       (i) the Mines and Minerals Act [Chapter 21:05]. or
+                       (ii) the Patents Act [Chapter 26:03]; or
+                       (iii) the Trade Marks Act [Chapter 26:04]; or
+                       (iv) the Industrial Designs Act [Chapter 26:02]; or
+                       (v) the Copyright and Neighbouring Rights [Chapter 26:05]; or
+                       (vi) the Brands Act [Chapter 19:03]; or
+                       (vii) the Geographical Indications Act [Chapter 26:06]; or
+                       (viii) the Integrated Circuit Layout-Designs Act [Chapter 26:07] Act
+                                (No. 18 of 2001);
+para (g) -not (e) inserted in sequence by the Finance Act 2 of 2017 gazetted on 23rd March,2017
+                                 backdated to the 1st January,2017
+
+      “land developer” means a person who carries on the business of a land developer;
+      “land development scheme” means any scheme whereunder —
+               (a) land is subdivided into stands for servicing by a local authority or a
+                      land developer; and
+
+
+
+
+                                         Page 27 of 46
+                 (b) beneficiaries of the scheme receive rights of possession, occupation
+                        and, ultimately, of registration of title over the stands in their
+                        names upon fulfilment of agreed conditions;
+        “local authority” means —
+                 (a) a city or municipal council, town council, local board or rural district
+                         council; or
+                 (b) any body declared by the President to be a local authority for the
+                        purposes of the Interpretation Act [Chapter 1:01] which is not a
+                        body or authority referred to in paragraph (a);
+        “membership interest in a condominium” means an interest or share in a
+             condominium that confers on the holder thereof any of the rights referred
+             to in paragraph (b) of the definition of “condominium”, however such
+             membership, interest or share is evidenced, whether by the holding or
+             transfer of shares in a condominium that is a company, or in the form of a
+             partnership interest, or by registration of sectional title in terms of section
+             27 of the Deeds Registries Act [Chapter 20:05];
+        “payee” means a person to whom a depositary pays or is required to pay an
+               amount held by him as depositary in respect of the sale of a specified asset.
+        “service”, in relation to a stand, means to clear the land constituting the stand and
+                to drain, dredge, pave, excavate, grade, landscape, construct buildings upon
+                or otherwise develop such stand in every way that will render it suitable for
+                residential, commercial or industrial purposes, and “unserviced” shall be
+                construed accordingly;
+        “stand” means any unserviced or partly unserviced piece of land whether or not
+                registered as a stand in terms of the Deeds Registries Act [Chapter 20:05];
+
+22B Capital gains withholding tax
+There shall be charged, levied and collected throughout Zimbabwe in accordance with this
+Part, for the benefit of the Consolidated Revenue Fund, a capital gains withholding tax
+calculated in accordance with the Finance Act [Chapter 23:04].
+  Zimra not permitted to refuse to assess and issue a CGT certificate once tax is paid Sabeta. M v
+                            Commissioner General: Zimra 12-HH-079
+
+22C Depositaries to withhold tax
+(1) Subject to subsections (5) and (7), every depositary who, in consequence of the sale or
+transfer of a specified asset, pays any amount held by him as depositary to or for the credit
+of the seller of the specified asset shall withhold capital gains withholding tax from that
+amount and shall pay the amount withheld to the Commissioner no later than the 3rd
+working day from the date when the payment was made or within such further time as the
+Commissioner may for good cause allow.
+ amended by the Finance Act 22 of 1999 with effect from 7 July 1999, and by the Finance Act 16 of
+      2007 which shortened the period for payment with effect from the 1st January, 2008.
+
+                                           Page 28 of 46
+Limit shortened further by Act 3 of 2009 with effect from the year of assessment beginning on the 1st
+                                           January, 2009.
+
+(2) If the capital gains withholding tax payable in respect of any sale or transfer exceeds
+the amount held by a depositary, the depositary shall pay the full amount held by him to the
+Commissioner in accordance with subsection (1).
+(3) Where capital gains withholding tax is withheld in accordance with subsection (1), the
+depositary shall provide the payee with a certificate, in a form approved by the
+Commissioner, showing the following particulars—
+        (a) the depositary’s name and address; and
+        (b) the payee’s name and address; and
+        (c) particulars of the property sold; and
+        (d) the amount of capital gains withholding tax that has been withheld.
+(4) Where 2 or more depositaries hold the whole or any part of the price paid or payable
+in respect of any one sale of a specified asset—
+        (a) they shall be severally liable for payment of the full amount of capital gains
+               withholding tax in respect of that sale, up to the amount held by them; and
+        (b) payment by any 1 of them of any amount of capital gains withholding tax in
+               terms of this section shall absolve the others or reduce their liability pro
+               tanto, as the case may be.
+(5) A depositary need not withhold capital gains withholding tax in terms of subsection (1)
+if, before he pays any amount to or for the credit of the seller of the specified asset
+concerned—
+        (a) he or the seller applies to the Commissioner for a clearance certificate in
+               respect of the sale of that specified asset, and provides the Commissioner
+               with such information regarding the sale as the Commissioner may
+               reasonably require; and
+        (b) the Commissioner, being satisfied that—
+                 (i) no capital gains tax is likely to be payable in respect of the sale or that
+                         any capital gains tax so payable is likely to be less than the capital
+                         gains withholding tax required to be withheld in terms of
+                         subsection (1); and
+                 (ii) adequate arrangements have been or will be made for the payment of
+                         any capital gains tax payable in respect of the sale;
+                 has issued a clearance certificate in respect of the sale.
+
+   Law Society of Zimbabwe and Mollat P.M. v Minister of Finance with AG intervening 99-SC-092
+
+(6) A clearance certificate may be issued in terms of subsection (5) on such terms and
+conditions as the Commissioner may fix, including terms and conditions relating to the
+furnishing of a return or interim return for the assessment of capital gains tax.
+
+                                           Page 29 of 46
+(7) Where the amount held by a depositary represents the whole or part of an instalment
+payable in a sale by instalments, the amount of capital gains withholding tax to be withheld
+from that amount and paid to the Commissioner in terms of subsection (1) shall be
+calculated as if the instalment were the full price at which the specified asset concerned was
+sold.
+
+22D Agents to withhold tax not withheld by depositaries
+(1) Subject to subsections (7) and (9) where—
+        (a) an agent, on behalf of a payee, receives from a depositary an amount which
+               represents the whole or part of the price of a specified asset; and
+        (b) capital gains withholding tax has not been withheld from that amount in terms
+               of section twenty-two C, nor has a clearance certificate been issued in
+               terms of that section in respect of the sale of the specified asset concerned;
+        the agent shall withhold capital gains withholding tax from that amount and shall
+        pay the tax withheld to the Commissioner no later than the 3rd working day from
+        the date on which he or she received the amount or within such further time as the
+        Commissioner may for good cause allow.
+  Amended by the Finance Act 16 of 2007 which shortened the period for payment with effect from
+                                        the 1st January, 2008.
+Limit shortened further by Act 3 of 2009 with effect from the year of assessment beginning on the 1st
+                                           January, 2009.
+
+(2) Where capital gains withholding tax is withheld in accordance with subsection (1), the
+agent shall provide the payee with a certificate, in a form approved by the Commissioner,
+showing the following particulars, to the extent that the agent knows them—
+        (a) the depositary’s name and address; and
+        (b) the payee’s name and address; and
+        (c) particulars of the property sold; and
+        (d) the amount of capital gains withholding tax that has been withheld.
+(3) For the purpose of this section, a person shall be deemed to be the agent of a payee
+and to have received an amount on behalf of that payee if—
+        (a) that person’s address appears as the address of the payee in the records of the
+               depositary who paid the amount; and
+        (b) the warrant, cheque or draft in payment of the amount is delivered at that
+               person’s address.
+(4) Where a trust receives from a depositary an amount—
+        (a) to the whole or part of which a beneficiary is entitled in terms of the trust; or
+        (b) which in terms of section nine is deemed to accrue to a person as a capital
+              gain;
+        then—
+
+                                           Page 30 of 46
+                 (i) a trustee of that trust shall be deemed for the purpose of this section
+                 to be an agent in respect of that amount; and
+                 (ii) any such beneficiary shall be deemed for the purpose of this section to
+                 be a payee in respect of that amount.
+(5) Any person deemed to be the agent of a payee in terms of subsection (3) or (4) shall, as
+regards the payee and in respect of any capital gain accruing to or in favour of the payee,
+have and exercise all the powers, duties and responsibilities of a person declared to be the
+agent of a taxpayer in terms of section 58 of the Taxes Act.
+(6) Where 2 or more agents hold the whole or any part of the price paid in respect of any 1
+sale of a specified asset—
+        (a) they shall be severally liable for payment of the full amount of capital gains
+               withholding tax in respect of that sale, up to the amount held by them; and
+        (b) payment by any 1 of them of any amount of capital gains withholding tax in
+               terms of this section shall absolve the others or reduce their liability pro
+               tanto, as the case may be.
+(7) An agent need not withhold capital gains withholding tax in terms of subsection (1) if,
+before he pays any amount to or for the credit of the seller of the specified asset
+concerned—
+        (a) he or the seller applies to the Commissioner for a clearance certificate in
+               respect of the sale of that specified asset, and provides the Commissioner
+               with such information regarding the sale as the Commissioner may
+               reasonably require; and
+        (b) the Commissioner, being satisfied that—
+                 (i) no capital gains tax is likely to be payable in respect of the sale or that
+                         any capital gains tax so payable is likely to be less than the capital
+                         gains withholding tax required to be withheld in terms of
+                         subsection (1); and
+                 (ii) adequate arrangements have been or will be made for the payment of
+                         any capital gains tax payable in respect of the sale;
+                 has issued a clearance certificate in respect of the sale.
+   Law Society of Zimbabwe and Mollat P.M. v Minister of Finance with AG intervening 99-SC-092
+
+(8) A clearance certificate may be issued in terms of subsection (7) on such terms and
+conditions as the Commissioner may fix, including terms and conditions relating to the
+furnishing of a return or interim return for the assessment of capital gains tax.
+(9) Where the amount received by an agent represents the whole or part of an instalment
+payable in a sale by instalments, the amount of capital gains withholding tax to be withheld
+from that amount and paid to the Commissioner in terms of subsection (1) shall be
+calculated as if the instalment were the full price at which the specified asset concerned was
+sold.
+
+
+                                          Page 31 of 46
+22E Payee to pay tax not withheld by depositary or agent
+(1) Subject to subsections (2) and (4), where—
+        (a) a payee receives an amount which represents the whole or part of the price of
+               a specified asset; and
+        (b) capital gains withholding tax has not been withheld from that amount in terms
+               of section twenty-two C or twenty-two D, nor has a clearance certificate
+               been issued in terms of either of those sections in respect of the sale of the
+               specified asset concerned;
+        the payee shall pay to the Commissioner, no later than the 3rd working day from the
+        date on which the amount was received or within such further time as the
+        Commissioner may for good cause allow, the amount of capital gains withholding
+        tax that should have been withheld.
+
+  Amended by the Finance Act 16 of 2007 which shortened the period for payment with effect from
+                                        the 1st January, 2008.
+Limit shortened further by Act 3 of 2009 with effect from the year of assessment beginning on the 1st
+                                           January, 2009.
+
+(2) A payee need not pay capital gains withholding tax in terms of subsection (1) if, before
+end of the period within which it is required to be paid in terms of that subsection—
+        (a) he applies to the Commissioner for a clearance certificate in respect of the sale
+               of that specified asset, and provides the Commissioner with such
+               information regarding the sale as the Commissioner may reasonably
+               require; and
+        (b) the Commissioner, being satisfied that—
+                 (i) no capital gains tax is likely to be payable in respect of the sale or that
+                         any capital gains tax so payable is likely to be less than the capital
+                         gains withholding tax required to be withheld in terms of
+                         subsection (1); and
+                 (ii) adequate arrangements have been or will be made for the payment of
+                         any capital gains tax payable in respect of the sale;
+                 has issued a clearance certificate in respect of the sale.
+  ultra vires Constitution ? Law Society of Zimbabwe and Mollat P.M. v Minister of Finance with AG
+                                         intervening 99-SC-092
+
+(3) A clearance certificate may be issued in terms of subsection (2) on such terms and
+conditions as the Commissioner may fix, including terms and conditions relating to the
+furnishing of a return or interim return for the assessment of capital gains tax.
+(4) Where the amount received by a payee represents the whole or part of an instalment
+payable in a sale by instalments, the amount of capital gains withholding tax to be withheld
+from that amount and paid to the Commissioner in terms of subsection (1) shall be
+calculated as if the instalment were the full price at which the specified asset concerned was
+sold.
+
+                                           Page 32 of 46
+22F Exemptions
+Notwithstanding section twenty-two C, twenty-two D or twenty-two E, capital gains
+withholding tax
+        (a) need not be withheld or paid where the amount concerned is exempt from
+               capital gains tax in terms of section ten;
+        (b) shall not be withheld or paid on the sale of marketable securities by a unit trust
+               registered as an internal scheme under the Collective Investment Schemes
+               Act [Chapter 24:19], or as an asset manager under the Asset Management
+               Act [Chapter 24:26] but shall be withheld and paid on the redemption of
+               any unit by an investor in the unit trust.
+
+                Substituted by Act 8 of 2005 with effect from the 1st January, 2006.
+
+22FA Registration of depositaries
+(1) Every person who acts as a depositary in the ordinary course of his business shall apply
+to the Commissioner for a registration certificate—
+        (a) within 30 days after he commences that business; or
+        (b) in the case of a person who was carrying on that business before the date of
+                commencement of the Finance (No. 2) Act, 1999, within 30 days after that
+                date.
+(2) An application in terms of subsection (1) shall be made in writing and shall be
+accompanied by such information as the Commissioner may reasonably require to ascertain
+the applicant's identity, the place where he conducts his business and the nature and extent
+of his business as a depositary.
+(3) On a receipt of an application in terms of subsection (1) and any information he may
+have required in terms of subsection (2), the Commissioner shall promptly issue the
+applicant with a registration certificate in the form prescribed.
+(4) Any one who contravenes subsection (1) shall be guilty of an offence and liable to a
+fine not exceeding level three or to imprisonment for a period not exceeding one month or
+to both such fine and such imprisonment.
+Section inserted by Finance Act (No. 2) 21 of 1999 from the 1st January 2000, and subs (4) amended
+ by the Criminal Penalties Amendment Act 22 of 2001 with effect from the 10th September , 2002.
+
+22G Depositaries to furnish returns
+(1) Subject to subsection (4), every conveyancer, legal practitioner, estate agent,
+stockbroker, financial institution and other person that performs the functions of a
+depositary in the ordinary course of business shall, on or before the last day of every month
+or at such other intervals as the Commissioner may permit, submit to the Commissioner a
+statement in the form prescribed giving such particulars as may be prescribed of—
+        (a) all sales of specified assets which the person has concluded or negotiated on
+                behalf of any other person; and
+
+
+                                           Page 33 of 46
+        (b) all amounts of capital gains withholding tax the person has withheld in terms
+                of section twenty-two C;
+        during the preceding month.
+(2) A return submitted in terms of subsection (1) shall be accompanied by the amount of
+capital gains withholding tax payable in respect of the sales to which the return relates.
+(3) Subject to subsection (4), payment of capital gains withholding tax by a depositary,
+other than a depositary referred to in subsection (1), shall be accompanied by a return in
+the form prescribed.
+(4) Where a person performs the functions of a depositary—
+        (a) in partnership or association with any other person, the Commissioner may
+                permit a joint return to be submitted in respect of sales concluded or
+                negotiated, and capital gains withholding tax withheld, by the partnership
+                or association;
+        (b) as an employee, the Commissioner may permit his employer to submit a
+               return of sales the employee has concluded or negotiated and capital gains
+               withholding tax the employee has withheld, whether such return is
+               submitted individually or as part of a joint return referred to in paragraph
+               (a);
+        and any return submitted in terms of this subsection shall be a sufficient discharge
+        of the person’s obligations under subsection (1) or (3).
+          Section substituted by the Finance Act 22 of 1999 with effect from 7 July 1999.
+
+22H Penalty for non-payment of tax
+(1) Subject to subsection (2), a depositary or an agent who fails to withhold or pay to the
+Commissioner any capital gains withholding tax as provided in section twenty-two C or
+twenty-two D shall be personally liable for the payment to the Commissioner, not later than
+the date on which payment should have been made in terms of section twenty-two C or
+twenty-two D, as the case may be, of—
+        (a) the amount of capital gains withholding tax which should have been withheld;
+               and
+        (b) a further amount equal to 15% of the capital gains withholding tax which
+                should have been withheld.
+(2) If the Commissioner is satisfied in any particular case that a failure to pay capital gains
+withholding tax was not due to any intent to evade the provisions of this Part, he may waive
+the payment of the whole or such part as he thinks fit of the amount referred to in
+paragraph (b) of subsection (1).
+
+22I Refund of overpayments
+(1) If it is proved to the satisfaction of the Commissioner that any person has been charged
+with capital gains withholding tax in excess of the amount properly chargeable to him in
+
+
+                                          Page 34 of 46
+terms of this Part, the Commissioner shall authorise a refund in so far as it has been
+overpaid:
+
+   Law Society of Zimbabwe and Mollat P.M. v Minister of Finance with AG intervening 99-SC-092
+
+                 Provided that the Commissioner shall not authorise any such refund unless
+                 a claim for it is made within 6 years of the date on which the tax was paid.
+(2) The Commissioner shall pay interest, calculated at a rate to be fixed by the Minister by
+statutory instrument, on any amount of capital gains withholding tax overpaid that is not
+refunded by him or her within 60 days of the date when the taxpayer claimed the refund or
+the date of completion of the assessment ,whichever is the later date, unless the
+overpayment was due to an incomplete or defective return or other error on the part of the
+taxpayer, and not to an error on the part of the Commissioner.
+              Subsection (2) inserted by Act 18 of 2004 from the 5th November, 2004;
+                   See the Capital Gains Tax (Rate of Interest) Notice SI 33/2009;
+                  substituted by SI 211/2022 w.e.f. 1st DECEMBER, 2022 – Editor.
+
+22J Credit where tax has been withheld
+If a person to whom a capital gain has accrued proves to the Commissioner’s satisfaction
+that capital gains withholding tax has been paid in respect of that capital gain, the capital
+gains withholding tax shall be allowed as a credit against any capital gains tax chargeable in
+terms of this Act in respect of that capital gain, and any excess shall be refunded.
+
+22K Application of Part IIIA to sales concluded before 1.1.1999
+(1) This Part shall not apply in respect of any sale of a specified asset which was concluded
+before the 1st January, 1999, even if a depositary pays any amount after that date to or for
+the credit of a seller as a consequence of that sale.
+(2) Notwithstanding subsection (1), any amount paid purportedly by way of capital gains
+withholding tax in respect of a sale referred to in subsection (1) shall be regarded in all
+respects as if it had been validly paid in terms of this Part.
+ Section 36 in part IV of the Finance Act 29 of 1998 was, prior to its amendment by SI 222E of 7 July
+1999, ultra vires s 16 of the Constitution of Zimbabwe and therefore of no force and effect between
+                               the dates 1 January 1999 and 7 July 1999-
+   Law Society of Zimbabwe and Mollat P.M. v Minister of Finance with AG intervening 99-SC-092
+
+22L Suspension of provisions of Part IIIA relating to marketable securities
+     Lifted with effect from 17th October, 2005 by S.I.188/05 gazetted on 16 September, 2005.
+
+Notwithstanding sections twenty-two A to twenty-two H, this Part shall be suspended in
+respect of—
+        (a) the charging, levying and collecting of capital gains withholding tax on the sale
+               of marketable securities; and
+
+
+
+
+                                           Page 35 of 46
+        (b) the submission of returns by depositaries, to the extent that they hold moneys
+               representing the price paid or payable in respect of the sale of marketable
+               securities;
+        until such date as the Minister may specify by notice in the Gazette:
+                Provided that the date so specified shall not be earlier than 1 month after
+                the date of publication of the notice.
+                                         PART IV
+                                RETURNS AND ASSESSMENTS
+23 Application of provisions of Taxes Act relating to returns and assessments
+For the purposes of providing for and giving effect to the matters concerned in relation to
+this Act, the following provisions of the Taxes Act—
+        (a) section 37 relating to the publication of notices regarding, and the furnishing
+               of, returns and interim returns ;
+              amended by s 24 of the Finance Act 22 of 1999 from 1st January 1999.
+
+        (b) section 38 relating to the income of minor children;
+        (c) section 39 relating to the furnishing of further returns and information;
+        (d) section 40 relating to the Commissioner having access to public records;
+        (e) sections 41 and 42 relating to shareholdings;
+        (f) section 43 relating to the submission of returns and the preparation of
+                accounts;
+        (g) section 44 relating to the production of documents and evidence on oath;
+        (h) section 45 relating to estimated assessments;
+        (i) section 46 relating to additional tax in the event of default or omission;
+        (j) section 47 relating to additional assessments;
+        (k) section 48 relating to reduced assessments and refunds;
+        (l) section 49 relating to amended assessments of loss;
+        (m) section 50 relating to adjustments of tax;
+        (n) section 51 relating to assessments and the recording thereof; and
+        (o) section 52 relating to copies of assessments;
+        (o1) Part VIIIA relating to application of information technology for the purposes
+               of the Taxes Act;
+           Para (o1) inserted by Act 12 of 2006 with effect from the 1st January, 2007.
+
+        (p) section 97B relating to calculation of interest payable,
+
+
+
+                                          Page 36 of 46
+                 Para (p) inserted by Act 18 of 2004 w.e.f. 5th November, 2004;
+            changed by s.16 of Act 29 of 2004 w.e.f. 31st December, 2004 to read 97B.
+
+        shall apply, mutatis mutandis, in relation to this Act.
+                                         PART V
+                                REPRESENTATIVE TAXPAYERS
+24 Application of provisions of Taxes Act relating to representative taxpayer
+For the purposes of providing for and giving effect to the matters concerned in relation to
+this Act, the following provisions of the Taxes Act—
+        (a) section 53 relating to representative taxpayers;
+        (b) section 54 relating to the liability of representative taxpayers;
+        (c) section 55 relating to the right of representative taxpayers to indemnity;
+        (d) section 56 relating to the personal liability of representative taxpayers;
+        (e) section 58 relating to the power to appoint an agent;
+        (f) section 59 relating to the remedies of the Commissioner against an agent or
+                trustee;
+        (g) section 60 relating to the Commissioner’s power to require information; and
+        (h) section 61 relating to public officers of companies;
+        shall apply, mutatis mutandis, in relation to this Act.
+                                          PART VI
+                                  OBJECTIONS AND APPEALS
+25 Objections and appeals
+(1) Any taxpayer who is aggrieved by—
+        (a) any assessment made upon him under this Act; or
+        (b) any decision of the Commissioner mentioned in—
+                (i) paragraphs (b) and (e) of subsection (2) of section eight;
+                (ii) subparagraph A of subparagraph (ii) of paragraph (a) of subsection (2)
+                        of section eleven;
+                (iii) proviso (i) to subsection (3) of section eleven;
+                (iv) subsection (3) of section thirteen;
+                (v) section fourteen;
+                (vi) section fifteen;
+                (vii) proviso (i) to subsection (1) of section nineteen;
+                (viii) the definition of “principal private residence” in subsection (1) of
+                         section twenty-one;
+
+                                         Page 37 of 46
+                (ix) subsection (2) of section twenty-one;
+                (x) subsection (6) of section twenty-one;
+       may, unless it is otherwise provided in this Act, object to such assessment or
+       decision within 30 days after the date of the notice of assessment or of the written
+       notification of the decision in the manner and under the terms prescribed by this
+       Act:
+                Provided that nothing herein contained shall give a further right of
+                objection to the amount of any assessed capital loss determined in respect
+                of the previous year of assessment.
+(2) The provisions of—
+       (a) subsections (2), (3), (4), (5) and (6) of section 62 of the Taxes Act, relating to
+              objections; and
+       (b) sections 63 to 70 of the Taxes Act, relating to objections and appeals;
+                          Sommer Ranching (Pvt) Ltd v COT 99-SC-065
+
+       shall apply, mutatis mutandis, in relation to this Act for the purposes of providing
+       for and giving effect to the matters concerned in relation to this Act.
+                                       PART VII
+                              PAYMENT AND RECOVERY OF TAX
+26 Day and place for payment of tax
+                     Substituted by Act 16 of 2007 w.e.f. 1st January, 2008.
+
+(1) Tax shall become due and payable—
+Interest BACKDATED TO 1ST JANUARY 2020 – if IN FOREIGN CURRENCY – See CGT (Rate of Interest)
+                         Notice gazetted 26th February, 2021 SI 54/2021;
+     replaced by SI 211/2022 gazetted on 16th December w.e.f. 1st DECEMBER, 2022 – Editor.
+
+       (a) no later than 30 days from the date when a specified asset referred to in
+              section eighteen(1) or nineteen(1) accrues to the taxpayer in terms of those
+              provisions;
+
+  It would appear that a “specified asset” would not accrue to taxpayers but the capital amount
+          on disposal of such specified asset will be what accrues to the taxpayer.-Editor
+
+       or
+       (b) in any case other than one referred to in paragraph (a), no later than 30 days
+               from the date when title to the specified asset in question is formally
+               transferred to the taxpayer; or
+       (c) no later than the last date specified in terms of section twenty-twoC, twenty-
+               twoD and twenty-twoE, if that date is earlier than the last date referred to
+               in paragraph (a) or (b):
+
+
+
+                                         Page 38 of 46
+                 Provided that nothing herein contained shall deprive any taxpayer of the
+                 right to pay his tax through the post.
+(2) Tax shall be payable at any branch, division or department of the Zimbabwe Revenue
+Authority responsible for assessing, collecting and enforcing the payment of taxes under this
+Act, or through any agent of the Zimbabwe Revenue Authority notified by the
+Commissioner.
+(3) If tax is not paid on or before the date specified in terms of subsection (1)(a) or (b),
+interest, calculated at a rate to be fixed by the Minister, by statutory instrument, shall be
+payable on so much of the tax as from time to time remains unpaid by the taxpayer during
+the period beginning on the date specified by the Commissioner in the notification as the
+date on which the tax shall be paid and ending on the date the tax is paid in full:
+                        See the CGT (Rate of Interest) Notice SI 281/2019
+see CGT in forex backdated SI 54/2021-to 1ST JANUARY 2020: ; replaced by SI 211/2022 gazetted 16th
+                          December w.e.f. 1st DECEMBER, 2022 – Editor.
+
+                 Provided that in special circumstances the Commissioner may extend the
+                 time for payment of the tax without charging interest.
+(4) For the purposes of collecting the tax and any interest payable in terms of subsection
+(1) and (3) the Commissioner shall have the same powers as are conferred by the Taxes Act
+for the collection of income tax and the provisions of the Taxes Act shall apply accordingly
+with any necessary changes.
+                                            PART VIII
+                                            GENERAL
+27 Application of provisions of Taxes Act relating to offences, evidence,
+forms and regulations
+The provisions of—
+        (a) sections 81 to 86, relating to offences;
+        (b) sections 87 and 88, relating to evidence and proof;
+        (c) section 89, relating to forms and authentication and service of documents;
+        (d) section 90, relating to regulations;
+        of the Taxes Act shall apply, mutatis mutandis, in relation to this Act, for the
+        purposes of providing for and giving effect to the matters concerned in relation to
+        this Act.
+
+28 Application of provisions of Taxes Act relating to relief from double
+taxation
+The provisions of section 91 of the Taxes Act relating to relief from double taxation shall
+apply, mutatis mutandis, in relation to this Act, for the purposes of providing for and giving
+effect to the matters concerned in relation to this Act.
+
+29 Application of provisions of Taxes Act relating to tax avoidance
+
+                                          Page 39 of 46
+The provisions of section 98 of the Taxes Act relating to tax avoidance shall apply, mutatis
+mutandis, in relation to this Act, for the purposes of providing for and giving effect to the
+matters concerned in relation to this Act.
+
+30 Transitional provision re capital gains and losses of married women
+Where in terms of this Act a gross capital amount which was received by or accrued to or in
+favour of a married woman in any year of assessment prior to the year of assessment
+beginning on the 1st April, 1988, has been deemed to be a capital amount received by or
+accrued to or in favour of her husband, then, for the purposes of charging, levying and
+collecting tax in respect of the year of assessment beginning on the 1st April, 1988, and any
+subsequent year of assessment—
+        (a) any capital gain accruing to or assessed capital loss carried forward by her
+               husband from that source; or
+        (b) any right of election exercised by or allowance or deduction granted to her
+               husband in respect of the capital gain or assessed capital loss referred to in
+               paragraph (a);
+        shall be deemed to have accrued to or been carried forward or exercised by or been
+        granted to, as the case may be, the married woman, and the same consequences
+        shall follow and the same rights accrue to the married woman as would have
+        followed or, as the case may be, accrued to her husband in respect of that capital
+        gain, assessed capital loss, election, allowance or deduction.
+
+30A Capital gains tax not withheld in terms of Part IIIA to be paid before
+transfer of specified asset
+(1) No registration of the acquisition of a specified asset in respect of which capital gains
+tax is not withheld in terms of Part IIIA shall be executed, attested or registered by—
+        (a) the Registrar of Deeds in terms of the Deeds Registries Act [Chapter 20:05];
+        (b) the person responsible for registering the transfer of shares of any company
+               registered or incorporated in terms of the Companies and Other Business
+               Entities Act [Chapter 24:31]
+        unless there is submitted to the Registrar of Deeds or the person concerned by
+        either of the parties or their agents concerned in the transaction a certificate issued
+        by the Zimbabwe Revenue Authority stating that any capital gains tax payable on
+        the acquisition of the specified asset has been paid.
+
+   Section inserted by Act 15 of 2002 w.e.f.1st January, 2003 and renumbered by Act 10 of 2003.
+
+(2) No registration of the acquisition of —
+        (a) a stand that originated from a land development scheme and was
+                subsequently ceded by the original beneficiary of the scheme to a
+                cessionary (or, where further or more cessions of the stand occurred after
+                that, by the cessionary seeking the registration of the stand); or
+
+
+
+                                          Page 40 of 46
+        (b) a membership interest in a condominium that is evidenced by the registration
+               of sectional title in terms of section 27 of the Deeds Registries Act [Chapter
+               20:05];
+        shall be executed, attested or registered by the Registrar of Deeds in terms of the
+        Deeds Registries Act [Chapter 20:05] unless the cessionary or acquirer of the
+        membership interest in condominium submits to the Registrar of Deeds a certificate
+        issued by the Zimbabwe Revenue Authority stating that any capital gains tax
+        payable on the cession of the stand or acquisition of the membership interest has
+        been paid.
+
+                   subsection (2) inserted by Act 1 /2014 w.e.f. 1st January 2014
+
+30B Special capital gains tax on entities acquiring mining title or any interest
+therein
+                          Inserted by Act 13/2023 w.e.f. 1st January, 2024
+ Editor’s Note: The Chamber of Mines is seeking to have this new section reversed as it appears to
+  target foreigners who would not normally be liable retrospectively under Zimbabwe taxation for
+                    extra territorial transactions; making concluded deals liable.
+
+(1) In this section—
+        “beneficial owner” means—
+                 (a) an individual who or entity which enjoys the benefits of ownership
+                        though the property’s title is in another name (“the nominee”); or
+                 (b) an individual or entity who through the ownership of any share or
+                        stake in an entity or of all or any of the assets of the entity is able to
+                        exert a significant or preponderant voice in the affairs of the
+                        organisation, including an individual or entity who exerts such
+                        control through a nominee who holds such stake, share or assets
+                        on behalf of such person;
+        “controller”, in relation to a corporate entity, means a person other than a
+                beneficial owner who, notwithstanding the formal arrangements for the
+                exercise of control over the entity as specified in its constitutive document,
+                exerts a significant or preponderant voice in the affairs of the entity;
+        “entity”, for the purposes of this section means any of the following holding or
+                capable of holding any mining title—
+                 (a) an individual or partnership domiciled outside Zimbabwe; or
+                 (b) a company incorporated or domiciled outside Zimbabwe; or
+                 (c) a locally incorporated subsidiary company of a holding company
+                         incorporated or domiciled outside Zimbabwe; or
+                 (d) any other entity whatsoever domiciled outside Zimbabwe that is
+                        capable, by the law of the country of its domicile, to hold a mining
+
+
+
+                                           Page 41 of 46
+                  title or other real right, including a trust, syndicate or joint venture;
+                  or
+        (e) an individual, whether or not he or she is a citizen or permanent
+               resident of Zimbabwe ordinarily resident in Zimbabwe; or
+        (f) a company or other business entity unless it is incorporated under the
+                Companies and Other Business Entities Act [Chapter 24:31],
+                whether or not the majority of its members are citizens or
+                permanent residents of Zimbabwe ordinarily resident in Zimbabwe;
+                or
+        (g) a partnership, syndicate or joint venture —
+                  (i) made up of individuals, whether or not any of them are citizens
+                         of Zimbabwe ordinarily resident in Zimbabwe; or
+                  (ii) made up of 2 or more companies referred to in paragraph (b);
+                         or
+                  (iii) made up of any combination of individuals and companies
+                          whether or not its members or partners are citizens of
+                          Zimbabwe ordinarily resident in Zimbabwe;
+        (h) the nominee (being any entity as described in paragraphs (a) to (g)) of
+               a beneficial owner of a mining title (being any entity as described in
+               paragraphs (a) to (g)), including an entity that, being the owner of
+               the mining title or interest therein immediately before the mining
+               title was transferred, agrees to be the nominee for the beneficial
+               owner acquiring the mining title or interests therein;
+        “mining law” means the Mines and Minerals Act [Chapter 21:05], or any
+        other law that may be substituted for the same;
+“mining right” means a right evidenced by a mining title to prospect or explore for,
+       obtain, extract or produce any mineral, or do any other thing that the
+       mining title gives the holder thereof the right to do;
+“mining title”—
+        (a) means a claim, block of claims, mining lease or special grant and
+              (depending on the context) includes any document evidencing a
+              mining right that is precedent to obtaining any of the foregoing
+              titles, such as an exclusive prospecting licence or exclusive
+              exploration licence;
+        (b) includes a share, stake, right or interest in any mining title referred to
+               in paragraph (a);
+        (c) does not include the hypothecation of a mining title referred to in
+               paragraph (a), or its subjection to an option agreement, except on
+               the date when the hypothecated title is seized for failure to make
+               repayments pursuant to the hypothecation (in which event the title
+
+
+                                  Page 42 of 46
+                         is deemed to be transferred to the entity discharging the
+                         hypothecation), or the date when option is exercised.
+(2) For the purposes of the definitions of “beneficial owner” and “controller”—
+                (a) a person exerts a significant or preponderant voice in the affairs of an
+                       entity if (singly or in combination)—
+                         (i) that person’s decision on any matter or policy concerning the
+                                 governance of the entity or the exercise of any of its
+                                 functions is binding on the organisation or the governing
+                                 body of the entity; or
+                         (ii) that person is able to overrule or veto any decisions of the
+                                 governing body of the entity; or
+                         (iii) that person directly or indirectly controls 25% or more of the
+                                  votes in the governing body;
+                (b) reference to a “person” exerting a significant or preponderant voice in
+                       the affairs of an entity includes a State, or an arm, organ, agency or
+                       representative of a State.
+(3) There is hereby chargeable a special capital gains tax on the transfer of a mining title,
+being a tax on the value of any transaction concluded within or outside Zimbabwe whereby
+any mining title—
+        (a) has, within the period of 10 years before the 1st January, 2024, been
+               transferred to an entity which still held it on the 1st January, 2024;
+
+                                         See note above
+
+        (b) is, at any time on or after the 1st January, 2024, transferred to an entity:
+(4) In amplification of subsection (3) —
+        (a) the liability to pay the special capital gains tax on the transfer of a mining title
+               of any entity referred to in subsection (3) (a)—
+                (i) is not affected by the fact that since the 1st January, 2024, the mining
+                        title that was the subject of the transfer has ceased to subsist due
+                        to its cancellation, forfeiture, surrender or extinction for any other
+                        reason;
+                (ii) is payable on the latest transaction by which the mining title was
+                         transferred to last entity holding it before the 1st January, 2024,
+                         and if such entity transfers it again at any time after that date, it
+                         shall become liable to the special capital gains tax on the transfer of
+                         a mining title under subsection (3)(b);
+        (b) referred to in subsection (3)(b) is not affected by the fact that at any time
+               between the transfer of the mining title that was the subject of the transfer,
+               and the date when payment of the tax became due, the mining title
+
+
+                                          Page 43 of 46
+                concerned has ceased to subsist due to its cancellation, forfeiture,
+                surrender or extinction for any other reason.
+(5) The special capital gains tax on the transfer of a mining title shall be payable—
+        (a) in United States dollars (or the equivalent in any other foreign currency at the
+                international cross rate of exchange prevailing on the time of the transfer)
+                at the rate of 20% of the value of the transaction concerned by the
+                transferee entity (or, in default of the transferee entity, by the owner of the
+                mining title immediately before the mining title was transferred):
+                Provided that if there is express provision in the mining law for the approval
+                by the Minister responsible for administering the mining law (or by any
+                other person or authority specified in that law) of the transfer of the mining
+                title in question, whether by means of the transfer of the certificate,
+                permit, licence, mining lease, mining grant or other document evidencing
+                title to the transferee, or by means of the transfer of the majority of the
+                shares or the controlling stake in the entity holding such title, then, upon
+                production of proof satisfactory to the Commissioner-General of such
+                approval having been obtained for the transfer in question—
+                (i) the special capital gains tax on the transfer of a mining title shall be
+                        payable at the rate of 5% of the value of the transaction
+                        concerned; or
+                (ii) if the mining title that was the subject of the transfer has ceased to
+                          subsist due to its cancellation, forfeiture, surrender or extinction
+                          for any other reason, and there is produced to the Commissioner-
+                          General by or on behalf of the entity an affidavit to the effect that
+                          such extinction was not procured for the purpose of avoiding
+                          liability for the special capital gains tax on the transfer of a mining
+                          title, no special capital gains tax on the transfer of a mining title
+                          shall be payable, despite subsection (4)(a)(i) or (4)(b);
+        (b) no later than the 1st April, 2024 (in the case of a transaction referred to in
+               subsection (3)(a)), or no later than 30 days after the conclusion of the
+               transaction (in the case of a transaction referred to in subsection (3)(b)):
+                Provided that the Commissioner-General may, for good cause shown,
+                extend the period for payment of the special capital gains tax on the
+                transfer of a mining title for a period not exceeding 6 months, or may agree
+                to the payment being staggered at specified intervals over such period;
+        (c) the payment of special capital gains tax on the transfer of a mining title shall be
+               made to the Authority or deposited with the registrar or other registering
+               official by whatever name called responsible for registering rights, titles and
+               transfers or amendments thereof in terms of any of the Mines and Minerals
+               Act [Chapter 21:05] and shall be accompanied by an affidavit sworn by the
+               payer (or by the corporate secretary or similar office-bearer of a corporate
+               entity) setting forth—
+                (i) the consideration paid or payable for such transfer of the mining title;
+
+                                         Page 44 of 46
+                (ii) full particulars of the mining title that was transferred;
+                (iii) full particulars of the names and addresses of the transferee and
+                         transferor entities, and, in the case of a body corporate particulars
+                         of the date of incorporation and registration and the names of the
+                         directors of the body corporate;
+                (iv) if any person as a beneficial owner or controller exerts a significant or
+                         preponderant voice in the affairs of the transferee entity, the name
+                         and address or domicile of the beneficial owner or controller, and
+                         the nature and extent of such beneficial ownership or control.
+(6) No registration of the acquisition of a mining title in respect of which special capital
+gains tax on the transfer of a mining title is not paid in terms of this section shall be
+executed, attested or registered by registrar or other registering official by whatever name
+called responsible for registering rights, titles and transfers or amendments thereof in terms
+of any of the Mines and Minerals Act [Chapter 21:05] unless there is submitted to the
+official concerned by either of the parties or their agents concerned in the transaction a
+certificate issued by the Zimbabwe Revenue Authority stating that the special capital gains
+tax on the transfer of the mining title in question has been paid
+(or, if such mining title has been registered without such certificate having been submitted,
+whether or not the transaction is one referred to in subsection (3)(a) or (b), the transfer
+such mining title or share, stake, right or interest in any mining title is deemed to be void,
+and shall be cancelled upon the request in writing of the Commissioner-General to that
+effect).
+
+31 Returns by Registrar of Deeds, financial institutions and other persons
+(1) At such intervals as the Commissioner may require, the Registrar of Deeds shall notify
+the Commissioner in the form prescribed of—
+        (a) all transfers of immovable property registered in the Deeds Registry during the
+                period covered by the notification; and
+        (b) the name and address of the transferor and the transferee in each transfer
+               referred to in paragraph (a); and
+        (c) the price, if any, at which each property referred to in paragraph (a) was
+               transferred.
+(2) Subject to subsection (3), whenever any marketable security is sold by or through the
+agency of—
+        (a) a bank or other institution registered or required to be registered under the
+               Banking Act [Chapter 24:20]; or
+        (b) a building society registered or required to be registered under the Building
+               Societies Act [Chapter 23:02]; or
+        (c) a broker licensed or required to be licensed under the Securities and Exchange
+               Act [Chapter 24:25];
+                       amended by the Securities Act w.e.f.1st June, 2008
+
+                                         Page 45 of 46
+        the institution, society or broker, as the case may be, shall forthwith notify the
+        Commissioner in the form prescribed of—
+
+                        amended by the Securities Act w.e.f. 1st June, 2008
+
+                 (i) the name and address of the seller and the purchaser; and
+                 (ii) the nature of the marketable security; and
+                 (iii) the price, if any, at which the marketable security was transferred:
+        Provided that, with the Commissioner’s consent, such notification may be made at
+        such intervals as the Commissioner may require.
+(3) Subsection (2) shall be suspended until such date as the Minister may specify by notice
+in the Gazette:
+                 Provided that the date so specified shall not be earlier than 1 month after
+                 the date of publication of the notice.
+
+              Section 31 inserted by the Finance Act 22 of 1999 from 1 January 1999.
+
+32 Capital gains tax not withheld in terms of Part IIIA to be paid before
+transfer of specified asset
+No registration of the acquisition of a specified asset in respect of which capital gains tax is
+not withheld in terms of Part IIIA shall be executed, attested or registered by—
+        (a) the Registrar of Deeds in terms of the Deeds Registries Act [Chapter 20:05];
+        (b) the person responsible for registering the transfer of shares of any company
+               registered or incorporated in terms of the Companies and Other Business
+               Entities Act [Chapter 24:31];
+        unless there is submitted to the Registrar of Deeds or the person concerned by
+        either of the parties or their agents concerned in the transaction a certificate issued
+        by the Zimbabwe Revenue Authority stating that any capital gains tax payable on
+        the acquisition of the specified asset has been paid.
+
+                        inserted by Act 15 of 2002 w.e.f. 1st January, 2003.
+                                Section wrongly numbered - Editor.
+
+
+
+
+                                           Page 46 of 46
+

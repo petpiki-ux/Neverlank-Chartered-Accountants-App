@@ -74,6 +74,18 @@ ACTS = {
             9: "Penalties for Late Submissions of Documents or Notices",
         },
     },
+    "cgt": {
+        "code": "cgt",
+        "title": "Capital Gains Tax Act [Chapter 23:01]",
+        "short": "Capital Gains Tax Act",
+        "source_reference": "Capital Gains Tax Act [Chapter 23:01]",
+        "file": "cgt_chapter_23_01.txt",
+        "tax_head": "Capital Gains Tax (CGT)",
+        "areas": ["Tax"],
+        "consolidated_note": "Consolidated text updated to 1st December 2024 (amended up to Act 13 of 2023 and SI 211 of 2022), with the editor's notes and case references as printed. The Act sets no rate of tax: section 7 sends the rate and the calculation to the Finance Act [Chapter 23:04]. The four formulas (s11(2)(c), s18(1), s21(2)(b), s22(1)(b)) are printed in the Act as pictures and are written out here in words from the printed page. A section 32 is printed at the end of the body (the editor notes it as wrongly numbered; it repeats section 30A(1)); it is not in the printed list of sections, so it is added to the list here so that it can be opened on its own.",
+        "match_titles": ["capital gains tax act", "capital gains tax"],
+        "exclude_titles": ["income tax", "value added", "companies and other", "finance act", "rate of interest", "charging act"],
+    },
 }
 
 CHUNK_TARGET = 4500      # characters; a long section is split at paragraph breaks near this size

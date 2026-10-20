@@ -12,7 +12,7 @@
       <div>
         <label for="scope">Payroll type *</label>
         <select id="scope" name="scope" onchange="toggleScopeFields()">
-          <option value="internal" {% if scope=='internal' %}selected{% endif %}>Neverlank staff</option>
+          {% if current_user.role == 'admin' %}<option value="internal" {% if scope=='internal' %}selected{% endif %}>Neverlank staff</option>{% endif %}
           <option value="client" {% if scope=='client' %}selected{% endif %}>Client employee</option>
         </select>
       </div>

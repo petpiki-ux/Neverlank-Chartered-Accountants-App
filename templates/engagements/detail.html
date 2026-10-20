@@ -2439,6 +2439,11 @@
       {% if not engagement.tax_service_list %}<span class="muted">none explicitly ticked - shown because this is a dedicated {{ engagement.type }} engagement.</span>{% endif %}
     </p>
     <p class="muted" style="font-size:11.5px;">
+      The Acts, section by section: <a href="{{ url_for('tax.act_contents', code='ita') }}">Income Tax Act</a> &middot;
+      <a href="{{ url_for('tax.act_contents', code='vat') }}">VAT Act</a> &middot;
+      <a href="{{ url_for('tax.act_contents', code='cgt') }}">Capital Gains Tax Act</a> (<a href="{{ url_for('tax.cgt_act_check') }}">beside the app's CGT material</a>).
+    </p>
+    <p class="muted" style="font-size:11.5px;">
       The Tax Risk Register below reuses the same likelihood x impact register as everywhere else in this app; the Execution Plan (one section per tax head) lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas; CIT/Deferred Tax computations are their own tabs (<a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a>); and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Documents</a> tab, tagged with a Filing Index reference like any other working paper.
     </p>
   </div>

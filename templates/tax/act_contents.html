@@ -12,7 +12,7 @@
 {% if not st.loaded %}
 <div class="card">
   <h3 style="margin-top:0;">The {{ cfg.short }} is not filed section by section yet</h3>
-  <p>Filing it opens every section and schedule by its number (for example {% if code == 'vat' %}<em>15(2)(a)</em> or <em>16(2)(d)</em>{% elif code == 'cobe' %}<em>165(2)</em> or <em>Ninth Schedule</em>{% else %}<em>16(1)(m)</em> or <em>Fourth Schedule, paragraph 3</em>{% endif %}), lets the {% if code == 'cobe' %}Secretarial pages{% else %}tax pages{% endif %} show the Act's own words beside each rule, and makes every section searchable in Deep Search.</p>
+  <p>Filing it opens every section and schedule by its number (for example {% if code == 'vat' %}<em>15(2)(a)</em> or <em>16(2)(d)</em>{% elif code == 'cgt' %}<em>11(2)(c)</em> or <em>22C</em>{% elif code == 'cobe' %}<em>165(2)</em> or <em>Ninth Schedule</em>{% else %}<em>16(1)(m)</em> or <em>Fourth Schedule, paragraph 3</em>{% endif %}), lets the {% if code == 'cobe' %}Secretarial pages{% else %}tax pages{% endif %} show the Act's own words beside each rule, and makes every section searchable in Deep Search.</p>
   {% if st.existing_other_copy %}
   <p class="muted" style="font-size:13px;">The library already holds an earlier copy, <strong>{{ st.existing_other_copy.title }}</strong>. Filing replaces its text with this consolidation, so searches never read two versions.</p>
   {% endif %}
@@ -25,11 +25,11 @@
 {% else %}
 <div class="card" style="padding:10px 14px;">
   <form method="get" action="{{ url_for('tax.search_legislative_updates') }}" class="form-row" style="margin:0;align-items:flex-end;">
-    <div style="flex:4;"><label style="margin:0;">Search the Act (and the rest of the library)</label><input type="text" name="q" placeholder="{% if code == 'vat' %}e.g. input tax, tax invoice, zero rating, time of supply{% elif code == 'cobe' %}e.g. annual return, beneficial owner, company secretary, special resolution{% else %}e.g. wear and tear, &quot;passenger motor vehicle&quot;, assessed loss{% endif %}" style="margin:0;"></div>
+    <div style="flex:4;"><label style="margin:0;">Search the Act (and the rest of the library)</label><input type="text" name="q" placeholder="{% if code == 'vat' %}e.g. input tax, tax invoice, zero rating, time of supply{% elif code == 'cobe' %}e.g. annual return, beneficial owner, company secretary, special resolution{% elif code == 'cgt' %}e.g. specified asset, withholding tax, principal private residence, clearance certificate{% else %}e.g. wear and tear, &quot;passenger motor vehicle&quot;, assessed loss{% endif %}" style="margin:0;"></div>
     <div><button class="btn small" type="submit">Search</button></div>
   </form>
   <form method="get" onsubmit="var v=this.ref.value.trim(); if(v){location.href='{{ url_for('tax.act_contents', code=code) }}/'+encodeURIComponent(v);} return false;" class="form-row" style="margin:10px 0 0;align-items:flex-end;">
-    <div style="flex:4;"><label style="margin:0;">Go to a section</label><input type="text" name="ref" placeholder="{% if code == 'vat' %}e.g. 15(2), 16(2)(a), 20(4), 23(1){% elif code == 'cobe' %}e.g. 165(2), 167(2), 72(2), 198(1), sch9{% else %}e.g. 15(2)(c), 16(1)(m), 36G, sch4.3{% endif %}" style="margin:0;"></div>
+    <div style="flex:4;"><label style="margin:0;">Go to a section</label><input type="text" name="ref" placeholder="{% if code == 'vat' %}e.g. 15(2), 16(2)(a), 20(4), 23(1){% elif code == 'cobe' %}e.g. 165(2), 167(2), 72(2), 198(1), sch9{% elif code == 'cgt' %}e.g. 11(2)(c), 21(2), 22C, 26(1), 30B{% else %}e.g. 15(2)(c), 16(1)(m), 36G, sch4.3{% endif %}" style="margin:0;"></div>
     <div><button class="btn small secondary" type="submit">Go</button></div>
   </form>
   <p class="muted" style="font-size:12px;margin:8px 0 0;">{{ st.sections }} sections and {{ st.schedules }} schedules filed
