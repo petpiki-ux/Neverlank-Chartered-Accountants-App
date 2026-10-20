@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}The Capital Gains Tax Act beside the app - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div>
+  <h1 style="font-size:22px;">The Capital Gains Tax Act beside the app</h1>
+  <div class="subtitle">Capital Gains Tax Act [Chapter 23:01] &middot; what the Act says, what the app does for CGT, and where they differ</div></div>
+  <div>
+    <a href="{{ url_for('tax.act_contents', code='cgt') }}" class="btn secondary">CGT Act, section by section</a>
+    <a href="{{ url_for('tax.search_legislative_updates') }}" class="btn secondary">Search the library</a>
+  </div></div>
+
+{% if not st.loaded %}
+<div class="card">
+  <strong>The Capital Gains Tax Act is not filed section by section yet,</strong> so the Act's words below are missing and the section numbers are not links.
+  {% if can_load %}
+  <form method="post" action="{{ url_for('tax.act_load', code='cgt') }}" enctype="multipart/form-data" style="margin-top:8px;">
+    <button class="btn" type="submit">File the Capital Gains Tax Act now</button>
+  </form>
+  {% else %}Ask a Partner or Admin to file it from <a href="{{ url_for('tax.act_contents', code='cgt') }}">the CGT Act page</a>.{% endif %}
+</div>
+{% endif %}
+
+<div class="card" style="font-size:12.5px;">
+  <p style="margin:0 0 6px;">The text of the Act is the consolidation updated to 1 December 2024 that was supplied to the firm. <strong>The Act contains no rate of tax:</strong> section 7 sends the calculation and the rate to the Finance Act [Chapter 23:04], which was not supplied, so no rate is stated here or built into the app. The app has no CGT register; what it holds for CGT is the Tax / CGT Advisory checklist, the TX-02 and TX-03 templates and the CGT tax head in the Tax module. <strong>Nothing here is marked verified:</strong> a Partner should confirm each line against the Gazette and the Finance Acts before relying on it.</p>
+  <p style="margin:0;">
+    {% for k, label in result_labels.items() %}{% if counts.get(k) %}<span class="badge" style="margin-right:6px;{% if k == 'differs' %}background:#a33;color:#fff;{% elif k == 'missing' %}background:#8a6d1d;color:#fff;{% elif k == 'updated' %}background:#2e6f95;color:#fff;{% else %}background:#2e7d32;color:#fff;{% endif %}">{{ counts[k] }} &middot; {{ label }}</span>{% endif %}{% endfor %}
+  </p>
+</div>
+
+<div class="card" id="dates">
+  <h3 style="margin-top:0;font-size:15px;">Dates the Act sets</h3>
+  <p class="muted" style="font-size:12px;">Enter the date of an event and see the last day. Nothing is saved. These are the Act's own time limits; the Commissioner can allow more time in some cases (for example sections 22C(1) and 26(3)).</p>
+  <form method="get" action="#dates" class="form-row" style="align-items:flex-end;flex-wrap:wrap;">
+    <div><label style="margin:0;">Title formally transferred</label><input type="date" name="title_date" value="{{ given.title_date or '' }}"></div>
+    <div><label style="margin:0;">Date depositary paid or agent / payee received money</label><input type="date" name="pay_date" value="{{ given.pay_date or '' }}"></div>
+    <div><label style="margin:0;">Date of sale (residence, stand or business property)</label><input type="date" name="sale_date" value="{{ given.sale_date or '' }}"></div>
+    <div><label style="margin:0;">Date asset damaged or destroyed</label><input type="date" name="damage_date" value="{{ given.damage_date or '' }}"></div>
+    <div><label style="margin:0;">Date of notice of assessment</label><input type="date" name="notice_date" value="{{ given.notice_date or '' }}"></div>
+    <div><button class="btn small" type="submit">Work out the dates</button></div>
+  </form>
+  {% if dates|selectattr(1)|list %}
+  <table style="font-size:12.5px;margin-top:8px;">
+    {% for label, d in dates %}{% if d %}<tr><td>{{ label }}</td><td style="white-space:nowrap;"><strong>{{ d.strftime('%A %d %B %Y') }}</strong></td></tr>{% endif %}{% endfor %}
+  </table>
+  {% endif %}
+</div>
+
+{% for f in findings %}
+<div class="card" id="f{{ loop.index }}">
+  <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline;">
+    <h3 style="margin:0;font-size:15px;">{{ f.topic }}
+      <span class="muted" style="font-size:12px;font-weight:400;">
+        {% for r in f.refs %}{{ act_ref(r, text='s' ~ r, code='cgt') }}{% if not loop.last %}, {% endif %}{% endfor %}
+      </span></h3>
+    <span class="badge" style="{% if f.result == 'differs' %}background:#a33;color:#fff;{% elif f.result == 'missing' %}background:#8a6d1d;color:#fff;{% elif f.result == 'updated' %}background:#2e6f95;color:#fff;{% else %}background:#2e7d32;color:#fff;{% endif %}">{{ result_labels[f.result] }}</span>
+  </div>
+  {% set first = f.refs[0] %}{% set w = act_words(first, 650, code='cgt') %}{% if w %}
+  <blockquote style="margin:8px 0 0;padding:6px 12px;border-left:3px solid #b8923a;font-size:12.5px;color:#444;"><span class="muted" style="font-size:11px;">The Act, section {{ first }}:</span> {{ w }}</blockquote>
+  {% endif %}
+  <p style="margin:8px 0 2px;font-size:13px;"><strong>The app:</strong> {{ f.app }}</p>
+  <p style="margin:2px 0 0;font-size:13px;">{{ f.note }}</p>
+</div>
+{% endfor %}
+
+<div class="card">
+  <h3 style="margin-top:0;font-size:15px;">The Act's time limits</h3>
+  <table style="font-size:12.5px;">
+    <tr><th style="width:24%;">Matter</th><th style="width:14%;">Sections</th><th>The Act</th></tr>
+    {% for topic, refs, rule in deadlines %}
+    <tr><td>{{ topic }}</td><td>{% for r in refs %}{{ act_ref(r, text='s' ~ r, code='cgt') }}{% if not loop.last %}, {% endif %}{% endfor %}</td><td>{{ rule }}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;font-size:15px;">Exemptions in section 10</h3>
+  <p class="muted" style="font-size:12px;">A short list only; read section 10 itself for the conditions. Amounts and ages are as printed in the consolidation (the age was reduced from 59 to 55 by Act 5 of 2009; the amounts have been changed by several Acts).</p>
+  <table style="font-size:12.5px;">
+    {% for item, refs in exemptions %}
+    <tr><td>{{ item }}</td><td style="white-space:nowrap;">{% for r in refs %}{{ act_ref(r, text='s' ~ r, code='cgt') }}{% if not loop.last %}, {% endif %}{% endfor %}</td></tr>
+    {% endfor %}
+  </table>
+</div>
+{% endblock %}

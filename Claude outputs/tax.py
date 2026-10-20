@@ -1378,6 +1378,52 @@ def vat_act_check():
                            can_load=user_has_permission(current_user, "manage_legislative_updates"))
 
 
+@tax_bp.route("/cobe-act")
+@login_required
+def cobe_act_check():
+    """The Companies and Other Business Entities Act set beside the Secretarial module: what the Act says (in its own words, from the filed Act),
+    what the module does, and where they differ - plus the Act's time limits, the section numbers that were corrected and the civil penalty categories."""
+    import cobe_checks
+    st = act_import.status("cobe")
+    counts = {}
+    for f in cobe_checks.FINDINGS:
+        counts[f["result"]] = counts.get(f["result"], 0) + 1
+    return render_template("tax/cobe_act_check.html", findings=cobe_checks.FINDINGS, result_labels=cobe_checks.RESULT_LABELS, st=st, counts=counts,
+                           deadlines=cobe_checks.DEADLINES, corrections=cobe_checks.SECTION_CORRECTIONS,
+                           penalty_categories=cobe_checks.CIVIL_PENALTY_CATEGORIES, late_table=cobe_checks.LATE_FILING_TABLE,
+                           can_load=user_has_permission(current_user, "manage_legislative_updates"))
+
+
+@tax_bp.route("/cgt-act")
+@login_required
+def cgt_act_check():
+    """The Capital Gains Tax Act set beside what the app does for CGT: what the Act says (in its own words, from the filed Act), what the app does,
+    where they differ; the Act's time limits and exemptions; and a small calculator for the dates the Act sets (nothing is saved)."""
+    import cgt_checks
+    st = act_import.status("cgt")
+    counts = {}
+    for f in cgt_checks.FINDINGS:
+        counts[f["result"]] = counts.get(f["result"], 0) + 1
+
+    def _d(name):
+        raw = request.args.get(name, "").strip()
+        try:
+            return datetime.strptime(raw, "%Y-%m-%d").date() if raw else None
+        except ValueError:
+            return None
+    given = {k: _d(k) for k in ("title_date", "pay_date", "sale_date", "damage_date", "notice_date")}
+    dates = [
+        ("Tax due (section 26(1)(b)): 30 days from formal transfer of title", cgt_checks.payment_due(given["title_date"])),
+        ("Withholding tax due (sections 22C to 22E): 3rd working day from payment. Weekends skipped; public holidays are not", cgt_checks.withholding_due(given["pay_date"])),
+        ("Reinvestment deadline (sections 21(2), 22(1)): end of the year of assessment next following the sale", cgt_checks.reinvestment_deadline(given["sale_date"])),
+        ("Replacement of a damaged or destroyed asset (section 13(3)): 2 years", cgt_checks.damage_replacement_deadline(given["damage_date"])),
+        ("Objection (section 25(1)): 30 days from the date of the notice", cgt_checks.objection_due(given["notice_date"])),
+    ]
+    return render_template("tax/cgt_act_check.html", findings=cgt_checks.FINDINGS, result_labels=cgt_checks.RESULT_LABELS, st=st, counts=counts,
+                           deadlines=cgt_checks.DEADLINES, exemptions=cgt_checks.EXEMPTIONS_NOTED, given=given, dates=dates,
+                           can_load=user_has_permission(current_user, "manage_legislative_updates"))
+
+
 @tax_bp.route("/vat/import-batches/<int:batch_id>/currency", methods=["POST"])
 @login_required
 def set_vat_import_batch_currency(batch_id):
