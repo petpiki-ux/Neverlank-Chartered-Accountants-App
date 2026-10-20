@@ -557,6 +557,8 @@ def _add_missing_columns():
         "fx_rate": [("original_rate_zwl", "FLOAT")],
         "fx_average_rate": [("original_rate_zwl", "FLOAT")],
         "coa_mapping": [("coa_account_number", "VARCHAR(20)")],
+        # registration_date / last_agm_date - see models.SecretarialPlan (COBE Act s165(2) and s167(2)).
+        "secretarial_plan": [("registration_date", "DATE"), ("last_agm_date", "DATE")],
         "trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
         "qpd_trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
         # recurring_invoice_id / recurrence_index - see models.RecurringInvoice:
@@ -883,6 +885,8 @@ def create_app():
     app.jinja_env.globals["today_cat"] = today_cat
     import act_import
     app.jinja_env.globals["act_words"] = act_import.words
+    import cobe_checks
+    app.jinja_env.globals["cobe_deadlines"] = cobe_checks.DEADLINES   # the COBE Act's time limits, shown on the Secretarial plan
     app.jinja_env.globals["act_ref"] = act_import.ref_link   # {{ act_ref('16(1)(m)') }}: links a section reference to the Act's own wording
 
     def _cash_choices():
@@ -1028,9 +1032,15 @@ def create_app():
         # of Directors) is now CR6, old CR6 (Notice of Situation of
         # Registered Office) is now CR5 - see migrate_cr_form_codes's own
         # docstring. Same no-op-once-done safety as the migration above.
-        from seed import migrate_cr_form_codes, migrate_secretarial_finalisation_company_summary
+        from seed import migrate_cr_form_codes, migrate_secretarial_finalisation_company_summary, migrate_cobe_wording
         migrate_cr_form_codes()
+        # Section numbers / time limits in the Secretarial wording corrected against the COBE Act (see cobe_checks.py);
+        # must run after the CR-code migration above and before the Company Summary one below.
+        migrate_cobe_wording()
         migrate_secretarial_finalisation_company_summary()
+        # The Tax / CGT Advisory checklist reworded against the Capital Gains Tax Act (see cgt_checks.py).
+        from seed import migrate_cgt_wording
+        migrate_cgt_wording()
         # Payroll PAYE bands: seed_payroll_tax_bands() only ever populates a
         # pay frequency that currently has ZERO PayrollTaxBand rows of its
         # own, so it's safe/cheap to call on every startup (like

@@ -54,6 +54,38 @@ ACTS = {
         # the printed list of sections calls the First Schedule "Repealed"; the text re-inserted by Finance Act 13 of 2023 is Civil Penalty Orders
         "schedule_titles": {1: "Civil Penalty Orders (re-inserted by Finance Act 13 of 2023)"},
     },
+    "cobe": {
+        "code": "cobe",
+        "title": "Companies and Other Business Entities Act [Chapter 24:31]",
+        "short": "COBE Act",
+        "source_reference": "Companies and Other Business Entities Act [Chapter 24:31]",
+        "file": "cobe_chapter_24_31.txt",
+        "tax_head": None,
+        "areas": ["Companies & Corporate Law"],
+        "consolidated_note": "Consolidated text as printed in the Veritas consolidation of the Companies and Other Business Entities Act (Acts 4/2019 and 8/2020; commenced 13 February 2020). Later amendments and Statutory Instruments must be confirmed against the Gazette.",
+        "match_titles": ["companies and other business entities act", "cobe act"],
+        "exclude_titles": [],
+        "schedule_titles": {
+            1: "Form of Memorandum of Association of a Company",
+            2: "Form of statement in lieu of prospectus (private company ceasing to be private)",
+            3: "Form of statement in lieu of prospectus (company not issuing a prospectus)",
+            4: "Form of Annual Return of a Company",
+            6: "Model Articles and By-laws",
+            9: "Penalties for Late Submissions of Documents or Notices",
+        },
+    },
+    "cgt": {
+        "code": "cgt",
+        "title": "Capital Gains Tax Act [Chapter 23:01]",
+        "short": "Capital Gains Tax Act",
+        "source_reference": "Capital Gains Tax Act [Chapter 23:01]",
+        "file": "cgt_chapter_23_01.txt",
+        "tax_head": "Capital Gains Tax (CGT)",
+        "areas": ["Tax"],
+        "consolidated_note": "Consolidated text updated to 1st December 2024 (amended up to Act 13 of 2023 and SI 211 of 2022), with the editor's notes and case references as printed. The Act sets no rate of tax: section 7 sends the rate and the calculation to the Finance Act [Chapter 23:04]. The four formulas (s11(2)(c), s18(1), s21(2)(b), s22(1)(b)) are printed in the Act as pictures and are written out here in words from the printed page. A section 32 is printed at the end of the body (the editor notes it as wrongly numbered; it repeats section 30A(1)); it is not in the printed list of sections, so it is added to the list here so that it can be opened on its own.",
+        "match_titles": ["capital gains tax act", "capital gains tax"],
+        "exclude_titles": ["income tax", "value added", "companies and other", "finance act", "rate of interest", "charging act"],
+    },
 }
 
 CHUNK_TARGET = 4500      # characters; a long section is split at paragraph breaks near this size
@@ -176,7 +208,7 @@ def load_act(code="ita", text=None, user_id=None, replace_existing=True):
     )
     upd.title = cfg["title"]
     upd.source_reference = cfg["source_reference"]
-    upd.tax_head = upd.tax_head or cfg["tax_head"]
+    upd.tax_head = upd.tax_head or cfg.get("tax_head")
     upd.set_areas(cfg["areas"])
     upd.summary = (cfg["consolidated_note"] + " Filed section by section: every section and schedule can be opened by its number, "
                    "and Deep Search cites them.")
