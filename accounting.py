@@ -350,7 +350,8 @@ def roll_up_to_trial_balance(engagement_id):
         lines_added += 1
     db.session.commit()
     flash(f"General Ledger rolled up to the Trial Balance ({lines_added} account(s)). Map any unmapped lines on the Trial Balance tab.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id,
+                            tab="trial_balance" if engagement.is_tax_advisory_type else "finalisation"))
 
 
 # ---------- Bank Reconciliations ----------

@@ -545,13 +545,25 @@ def view_engagement(engagement_id):
     # accounts: no Analytical Review, Risk Assessment, Trial Balance or
     # Substantive Procedures (its tax-head Execution Plan is on the Tax tab).
     # Old links and bookmarks to those tabs land somewhere sensible.
+    # It also has no Understanding the Entity or Planning tab (the Tax tab
+    # holds the Tax Entity Profile and Regulatory Matrix, the Tax Analytical
+    # Review and the Tax Risk Register). It keeps the Trial Balance tab, to
+    # import a trial balance, next to the Accounting tab, to capture one, and
+    # has its own Asset Register tab.
     if engagement.is_tax_advisory_type:
         if tab == "substantive":
             tab = "tax"
-        elif tab in ("analytical", "risks", "trial_balance"):
+        elif tab in ("analytical", "risks", "entity", "planning"):
             tab = "overview"
-    elif tab in ("capital_allowances", "qpd"):
+    elif tab == "asset_register":
+        tab = "substantive"
+    if tab in ("capital_allowances", "qpd") and not engagement.has_tax_module:
         tab = "overview"
+    # The VAT register has its own tab once the client has a VAT number (and stays on the Tax tab until then).
+    if tab == "vat" and not engagement.shows_vat_tab:
+        tab = "tax" if engagement.has_tax_module else "overview"
+    elif tab == "tax" and engagement.shows_vat_tab and request.args.get("vat_period"):
+        tab = "vat"
     # The stand-alone service lines (Whistle-blower / Training) only have the
     # shared Overview / Client Acceptance / Documents / Tasks tabs here - their
     # own workspaces live in whistleblower.py / training.py. Corporate Finance &
@@ -769,7 +781,7 @@ def view_engagement(engagement_id):
     # Execution Plan - one area per ACCOUNTING_AREAS entry, appended on top
     # of whatever this engagement type's own areas already are, whenever
     # Engagement.has_accounting_module is True.
-    if engagement.has_accounting_module:
+    if engagement.has_accounting_module and not engagement.is_tax_advisory_type:
         substantive_area_names = list(substantive_area_names) + [a for a in ACCOUNTING_AREAS if a not in substantive_area_names]
 
     substantive_areas_by_name = {
@@ -1018,7 +1030,7 @@ def view_engagement(engagement_id):
     # Tax Advisory engagements: the Capital Allowances and Provisional Tax (QPD) tabs, and the allowance schedule's tax value offered on
     # the Deferred Tax tab. Worked only for the tabs that show them.
     tax_tab_context = {}
-    if engagement.is_tax_advisory_type:
+    if engagement.has_tax_module:
         import engagement_tax
         if tab in ("capital_allowances", "deferred_tax", "income_tax"):
             tax_tab_context.update(engagement_tax.capital_allowance_context(engagement))
@@ -1028,6 +1040,7 @@ def view_engagement(engagement_id):
     return render_template(
         "engagements/detail.html",
         profit_before_tax_is_manual=profit_before_tax_is_manual,
+        vat_home_tab="vat" if engagement.shows_vat_tab else "tax",
         **tax_tab_context,
         engagement=engagement,
         users=users,
@@ -5232,8 +5245,11 @@ def _parse_date(value):
 
 
 def _ppe_tab(engagement):
-    """Where the Asset Register lives: the Substantive Procedures tab, or the Capital Allowances tab on a Tax Advisory engagement."""
-    return "capital_allowances" if engagement.is_tax_advisory_type else "substantive"
+    """Where the Asset Register lives: the Substantive Procedures tab, or its own Asset Register tab on a Tax Advisory engagement. A change
+    made from the Capital Allowances tab goes back there."""
+    if "tab=capital_allowances" in (request.referrer or ""):
+        return "capital_allowances"
+    return "asset_register" if engagement.is_tax_advisory_type else "substantive"
 
 
 @engagements_bp.route("/<int:engagement_id>/ppe/asset-classes/add", methods=["POST"])

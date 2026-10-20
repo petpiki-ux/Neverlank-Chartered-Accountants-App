@@ -156,9 +156,15 @@ def legislative_update_editor_required(f):
 def _tax_redirect(engagement_id, vat_period=None):
     """Back to the Tax tab; `vat_period` ('2026-09' or 'undated') reopens the
     VAT month the person was working in rather than the month list."""
+    tab = "tax"
+    if "vat" in (request.endpoint or ""):
+        # a VAT route: back to the VAT tab when the client has a VAT number, which is when that register has its own tab
+        eng = db.session.get(Engagement, engagement_id)
+        if eng is not None and eng.shows_vat_tab:
+            tab = "vat"
     if vat_period:
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax", vat_period=vat_period))
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="tax"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=tab, vat_period=vat_period))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=tab))
 
 
 def _vat_doc_period_arg(day):

@@ -2044,12 +2044,21 @@ class Engagement(db.Model):
         return self.type in TAX_ENGAGEMENT_TYPES or bool(self.tax_service_list)
 
     @property
+    def shows_vat_tab(self):
+        """The VAT tab (invoice register and input/output tax working paper) is shown when a Tax service is on and the client has a VAT
+        number; otherwise that register stays on the Tax tab."""
+        return bool(self.has_tax_module and self.client is not None and (self.client.vat_number or "").strip())
+
+    @property
     def is_tax_advisory_type(self):
         """A dedicated Tax Advisory engagement (or one of the two legacy tax
         types), as opposed to another engagement type that merely has a Tax
         service ticked. These get the lean tax tab set - no Analytical
         Review, Risk Assessment, Trial Balance or Substantive Procedures -
-        and the tax-head Execution Plan sits on the Tax tab itself."""
+        and the tax-head Execution Plan sits on the Tax tab itself. It does
+        get the Accounting tab (to capture a ledger or take in a trial
+        balance), the Trial Balance tab (to import one) and its own Asset
+        Register tab."""
         return self.type in TAX_ENGAGEMENT_TYPES
 
     @property
@@ -2080,7 +2089,7 @@ class Engagement(db.Model):
         or any Accounting service explicitly turned on for another
         engagement type (e.g. a bookkeeping clean-up bundled into an Audit
         engagement)."""
-        return self.type == "Accounting & Bookkeeping" or bool(self.accounting_service_list)
+        return self.type == "Accounting & Bookkeeping" or self.is_tax_advisory_type or bool(self.accounting_service_list)
 
     @property
     def has_cost_accounting(self):
@@ -7968,6 +7977,24 @@ class ClientAcceptance(db.Model):
     operational_capacity_confirmed = db.Column(db.Boolean)  # 5. Operational Capacity & Commercial Feasibility
     operational_capacity_notes = db.Column(db.Text)
 
+    # Tax Client Acceptance - on engagements of type "Tax Advisory" these five
+    # sections REPLACE sections 1-5 above (same pattern as the forensic and
+    # secretarial sets): the audit questions on predecessor auditors and
+    # independence from the audit client do not fit tax work; what matters is
+    # who the taxpayer is and what it is registered for, its standing with
+    # ZIMRA, exactly what tax work is asked for, the client's integrity and
+    # appetite for tax risk, and conflicts and competence.
+    tax_kyc_satisfactory = db.Column(db.Boolean)            # 1. Taxpayer Identity, KYC & Registrations
+    tax_kyc_notes = db.Column(db.Text)
+    tax_history_satisfactory = db.Column(db.Boolean)        # 2. Tax Compliance History & Standing
+    tax_history_notes = db.Column(db.Text)
+    tax_scope_clear = db.Column(db.Boolean)                 # 3. Scope & Nature of Tax Work
+    tax_scope_notes = db.Column(db.Text)
+    tax_integrity_acceptable = db.Column(db.Boolean)        # 4. Integrity & Tax Risk Appetite
+    tax_integrity_notes = db.Column(db.Text)
+    tax_conflict_competence_clear = db.Column(db.Boolean)   # 5. Conflicts, Independence & Competence
+    tax_conflict_competence_notes = db.Column(db.Text)
+
     # 6. Engagement letter - scope/timeline/responsibilities/fees, signed by
     # the client. The signed copy is filed as an ordinary Document (see
     # acceptance.py's upload route) and linked here.
@@ -8053,6 +8080,15 @@ class ClientAcceptance(db.Model):
                 self.edd_completed is not None,
                 self.legal_evidence_satisfactory is not None,
                 self.competence_scope_confirmed is not None,
+                self.engagement_letter_signed_at is not None,
+            ])
+        if self.engagement and self.engagement.is_tax_advisory_type:
+            return all([
+                self.tax_kyc_satisfactory is not None,
+                self.tax_history_satisfactory is not None,
+                self.tax_scope_clear is not None,
+                self.tax_integrity_acceptable is not None,
+                self.tax_conflict_competence_clear is not None,
                 self.engagement_letter_signed_at is not None,
             ])
         if self.engagement and self.engagement.type == "Secretarial":
@@ -8192,12 +8228,21 @@ class ClientAcceptance(db.Model):
 
         is_forensic = self.engagement and self.engagement.type == "Investigative Engagement"
         is_secretarial = self.engagement and self.engagement.type == "Secretarial"
+        is_tax = bool(self.engagement and self.engagement.is_tax_advisory_type)
         if is_forensic:
             section_checks = [
                 ("conflict_threat_clear", False, "Conflict of Interest & Threat Assessment", "conflict_threat_notes"),
                 ("edd_completed", False, "Enhanced Due Diligence", "edd_notes"),
                 ("legal_evidence_satisfactory", False, "Legal Framework & Evidence Control", "legal_evidence_notes"),
                 ("competence_scope_confirmed", False, "Competence & Scope Realism", "competence_scope_notes"),
+            ]
+        elif is_tax:
+            section_checks = [
+                ("tax_kyc_satisfactory", False, "Taxpayer Identity, KYC & Registrations", "tax_kyc_notes"),
+                ("tax_history_satisfactory", False, "Tax Compliance History & Standing", "tax_history_notes"),
+                ("tax_scope_clear", False, "Scope & Nature of Tax Work", "tax_scope_notes"),
+                ("tax_integrity_acceptable", False, "Integrity & Tax Risk Appetite", "tax_integrity_notes"),
+                ("tax_conflict_competence_clear", False, "Conflicts, Independence & Competence", "tax_conflict_competence_notes"),
             ]
         elif is_secretarial:
             section_checks = [
@@ -8219,7 +8264,7 @@ class ClientAcceptance(db.Model):
                 detail = (getattr(self, notes_field) or "").strip() or "No further notes recorded."
                 issues.append({"key": f"section:{field}", "label": label, "detail": detail})
 
-        if not is_forensic and not is_secretarial and not self.predecessor_not_applicable:
+        if not is_forensic and not is_secretarial and not is_tax and not self.predecessor_not_applicable:
             if self.client_permission_obtained is False:
                 issues.append({"key": "section:predecessor_permission", "label": "Predecessor communication", "detail": "Client permission to contact the predecessor auditor was not obtained."})
             elif self.predecessor_contacted is False:
@@ -8450,6 +8495,44 @@ SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS = [
     ("Operational Capacity & Commercial Feasibility", "Are the client's expectations regarding our role clearly defined - specifically, do they understand we are acting as a filing agent and not providing formal tax or legal advice?"),
 ]
 
+
+# Seeded instead of DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS when the engagement's type is "Tax Advisory" (see acceptance.seed_acceptance_checklist).
+# Section names match the five Tax Client Acceptance sections that REPLACE the generic narrative sections for this engagement type (see
+# ClientAcceptance.tax_kyc_satisfactory etc. and items_complete above). They are questions to work through, not statements of law.
+TAX_ACCEPTANCE_CHECKLIST_ITEMS = [
+    ('Taxpayer Identity, KYC & Registrations', "Has the client's Taxpayer Identification Number (TIN) been obtained and checked against its ZIMRA registration documents?"),
+    ('Taxpayer Identity, KYC & Registrations', 'Which taxes is the client registered for (income tax, VAT, PAYE, withholding tax, other) - are the registration numbers on file, correct and current?'),
+    ('Taxpayer Identity, KYC & Registrations', 'Who are the directors, beneficial owners and authorised signatories, and has their identity been verified?'),
+    ('Taxpayer Identity, KYC & Registrations', 'Has the Sanctions & AML Vetting below been completed for the client, its directors and its beneficial owners?'),
+    ('Taxpayer Identity, KYC & Registrations', "Who in the client's business will give us instructions and information, and do they have authority to bind the client?"),
+    ('Tax Compliance History & Standing', 'Does the client hold a current tax clearance certificate? If not, why not?'),
+    ('Tax Compliance History & Standing', 'Are any returns (income tax, VAT, PAYE, provisional tax) outstanding or filed late, and for which periods?'),
+    ('Tax Compliance History & Standing', 'Are there open ZIMRA audits, assessments, objections, appeals or payment plans, and what stage has each reached?'),
+    ('Tax Compliance History & Standing', 'What penalties and interest has ZIMRA charged in the last three years, and what caused them?'),
+    ('Tax Compliance History & Standing', 'Who was the previous tax adviser, why is the client changing, and has the client allowed us to ask for the handover?'),
+    ('Tax Compliance History & Standing', "Are the client's books and records good enough to support the returns or advice for the periods in question?"),
+    ('Scope & Nature of Tax Work', 'Which tax services are requested (compliance, advisory and planning, health check or due diligence, representation) and for which tax heads and periods?'),
+    ('Scope & Nature of Tax Work', 'Is the scope clear and in writing, and are the deadlines realistic against the ZIMRA due dates?'),
+    ('Scope & Nature of Tax Work', 'Will we rely on information supplied by the client without verifying it, and has the client accepted responsibility for its completeness and accuracy?'),
+    ('Scope & Nature of Tax Work', 'For planning or structuring advice: are the facts, the documents and the proposed transaction available to us in enough detail?'),
+    ('Scope & Nature of Tax Work', 'Are we expected to represent the client before ZIMRA, and is the authority to do so in place?'),
+    ('Scope & Nature of Tax Work', 'Are there USD and ZWG (ZiG) amounts that need an exchange rate treatment agreed with the client?'),
+    ('Integrity & Tax Risk Appetite', 'How would the client describe its appetite for tax risk, and has it asked for a position we would not be comfortable defending?'),
+    ('Integrity & Tax Risk Appetite', 'Is there any sign of undisclosed income, unrecorded sales or understated VAT or PAYE?'),
+    ('Integrity & Tax Risk Appetite', 'Does any arrangement seem to have tax saving as its main purpose rather than a commercial one?'),
+    ('Integrity & Tax Risk Appetite', 'If errors are found in earlier returns, is the client willing to correct them and make a voluntary disclosure?'),
+    ('Integrity & Tax Risk Appetite', 'Are there cross-border or related-party transactions, and is there support for the pricing?'),
+    ('Integrity & Tax Risk Appetite', 'Does the client operate in a cash-intensive or high-risk sector?'),
+    ('Conflicts, Independence & Competence', "Do we act for another party to the same transaction, or for a party whose interests conflict with this client's?"),
+    ('Conflicts, Independence & Competence', "Does the firm also audit or review this client's financial statements? If so, have the threats (self-review, advocacy) been assessed and the safeguards recorded?"),
+    ('Conflicts, Independence & Competence', 'Does the team have the technical knowledge of the tax heads involved, and the time to meet the deadlines?'),
+    ('Conflicts, Independence & Competence', 'Is our professional indemnity cover suitable for the nature and size of the advice?'),
+    ('Conflicts, Independence & Competence', 'Is the fee arrangement free of any fee that depends on the tax result and could threaten our objectivity?'),
+    ('Engagement letter', 'Does the engagement letter set out the tax services, tax heads, periods, deliverables, deadlines and what is excluded?'),
+    ('Engagement letter', "Does it state the client's responsibility to give us complete and accurate information and to pay tax on time?"),
+    ('Engagement letter', 'Does it record our authority to deal with ZIMRA for the client, where that is part of the work?'),
+    ('Engagement letter', "Does it set the fee basis and say that our advice is for the client's own use and based on the law and facts at its date?"),
+]
 
 class ClientAcceptanceChecklistItem(db.Model):
     """A single tick + comment line within a Client Acceptance record,

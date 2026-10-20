@@ -28,7 +28,7 @@ from models import (
     Engagement, Document, ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS,
     ClientAcceptanceChecklistItem, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS,
-    BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS, SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS,
+    BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS, SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS, TAX_ACCEPTANCE_CHECKLIST_ITEMS,
     RISK_CATEGORIES,
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, RegulatoryNotice,
     ClientKeyPerson, AcceptanceFlagReview, ACCEPTANCE_FLAG_STATUSES,
@@ -319,6 +319,76 @@ def save_acceptance_operational_capacity(engagement_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
 
 
+@acceptance_bp.route("/<int:engagement_id>/acceptance/tax-kyc/save", methods=["POST"])
+@login_required
+def save_acceptance_tax_kyc(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.tax_kyc_satisfactory = _bool("tax_kyc_satisfactory")
+    record.tax_kyc_notes = request.form.get("tax_kyc_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Taxpayer Identity, KYC & Registrations saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/tax-history/save", methods=["POST"])
+@login_required
+def save_acceptance_tax_history(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.tax_history_satisfactory = _bool("tax_history_satisfactory")
+    record.tax_history_notes = request.form.get("tax_history_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Tax Compliance History & Standing saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/tax-scope/save", methods=["POST"])
+@login_required
+def save_acceptance_tax_scope(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.tax_scope_clear = _bool("tax_scope_clear")
+    record.tax_scope_notes = request.form.get("tax_scope_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Scope & Nature of Tax Work saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/tax-integrity/save", methods=["POST"])
+@login_required
+def save_acceptance_tax_integrity(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.tax_integrity_acceptable = _bool("tax_integrity_acceptable")
+    record.tax_integrity_notes = request.form.get("tax_integrity_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Integrity & Tax Risk Appetite saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
+@acceptance_bp.route("/<int:engagement_id>/acceptance/tax-conflict-competence/save", methods=["POST"])
+@login_required
+def save_acceptance_tax_conflict_competence(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_access(engagement)
+    record = _get_or_create(engagement_id)
+    record.tax_conflict_competence_clear = _bool("tax_conflict_competence_clear")
+    record.tax_conflict_competence_notes = request.form.get("tax_conflict_competence_notes", "").strip()
+    _touch(record)
+    db.session.commit()
+    flash("Conflicts, Independence & Competence saved.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+
+
 @acceptance_bp.route("/<int:engagement_id>/acceptance/decision/save", methods=["POST"])
 @login_required
 def save_acceptance_decision(engagement_id):
@@ -579,6 +649,8 @@ def seed_acceptance_checklist(engagement_id):
         default_items = BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS
     elif engagement.type == "Secretarial":
         default_items = SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS
+    elif engagement.is_tax_advisory_type:
+        default_items = TAX_ACCEPTANCE_CHECKLIST_ITEMS
     else:
         default_items = DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS
     for order, (section, item_text) in enumerate(default_items, start=1):
