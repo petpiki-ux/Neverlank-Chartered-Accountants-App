@@ -95,13 +95,17 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='overview') }}" class="{% if tab=='overview' %}active{% endif %}">Overview</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}" class="{% if tab=='acceptance' %}active{% endif %}">Client Acceptance{% if client_acceptance and client_acceptance.is_partner_signed and acceptance_cleared %} &#10003;{% elif client_acceptance and client_acceptance.is_authorized_to_continue and acceptance_cleared %} (Provisional){% elif client_acceptance and client_acceptance.decision == 'Declined' %} (Declined){% elif engagement.acceptance_required %} &#128274;{% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='entity') }}" class="{% if tab=='entity' %}active{% endif %}">Understanding the Entity{% if entity_understanding and entity_understanding.is_complete %} &#10003;{% endif %}</a>
+  {% if not engagement.is_tax_advisory_type %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='analytical') }}" class="{% if tab=='analytical' %}active{% endif %}">Analytical Review{% if analytical_review and analytical_review.significant_lines %} ({{ analytical_review.significant_lines|length }} flagged){% endif %}</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='risks') }}" class="{% if tab=='risks' %}active{% endif %}">Risk Assessment{% if risk_assessment and risk_assessment.rating %} ({{ risk_assessment.rating }}){% else %} (Not started){% endif %}</a>
+  {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='planning') }}" class="{% if tab=='planning' %}active{% endif %}">{% if engagement.type == 'Investigative Engagement' %}Audit Strategy{% elif engagement.type == 'Secretarial' %}Engagement Plan{% else %}Planning{% endif %}</a>
-  {% if engagement.type not in ('Secretarial', 'Business Intelligence and IT Engagements') %}
+  {% if engagement.type not in ('Secretarial', 'Business Intelligence and IT Engagements') and not engagement.is_tax_advisory_type %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}" class="{% if tab=='trial_balance' %}active{% endif %}">Trial Balance{% if trial_balance and trial_balance.lines %} ({{ trial_balance.lines|length }} accounts){% elif trial_balance and trial_balance.not_applicable %} (N/A){% endif %}</a>
   {% endif %}
+  {% if not engagement.is_tax_advisory_type %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}" class="{% if tab=='substantive' %}active{% endif %}">{% if engagement.type == 'Secretarial' %}Execution Plan{% else %}Substantive Procedures{% endif %}{% if substantive_areas %} ({{ substantive_areas|length }}/{{ audit_areas|length }} areas){% endif %}</a>
+  {% endif %}
   {% if engagement.type == 'Secretarial' %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='registry_forms') }}" class="{% if tab=='registry_forms' %}active{% endif %}">Registry Forms{% if registry_filings %} ({{ registry_filings|length }}){% endif %}</a>
   {% endif %}
@@ -111,6 +115,10 @@
   {% if engagement.type != 'Business Intelligence and IT Engagements' %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}" class="{% if tab=='income_tax' %}active{% endif %}">Income Tax Computation</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}" class="{% if tab=='deferred_tax' %}active{% endif %}">Deferred Tax Computation</a>
+  {% endif %}
+  {% if engagement.is_tax_advisory_type %}
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}" class="{% if tab=='capital_allowances' %}active{% endif %}">Capital Allowances</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='qpd') }}" class="{% if tab=='qpd' %}active{% endif %}">Provisional Tax (QPD)</a>
   {% endif %}
   {% if engagement.has_tax_module %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax') }}" class="{% if tab=='tax' %}active{% endif %}">Tax</a>
@@ -2165,7 +2173,18 @@
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
 {% else %}
-{% if profit_before_tax is none %}
+{% if profit_before_tax is none and engagement.is_tax_advisory_type %}
+  <div class="card">
+    <h3 class="mt-0">Income Tax Computation</h3>
+    <p class="muted" style="font-size:12.5px;">A Tax Advisory engagement works from the client's finished accounts, so there is no Trial Balance here. Enter the <strong>profit before tax</strong> per those accounts to start the computation; the rate, AIDS levy, add-backs, capital allowances and any assessed loss follow below.</p>
+    <form method="post" action="{{ url_for('engagements.save_income_tax_computation', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        <div><label for="it_pbt_start">Profit before tax per the client's accounts</label><input type="number" step="0.01" id="it_pbt_start" name="profit_before_tax_manual" required></div>
+      </div>
+      <button type="submit" class="btn gold">Start the computation</button>
+    </form>
+  </div>
+{% elif profit_before_tax is none %}
   <div class="card"><div class="empty-state">Profit before tax isn't available yet - complete the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab first, then come back here.</div></div>
 {% else %}
   {% include "tax/_act_links.html" %}
@@ -2175,10 +2194,13 @@
       Reconciles accounting profit before tax (taken live from the Statement of Profit or Loss below - never re-entered here) to taxable income and the resulting current tax charge. The tax rate and AIDS levy rate are left for you to enter - Zimbabwean statutory rates change with each year's Finance Act and published sources have disagreed even on the headline corporate rate, so nothing here is pre-filled or assumed on your behalf. Add every allowable deduction, capital allowance and disallowable add-back as its own line below.
     </p>
     <div class="stat-grid">
-      <div class="stat-card"><div class="num">{{ '%.2f'|format(profit_before_tax) }}</div><div class="label">Profit before tax (current year)</div></div>
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(profit_before_tax) }}</div><div class="label">Profit before tax (current year){% if profit_before_tax_is_manual %} - entered below{% endif %}</div></div>
     </div>
     <form method="post" action="{{ url_for('engagements.save_income_tax_computation', engagement_id=engagement.id) }}">
       <div class="form-row">
+        {% if engagement.is_tax_advisory_type and not statements %}
+        <div><label for="it_pbt_manual">Profit before tax per the client's accounts</label><input type="number" step="0.01" id="it_pbt_manual" name="profit_before_tax_manual" value="{{ income_tax_computation.profit_before_tax_manual if income_tax_computation and income_tax_computation.profit_before_tax_manual is not none else '' }}"></div>
+        {% endif %}
         <div><label for="it_tax_rate_percent">Corporate tax rate (%)</label><input type="number" step="0.01" id="it_tax_rate_percent" name="tax_rate_percent" value="{{ income_tax_computation.tax_rate_percent if income_tax_computation and income_tax_computation.tax_rate_percent is not none else '' }}" placeholder="e.g. the current ZIMRA rate"></div>
         <div><label for="it_aids_levy_percent">AIDS levy (% of base tax)</label><input type="number" step="0.01" id="it_aids_levy_percent" name="aids_levy_percent" value="{{ income_tax_computation.aids_levy_percent if income_tax_computation and income_tax_computation.aids_levy_percent is not none else '' }}" placeholder="e.g. 3"></div>
         <div><label for="it_tax_loss_brought_forward">Assessed tax loss brought forward</label><input type="number" step="0.01" id="it_tax_loss_brought_forward" name="tax_loss_brought_forward" value="{{ income_tax_computation.tax_loss_brought_forward if income_tax_computation else 0.0 }}"></div>
@@ -2189,6 +2211,13 @@
     </form>
   </div>
 
+  {% if engagement.is_tax_advisory_type %}
+  <div class="card" style="border-left:4px solid #b8923a;">
+    <h3 class="mt-0" style="font-size:14px;">Capital allowances</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Work the allowances asset by asset, with the firm's own capital allowance engine, and post them here (with the depreciation add-back and any recoupment or scrapping allowance). Lines posted that way are marked below and replaced if you post again.</p>
+    <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}" class="btn gold small">Open the Capital Allowances schedule</a>
+  </div>
+  {% endif %}
   <div class="card" style="border-left:4px solid #b8923a;">
     <h3 class="mt-0" style="font-size:14px;">Section 16(1) prohibited deductions ({{ act_ref('16', text='read section 16') }})</h3>
     <p class="muted" style="font-size:12.5px;margin-top:0;">Test this client's expenses against section 16(1), see the add-backs by clause with voucher references, and post them here as add-back lines. Lines posted that way are marked below and are replaced if you post again.</p>
@@ -2208,7 +2237,7 @@
               {% for t in income_tax_item_types %}<option value="{{ t }}" {% if line.item_type==t %}selected{% endif %}>{{ income_tax_item_type_labels[t] }}</option>{% endfor %}
             </select>
           </td>
-          <td><input type="text" name="description" value="{{ line.description }}" style="width:100%;margin-bottom:0;">{% if line.source == 's16_engine' %}<div class="muted" style="font-size:11px;">Posted from the section 16(1) schedule - posting again replaces it</div>{% endif %}</td>
+          <td><input type="text" name="description" value="{{ line.description }}" style="width:100%;margin-bottom:0;">{% if line.source == 'cap_allow_engine' %}<div class="muted" style="font-size:11px;">Posted from the Capital Allowances schedule - posting again replaces it.</div>{% elif line.source == 's16_engine' %}<div class="muted" style="font-size:11px;">Posted from the section 16(1) schedule - posting again replaces it</div>{% endif %}</td>
           <td><input type="number" step="0.01" name="amount" value="{{ line.amount }}" style="width:120px;margin-bottom:0;" class="text-right"></td>
           <td>
             <button type="submit" class="btn small secondary">Save</button>
@@ -2320,6 +2349,16 @@
       <textarea id="dt_notes" name="notes">{{ deferred_tax_computation.notes if deferred_tax_computation else '' }}</textarea>
       <button type="submit" class="btn gold">Save</button>
     </form>
+    {% if engagement.is_tax_advisory_type %}
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e5e5;">
+      {% if ca_result %}
+      <p class="muted" style="font-size:12.5px;margin:0 0 8px;">The Capital Allowances schedule puts the tax value of the asset register at {{ ca_target_end.strftime('%d %b %Y') }} at <strong>{{ '%.2f'|format(ca_result.tax_value_end) }}</strong>.</p>
+      <form method="post" action="{{ url_for('engtax.use_tax_base', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Use it as the PPE tax base</button></form>
+      {% else %}
+      <p class="muted" style="font-size:12.5px;margin:0;">Add the client's assets on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a> tab and the tax value can be carried here as the PPE tax base.</p>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 
   <div class="card">
@@ -2444,9 +2483,89 @@
       <a href="{{ url_for('tax.act_contents', code='cgt') }}">Capital Gains Tax Act</a> (<a href="{{ url_for('tax.cgt_act_check') }}">beside the app's CGT material</a>).
     </p>
     <p class="muted" style="font-size:11.5px;">
-      The Tax Risk Register below reuses the same likelihood x impact register as everywhere else in this app; the Execution Plan (one section per tax head) lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas; CIT/Deferred Tax computations are their own tabs (<a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a>); and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Documents</a> tab, tagged with a Filing Index reference like any other working paper.
+      The Tax Risk Register below reuses the same likelihood x impact register as everywhere else in this app; the Execution Plan (one section per tax head) {% if engagement.is_tax_advisory_type %}is the next card below{% else %}lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas{% endif %}; CIT/Deferred Tax computations are their own tabs (<a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a>{% if engagement.is_tax_advisory_type %}, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='qpd') }}">Provisional Tax (QPD)</a>{% endif %}); and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Documents</a> tab, tagged with a Filing Index reference like any other working paper.
     </p>
   </div>
+
+  {% if engagement.is_tax_advisory_type %}
+  <!-- ---------- Execution Plan (one section per tax head) ---------- -->
+  <div class="card" id="execution-plan">
+    <h3 class="mt-0">Execution Plan</h3>
+    <p class="muted" style="font-size:12.5px;">One section per tax head. Add the procedures to be done for each head the engagement covers, mark them as they are done, and sign each section off. A section can be reviewed once every procedure is Done or N/A, by someone other than the preparer.</p>
+    {% for head in tax_heads %}
+    {% set area = tax_execution_areas_by_name.get(head) %}
+    <div style="margin-top:14px;padding-top:14px;border-top:1px solid #e5e5e5;">
+      <h4 class="mt-0" style="margin-bottom:6px;">{{ head }}</h4>
+      {% if area and area.items %}
+      <table>
+        <thead><tr><th>Procedure</th><th>Notes</th><th>Status</th><th>Tickmark</th><th></th></tr></thead>
+        <tbody>
+        {% for item in area.items %}
+          <form method="post" action="{{ url_for('engagements.update_substantive_procedure_item', item_id=item.id) }}" class="inline">
+          <tr>
+            <td style="min-width:320px;"><textarea name="procedure_text" rows="2" style="width:100%;min-width:300px;margin-bottom:0;resize:vertical;">{{ item.procedure_text }}</textarea></td>
+            <td><input type="text" name="notes" value="{{ item.notes or '' }}" placeholder="Notes" style="width:160px;margin-bottom:0;"></td>
+            <td>
+              <select name="status">
+                {% for st in checklist_statuses %}<option value="{{ st }}" {% if item.status==st %}selected{% endif %}>{{ st }}</option>{% endfor %}
+              </select>
+            </td>
+            <td>{{ tickmark_picker(item.tickmark_id) }}</td>
+            <td>
+              <button type="submit" class="btn small secondary">Save</button>
+              <button type="submit" formaction="{{ url_for('engagements.delete_substantive_procedure_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this procedure?')">Delete</button>
+            </td>
+          </tr>
+          </form>
+          <tr><td colspan="5" style="padding-top:0;border-top:none;">{{ rmacros.render_reviews('substantive_item', item) }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+      <div class="empty-state">No procedures for this tax head yet - add one below.</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('engagements.add_substantive_procedure_item', engagement_id=engagement.id, area_name=head) }}" class="form-row" style="align-items:flex-end;">
+        <div style="grid-column: span 3;"><label>Add a procedure</label><input type="text" name="procedure_text" placeholder="Describe the procedure" required></div>
+        <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add</button></div>
+      </form>
+      {% if area %}
+      <form method="post" action="{{ url_for('engagements.save_substantive_area_notes', area_id=area.id) }}" style="margin-top:4px;">
+        <label>Notes on {{ head }}</label>
+        <textarea name="notes" rows="2">{{ area.notes or '' }}</textarea>
+        <button type="submit" class="btn small secondary">Save notes</button>
+      </form>
+      <p class="muted" style="font-size:12px;margin-top:10px;">
+        Prepared by {{ area.completed_by.name if area.completed_by else '—' }} on {{ (area.completed_at|cat).strftime('%d %b %Y') if area.completed_at else '—' }}.
+        {% if area.is_reviewed %}Reviewed by {{ area.reviewed_by.name }} on {{ (area.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+        {% if area.is_partner_signed %}Partner sign-off by {{ area.partner_signed_by.name }} on {{ (area.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      </p>
+      {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+        {% if area.is_reviewed %}
+        <form method="post" action="{{ url_for('engagements.unreview_substantive_area', area_id=area.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+        {% elif area.is_complete and area.completed_by_id != current_user.id %}
+        <form method="post" action="{{ url_for('engagements.review_substantive_area', area_id=area.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+        {% elif area.is_complete and effectively_reviewed(area) %}
+        <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+        {% elif area.is_complete %}
+        <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+        {% else %}
+        <span class="muted" style="font-size:11px;">Every procedure needs to be Done or N/A before this section can be reviewed</span>
+        {% endif %}
+      {% endif %}
+      {% if current_user.role in ('partner', 'admin') %}
+        {% if area.is_partner_signed %}
+        <form method="post" action="{{ url_for('engagements.partner_unsign_substantive_area', area_id=area.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+        {% elif area.is_complete and area.completed_by_id != current_user.id %}
+        <form method="post" action="{{ url_for('engagements.partner_sign_substantive_area', area_id=area.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+        {% elif area.is_complete %}
+        <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+        {% endif %}
+      {% endif %}
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   <!-- ---------- Tax Entity Profile ---------- -->
   <div class="card">
@@ -4683,6 +4802,261 @@
   {{ qmacros.render_queries(engagement, 'finalisation', queries_by_section.get('finalisation', [])) }}
 
 {% endif %}
+{% elif tab == 'capital_allowances' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off first.</div></div>
+{% else %}
+  {% include "tax/_act_links.html" %}
+  <div class="card">
+    <h3 class="mt-0">Capital Allowances</h3>
+    <p class="muted" style="font-size:12.5px;">
+      The client's assets, worked asset by asset with the same capital allowance engine as Firm Finance &gt; Tax: special initial allowance or wear and tear (straight line or reducing balance) by asset class, no allowance in the year of sale, recoupment when an asset is sold above its tax value and a scrapping allowance when it is sold below. Allowances are worked for the year ending <strong>{{ ca_target_end.strftime('%d %b %Y') if ca_target_end else '(set the period end first)' }}</strong>. Nothing here is hard-coded law: every rule below is editable and starts as "not verified" until a Partner or Admin has checked it against the Income Tax Act and ticked it.
+    </p>
+    {% if not ca_target_end %}
+    <div class="empty-state">This engagement has no period end. <a href="{{ url_for('engagements.edit_engagement', engagement_id=engagement.id) }}">Edit the engagement</a> and enter it, then come back.</div>
+    {% endif %}
+    {% if ca_undated %}
+    <div class="flash warning" style="margin:8px 0;">{{ ca_undated|length }} asset(s) have no date acquired and are left out of the schedule: {% for a in ca_undated %}{{ a.asset_code or a.description }}{% if not loop.last %}, {% endif %}{% endfor %}.</div>
+    {% endif %}
+    {% if ca_unclassified %}
+    <div class="flash warning" style="margin:8px 0;">{{ ca_unclassified|length }} asset(s) have no class and so get no allowance: {% for a in ca_unclassified %}{{ a.asset_code or a.description }}{% if not loop.last %}, {% endif %}{% endfor %}. Give them a class below.</div>
+    {% endif %}
+    {% if ca_unverified %}
+    <div class="flash warning" style="margin:8px 0;">The allowance rule for {% for c in ca_unverified %}{{ c.name }}{% if not loop.last %}, {% endif %}{% endfor %} is not verified. Check it against the current Income Tax Act before the figures are relied on.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Asset classes and their allowance rules</h3>
+    {% if ca_classes %}
+    <table style="font-size:12px;">
+      <thead><tr><th>Class</th><th>Allowance</th><th>Wear &amp; tear %</th><th>SIA %</th><th>SIA years</th><th>First-year SIA %</th><th>Cost cap</th><th>First year by months</th><th>Verified</th><th>Note</th><th></th></tr></thead>
+      <tbody>
+      {% for c in ca_classes %}
+        {% set r = ca_rules[c.id] %}
+        <form method="post" action="{{ url_for('engtax.save_rule', engagement_id=engagement.id, class_id=c.id) }}" class="inline">
+        <tr>
+          <td><strong>{{ c.name }}</strong></td>
+          <td><select name="method" style="width:auto;margin-bottom:0;">{% for k, label in ca_methods %}<option value="{{ k }}" {% if r.method==k %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></td>
+          <td><input type="number" step="0.01" name="wt_rate_percent" value="{{ r.wt_rate_percent or 0 }}" style="width:70px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="sia_percent" value="{{ r.sia_percent if r.sia_percent is not none else 25 }}" style="width:70px;margin-bottom:0;"></td>
+          <td><input type="number" step="1" name="sia_years" value="{{ r.sia_years if r.sia_years is not none else 4 }}" style="width:55px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="sia_first_percent" value="{{ r.sia_first_percent if r.sia_first_percent is not none else '' }}" style="width:70px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="cost_cap" value="{{ r.cost_cap if r.cost_cap else '' }}" style="width:90px;margin-bottom:0;"></td>
+          <td><input type="checkbox" name="prorata_first_year" {% if r.prorata_first_year %}checked{% endif %}></td>
+          <td>{% if ca_is_senior %}<input type="checkbox" name="verified" {% if r.verified %}checked{% endif %}>{% elif r.verified %}<span class="badge status-Completed">Verified</span>{% else %}<span class="badge">Not verified</span>{% endif %}</td>
+          <td><input type="text" name="note" value="{{ r.note or '' }}" style="width:180px;margin-bottom:0;"></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_ppe_asset_class', class_id=c.id) }}" class="btn small danger" onclick="return confirm('Delete this asset class? Its assets become Unclassified.')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:11px;">Changing a rule clears its Verified tick. Only a Partner or Admin can tick it.</p>
+    {% else %}
+    <div class="empty-state">No asset classes yet - add one below, then enter the assets.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('engagements.add_ppe_asset_class', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div><label>Asset class</label><input type="text" name="name" placeholder="e.g. Motor vehicles" required></div>
+      <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add class</button></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Asset register</h3>
+    <p class="muted" style="font-size:12px;">The same register the Finalisation notes use. Cost and date acquired drive the schedule; the depreciation the client's accounts charged is added back on the Income Tax Computation.</p>
+    {% if ca_assets %}
+    <table style="font-size:12px;">
+      <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th>Cost</th><th>Depreciation in the accounts</th><th></th></tr></thead>
+      <tbody>
+      {% for a in ca_assets %}
+        <form method="post" action="{{ url_for('engagements.update_ppe_asset', asset_id=a.id) }}" class="inline">
+        <tr>
+          <td><input type="text" name="asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
+          <td><input type="text" name="description" value="{{ a.description }}" style="width:180px;margin-bottom:0;"></td>
+          <td><select name="asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in ca_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
+          <td><input type="date" name="date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') if a.date_acquired else '' }}" style="width:128px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="cost" value="{{ a.cost or 0 }}" style="width:95px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="current_year_depreciation" value="{{ a.current_year_depreciation or 0 }}" style="width:95px;margin-bottom:0;">
+            <input type="hidden" name="opening_accumulated_depreciation" value="{{ a.opening_accumulated_depreciation or 0 }}">
+            <input type="hidden" name="disposal_cost" value="{{ a.disposal_cost or 0 }}">
+            <input type="hidden" name="disposal_accumulated_depreciation" value="{{ a.disposal_accumulated_depreciation or 0 }}"></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_ppe_asset', asset_id=a.id) }}" class="btn small danger" onclick="return confirm('Delete this asset?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No assets yet - add one below.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('engagements.add_ppe_asset', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div><label>Code</label><input type="text" name="asset_code"></div>
+      <div style="grid-column: span 2;"><label>Description</label><input type="text" name="description" placeholder="e.g. Toyota Hilux - ABC 1234" required></div>
+      <div><label>Class</label><select name="asset_class_id"><option value="">Unclassified</option>{% for c in ca_classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+      <div><label>Acquired</label><input type="date" name="date_acquired"></div>
+      <div><label>Cost</label><input type="number" step="0.01" name="cost"></div>
+      <div><label>Depreciation in the accounts</label><input type="number" step="0.01" name="current_year_depreciation"></div>
+      <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add asset</button></div>
+    </form>
+
+    {% if ca_assets %}
+    <h4 style="margin-bottom:4px;margin-top:14px;">Assets sold</h4>
+    <p class="muted" style="font-size:12px;">Enter the date an asset was sold and what it fetched; leave blank for an asset still held. The schedule then works the recoupment or the scrapping allowance in the year of sale.</p>
+    <table style="font-size:12px;">
+      <thead><tr><th>Asset</th><th>Sold on</th><th>Proceeds</th><th></th></tr></thead>
+      <tbody>
+      {% for a in ca_assets %}
+        <form method="post" action="{{ url_for('engtax.save_disposal', engagement_id=engagement.id, asset_id=a.id) }}" class="inline">
+        <tr>
+          <td>{{ a.asset_code or '' }} {{ a.description }}</td>
+          <td><input type="date" name="tax_disposed_on" value="{{ a.tax_disposed_on.strftime('%Y-%m-%d') if a.tax_disposed_on else '' }}" style="width:128px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="tax_disposal_proceeds" value="{{ a.tax_disposal_proceeds if a.tax_disposal_proceeds is not none else '' }}" style="width:110px;margin-bottom:0;"></td>
+          <td><button type="submit" class="btn small secondary">Save</button></td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Allowance schedule{% if ca_target_end %} - year ending {{ ca_target_end.strftime('%d %b %Y') }}{% endif %}</h3>
+    {% if ca_result and ca_result.rows %}
+    <div class="stat-grid">
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(ca_result.total.allowance) }}</div><div class="label">Capital allowances for the year</div></div>
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(ca_result.total.recoupment) }}</div><div class="label">Recoupment</div></div>
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(ca_result.total.scrapping) }}</div><div class="label">Scrapping allowance</div></div>
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(ca_result.tax_value_end) }}</div><div class="label">Tax value at the year end</div></div>
+    </div>
+    <table style="font-size:12px;">
+      <thead><tr><th>Asset</th><th>Class</th><th>Allowance</th><th class="text-right">Cost</th><th class="text-right">Opening tax value</th><th class="text-right">Additions</th><th class="text-right">Allowance</th><th class="text-right">Recoupment</th><th class="text-right">Scrapping</th><th class="text-right">Closing tax value</th></tr></thead>
+      <tbody>
+      {% for r in ca_result.rows %}
+        <tr>
+          <td>{{ r.asset_code or '' }} {{ r.description }}{% if r.disposed_on %}<div class="muted" style="font-size:11px;">Sold {{ r.disposed_on.strftime('%d %b %Y') }} for {{ '%.2f'|format(r.proceeds) }}</div>{% endif %}</td>
+          <td>{{ r.class_name }}</td>
+          <td>{{ ca_method_labels.get(r.method, r.method) }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.cost) }}{% if r.capped %}<div class="muted" style="font-size:11px;">capped at {{ '%.2f'|format(r.tax_cost) }}</div>{% endif %}</td>
+          <td class="text-right">{{ '%.2f'|format(r.opening) }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.additions) }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.allowance) }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.recoupment) }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.scrapping) }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.closing) }}</td>
+        </tr>
+      {% endfor %}
+        <tr>
+          <td colspan="3"><strong>Total</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.cost) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.opening) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.additions) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.allowance) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.recoupment) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.scrapping) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.closing) }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:11.5px;margin-top:8px;">A gain on a sale above cost is a capital gains tax matter and is not included here. An allowance never exceeds the tax value left.</p>
+
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e5e5;">
+      {% if ca_posted %}
+      <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Posted to the Income Tax Computation: {% for l in ca_posted %}{{ l.description }} ({{ '%.2f'|format(l.amount) }}){% if not loop.last %}; {% endif %}{% endfor %}.
+        {% if ca_stale %}<strong>The schedule has changed since - post again.</strong>{% endif %}</p>
+      {% endif %}
+      <form method="post" action="{{ url_for('engtax.post_to_income_tax', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn gold small">Post to the Income Tax Computation</button></form>
+      <form method="post" action="{{ url_for('engtax.use_tax_base', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn secondary small">Use the tax value as the Deferred Tax PPE tax base</button></form>
+      <p class="muted" style="font-size:11.5px;margin-top:6px;">Posting adds the depreciation charged in the accounts back, takes the allowances off and handles any recoupment or scrapping allowance. Posting again replaces only the lines this schedule posted before.</p>
+    </div>
+    {% else %}
+    <div class="empty-state">{% if not ca_target_end %}Enter the engagement's period end first.{% else %}No assets in the schedule for this year yet. Add dated assets above - an asset acquired after the year end, or sold in an earlier year, is not shown.{% endif %}</div>
+    {% endif %}
+  </div>
+{% endif %}
+
+{% elif tab == 'qpd' %}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off first.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Provisional Tax (QPD)</h3>
+    <p class="muted" style="font-size:12.5px;">
+      The client's quarterly payment dates for the tax year: the estimated annual tax is split with the firm-wide instalment structure, exactly as on the client's QPD page. Here the estimate can be taken straight from this engagement's Income Tax Computation, so the two never disagree.
+    </p>
+    <form method="get" class="form-row" style="align-items:flex-end;">
+      <input type="hidden" name="tab" value="qpd">
+      <div><label for="qpd_year">Tax year</label><input type="number" id="qpd_year" name="tax_year" value="{{ qpd_tax_year }}" style="width:100px;"></div>
+      <div><button type="submit" class="btn small secondary" style="margin-bottom:14px;">Show</button></div>
+      <div><a href="{{ url_for('qpd.view_qpd', client_id=engagement.client_id, tax_year=qpd_tax_year) }}" class="btn small secondary" style="margin-bottom:14px;">Open the full QPD page</a></div>
+    </form>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">This engagement's computation</h3>
+    {% if qpd_result is none %}
+    <div class="empty-state">There is no Income Tax Computation to work from yet. Enter the profit before tax on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a> tab first.</div>
+    {% else %}
+    <div class="stat-grid">
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(qpd_result.taxable_income) }}</div><div class="label">Taxable income</div></div>
+      <div class="stat-card"><div class="num">{{ qpd_result.tax_rate_percent if qpd_result.tax_rate_percent is not none else '-' }}%</div><div class="label">Tax rate</div></div>
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(qpd_result.total_tax_charge) }}</div><div class="label">Tax charge (incl. AIDS levy)</div></div>
+    </div>
+    {% if not qpd_result.tax_rate_percent %}
+    <p class="muted" style="font-size:12.5px;">Enter the corporate tax rate on the Income Tax Computation first - the app never assumes one.</p>
+    {% elif qpd_can_manage %}
+    <form method="post" action="{{ url_for('engtax.qpd_use_computation', engagement_id=engagement.id) }}" class="inline">
+      <input type="hidden" name="tax_year" value="{{ qpd_tax_year }}">
+      <button type="submit" class="btn gold small">Use it as the {{ qpd_tax_year }} QPD estimate and compute the instalments</button>
+    </form>
+    {% else %}
+    <p class="muted" style="font-size:12.5px;">You do not have permission to change QPD estimates.</p>
+    {% endif %}
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">{{ qpd_tax_year }} estimate and instalments</h3>
+    {% if not qpd_estimate %}
+    <div class="empty-state">No QPD estimate for {{ qpd_tax_year }} yet.</div>
+    {% else %}
+    <div class="stat-grid">
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(qpd_estimate.estimated_annual_taxable_income or 0) }}</div><div class="label">Estimated taxable income</div></div>
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(qpd_estimate.estimated_annual_tax_charge or 0) }}</div><div class="label">Estimated annual tax</div></div>
+    </div>
+    {% if qpd_out_of_step %}
+    <div class="flash warning" style="margin:8px 0;">The estimate differs from this engagement's Income Tax Computation ({{ '%.2f'|format(qpd_result.total_tax_charge) }}). Use the button above to bring it in line.</div>
+    {% endif %}
+    {% if qpd_instalments %}
+    <table>
+      <thead><tr><th>Instalment</th><th>Due</th><th class="text-right">Cumulative %</th><th class="text-right">Amount</th><th>Paid</th></tr></thead>
+      <tbody>
+      {% for r in qpd_instalments %}
+        <tr>
+          <td>{{ r.label }}</td>
+          <td>{{ r.due_date.strftime('%d %b %Y') if r.due_date else '-' }}</td>
+          <td class="text-right">{{ r.cumulative_pct }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.computed_amount or 0) }}</td>
+          <td>{% if r.is_paid %}<span class="badge status-Completed">{{ '%.2f'|format(r.paid_amount or 0) }} on {{ r.paid_date.strftime('%d %b %Y') if r.paid_date else '' }}</span>{% else %}<span class="muted">Not paid</span>{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <p class="muted" style="font-size:11.5px;">Payments are recorded on the <a href="{{ url_for('qpd.view_qpd', client_id=engagement.client_id, tax_year=qpd_tax_year) }}">client's QPD page</a>.</p>
+    {% else %}
+    <div class="empty-state">No instalments computed yet.{% if not qpd_has_structure %} No QPD instalment structure is set up yet, so none can be computed.{% endif %}</div>
+    {% endif %}
+    {% endif %}
+  </div>
+{% endif %}
+
 {% elif tab == 'registry_forms' %}
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>

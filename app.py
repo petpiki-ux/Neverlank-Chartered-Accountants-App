@@ -233,6 +233,8 @@ def _add_missing_columns():
         # _update_last_seen - drives the Messages "who's in the app" online
         # indicator.
         "user": [("last_seen_at", "DATETIME")],
+        "income_tax_computation": [("profit_before_tax_manual", "FLOAT")],
+        "ppe_asset": [("tax_disposed_on", "DATE"), ("tax_disposal_proceeds", "FLOAT")],
         "message_recipient": [("recalled_at", "DATETIME"), ("deleted_at", "DATETIME")],
         "engagement": [
             ("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0"),
@@ -743,6 +745,7 @@ def create_app():
     from receipts import receipts_bp
     from advances import advances_bp
     from prohibited_deductions import prohibited_bp
+    from engagement_tax import engtax_bp
     from firm_finance import firmfs_bp
     from learning import learning_bp
     from credit_notes import credit_notes_bp
@@ -782,6 +785,7 @@ def create_app():
     app.register_blueprint(advances_bp)
     app.register_blueprint(learning_bp)
     app.register_blueprint(prohibited_bp)
+    app.register_blueprint(engtax_bp)
     app.register_blueprint(firmfs_bp)
     app.register_blueprint(credit_notes_bp)
     app.register_blueprint(corpfin_bp)

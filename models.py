@@ -2044,6 +2044,15 @@ class Engagement(db.Model):
         return self.type in TAX_ENGAGEMENT_TYPES or bool(self.tax_service_list)
 
     @property
+    def is_tax_advisory_type(self):
+        """A dedicated Tax Advisory engagement (or one of the two legacy tax
+        types), as opposed to another engagement type that merely has a Tax
+        service ticked. These get the lean tax tab set - no Analytical
+        Review, Risk Assessment, Trial Balance or Substantive Procedures -
+        and the tax-head Execution Plan sits on the Tax tab itself."""
+        return self.type in TAX_ENGAGEMENT_TYPES
+
+    @property
     def has_tax_advisory(self):
         """Whether the Tax tab's advisory-only sections (Technical Research
         Log, Structuring Options Analysis, Tax Dispute Management - Module
@@ -4350,6 +4359,10 @@ class IncomeTaxComputation(db.Model):
     tax_rate_percent = db.Column(db.Float)
     aids_levy_percent = db.Column(db.Float)
     tax_loss_brought_forward = db.Column(db.Float, default=0.0)
+    # Profit before tax typed in by the preparer, used only when the engagement
+    # has no Trial Balance to take it from (a Tax Advisory engagement works from
+    # the client's finished accounts and has no Trial Balance tab).
+    profit_before_tax_manual = db.Column(db.Float)
     notes = db.Column(db.Text)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -5090,6 +5103,10 @@ class PPEAsset(db.Model):
     current_year_depreciation = db.Column(db.Float, default=0.0)
     disposal_cost = db.Column(db.Float, default=0.0)
     disposal_accumulated_depreciation = db.Column(db.Float, default=0.0)
+    # For the Capital Allowances tab only: when the asset was sold and what it
+    # fetched, which the allowance schedule needs (recoupment / scrapping).
+    tax_disposed_on = db.Column(db.Date)
+    tax_disposal_proceeds = db.Column(db.Float)
     order = db.Column(db.Integer, default=0)
 
     engagement = db.relationship(
@@ -5114,6 +5131,31 @@ class PPEAsset(db.Model):
 # named separately since the two lists are conceptually different things
 # and CHECKLIST_STATUSES may not always evolve in lockstep with this one.
 AUDIT_STRATEGY_PHASE_STATUSES = CHECKLIST_STATUSES
+
+
+
+class EngagementTaxAssetRule(db.Model):
+    """The capital allowance treatment of one asset class on a client
+    engagement - the same fields as the firm's own FirmTaxAssetRule, so the one
+    engine in firm_tax.py works the schedule for both. Starter rules are
+    "not verified" until the Partner has checked them against the Income Tax
+    Act. One per (engagement, class)."""
+    __tablename__ = "engagement_tax_asset_rule"
+    __table_args__ = (db.UniqueConstraint("engagement_id", "asset_class_id", name="uq_eng_tax_rule"),)
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    asset_class_id = db.Column(db.Integer, db.ForeignKey("ppe_asset_class.id"), nullable=False)
+    method = db.Column(db.String(10), nullable=False, default="WT_SL")   # NONE, WT_SL, WT_RB, SIA
+    wt_rate_percent = db.Column(db.Float, default=0.0)
+    sia_percent = db.Column(db.Float, default=25.0)
+    sia_years = db.Column(db.Integer, default=4)
+    sia_first_percent = db.Column(db.Float)
+    cost_cap = db.Column(db.Float)
+    prorata_first_year = db.Column(db.Boolean, default=False, nullable=False)
+    verified = db.Column(db.Boolean, default=False, nullable=False)
+    note = db.Column(db.String(250))
+    engagement = db.relationship("Engagement", backref=db.backref("tax_asset_rules", lazy=True, cascade="all, delete-orphan"))
+    asset_class = db.relationship("PPEAssetClass", backref=db.backref("tax_rule", uselist=False, cascade="all, delete-orphan"))
 
 
 class AuditStrategy(db.Model):

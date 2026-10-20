@@ -28,6 +28,269 @@
     {% if ns.open %}</optgroup>{% endif %}
   </select>
 {% endmacro %}
+{% macro vat_register_section() %}
+  <!-- ---------- VAT Invoice Register & Input/Output Tax Working Paper ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Monthly VAT Computations <span class="muted" style="font-size:12px;font-weight:400;">VAT register &amp; Input/Output Tax</span></h3>
+    <p class="muted" style="font-size:11.5px;">Nothing here is a fabricated/hardcoded VAT rate - every invoice uses a rate you (or a colleague) entered on the <a href="{{ url_for('tax.list_vat_rates') }}">firm-wide VAT Rates</a> page (including any rate lower than Standard), or the invoice's own stated VAT amount typed in directly.</p>
+
+{# ---- No month opened: the list of VAT months (documents stay hidden) ---- #}
+    {% if not vat_selected_period %}
+    <p class="muted" style="font-size:12px;">Each VAT month is computed on its own. Open a month to see its Output Tax / Input Tax computation and the documents behind it. When the computation is final, mark the month as <strong>Computation done</strong> - it is then locked until a Supervisor, Partner or Admin reopens it.</p>
+    {% if vat_periods %}
+    <table style="margin-bottom:12px;">
+      <thead><tr><th>VAT month</th><th>Status</th><th class="text-right">Documents</th><th>Net VAT <span class="muted" style="font-size:11px;">(per currency of trade)</span></th><th></th></tr></thead>
+      <tbody>
+        {% for p in vat_periods %}
+        <tr>
+          <td><strong>{{ p.label }}</strong></td>
+          <td>
+            {% if p.is_done %}
+            <span class="badge" style="background:#2e7d32;color:#fff;">Computation done</span>
+            <div class="muted" style="font-size:11px;">{{ p.row.completed_by.name if p.row.completed_by else '—' }}{% if p.row.completed_at %}, {{ (p.row.completed_at|cat).strftime('%d %b %Y %H:%M') }}{% endif %}</div>
+            {% else %}
+            <span class="badge" style="background:#b8923a;color:#fff;">In progress</span>
+            {% if p.row and p.row.reopened_at %}<div class="muted" style="font-size:11px;">Reopened {{ (p.row.reopened_at|cat).strftime('%d %b %Y') }}{% if p.row.reopened_by %} by {{ p.row.reopened_by.name }}{% endif %}</div>{% endif %}
+            {% endif %}
+          </td>
+          <td class="text-right">{{ p.count }}</td>
+          <td>
+            {% for cur, sm in p.by_currency.items() %}
+            <div>{{ cur }} {{ '%.2f'|format(sm.net_position|abs) }} <span class="muted" style="font-size:11px;">{% if sm.net_position > 0 %}payable{% elif sm.net_position < 0 %}refundable{% else %}nil{% endif %}</span></div>
+            {% else %}<span class="muted">—</span>{% endfor %}
+          </td>
+          <td><a class="btn small secondary" href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab=vat_home_tab, vat_period=p.key) }}">Open</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No VAT documents captured yet.</div>
+    {% endif %}
+    {% if vat_undated_docs %}
+    <p style="font-size:12.5px;"><strong>{{ vat_undated_docs|length }} document(s) have no date</strong> and so belong to no VAT month.
+      <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab=vat_home_tab, vat_period='undated') }}">Open them</a> to review.</p>
+    {% endif %}
+
+    {% if vat_import_batches %}
+    <p style="font-size:12.5px;margin-bottom:4px;"><strong>Imported schedules</strong></p>
+    <table style="margin-bottom:12px;">
+      <thead><tr><th>Schedule type</th><th>Currency</th><th>File</th><th>Rows</th><th>Skipped</th><th>Imported by</th><th>Date</th><th></th></tr></thead>
+      <tbody>
+        {% for b in vat_import_batches %}
+        <tr>
+          <td>{{ b.kind_label }}</td>
+          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.set_vat_import_batch_currency', batch_id=b.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change the currency of this whole schedule">{% for cur in vat_currencies %}<option value="{{ cur }}" {% if (b.currency or vat_default_currency) == cur %}selected{% endif %}>{{ cur }}</option>{% endfor %}</select></form>{% else %}{{ b.currency or vat_default_currency }}{% endif %}</td>
+          <td>{{ b.original_filename or '—' }}</td>
+          <td>{{ b.row_count }}</td>
+          <td>{{ b.skipped_row_count or 0 }}</td>
+          <td>{{ b.imported_by.name if b.imported_by else '—' }}</td>
+          <td>{{ (b.imported_at|cat).strftime('%d %b %Y') if b.imported_at else '—' }}</td>
+          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.delete_vat_import_batch', batch_id=b.id) }}" class="inline" onsubmit="return confirm('Delete this import batch and every invoice it created?');"><button type="submit" class="btn small danger">Delete batch</button></form>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+
+    {# ---- A month is open: its computation, status and documents ---- #}
+    {% else %}
+    <p style="margin:0 0 8px 0;"><a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab=vat_home_tab) }}">&larr; All VAT months</a></p>
+    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:8px;">
+      <div>
+        <h4 style="margin:0;">{{ vat_selected_period.label }}
+          {% if vat_selected_period.undated %}
+          {% elif vat_selected_period.is_done %}<span class="badge" style="background:#2e7d32;color:#fff;">Computation done</span>
+          {% else %}<span class="badge" style="background:#b8923a;color:#fff;">In progress</span>{% endif %}
+        </h4>
+        {% if vat_selected_period.is_done %}
+        <div class="muted" style="font-size:12px;">Marked done by {{ vat_selected_period.row.completed_by.name if vat_selected_period.row.completed_by else '—' }}{% if vat_selected_period.row.completed_at %} on {{ (vat_selected_period.row.completed_at|cat).strftime('%d %b %Y at %H:%M') }}{% endif %}. This month is locked: documents dated in it cannot be added, deleted or imported until it is reopened.</div>
+        {% elif vat_selected_period.undated %}
+        <div class="muted" style="font-size:12px;">These documents have no date, so they are in no VAT month and no month's computation includes them.</div>
+        {% else %}
+        <div class="muted" style="font-size:12px;">Still being computed - documents dated in {{ vat_selected_period.label }} can be added, deleted or imported.{% if vat_selected_period.row and vat_selected_period.row.reopened_at %} Reopened {{ (vat_selected_period.row.reopened_at|cat).strftime('%d %b %Y') }}{% if vat_selected_period.row.reopened_by %} by {{ vat_selected_period.row.reopened_by.name }}{% endif %}{% if vat_selected_period.row.reopen_reason %}: {{ vat_selected_period.row.reopen_reason }}{% endif %}.{% endif %}</div>
+        {% endif %}
+      </div>
+      {% if not vat_selected_period.undated %}
+      <div>
+        {% if vat_selected_period.is_done %}
+          {% if user_has_permission(current_user, 'reopen_vat_periods') %}
+          <form method="post" action="{{ url_for('tax.reopen_vat_period', engagement_id=engagement.id, period_key=vat_selected_period.key) }}" class="inline" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+            <input type="text" name="reason" placeholder="Reason for reopening *" required maxlength="300" style="min-width:200px;">
+            <button type="submit" class="btn small secondary">Reopen {{ vat_selected_period.label }}</button>
+          </form>
+          {% else %}
+          <span class="muted" style="font-size:11.5px;">Only a Supervisor, Partner or Admin can reopen a completed month.</span>
+          {% endif %}
+        {% else %}
+          <form method="post" action="{{ url_for('tax.mark_vat_period_done', engagement_id=engagement.id, period_key=vat_selected_period.key) }}" class="inline" onsubmit="return confirm('Mark the {{ vat_selected_period.label }} VAT computation as done? Documents dated in this month will be locked until it is reopened.');">
+            <button type="submit" class="btn small gold">Mark computation as done</button>
+          </form>
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+
+    {% if vat_return_due %}
+    <div style="margin:8px 0;padding:9px 12px;border:1px solid #d9d2c0;border-radius:6px;font-size:12.5px;background:rgba(184,146,58,.07);">
+      <strong>Return and payment due {{ vat_return_due.strftime('%d %B %Y') }}</strong> <span class="muted">({{ act_ref('28(1)', text='VAT Act s28(1)', code='vat') }}: the 25th of the month after the tax period; a two-month period is due the 25th after its second month, {{ act_ref('27(1)', text='s27', code='vat') }}).</span>
+      {% if vat_month_checks %}
+      <div style="margin-top:6px;"><strong>Points to look at in this month</strong> <span class="muted" style="font-size:11.5px;">(prompts from the VAT Act; nothing is changed for you)</span></div>
+      <ul style="margin:4px 0 0 18px;padding:0;">
+        {% for f in vat_month_checks %}<li style="margin-bottom:3px;{% if f.level == 'note' %}color:#6b6b6b;{% endif %}">{{ f.text }} <span class="muted" style="font-size:11.5px;">[{{ act_ref(f.ref, text='s' ~ f.ref, code='vat') }}]</span></li>{% endfor %}
+      </ul>
+      {% endif %}
+      <div class="muted" style="font-size:11.5px;margin-top:6px;"><a href="{{ url_for('tax.vat_act_check') }}">The VAT Act beside this register</a> &middot; <a href="{{ url_for('tax.act_contents', code='vat') }}">VAT Act, section by section</a></div>
+    </div>
+    {% endif %}
+
+    <p class="muted" style="font-size:11.5px;">ZIMRA requires VAT to be accounted for and paid in the currency of trade, so each currency below is its own VAT working paper and net position - ZWG and USD are never added together or set off against each other.</p>
+        {% for cur, sm in vat_by_currency.items() %}
+    <div class="card" style="margin:12px 0;padding:12px;border-left:4px solid #b8923a;">
+    <h4 style="margin:0 0 8px 0;">{{ cur }} VAT - {% if cur == 'ZWG' %}Zimbabwe Gold (ZiG){% else %}US dollars{% endif %}</h4>
+    <div class="form-row" style="flex-wrap:wrap;margin-bottom:10px;">
+      <div class="card" style="flex:1;min-width:160px;padding:10px;">
+        <div class="muted" style="font-size:11px;">Net Output Tax</div>
+        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.output_tax) }}</div>
+        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(sm.output_taxable_excl_exempt) }} net taxable sales (after credit notes){% if sm.output_zero_rated_taxable %}, of which {{ '%.2f'|format(sm.output_zero_rated_taxable) }} zero-rated{% endif %}</div>
+        {% if sm.output_exempt_taxable %}<div class="muted" style="font-size:11px;">plus {{ '%.2f'|format(sm.output_exempt_taxable) }} exempt sales, not taxable supplies ({{ act_ref('11', text='s11', code='vat') }})</div>{% endif %}
+      </div>
+      <div class="card" style="flex:1;min-width:160px;padding:10px;">
+        <div class="muted" style="font-size:11px;">Net Input Tax</div>
+        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.input_tax_claimable) }}</div>
+        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(sm.input_taxable) }} net taxable purchases &amp; imports (after credit notes)</div>
+        {% if sm.input_tax_denied %}<div class="muted" style="font-size:11px;">{{ '%.2f'|format(sm.input_tax) }} captured less {{ '%.2f'|format(sm.input_tax_denied) }} not deductible ({{ act_ref('16(2)', text='s16(2)', code='vat') }})</div>{% endif %}
+      </div>
+      <div class="card" style="flex:1;min-width:160px;padding:10px;">
+        <div class="muted" style="font-size:11px;">Net VAT position</div>
+        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.net_position|abs) }}</div>
+        <div class="muted" style="font-size:11px;">{% if sm.net_position > 0 %}Payable to ZIMRA in {{ cur }}{% elif sm.net_position < 0 %}Refundable{% else %}Nil{% endif %}</div>
+      </div>
+    </div>
+
+    {% set vb = sm.buckets %}
+    <p style="font-size:12.5px;margin-bottom:4px;"><strong>{{ cur }} VAT working paper - each kind shown separately</strong></p>
+    <table style="margin-bottom:14px;">
+      <thead><tr><th>Output Tax (sales)</th><th class="text-right">Docs</th><th class="text-right">Taxable value</th><th class="text-right">VAT</th></tr></thead>
+      <tbody>
+        <tr><td>Sales invoices</td><td class="text-right">{{ vb.output_invoice.count }}</td><td class="text-right">{{ '%.2f'|format(vb.output_invoice.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.output_invoice.vat) }}</td></tr>
+        <tr><td>Export sales <span class="muted" style="font-size:11px;">(zero-rated)</span></td><td class="text-right">{{ vb.export_sale.count }}</td><td class="text-right">{{ '%.2f'|format(vb.export_sale.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.export_sale.vat) }}</td></tr>
+        <tr><td>Less: credit notes issued</td><td class="text-right">{{ vb.output_credit_note.count }}</td><td class="text-right">({{ '%.2f'|format(vb.output_credit_note.taxable) }})</td><td class="text-right">({{ '%.2f'|format(vb.output_credit_note.vat) }})</td></tr>
+        <tr style="font-weight:600;"><td>Net Output Tax</td><td></td><td class="text-right">{{ '%.2f'|format(sm.output_taxable) }}</td><td class="text-right">{{ '%.2f'|format(sm.output_tax) }}</td></tr>
+      </tbody>
+      <thead><tr><th>Input Tax (purchases &amp; imports)</th><th class="text-right">Docs</th><th class="text-right">Taxable value</th><th class="text-right">VAT</th></tr></thead>
+      <tbody>
+        <tr><td>Purchase/expense invoices</td><td class="text-right">{{ vb.input_invoice.count }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.vat) }}</td></tr>
+        <tr><td>Bills of Entry <span class="muted" style="font-size:11px;">(import VAT{% if vb.bill_of_entry.duty %}; customs duty {{ '%.2f'|format(vb.bill_of_entry.duty) }}{% endif %})</span></td><td class="text-right">{{ vb.bill_of_entry.count }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.vat) }}</td></tr>
+        <tr><td>Less: credit notes received</td><td class="text-right">{{ vb.input_credit_note.count }}</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.taxable) }})</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.vat) }})</td></tr>
+        <tr style="font-weight:600;"><td>Net Input Tax as captured</td><td></td><td class="text-right">{{ '%.2f'|format(sm.input_taxable) }}</td><td class="text-right">{{ '%.2f'|format(sm.input_tax) }}</td></tr>
+        {% if sm.input_tax_denied %}<tr><td>Less: input tax not deductible <span class="muted" style="font-size:11px;">({{ sm.input_tax_denied_count }} document(s), {{ act_ref('16(2)', text='section 16(2)', code='vat') }})</span></td><td></td><td></td><td class="text-right">({{ '%.2f'|format(sm.input_tax_denied) }})</td></tr>
+        <tr style="font-weight:600;"><td>Input Tax claimable</td><td></td><td></td><td class="text-right">{{ '%.2f'|format(sm.input_tax_claimable) }}</td></tr>{% endif %}
+      </tbody>
+      <tbody>
+        <tr style="font-weight:700;"><td colspan="3">Net VAT {% if sm.net_position > 0 %}payable to ZIMRA in {{ cur }}{% elif sm.net_position < 0 %}refundable{% else %}position (nil){% endif %}</td><td class="text-right">{{ '%.2f'|format(sm.net_position|abs) }}</td></tr>
+      </tbody>
+    </table>
+
+
+    <details {% if not vat_selected_period.is_done %}open{% endif %} style="margin-top:8px;">
+    <summary style="cursor:pointer;font-size:12.5px;font-weight:600;">{{ cur }} documents behind this computation{% if vat_selected_period.is_done %} (locked){% endif %}</summary>
+    {% for code, label, kdir, ktype in vat_document_kinds %}
+    {% set items = vat_invoices_by_currency_kind[cur].get(code, []) %}
+    {% if items %}
+    <p style="font-size:12.5px;margin:12px 0 4px 0;"><strong>{{ label }}</strong> <span class="muted" style="font-size:11px;">({{ items|length }})</span></p>
+    <table style="margin-bottom:8px;">
+      <thead><tr><th>Date</th><th>{% if ktype == 'Bill of Entry' %}Bill of Entry #{% elif ktype == 'Credit Note' %}Credit note #{% else %}Invoice #{% endif %}</th><th>{% if ktype == 'Credit Note' %}Original invoice / ref{% elif ktype in ('Bill of Entry', 'Export Sale') %}Customs / export ref{% else %}Ref{% endif %}</th><th>{% if kdir == 'Output' %}Customer{% else %}Supplier{% endif %}</th><th>{% if ktype == 'Bill of Entry' %}VAT value{% else %}Taxable{% endif %}</th>{% if ktype == 'Bill of Entry' %}<th>Duty</th>{% endif %}<th>Rate</th><th>VAT</th><th>Total</th><th>Src</th><th>Currency</th><th></th></tr></thead>
+      <tbody>
+        {% for inv in items %}
+        <tr>
+          <td>{{ inv.invoice_date.strftime('%d %b %Y') if inv.invoice_date else '—' }}</td>
+          <td>{{ inv.invoice_number or '—' }}</td>
+          <td>{{ inv.related_reference or '—' }}</td>
+          <td>{{ inv.counterparty_name or '—' }}{% if inv.description %}<div class="muted" style="font-size:11px;">{{ inv.description }}</div>{% endif %}</td>
+          <td>{{ '%.2f'|format(inv.taxable_amount) }}</td>
+          {% if ktype == 'Bill of Entry' %}<td>{{ ('%.2f'|format(inv.customs_duty)) if inv.customs_duty is not none else '—' }}</td>{% endif %}
+          <td>{{ ('%.2f'|format(inv.vat_rate_percent_used) + '%') if inv.vat_rate_percent_used is not none else '—' }}</td>
+          <td>{{ '%.2f'|format(inv.vat_amount) }}</td>
+          <td>{{ '%.2f'|format(inv.total_amount) }}{% if inv.input_tax_denied %}<div style="font-size:11px;color:#a33;">Not deductible: {{ vat_denial_labels.get(inv.denial_ground, 'see notes') }}</div>{% endif %}</td>
+          <td class="muted" style="font-size:11px;">{{ inv.source }}{% if kdir == 'Input' and vat_selected_period and not vat_selected_period.is_done %}
+            <form method="post" action="{{ url_for('tax.set_vat_input_denial', invoice_id=inv.id) }}" class="inline" style="display:block;margin-top:3px;">
+              {% if inv.input_tax_denied %}<input type="hidden" name="action" value="restore"><button type="submit" class="btn small secondary" title="Put this document's VAT back into the Input Tax claim">Claim again</button>
+              {% else %}<select name="ground" title="Input tax the VAT Act (section 16(2)) does not allow">{% for gk, gl, gr in vat_denial_grounds %}<option value="{{ gk }}">{{ gl }} (s{{ gr }})</option>{% endfor %}</select><button type="submit" class="btn small secondary" title="Leave this document's VAT out of the claim">Not deductible</button>{% endif %}
+            </form>{% endif %}</td>
+          <td>{% if vat_selected_period.is_done %}{{ inv.currency or vat_default_currency }}{% else %}<form method="post" action="{{ url_for('tax.set_vat_invoice_currency', invoice_id=inv.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change currency of trade">{% for c2 in vat_currencies %}<option value="{{ c2 }}" {% if (inv.currency or vat_default_currency) == c2 %}selected{% endif %}>{{ c2 }}</option>{% endfor %}</select></form>{% endif %}</td>
+          <td>{% if vat_selected_period.is_done %}<span class="muted" style="font-size:11px;">Locked</span>{% else %}<form method="post" action="{{ url_for('tax.delete_vat_invoice', invoice_id=inv.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% endif %}
+    {% endfor %}
+    </details>
+
+    </div>
+    {% endfor %}
+    {% endif %}
+
+    <form method="post" action="{{ url_for('tax.add_vat_invoice', engagement_id=engagement.id) }}" class="form-row" style="flex-wrap:wrap;margin-bottom:14px;">
+      <div>
+        <label for="vat_kind">Capture *</label>
+        <select id="vat_kind" name="kind" required>
+          <option value="">—</option>
+          {% for code, label, kdir, ktype in vat_document_kinds %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="vat_currency">Currency of trade *</label>
+        <select id="vat_currency" name="currency" required>
+          {% for cur in vat_currencies %}<option value="{{ cur }}" {% if cur == vat_default_currency %}selected{% endif %}>{{ cur }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="vat_invoice_date">Date</label><input type="date" id="vat_invoice_date" name="invoice_date"></div>
+      <div><label for="vat_invoice_number">Document # (invoice / credit note / Bill of Entry)</label><input type="text" id="vat_invoice_number" name="invoice_number"></div>
+      <div><label for="vat_related_reference">Original invoice # (credit note) / customs or export entry ref</label><input type="text" id="vat_related_reference" name="related_reference"></div>
+      <div><label for="vat_counterparty_name">Customer / supplier</label><input type="text" id="vat_counterparty_name" name="counterparty_name"></div>
+      <div><label for="vat_description">Description</label><input type="text" id="vat_description" name="description"></div>
+      <div><label for="vat_taxable_amount">Taxable amount (excl. VAT) * <span class="muted" style="font-size:10.5px;">(Bill of Entry: VAT value; credit note: as printed, positive)</span></label><input type="number" step="0.01" id="vat_taxable_amount" name="taxable_amount" required></div>
+      <div><label for="vat_customs_duty">Customs duty (Bill of Entry only)</label><input type="number" step="0.01" id="vat_customs_duty" name="customs_duty"></div>
+      <div>
+        <label for="vat_rate_id">VAT rate (firm-wide table)</label>
+        <select id="vat_rate_id" name="vat_rate_id">
+          <option value="">— use VAT amount below instead —</option>
+          {% for r in current_vat_rates %}{% if r.is_current %}<option value="{{ r.id }}">{{ r.label }}</option>{% endif %}{% endfor %}
+        </select>
+      </div>
+      <div><label for="vat_amount">or VAT amount directly <span class="muted" style="font-size:10.5px;">(Bill of Entry: import VAT paid; export sales are always 0)</span></label><input type="number" step="0.01" id="vat_amount" name="vat_amount"></div>
+      <div><button type="submit" class="btn small gold">Add to VAT register</button></div>
+    </form>
+    <p class="muted" style="font-size:11.5px;margin-top:-6px;">A document is placed in the VAT month of its date. If that month is marked <em>Computation done</em> it is locked and the document will be refused until the month is reopened.</p>
+
+    {% if user_has_permission(current_user, 'manage_vat_schedules') %}
+    <p style="font-size:12.5px;margin-bottom:4px;"><strong>Import an already-prepared Output/Input Tax schedule</strong></p>
+    <p class="muted" style="font-size:11.5px;">Upload an Excel (.xlsx/.xls) or CSV schedule - the app suggests which column is the date, invoice number, customer/supplier, taxable amount, VAT amount, etc.; you review and confirm the mapping before anything is imported.</p>
+    <form method="post" action="{{ url_for('tax.stage_vat_schedule_import', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="flex-wrap:wrap;">
+      <div>
+        <label for="vat_import_kind">Schedule type *</label>
+        <select id="vat_import_kind" name="kind" required>
+          <option value="">—</option>
+          {% for code, label, kdir, ktype in vat_document_kinds %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+        </select>
+      </div>
+      <div>
+        <label for="vat_import_currency">Currency of trade *</label>
+        <select id="vat_import_currency" name="currency" required>
+          {% for cur in vat_currencies %}<option value="{{ cur }}" {% if cur == vat_default_currency %}selected{% endif %}>{{ cur }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="vat_import_file">Schedule file *</label><input type="file" id="vat_import_file" name="file" accept=".xlsx,.xls,.csv" required></div>
+      <div><button type="submit" class="btn small secondary">Upload &amp; map columns</button></div>
+    </form>
+    {% else %}
+    <p class="muted" style="font-size:11.5px;">Uploading and mapping Output/Input VAT schedules is limited to Supervisors, Partners and Admins. You can still capture individual VAT documents above, or ask a supervisor to upload the schedule.</p>
+    {% endif %}
+  </div>
+
+{% endmacro %}
 {% macro filed_workpapers(kind) %}
   {% set docs = filed_workpapers_by_kind.get(kind, []) %}
   {% if docs %}
@@ -116,12 +379,15 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}" class="{% if tab=='income_tax' %}active{% endif %}">Income Tax Computation</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}" class="{% if tab=='deferred_tax' %}active{% endif %}">Deferred Tax Computation</a>
   {% endif %}
-  {% if engagement.is_tax_advisory_type %}
+  {% if engagement.has_tax_module %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}" class="{% if tab=='capital_allowances' %}active{% endif %}">Capital Allowances</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='qpd') }}" class="{% if tab=='qpd' %}active{% endif %}">Provisional Tax (QPD)</a>
   {% endif %}
   {% if engagement.has_tax_module %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax') }}" class="{% if tab=='tax' %}active{% endif %}">Tax</a>
+  {% endif %}
+  {% if engagement.shows_vat_tab %}
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='vat') }}" class="{% if tab=='vat' %}active{% endif %}">VAT</a>
   {% endif %}
   {% if engagement.has_accounting_module %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='accounting') }}" class="{% if tab=='accounting' %}active{% endif %}">Accounting</a>
@@ -290,6 +556,8 @@
   {% set known_prefixes = ['Conflict of Interest & Threat Assessment', 'Enhanced Due Diligence (EDD)', 'Legal Framework & Evidence Control', 'Competence & Scope Realism', 'Engagement letter'] %}
   {% elif engagement.type == 'Secretarial' %}
   {% set known_prefixes = ['KYC & Ultimate Beneficial Ownership', 'Authority, Integrity & Client Background', 'Nature of Business & Risk Profile', 'Conflict of Interest & Dispute Assessment', 'Operational Capacity & Commercial Feasibility', 'Engagement letter'] %}
+  {% elif engagement.is_tax_advisory_type %}
+  {% set known_prefixes = ['Taxpayer Identity, KYC & Registrations', 'Tax Compliance History & Standing', 'Scope & Nature of Tax Work', 'Integrity & Tax Risk Appetite', 'Conflicts, Independence & Competence', 'Engagement letter'] %}
   {% else %}
   {% set known_prefixes = ['Background check', 'Independence', 'Predecessor', 'Competence', 'Regulatory', 'Engagement letter'] %}
   {% endif %}
@@ -316,6 +584,8 @@
       Before forensic work starts, the firm works through the Forensic Audit Client Acceptance Questionnaire below and the Engagement Partner records an accept/decline decision.
       {% elif engagement.type == 'Secretarial' %}
       Before corporate secretarial work starts, the firm works through the Secretarial Client Acceptance Checklist below (KYC &amp; Ultimate Beneficial Ownership, Authority/Integrity/Client Background, Nature of Business &amp; Risk Profile, Conflict of Interest &amp; Dispute Assessment, and Operational Capacity &amp; Commercial Feasibility) and the Engagement Partner records an accept/decline decision.
+      {% elif engagement.is_tax_advisory_type %}
+      Before tax work starts, the firm works through the Tax Client Acceptance sections below (Taxpayer Identity, KYC &amp; Registrations; Tax Compliance History &amp; Standing; Scope &amp; Nature of Tax Work; Integrity &amp; Tax Risk Appetite; and Conflicts, Independence &amp; Competence) and the Engagement Partner records an accept/decline decision.
       {% else %}
       Before any audit work starts, the firm works through these six items and the Engagement Partner records an accept/decline decision.
       {% endif %}
@@ -441,6 +711,67 @@
     </div>
   </form>
   {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Operational Capacity & Commercial Feasibility', engagement, acceptance_checklist_responses) }}{% endif %}
+  {% elif engagement.is_tax_advisory_type %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_kyc', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">1. Taxpayer Identity, KYC &amp; Registrations</h3>
+      <p class="muted" style="font-size:12px;">Confirm who the taxpayer is, its TIN and every tax it is registered for (income tax, VAT, PAYE, withholding), and who owns and controls it.</p>
+      <label><input type="checkbox" name="tax_kyc_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.tax_kyc_satisfactory %}checked{% endif %}> Satisfactory - no concerns identified</label>
+      <label for="tax_kyc_notes">Notes</label>
+      <textarea id="tax_kyc_notes" name="tax_kyc_notes" rows="2">{{ client_acceptance.tax_kyc_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Taxpayer Identity, KYC &amp; Registrations</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Taxpayer Identity, KYC & Registrations', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_history', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">2. Tax Compliance History &amp; Standing</h3>
+      <p class="muted" style="font-size:12px;">Check the tax clearance certificate, outstanding or late returns, open ZIMRA audits, assessments and disputes, penalties and interest, and why the client is changing adviser.</p>
+      <label><input type="checkbox" name="tax_history_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.tax_history_satisfactory %}checked{% endif %}> Satisfactory - standing with ZIMRA is acceptable</label>
+      <label for="tax_history_notes">Notes</label>
+      <textarea id="tax_history_notes" name="tax_history_notes" rows="2">{{ client_acceptance.tax_history_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Tax Compliance History &amp; Standing</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Tax Compliance History & Standing', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_scope', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">3. Scope &amp; Nature of Tax Work</h3>
+      <p class="muted" style="font-size:12px;">Which services (compliance, advisory, health check, representation), which tax heads and periods, what we rely on the client for, and whether the deadlines are realistic.</p>
+      <label><input type="checkbox" name="tax_scope_clear" style="width:auto;" {% if client_acceptance and client_acceptance.tax_scope_clear %}checked{% endif %}> Clear - scope, responsibilities and deadlines are agreed</label>
+      <label for="tax_scope_notes">Notes</label>
+      <textarea id="tax_scope_notes" name="tax_scope_notes" rows="2">{{ client_acceptance.tax_scope_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Scope &amp; Nature of Tax Work</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Scope & Nature of Tax Work', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_integrity', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">4. Integrity &amp; Tax Risk Appetite</h3>
+      <p class="muted" style="font-size:12px;">The client's attitude to tax risk: any request for a position we could not defend, undisclosed income, arrangements aimed mainly at saving tax, and willingness to correct and disclose errors.</p>
+      <label><input type="checkbox" name="tax_integrity_acceptable" style="width:auto;" {% if client_acceptance and client_acceptance.tax_integrity_acceptable %}checked{% endif %}> Acceptable - no integrity or tax-risk concerns</label>
+      <label for="tax_integrity_notes">Notes</label>
+      <textarea id="tax_integrity_notes" name="tax_integrity_notes" rows="2">{{ client_acceptance.tax_integrity_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Integrity &amp; Tax Risk Appetite</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Integrity & Tax Risk Appetite', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_conflict_competence', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">5. Conflicts, Independence &amp; Competence</h3>
+      <p class="muted" style="font-size:12px;">Conflicts with other clients or parties, the threats where the firm also audits this client, whether the team has the knowledge and time, and whether our indemnity cover and fee basis suit the work.</p>
+      <label><input type="checkbox" name="tax_conflict_competence_clear" style="width:auto;" {% if client_acceptance and client_acceptance.tax_conflict_competence_clear %}checked{% endif %}> Clear - no conflicts, and the team is competent and available</label>
+      <label for="tax_conflict_competence_notes">Notes</label>
+      <textarea id="tax_conflict_competence_notes" name="tax_conflict_competence_notes" rows="2">{{ client_acceptance.tax_conflict_competence_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Conflicts, Independence &amp; Competence</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Conflicts, Independence & Competence', engagement, acceptance_checklist_responses) }}{% endif %}
   {% else %}
 
   <form method="post" action="{{ url_for('acceptance.save_acceptance_background', engagement_id=engagement.id) }}">
@@ -513,7 +844,7 @@
 
   <div class="card">
     <h3 class="mt-0">{% if engagement.type == 'Investigative Engagement' %}5{% else %}6{% endif %}. Engagement letter</h3>
-    <p class="muted" style="font-size:12px;">Send a formal contract outlining the audit scope, timeline, responsibilities, and fee structure, then secure client sign-off.</p>
+    <p class="muted" style="font-size:12px;">Send a formal contract outlining the {% if engagement.is_tax_advisory_type %}tax services, tax heads and periods, deadlines, client responsibilities, authority to deal with ZIMRA,{% else %}audit scope, timeline, responsibilities,{% endif %} and fee structure, then secure client sign-off.</p>
     {% if client_acceptance and client_acceptance.engagement_letter_document %}
     <p style="font-size:13px;">Signed copy on file: <a href="{{ url_for('engagements.download_document', doc_id=client_acceptance.engagement_letter_document_id) }}">{{ client_acceptance.engagement_letter_document.original_filename }}</a>{% if client_acceptance.engagement_letter_signed_at %} - signed {{ (client_acceptance.engagement_letter_signed_at|cat).strftime('%d %b %Y') }}{% endif %}.</p>
     {% else %}
@@ -2211,7 +2542,7 @@
     </form>
   </div>
 
-  {% if engagement.is_tax_advisory_type %}
+  {% if engagement.has_tax_module %}
   <div class="card" style="border-left:4px solid #b8923a;">
     <h3 class="mt-0" style="font-size:14px;">Capital allowances</h3>
     <p class="muted" style="font-size:12.5px;margin-top:0;">Work the allowances asset by asset, with the firm's own capital allowance engine, and post them here (with the depreciation add-back and any recoupment or scrapping allowance). Lines posted that way are marked below and replaced if you post again.</p>
@@ -2349,7 +2680,7 @@
       <textarea id="dt_notes" name="notes">{{ deferred_tax_computation.notes if deferred_tax_computation else '' }}</textarea>
       <button type="submit" class="btn gold">Save</button>
     </form>
-    {% if engagement.is_tax_advisory_type %}
+    {% if engagement.has_tax_module %}
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e5e5;">
       {% if ca_result %}
       <p class="muted" style="font-size:12.5px;margin:0 0 8px;">The Capital Allowances schedule puts the tax value of the asset register at {{ ca_target_end.strftime('%d %b %Y') }} at <strong>{{ '%.2f'|format(ca_result.tax_value_end) }}</strong>.</p>
@@ -2483,7 +2814,7 @@
       <a href="{{ url_for('tax.act_contents', code='cgt') }}">Capital Gains Tax Act</a> (<a href="{{ url_for('tax.cgt_act_check') }}">beside the app's CGT material</a>).
     </p>
     <p class="muted" style="font-size:11.5px;">
-      The Tax Risk Register below reuses the same likelihood x impact register as everywhere else in this app; the Execution Plan (one section per tax head) {% if engagement.is_tax_advisory_type %}is the next card below{% else %}lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas{% endif %}; CIT/Deferred Tax computations are their own tabs (<a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a>{% if engagement.is_tax_advisory_type %}, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='qpd') }}">Provisional Tax (QPD)</a>{% endif %}); and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Documents</a> tab, tagged with a Filing Index reference like any other working paper.
+      The Tax Risk Register below reuses the same likelihood x impact register as everywhere else in this app; the Execution Plan (one section per tax head) {% if engagement.is_tax_advisory_type %}is the next card below{% else %}lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas{% endif %}; CIT/Deferred Tax computations are their own tabs (<a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a>{% if engagement.has_tax_module %}, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='qpd') }}">Provisional Tax (QPD)</a>{% endif %}); and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Documents</a> tab, tagged with a Filing Index reference like any other working paper.
     </p>
   </div>
 
@@ -2915,266 +3246,14 @@
     {% endif %}
   </div>
 
-  <!-- ---------- VAT Invoice Register & Input/Output Tax Working Paper ---------- -->
+  {% if engagement.shows_vat_tab %}
   <div class="card">
-    <h3 class="mt-0">Monthly VAT Computations <span class="muted" style="font-size:12px;font-weight:400;">VAT register &amp; Input/Output Tax</span></h3>
-    <p class="muted" style="font-size:11.5px;">Nothing here is a fabricated/hardcoded VAT rate - every invoice uses a rate you (or a colleague) entered on the <a href="{{ url_for('tax.list_vat_rates') }}">firm-wide VAT Rates</a> page (including any rate lower than Standard), or the invoice's own stated VAT amount typed in directly.</p>
-
-{# ---- No month opened: the list of VAT months (documents stay hidden) ---- #}
-    {% if not vat_selected_period %}
-    <p class="muted" style="font-size:12px;">Each VAT month is computed on its own. Open a month to see its Output Tax / Input Tax computation and the documents behind it. When the computation is final, mark the month as <strong>Computation done</strong> - it is then locked until a Supervisor, Partner or Admin reopens it.</p>
-    {% if vat_periods %}
-    <table style="margin-bottom:12px;">
-      <thead><tr><th>VAT month</th><th>Status</th><th class="text-right">Documents</th><th>Net VAT <span class="muted" style="font-size:11px;">(per currency of trade)</span></th><th></th></tr></thead>
-      <tbody>
-        {% for p in vat_periods %}
-        <tr>
-          <td><strong>{{ p.label }}</strong></td>
-          <td>
-            {% if p.is_done %}
-            <span class="badge" style="background:#2e7d32;color:#fff;">Computation done</span>
-            <div class="muted" style="font-size:11px;">{{ p.row.completed_by.name if p.row.completed_by else '—' }}{% if p.row.completed_at %}, {{ (p.row.completed_at|cat).strftime('%d %b %Y %H:%M') }}{% endif %}</div>
-            {% else %}
-            <span class="badge" style="background:#b8923a;color:#fff;">In progress</span>
-            {% if p.row and p.row.reopened_at %}<div class="muted" style="font-size:11px;">Reopened {{ (p.row.reopened_at|cat).strftime('%d %b %Y') }}{% if p.row.reopened_by %} by {{ p.row.reopened_by.name }}{% endif %}</div>{% endif %}
-            {% endif %}
-          </td>
-          <td class="text-right">{{ p.count }}</td>
-          <td>
-            {% for cur, sm in p.by_currency.items() %}
-            <div>{{ cur }} {{ '%.2f'|format(sm.net_position|abs) }} <span class="muted" style="font-size:11px;">{% if sm.net_position > 0 %}payable{% elif sm.net_position < 0 %}refundable{% else %}nil{% endif %}</span></div>
-            {% else %}<span class="muted">—</span>{% endfor %}
-          </td>
-          <td><a class="btn small secondary" href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax', vat_period=p.key) }}">Open</a></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% else %}
-    <div class="empty-state">No VAT documents captured yet.</div>
-    {% endif %}
-    {% if vat_undated_docs %}
-    <p style="font-size:12.5px;"><strong>{{ vat_undated_docs|length }} document(s) have no date</strong> and so belong to no VAT month.
-      <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax', vat_period='undated') }}">Open them</a> to review.</p>
-    {% endif %}
-
-    {% if vat_import_batches %}
-    <p style="font-size:12.5px;margin-bottom:4px;"><strong>Imported schedules</strong></p>
-    <table style="margin-bottom:12px;">
-      <thead><tr><th>Schedule type</th><th>Currency</th><th>File</th><th>Rows</th><th>Skipped</th><th>Imported by</th><th>Date</th><th></th></tr></thead>
-      <tbody>
-        {% for b in vat_import_batches %}
-        <tr>
-          <td>{{ b.kind_label }}</td>
-          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.set_vat_import_batch_currency', batch_id=b.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change the currency of this whole schedule">{% for cur in vat_currencies %}<option value="{{ cur }}" {% if (b.currency or vat_default_currency) == cur %}selected{% endif %}>{{ cur }}</option>{% endfor %}</select></form>{% else %}{{ b.currency or vat_default_currency }}{% endif %}</td>
-          <td>{{ b.original_filename or '—' }}</td>
-          <td>{{ b.row_count }}</td>
-          <td>{{ b.skipped_row_count or 0 }}</td>
-          <td>{{ b.imported_by.name if b.imported_by else '—' }}</td>
-          <td>{{ (b.imported_at|cat).strftime('%d %b %Y') if b.imported_at else '—' }}</td>
-          <td>{% if user_has_permission(current_user, 'manage_vat_schedules') %}<form method="post" action="{{ url_for('tax.delete_vat_import_batch', batch_id=b.id) }}" class="inline" onsubmit="return confirm('Delete this import batch and every invoice it created?');"><button type="submit" class="btn small danger">Delete batch</button></form>{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-
-    {# ---- A month is open: its computation, status and documents ---- #}
-    {% else %}
-    <p style="margin:0 0 8px 0;"><a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tax') }}">&larr; All VAT months</a></p>
-    <div style="display:flex;flex-wrap:wrap;gap:12px;align-items:center;justify-content:space-between;margin-bottom:8px;">
-      <div>
-        <h4 style="margin:0;">{{ vat_selected_period.label }}
-          {% if vat_selected_period.undated %}
-          {% elif vat_selected_period.is_done %}<span class="badge" style="background:#2e7d32;color:#fff;">Computation done</span>
-          {% else %}<span class="badge" style="background:#b8923a;color:#fff;">In progress</span>{% endif %}
-        </h4>
-        {% if vat_selected_period.is_done %}
-        <div class="muted" style="font-size:12px;">Marked done by {{ vat_selected_period.row.completed_by.name if vat_selected_period.row.completed_by else '—' }}{% if vat_selected_period.row.completed_at %} on {{ (vat_selected_period.row.completed_at|cat).strftime('%d %b %Y at %H:%M') }}{% endif %}. This month is locked: documents dated in it cannot be added, deleted or imported until it is reopened.</div>
-        {% elif vat_selected_period.undated %}
-        <div class="muted" style="font-size:12px;">These documents have no date, so they are in no VAT month and no month's computation includes them.</div>
-        {% else %}
-        <div class="muted" style="font-size:12px;">Still being computed - documents dated in {{ vat_selected_period.label }} can be added, deleted or imported.{% if vat_selected_period.row and vat_selected_period.row.reopened_at %} Reopened {{ (vat_selected_period.row.reopened_at|cat).strftime('%d %b %Y') }}{% if vat_selected_period.row.reopened_by %} by {{ vat_selected_period.row.reopened_by.name }}{% endif %}{% if vat_selected_period.row.reopen_reason %}: {{ vat_selected_period.row.reopen_reason }}{% endif %}.{% endif %}</div>
-        {% endif %}
-      </div>
-      {% if not vat_selected_period.undated %}
-      <div>
-        {% if vat_selected_period.is_done %}
-          {% if user_has_permission(current_user, 'reopen_vat_periods') %}
-          <form method="post" action="{{ url_for('tax.reopen_vat_period', engagement_id=engagement.id, period_key=vat_selected_period.key) }}" class="inline" style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-            <input type="text" name="reason" placeholder="Reason for reopening *" required maxlength="300" style="min-width:200px;">
-            <button type="submit" class="btn small secondary">Reopen {{ vat_selected_period.label }}</button>
-          </form>
-          {% else %}
-          <span class="muted" style="font-size:11.5px;">Only a Supervisor, Partner or Admin can reopen a completed month.</span>
-          {% endif %}
-        {% else %}
-          <form method="post" action="{{ url_for('tax.mark_vat_period_done', engagement_id=engagement.id, period_key=vat_selected_period.key) }}" class="inline" onsubmit="return confirm('Mark the {{ vat_selected_period.label }} VAT computation as done? Documents dated in this month will be locked until it is reopened.');">
-            <button type="submit" class="btn small gold">Mark computation as done</button>
-          </form>
-        {% endif %}
-      </div>
-      {% endif %}
-    </div>
-
-    {% if vat_return_due %}
-    <div style="margin:8px 0;padding:9px 12px;border:1px solid #d9d2c0;border-radius:6px;font-size:12.5px;background:rgba(184,146,58,.07);">
-      <strong>Return and payment due {{ vat_return_due.strftime('%d %B %Y') }}</strong> <span class="muted">({{ act_ref('28(1)', text='VAT Act s28(1)', code='vat') }}: the 25th of the month after the tax period; a two-month period is due the 25th after its second month, {{ act_ref('27(1)', text='s27', code='vat') }}).</span>
-      {% if vat_month_checks %}
-      <div style="margin-top:6px;"><strong>Points to look at in this month</strong> <span class="muted" style="font-size:11.5px;">(prompts from the VAT Act; nothing is changed for you)</span></div>
-      <ul style="margin:4px 0 0 18px;padding:0;">
-        {% for f in vat_month_checks %}<li style="margin-bottom:3px;{% if f.level == 'note' %}color:#6b6b6b;{% endif %}">{{ f.text }} <span class="muted" style="font-size:11.5px;">[{{ act_ref(f.ref, text='s' ~ f.ref, code='vat') }}]</span></li>{% endfor %}
-      </ul>
-      {% endif %}
-      <div class="muted" style="font-size:11.5px;margin-top:6px;"><a href="{{ url_for('tax.vat_act_check') }}">The VAT Act beside this register</a> &middot; <a href="{{ url_for('tax.act_contents', code='vat') }}">VAT Act, section by section</a></div>
-    </div>
-    {% endif %}
-
-    <p class="muted" style="font-size:11.5px;">ZIMRA requires VAT to be accounted for and paid in the currency of trade, so each currency below is its own VAT working paper and net position - ZWG and USD are never added together or set off against each other.</p>
-        {% for cur, sm in vat_by_currency.items() %}
-    <div class="card" style="margin:12px 0;padding:12px;border-left:4px solid #b8923a;">
-    <h4 style="margin:0 0 8px 0;">{{ cur }} VAT - {% if cur == 'ZWG' %}Zimbabwe Gold (ZiG){% else %}US dollars{% endif %}</h4>
-    <div class="form-row" style="flex-wrap:wrap;margin-bottom:10px;">
-      <div class="card" style="flex:1;min-width:160px;padding:10px;">
-        <div class="muted" style="font-size:11px;">Net Output Tax</div>
-        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.output_tax) }}</div>
-        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(sm.output_taxable_excl_exempt) }} net taxable sales (after credit notes){% if sm.output_zero_rated_taxable %}, of which {{ '%.2f'|format(sm.output_zero_rated_taxable) }} zero-rated{% endif %}</div>
-        {% if sm.output_exempt_taxable %}<div class="muted" style="font-size:11px;">plus {{ '%.2f'|format(sm.output_exempt_taxable) }} exempt sales, not taxable supplies ({{ act_ref('11', text='s11', code='vat') }})</div>{% endif %}
-      </div>
-      <div class="card" style="flex:1;min-width:160px;padding:10px;">
-        <div class="muted" style="font-size:11px;">Net Input Tax</div>
-        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.input_tax_claimable) }}</div>
-        <div class="muted" style="font-size:11px;">on {{ '%.2f'|format(sm.input_taxable) }} net taxable purchases &amp; imports (after credit notes)</div>
-        {% if sm.input_tax_denied %}<div class="muted" style="font-size:11px;">{{ '%.2f'|format(sm.input_tax) }} captured less {{ '%.2f'|format(sm.input_tax_denied) }} not deductible ({{ act_ref('16(2)', text='s16(2)', code='vat') }})</div>{% endif %}
-      </div>
-      <div class="card" style="flex:1;min-width:160px;padding:10px;">
-        <div class="muted" style="font-size:11px;">Net VAT position</div>
-        <div style="font-size:18px;font-weight:600;">{{ '%.2f'|format(sm.net_position|abs) }}</div>
-        <div class="muted" style="font-size:11px;">{% if sm.net_position > 0 %}Payable to ZIMRA in {{ cur }}{% elif sm.net_position < 0 %}Refundable{% else %}Nil{% endif %}</div>
-      </div>
-    </div>
-
-    {% set vb = sm.buckets %}
-    <p style="font-size:12.5px;margin-bottom:4px;"><strong>{{ cur }} VAT working paper - each kind shown separately</strong></p>
-    <table style="margin-bottom:14px;">
-      <thead><tr><th>Output Tax (sales)</th><th class="text-right">Docs</th><th class="text-right">Taxable value</th><th class="text-right">VAT</th></tr></thead>
-      <tbody>
-        <tr><td>Sales invoices</td><td class="text-right">{{ vb.output_invoice.count }}</td><td class="text-right">{{ '%.2f'|format(vb.output_invoice.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.output_invoice.vat) }}</td></tr>
-        <tr><td>Export sales <span class="muted" style="font-size:11px;">(zero-rated)</span></td><td class="text-right">{{ vb.export_sale.count }}</td><td class="text-right">{{ '%.2f'|format(vb.export_sale.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.export_sale.vat) }}</td></tr>
-        <tr><td>Less: credit notes issued</td><td class="text-right">{{ vb.output_credit_note.count }}</td><td class="text-right">({{ '%.2f'|format(vb.output_credit_note.taxable) }})</td><td class="text-right">({{ '%.2f'|format(vb.output_credit_note.vat) }})</td></tr>
-        <tr style="font-weight:600;"><td>Net Output Tax</td><td></td><td class="text-right">{{ '%.2f'|format(sm.output_taxable) }}</td><td class="text-right">{{ '%.2f'|format(sm.output_tax) }}</td></tr>
-      </tbody>
-      <thead><tr><th>Input Tax (purchases &amp; imports)</th><th class="text-right">Docs</th><th class="text-right">Taxable value</th><th class="text-right">VAT</th></tr></thead>
-      <tbody>
-        <tr><td>Purchase/expense invoices</td><td class="text-right">{{ vb.input_invoice.count }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.input_invoice.vat) }}</td></tr>
-        <tr><td>Bills of Entry <span class="muted" style="font-size:11px;">(import VAT{% if vb.bill_of_entry.duty %}; customs duty {{ '%.2f'|format(vb.bill_of_entry.duty) }}{% endif %})</span></td><td class="text-right">{{ vb.bill_of_entry.count }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.taxable) }}</td><td class="text-right">{{ '%.2f'|format(vb.bill_of_entry.vat) }}</td></tr>
-        <tr><td>Less: credit notes received</td><td class="text-right">{{ vb.input_credit_note.count }}</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.taxable) }})</td><td class="text-right">({{ '%.2f'|format(vb.input_credit_note.vat) }})</td></tr>
-        <tr style="font-weight:600;"><td>Net Input Tax as captured</td><td></td><td class="text-right">{{ '%.2f'|format(sm.input_taxable) }}</td><td class="text-right">{{ '%.2f'|format(sm.input_tax) }}</td></tr>
-        {% if sm.input_tax_denied %}<tr><td>Less: input tax not deductible <span class="muted" style="font-size:11px;">({{ sm.input_tax_denied_count }} document(s), {{ act_ref('16(2)', text='section 16(2)', code='vat') }})</span></td><td></td><td></td><td class="text-right">({{ '%.2f'|format(sm.input_tax_denied) }})</td></tr>
-        <tr style="font-weight:600;"><td>Input Tax claimable</td><td></td><td></td><td class="text-right">{{ '%.2f'|format(sm.input_tax_claimable) }}</td></tr>{% endif %}
-      </tbody>
-      <tbody>
-        <tr style="font-weight:700;"><td colspan="3">Net VAT {% if sm.net_position > 0 %}payable to ZIMRA in {{ cur }}{% elif sm.net_position < 0 %}refundable{% else %}position (nil){% endif %}</td><td class="text-right">{{ '%.2f'|format(sm.net_position|abs) }}</td></tr>
-      </tbody>
-    </table>
-
-
-    <details {% if not vat_selected_period.is_done %}open{% endif %} style="margin-top:8px;">
-    <summary style="cursor:pointer;font-size:12.5px;font-weight:600;">{{ cur }} documents behind this computation{% if vat_selected_period.is_done %} (locked){% endif %}</summary>
-    {% for code, label, kdir, ktype in vat_document_kinds %}
-    {% set items = vat_invoices_by_currency_kind[cur].get(code, []) %}
-    {% if items %}
-    <p style="font-size:12.5px;margin:12px 0 4px 0;"><strong>{{ label }}</strong> <span class="muted" style="font-size:11px;">({{ items|length }})</span></p>
-    <table style="margin-bottom:8px;">
-      <thead><tr><th>Date</th><th>{% if ktype == 'Bill of Entry' %}Bill of Entry #{% elif ktype == 'Credit Note' %}Credit note #{% else %}Invoice #{% endif %}</th><th>{% if ktype == 'Credit Note' %}Original invoice / ref{% elif ktype in ('Bill of Entry', 'Export Sale') %}Customs / export ref{% else %}Ref{% endif %}</th><th>{% if kdir == 'Output' %}Customer{% else %}Supplier{% endif %}</th><th>{% if ktype == 'Bill of Entry' %}VAT value{% else %}Taxable{% endif %}</th>{% if ktype == 'Bill of Entry' %}<th>Duty</th>{% endif %}<th>Rate</th><th>VAT</th><th>Total</th><th>Src</th><th>Currency</th><th></th></tr></thead>
-      <tbody>
-        {% for inv in items %}
-        <tr>
-          <td>{{ inv.invoice_date.strftime('%d %b %Y') if inv.invoice_date else '—' }}</td>
-          <td>{{ inv.invoice_number or '—' }}</td>
-          <td>{{ inv.related_reference or '—' }}</td>
-          <td>{{ inv.counterparty_name or '—' }}{% if inv.description %}<div class="muted" style="font-size:11px;">{{ inv.description }}</div>{% endif %}</td>
-          <td>{{ '%.2f'|format(inv.taxable_amount) }}</td>
-          {% if ktype == 'Bill of Entry' %}<td>{{ ('%.2f'|format(inv.customs_duty)) if inv.customs_duty is not none else '—' }}</td>{% endif %}
-          <td>{{ ('%.2f'|format(inv.vat_rate_percent_used) + '%') if inv.vat_rate_percent_used is not none else '—' }}</td>
-          <td>{{ '%.2f'|format(inv.vat_amount) }}</td>
-          <td>{{ '%.2f'|format(inv.total_amount) }}{% if inv.input_tax_denied %}<div style="font-size:11px;color:#a33;">Not deductible: {{ vat_denial_labels.get(inv.denial_ground, 'see notes') }}</div>{% endif %}</td>
-          <td class="muted" style="font-size:11px;">{{ inv.source }}{% if kdir == 'Input' and vat_selected_period and not vat_selected_period.is_done %}
-            <form method="post" action="{{ url_for('tax.set_vat_input_denial', invoice_id=inv.id) }}" class="inline" style="display:block;margin-top:3px;">
-              {% if inv.input_tax_denied %}<input type="hidden" name="action" value="restore"><button type="submit" class="btn small secondary" title="Put this document's VAT back into the Input Tax claim">Claim again</button>
-              {% else %}<select name="ground" title="Input tax the VAT Act (section 16(2)) does not allow">{% for gk, gl, gr in vat_denial_grounds %}<option value="{{ gk }}">{{ gl }} (s{{ gr }})</option>{% endfor %}</select><button type="submit" class="btn small secondary" title="Leave this document's VAT out of the claim">Not deductible</button>{% endif %}
-            </form>{% endif %}</td>
-          <td>{% if vat_selected_period.is_done %}{{ inv.currency or vat_default_currency }}{% else %}<form method="post" action="{{ url_for('tax.set_vat_invoice_currency', invoice_id=inv.id) }}" class="inline"><select name="currency" onchange="this.form.submit()" title="Change currency of trade">{% for c2 in vat_currencies %}<option value="{{ c2 }}" {% if (inv.currency or vat_default_currency) == c2 %}selected{% endif %}>{{ c2 }}</option>{% endfor %}</select></form>{% endif %}</td>
-          <td>{% if vat_selected_period.is_done %}<span class="muted" style="font-size:11px;">Locked</span>{% else %}<form method="post" action="{{ url_for('tax.delete_vat_invoice', invoice_id=inv.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>{% endif %}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    {% endif %}
-    {% endfor %}
-    </details>
-
-    </div>
-    {% endfor %}
-    {% endif %}
-
-    <form method="post" action="{{ url_for('tax.add_vat_invoice', engagement_id=engagement.id) }}" class="form-row" style="flex-wrap:wrap;margin-bottom:14px;">
-      <div>
-        <label for="vat_kind">Capture *</label>
-        <select id="vat_kind" name="kind" required>
-          <option value="">—</option>
-          {% for code, label, kdir, ktype in vat_document_kinds %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
-        </select>
-      </div>
-      <div>
-        <label for="vat_currency">Currency of trade *</label>
-        <select id="vat_currency" name="currency" required>
-          {% for cur in vat_currencies %}<option value="{{ cur }}" {% if cur == vat_default_currency %}selected{% endif %}>{{ cur }}</option>{% endfor %}
-        </select>
-      </div>
-      <div><label for="vat_invoice_date">Date</label><input type="date" id="vat_invoice_date" name="invoice_date"></div>
-      <div><label for="vat_invoice_number">Document # (invoice / credit note / Bill of Entry)</label><input type="text" id="vat_invoice_number" name="invoice_number"></div>
-      <div><label for="vat_related_reference">Original invoice # (credit note) / customs or export entry ref</label><input type="text" id="vat_related_reference" name="related_reference"></div>
-      <div><label for="vat_counterparty_name">Customer / supplier</label><input type="text" id="vat_counterparty_name" name="counterparty_name"></div>
-      <div><label for="vat_description">Description</label><input type="text" id="vat_description" name="description"></div>
-      <div><label for="vat_taxable_amount">Taxable amount (excl. VAT) * <span class="muted" style="font-size:10.5px;">(Bill of Entry: VAT value; credit note: as printed, positive)</span></label><input type="number" step="0.01" id="vat_taxable_amount" name="taxable_amount" required></div>
-      <div><label for="vat_customs_duty">Customs duty (Bill of Entry only)</label><input type="number" step="0.01" id="vat_customs_duty" name="customs_duty"></div>
-      <div>
-        <label for="vat_rate_id">VAT rate (firm-wide table)</label>
-        <select id="vat_rate_id" name="vat_rate_id">
-          <option value="">— use VAT amount below instead —</option>
-          {% for r in current_vat_rates %}{% if r.is_current %}<option value="{{ r.id }}">{{ r.label }}</option>{% endif %}{% endfor %}
-        </select>
-      </div>
-      <div><label for="vat_amount">or VAT amount directly <span class="muted" style="font-size:10.5px;">(Bill of Entry: import VAT paid; export sales are always 0)</span></label><input type="number" step="0.01" id="vat_amount" name="vat_amount"></div>
-      <div><button type="submit" class="btn small gold">Add to VAT register</button></div>
-    </form>
-    <p class="muted" style="font-size:11.5px;margin-top:-6px;">A document is placed in the VAT month of its date. If that month is marked <em>Computation done</em> it is locked and the document will be refused until the month is reopened.</p>
-
-    {% if user_has_permission(current_user, 'manage_vat_schedules') %}
-    <p style="font-size:12.5px;margin-bottom:4px;"><strong>Import an already-prepared Output/Input Tax schedule</strong></p>
-    <p class="muted" style="font-size:11.5px;">Upload an Excel (.xlsx/.xls) or CSV schedule - the app suggests which column is the date, invoice number, customer/supplier, taxable amount, VAT amount, etc.; you review and confirm the mapping before anything is imported.</p>
-    <form method="post" action="{{ url_for('tax.stage_vat_schedule_import', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="flex-wrap:wrap;">
-      <div>
-        <label for="vat_import_kind">Schedule type *</label>
-        <select id="vat_import_kind" name="kind" required>
-          <option value="">—</option>
-          {% for code, label, kdir, ktype in vat_document_kinds %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
-        </select>
-      </div>
-      <div>
-        <label for="vat_import_currency">Currency of trade *</label>
-        <select id="vat_import_currency" name="currency" required>
-          {% for cur in vat_currencies %}<option value="{{ cur }}" {% if cur == vat_default_currency %}selected{% endif %}>{{ cur }}</option>{% endfor %}
-        </select>
-      </div>
-      <div><label for="vat_import_file">Schedule file *</label><input type="file" id="vat_import_file" name="file" accept=".xlsx,.xls,.csv" required></div>
-      <div><button type="submit" class="btn small secondary">Upload &amp; map columns</button></div>
-    </form>
-    {% else %}
-    <p class="muted" style="font-size:11.5px;">Uploading and mapping Output/Input VAT schedules is limited to Supervisors, Partners and Admins. You can still capture individual VAT documents above, or ask a supervisor to upload the schedule.</p>
-    {% endif %}
+    <h3 class="mt-0">VAT</h3>
+    <p class="muted" style="font-size:12.5px;margin:0;">This client has a VAT number, so the VAT invoice register and the input and output tax working paper are on their own <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='vat') }}">VAT tab</a>.</p>
   </div>
+  {% else %}
+  {{ vat_register_section() }}
+  {% endif %}
 
   <!-- ---------- Dynamic Information Request List ---------- -->
   <div class="card">
@@ -4802,6 +4881,23 @@
   {{ qmacros.render_queries(engagement, 'finalisation', queries_by_section.get('finalisation', [])) }}
 
 {% endif %}
+{% elif tab == 'vat' %}
+{% if not engagement.shows_vat_tab %}
+  <div class="card"><div class="empty-state">The VAT tab is shown when a Tax service is on and the client has a VAT number. Add the client's VAT number on the client page, then come back.</div></div>
+{% elif not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off first.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">VAT</h3>
+    <p class="muted" style="font-size:12.5px;margin:0;">
+      Client VAT number: <strong>{{ engagement.client.vat_number }}</strong>.
+      Capture or import the client's output and input VAT documents, work month by month, and see the output tax, input tax and net position.
+      The Acts, section by section: <a href="{{ url_for('tax.act_contents', code='vat') }}">VAT Act</a> (<a href="{{ url_for('tax.vat_act_check') }}">beside the app's VAT material</a>).
+    </p>
+  </div>
+  {{ vat_register_section() }}
+{% endif %}
+
 {% elif tab == 'capital_allowances' %}
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off first.</div></div>

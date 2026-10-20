@@ -489,15 +489,11 @@ def update_estimate(client_id, tax_year):
 
 # ---------- Instalments ----------
 
-@qpd_bp.route("/<int:client_id>/qpd/<int:tax_year>/instalments/compute", methods=["POST"])
-@login_required
-def compute_instalments(client_id, tax_year):
-    _ensure_qpd_access()
-    estimate = _get_or_create_estimate(client_id, tax_year)
+def build_instalment_records(estimate):
+    """(Re)compute the instalment records of one estimate from its annual tax charge. Instalments already recorded as paid are never
+    changed. Returns how many were left alone because they were paid. Does not commit."""
+    tax_year = estimate.tax_year
     rates = QPDInstalmentRate.query.order_by(QPDInstalmentRate.order).all()
-    if not rates:
-        flash("No QPD instalment structure is configured yet - set one up first.", "danger")
-        return redirect(url_for("qpd.view_qpd", client_id=client_id, tax_year=tax_year))
     built = qpd_calc.build_instalments(estimate.estimated_annual_tax_charge or 0.0, rates)
     existing_by_order = {r.order: r for r in estimate.instalments}
     skipped_paid = 0
@@ -526,6 +522,19 @@ def compute_instalments(client_id, tax_year):
         # - None if nothing has been logged in the FX Rates log yet.
         record.fx_rate_snapshot = fx_rate_today.rate if fx_rate_today else None
         record.computed_at = datetime.utcnow()
+    return skipped_paid
+
+
+@qpd_bp.route("/<int:client_id>/qpd/<int:tax_year>/instalments/compute", methods=["POST"])
+@login_required
+def compute_instalments(client_id, tax_year):
+    _ensure_qpd_access()
+    estimate = _get_or_create_estimate(client_id, tax_year)
+    rates = QPDInstalmentRate.query.order_by(QPDInstalmentRate.order).all()
+    if not rates:
+        flash("No QPD instalment structure is configured yet - set one up first.", "danger")
+        return redirect(url_for("qpd.view_qpd", client_id=client_id, tax_year=tax_year))
+    skipped_paid = build_instalment_records(estimate)
     db.session.commit()
     if skipped_paid:
         flash(f"QPD instalments recomputed ({skipped_paid} already-paid instalment(s) left untouched).", "success")

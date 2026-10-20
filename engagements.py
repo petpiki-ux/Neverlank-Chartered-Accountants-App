@@ -541,6 +541,17 @@ def view_engagement(engagement_id):
         tab = "overview"
     if tab == "registry_forms" and engagement.type != "Secretarial":
         tab = "overview"
+    # A dedicated Tax Advisory engagement works from the client's finished
+    # accounts: no Analytical Review, Risk Assessment, Trial Balance or
+    # Substantive Procedures (its tax-head Execution Plan is on the Tax tab).
+    # Old links and bookmarks to those tabs land somewhere sensible.
+    if engagement.is_tax_advisory_type:
+        if tab == "substantive":
+            tab = "tax"
+        elif tab in ("analytical", "risks", "trial_balance"):
+            tab = "overview"
+    elif tab in ("capital_allowances", "qpd"):
+        tab = "overview"
     # The stand-alone service lines (Whistle-blower / Training) only have the
     # shared Overview / Client Acceptance / Documents / Tasks tabs here - their
     # own workspaces live in whistleblower.py / training.py. Corporate Finance &
@@ -658,6 +669,11 @@ def view_engagement(engagement_id):
     )
     income_tax_computation = IncomeTaxComputation.query.filter_by(engagement_id=engagement_id).first()
     profit_before_tax = statements["pl"]["profit_before_tax"]["current"] if statements else None
+    profit_before_tax_is_manual = False
+    if profit_before_tax is None and income_tax_computation and income_tax_computation.profit_before_tax_manual is not None:
+        # no Trial Balance (a Tax Advisory engagement works from the client's finished accounts): the figure typed on this tab
+        profit_before_tax = income_tax_computation.profit_before_tax_manual
+        profit_before_tax_is_manual = True
     income_tax_lines = [
         {"item_type": l.item_type, "description": l.description, "amount": l.amount}
         for l in (income_tax_computation.items if income_tax_computation else [])
@@ -731,6 +747,9 @@ def view_engagement(engagement_id):
     elif is_secretarial:
         substantive_area_names = secretarial_substantive_areas(engagement)
         substantive_area_refs = SECRETARIAL_AREA_REFERENCES
+    elif engagement.is_tax_advisory_type:
+        substantive_area_names = []   # the audit areas do not apply; the tax heads are added just below
+        substantive_area_refs = AUDIT_AREA_REFERENCES
     else:
         substantive_area_names = AUDIT_AREAS
         substantive_area_refs = AUDIT_AREA_REFERENCES
@@ -996,8 +1015,20 @@ def view_engagement(engagement_id):
         }
     management_report_narratives = {k: workpaper_narratives.get(k) for k, _ in MANAGEMENT_ACCOUNTS_REPORT_PARTS} if engagement.has_accounting_module else {}
 
+    # Tax Advisory engagements: the Capital Allowances and Provisional Tax (QPD) tabs, and the allowance schedule's tax value offered on
+    # the Deferred Tax tab. Worked only for the tabs that show them.
+    tax_tab_context = {}
+    if engagement.is_tax_advisory_type:
+        import engagement_tax
+        if tab in ("capital_allowances", "deferred_tax", "income_tax"):
+            tax_tab_context.update(engagement_tax.capital_allowance_context(engagement))
+        if tab == "qpd":
+            tax_tab_context.update(engagement_tax.qpd_context(engagement))
+
     return render_template(
         "engagements/detail.html",
+        profit_before_tax_is_manual=profit_before_tax_is_manual,
+        **tax_tab_context,
         engagement=engagement,
         users=users,
         tab=tab,
@@ -4521,6 +4552,8 @@ def sync_substantive_procedures(engagement):
     is_forensic = engagement.type == "Investigative Engagement"
     is_business_it = engagement.type == "Business Intelligence and IT Engagements"
     is_secretarial = engagement.type == "Secretarial"
+    if engagement.is_tax_advisory_type:
+        return 0   # a Tax Advisory engagement has no audit areas to top up; its tax-head Execution Plan is kept by hand on the Tax tab
     if is_forensic:
         areas = FORENSIC_SUBSTANTIVE_AREAS
         baseline = FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES
@@ -4907,6 +4940,9 @@ def save_income_tax_computation(engagement_id):
     record.tax_rate_percent = _parse_float(request.form.get("tax_rate_percent"))
     record.aids_levy_percent = _parse_float(request.form.get("aids_levy_percent"))
     record.tax_loss_brought_forward = _parse_float(request.form.get("tax_loss_brought_forward")) or 0.0
+    if "profit_before_tax_manual" in request.form:
+        raw = request.form.get("profit_before_tax_manual", "").strip()
+        record.profit_before_tax_manual = _parse_float(raw) if raw else None
     record.notes = request.form.get("notes", "").strip()
     record.completed_by_id = current_user.id
     record.completed_at = datetime.utcnow()
@@ -5195,6 +5231,11 @@ def _parse_date(value):
         return None
 
 
+def _ppe_tab(engagement):
+    """Where the Asset Register lives: the Substantive Procedures tab, or the Capital Allowances tab on a Tax Advisory engagement."""
+    return "capital_allowances" if engagement.is_tax_advisory_type else "substantive"
+
+
 @engagements_bp.route("/<int:engagement_id>/ppe/asset-classes/add", methods=["POST"])
 @login_required
 def add_ppe_asset_class(engagement_id):
@@ -5203,7 +5244,7 @@ def add_ppe_asset_class(engagement_id):
     name = request.form.get("name", "").strip()
     if not name:
         flash("Please enter an asset class name.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=_ppe_tab(engagement)))
     order = PPEAssetClass.query.filter_by(engagement_id=engagement_id).count()
     db.session.add(PPEAssetClass(
         engagement_id=engagement_id, name=name,
@@ -5214,7 +5255,7 @@ def add_ppe_asset_class(engagement_id):
     ))
     db.session.commit()
     flash("Asset class added to the Depreciation policy.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=_ppe_tab(engagement)))
 
 
 @engagements_bp.route("/ppe/asset-classes/<int:class_id>/update", methods=["POST"])
@@ -5226,14 +5267,14 @@ def update_ppe_asset_class(class_id):
     name = request.form.get("name", "").strip()
     if not name:
         flash("Please enter an asset class name.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
     asset_class.name = name
     asset_class.depreciation_method = request.form.get("depreciation_method") or "Straight-line"
     asset_class.rate_percent = _parse_float(request.form.get("rate_percent"))
     asset_class.useful_life_years = _parse_float(request.form.get("useful_life_years"))
     db.session.commit()
     flash("Asset class updated.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
 
 
 @engagements_bp.route("/ppe/asset-classes/<int:class_id>/delete", methods=["POST"])
@@ -5250,7 +5291,7 @@ def delete_ppe_asset_class(class_id):
     db.session.delete(asset_class)
     db.session.commit()
     flash("Asset class removed from the Depreciation policy. Its assets are now Unclassified in the Asset Register.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
 
 
 @engagements_bp.route("/<int:engagement_id>/ppe/assets/add", methods=["POST"])
@@ -5261,7 +5302,7 @@ def add_ppe_asset(engagement_id):
     description = request.form.get("description", "").strip()
     if not description:
         flash("Please enter a description for the asset.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=_ppe_tab(engagement)))
     asset_class_id = request.form.get("asset_class_id") or None
     order = PPEAsset.query.filter_by(engagement_id=engagement_id).count()
     db.session.add(PPEAsset(
@@ -5279,7 +5320,7 @@ def add_ppe_asset(engagement_id):
     ))
     db.session.commit()
     flash("Asset added to the Asset Register.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=_ppe_tab(engagement)))
 
 
 @engagements_bp.route("/ppe/assets/<int:asset_id>/update", methods=["POST"])
@@ -5291,7 +5332,7 @@ def update_ppe_asset(asset_id):
     description = request.form.get("description", "").strip()
     if not description:
         flash("Please enter a description for the asset.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
     asset_class_id = request.form.get("asset_class_id") or None
     asset.asset_class_id = int(asset_class_id) if asset_class_id else None
     asset.asset_code = request.form.get("asset_code", "").strip() or None
@@ -5304,7 +5345,7 @@ def update_ppe_asset(asset_id):
     asset.disposal_accumulated_depreciation = _parse_float(request.form.get("disposal_accumulated_depreciation")) or 0.0
     db.session.commit()
     flash("Asset updated.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
 
 
 @engagements_bp.route("/ppe/assets/<int:asset_id>/delete", methods=["POST"])
@@ -5316,7 +5357,7 @@ def delete_ppe_asset(asset_id):
     db.session.delete(asset)
     db.session.commit()
     flash("Asset removed from the Asset Register.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="substantive"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
 
 
 @engagements_bp.route("/<int:engagement_id>/workpapers/ppe-asset-register/generate", methods=["POST"])
@@ -5327,11 +5368,11 @@ def generate_ppe_asset_register_xlsx(engagement_id):
     classes, assets, _, _ = _ppe_plain_data(engagement_id)
     if not assets:
         flash("Add at least one asset to the Asset Register before generating this working paper.", "danger")
-        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=_ppe_tab(engagement)))
     buf = wp.build_ppe_asset_register_xlsx(engagement, classes, assets)
     doc = _file_generated_workpaper(engagement, "ppe_asset_register", "Property, Plant and Equipment", "N3300", "PPE_Asset_Register", "xlsx", buf)
     flash(f"PPE Asset Register filed (v{doc.version}).", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=_ppe_tab(engagement)))
 
 
 @engagements_bp.route("/<int:engagement_id>/substantive-procedures/areas/<area_name>/items/add", methods=["POST"])
