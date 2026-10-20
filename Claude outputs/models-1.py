@@ -1,0 +1,11472 @@
+import json
+from datetime import datetime, date
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask import has_request_context, request
+from flask_login import UserMixin
+
+from extensions import db
+
+
+# "Corporate Finance & Business Advisory" replaced the old "Consulting" service line. Old rows are
+# renamed on startup (app._rename_consulting_service) and the old name is still recognised by
+# canonical_engagement_type so a stale bookmark or form cannot recreate it. The Document Templates for
+# this service stay in their original on-disk folder - see template_folder().
+CORPFIN_ENGAGEMENT_TYPE = "Corporate Finance & Business Advisory"
+LEGACY_CONSULTING_TYPE = "Consulting"
+CORPFIN_TASK_CATEGORY = "Corporate Finance & Advisory"
+IT_TASK_CATEGORY = "IT & Business Intelligence"
+
+ENGAGEMENT_TYPES = [
+    "Audit", "Assurance", CORPFIN_ENGAGEMENT_TYPE, "Secretarial", "Investigative Engagement",
+    "Business Intelligence and IT Engagements", "Tax Advisory",
+    "Accounting & Bookkeeping",
+    "Neverlank Anonymous Whistle-blower Services", "Neverlank Training Services",
+]
+
+# "Tax Advisory" is the single umbrella engagement type for ALL of the firm's
+# tax work - compliance (returns & filings), advisory (planning & structuring),
+# health checks and representation. It used to be two separate types ("Tax
+# Compliance" and "Tax Advisory & Health Check"); those two names are kept
+# here only so old rows can be recognised and moved across on startup (see
+# app._merge_tax_engagement_types) and so nothing breaks if one is met before
+# that has run. Which tax services are actually being delivered on a given
+# engagement is chosen with the "Tax services" ticks (TAX_SERVICES).
+TAX_ADVISORY_TYPE = "Tax Advisory"
+LEGACY_TAX_ENGAGEMENT_TYPES = ("Tax Compliance", "Tax Advisory & Health Check")
+
+# The two stand-alone service lines (not audit-style engagements): each gets
+# its own trimmed workspace instead of the audit tab set - see
+# Engagement.is_whistleblower_service/is_training_service, whistleblower.py
+# and training.py.
+WHISTLEBLOWER_SERVICE_TYPE = "Neverlank Anonymous Whistle-blower Services"
+TRAINING_SERVICE_TYPE = "Neverlank Training Services"
+
+# The financial reporting framework the client's Financial Statements are
+# prepared under (Finalisation tab). Only "full_ifrs" and "ifrs_for_smes"
+# get the auto-generated, numbered Notes to the Financial Statements (see
+# financials.build_notes) - "other" keeps the original plain statements +
+# free-text notes box, unchanged, since a local-GAAP framework isn't
+# something this app has any basis to generate IFRS-style notes for.
+REPORTING_FRAMEWORKS = [
+    ("full_ifrs", "Full IFRS"),
+    ("ifrs_for_smes", "IFRS for SMEs"),
+    ("other", "Other / local GAAP"),
+]
+REPORTING_FRAMEWORK_LABELS = dict(REPORTING_FRAMEWORKS)
+
+# Which method the Cash Flow Statement's operating activities section uses
+# (IAS 7.18) - see financials.build_cash_flow. Every other line on every
+# statement is identical regardless of which is chosen; only how operating
+# cash flow is presented changes, and both always reconcile to the same
+# net cash from operating activities.
+CASH_FLOW_METHODS = [
+    ("indirect", "Indirect method"),
+    ("direct", "Direct method"),
+]
+CASH_FLOW_METHOD_LABELS = dict(CASH_FLOW_METHODS)
+
+# Public Interest Entity checklist (Finalisation tab, "Company
+# classification"): PAAB Pronouncement 2/2016's own criteria for presuming
+# an entity to be a Public Interest Entity (public accountability) -
+# https://paab.org.zw, "Definition of a Public Interest Entity". PAAB and
+# the IASB draw the Full IFRS / IFRS for SMEs line on exactly this test
+# (public accountability), not on a numeric size threshold - Zimbabwean
+# company law itself sets none for this purpose (the Companies and Other
+# Business Entities Act just requires "generally accepted accounting
+# practice" as recognised by PAAB). Each tuple is
+# (Engagement boolean column name, checklist label). Any "yes" makes the
+# entity a Public Interest Entity - see Engagement.is_public_interest_entity.
+PIE_CRITERIA = [
+    ("pie_listed", "Listed on a licensed securities exchange"),
+    ("pie_financial_institution", "Bank, building society, or deposit-taking microfinance institution"),
+    ("pie_insurer", "Insurer (life or general)"),
+    ("pie_asset_manager", "Asset manager or collective investment scheme"),
+    ("pie_pension_fund", "Pension fund open to a large number and wide range of employees"),
+    ("pie_medical_aid", "Registered medical aid society"),
+    ("pie_debt_equity_issuer", "Issues debt or equity instruments to the public"),
+]
+
+# Separately, Zimbabwe's Small and Medium Enterprises Act [Chapter 24:12]
+# does classify enterprises by size (Micro/Small/Medium, by sector) - a
+# different, business-development/tax classification, not an accounting-
+# standards one (a Large non-PIE company remains free to use IFRS for
+# SMEs). Recorded on the Finalisation tab as preparer-entered client
+# information alongside the Public Interest Entity test above, not as
+# something the app computes or that changes which statements are
+# prepared - see Engagement.sme_sector / sme_size_band.
+SME_ACT_SECTORS = [
+    "Agriculture", "Mining", "Manufacturing", "Construction", "Energy",
+    "Financial Services", "Transport", "Retail and Wholesale",
+    "Tourism and Hospitality", "Arts and Entertainment", "Services", "Other",
+]
+SME_ACT_SIZE_BANDS = [
+    ("micro", "Micro"), ("small", "Small"), ("medium", "Medium"), ("large", "Large"),
+]
+SME_ACT_SIZE_BAND_LABELS = dict(SME_ACT_SIZE_BANDS)
+
+SECRETARIAL_SUBDIVISIONS = ["Company Registrations", "Trusts", "PVOs"]
+
+# Selectable "Activities" for a Secretarial engagement (Engagement.
+# secretarial_activities, a comma-separated list of the keys below) - what
+# the client has actually engaged the firm to do, under the Companies and
+# Other Business Entities Act [Chapter 24:31] (COBE Act). Used to filter
+# which Understanding the Business/Assignment questionnaire questions are
+# seeded for the engagement (see SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_
+# ITEMS below and engagements.seed_entity_checklist) - so a client engaged
+# only for annual compliance work isn't shown questionnaire sections about
+# share capital restructuring, and vice versa. Leaving none selected seeds
+# every section (the safe, unfiltered default).
+SECRETARIAL_ACTIVITIES = [
+    ("incorporation", "Incorporation & Entity Maintenance"),
+    ("directorship", "Directorship & Governance Structure"),
+    ("share_capital", "Share Capital & Ownership Transactions"),
+    ("meetings", "Board & General Meeting Secretarial Support"),
+    ("constitutional", "Constitutional Amendments & Corporate Restructuring"),
+    ("statutory_records", "Statutory Record Management & Good Standing"),
+    ("re_registration", "Company Re-registration (COBE Act)"),
+]
+SECRETARIAL_ACTIVITY_LABELS = dict(SECRETARIAL_ACTIVITIES)
+
+# Selectable "Services" for the Tax Advisory module (compliance, advisory, health check, representation)
+# (Engagement.tax_services, a comma-separated list of the keys below) -
+# what the firm has actually been engaged to do on the tax side. Unlike
+# SECRETARIAL_ACTIVITIES above (only meaningful on a Secretarial
+# engagement), this is deliberately combinable onto ANY engagement type -
+# a firm often bundles tax compliance work into an ordinary Audit
+# engagement rather than raising it separately - as well as being the
+# natural default for the two dedicated Tax engagement types above. The
+# whole Tax tab (see tax.py / templates/tax/*) only appears on an
+# engagement once at least one of these is selected - see
+# Engagement.has_tax_module. Advisory-only sections (Technical Research
+# Log, Structuring Options, Tax Dispute Management - Module 7B of the tax
+# module spec) only appear when "advisory" or "representation" is among
+# them - see Engagement.has_tax_advisory.
+TAX_SERVICES = [
+    ("compliance", "Tax Compliance (returns & statutory filings)"),
+    ("advisory", "Tax Advisory (planning & structuring)"),
+    ("health_check", "Tax Health Check / Due Diligence"),
+    ("representation", "Tax Representation & Dispute Support"),
+]
+TAX_SERVICE_LABELS = dict(TAX_SERVICES)
+
+# Selectable "Services" for the Financial Accounting, Cost Accounting &
+# Management Accounting module (Engagement.accounting_services, a
+# comma-separated list of the keys below) - what the firm has been engaged
+# to do on the accounting side, for a client whose books/costing/management
+# reporting Neverlank itself prepares (as distinct from an Audit/Assurance
+# engagement, which forms an opinion on figures someone else prepared).
+# Deliberately combinable onto ANY engagement type, exactly like
+# TAX_SERVICES above - a firm might bundle a bookkeeping clean-up into an
+# Audit engagement, as well as this being the natural default for the
+# dedicated "Accounting & Bookkeeping" engagement type. The whole
+# Accounting tab (see accounting.py / templates referenced from
+# templates/engagements/detail.html) only appears once at least one of
+# these is selected, or the engagement type is dedicated - see
+# Engagement.has_accounting_module. "costing"/"budgeting" each gate their
+# own sections of that tab further - see has_cost_accounting/
+# has_management_accounting below, since not every bookkeeping client also
+# needs job costing or a formal budget.
+ACCOUNTING_SERVICES = [
+    ("bookkeeping", "Financial Accounting / Bookkeeping (write-up & GL maintenance)"),
+    ("statements", "Financial Statement Preparation (compiled / management accounts)"),
+    ("costing", "Cost Accounting (job/process/standard costing & variance analysis)"),
+    ("budgeting", "Management Accounting (budgets, forecasts & management reports)"),
+]
+ACCOUNTING_SERVICE_LABELS = dict(ACCOUNTING_SERVICES)
+
+# The tax heads tracked throughout the Tax module (Registrations, the
+# Statutory Compliance Calendar, the Execution Plan, Return Records, the
+# Penalty & Interest Engine, and the Exposure Dashboard all key off this
+# same list) - deliberately a plain, editable-in-code list rather than
+# anything hardcoded into a rate or a form, per the module's own "nothing
+# tax-specific is fabricated" rule (see PenaltyInterestRate below).
+TAX_HEADS = [
+    "Corporate Income Tax (CIT)", "Value Added Tax (VAT)", "PAYE",
+    "Withholding Tax (WHT)", "Capital Gains Tax (CGT)", "Customs & Excise",
+    "Provisional Tax (QPDs)",
+]
+
+# The three sections of a client's Tax & Accounting Filing Archive (see
+# TaxAccountingFilingDocument below) - kept as a plain, ordered list like
+# every other section registry in this file (TAX_SERVICES, WORKPAPER_SECTIONS,
+# etc.) rather than hardcoded into the template, so a section can be
+# relabelled here in one place.
+FILING_ARCHIVE_SECTIONS = [
+    ("tax_clearance", "Tax Clearances"),
+    ("return", "Returns"),
+    ("schedule", "Schedules"),
+]
+FILING_ARCHIVE_SECTION_LABELS = dict(FILING_ARCHIVE_SECTIONS)
+
+# The write-up/close-out work areas tracked on the Accounting module's
+# Execution Plan - reuses SubstantiveProcedureArea/Item exactly like
+# TAX_HEADS does above (one area per entry, appended onto whatever this
+# engagement type's own areas already are, whenever Engagement.
+# has_accounting_module is True) - see the append in engagements.
+# view_engagement(). Kept as a plain, editable-in-code list for the same
+# reason TAX_HEADS is.
+ACCOUNTING_AREAS = [
+    "Bank & Cash Reconciliations", "Receivables & Payables Write-up",
+    "Inventory & Costing Records", "Payroll Postings",
+    "Fixed Asset Register Maintenance", "Management Reporting Pack",
+]
+
+ENGAGEMENT_STATUSES = ["Planning", "Fieldwork", "Review", "Completed", "On Hold"]
+TASK_STATUSES = ["To Do", "In Progress", "Review", "Done"]
+
+# Task categories (EngagementTask and PersonalTask) - one per firm service
+# line, plus Admin Work, Other and Personal. Tax Services tasks are ALWAYS High priority
+# (penalties and interest accrue on late ZIMRA filings/payments), enforced
+# server-side by effective_task_priority() so no form, status change or
+# URL edit can leave one at Low/Normal.
+TASK_CATEGORIES = [
+    "Audit", "Forensic Audit", "Tax Services", CORPFIN_TASK_CATEGORY, IT_TASK_CATEGORY, "Accounting",
+    "Secretarial", "Neverlank Anonymous Tipoff Services", "Training",
+    "Admin Work", "Other", "Personal",
+]
+TAX_TASK_CATEGORY = "Tax Services"
+
+# Engagement type -> the task category its tasks default to.
+ENGAGEMENT_TYPE_TASK_CATEGORY = {
+    "Audit": "Audit",
+    "Assurance": "Audit",
+    "Investigative Engagement": "Forensic Audit",
+    "Tax Advisory": "Tax Services",
+    "Tax Compliance": "Tax Services",  # legacy name, see LEGACY_TAX_ENGAGEMENT_TYPES
+    "Tax Advisory & Health Check": "Tax Services",  # legacy name
+    CORPFIN_ENGAGEMENT_TYPE: CORPFIN_TASK_CATEGORY,
+    LEGACY_CONSULTING_TYPE: CORPFIN_TASK_CATEGORY,  # legacy name
+    "Business Intelligence and IT Engagements": IT_TASK_CATEGORY,
+    "Accounting & Bookkeeping": "Accounting",
+    "Secretarial": "Secretarial",
+    "Neverlank Anonymous Whistle-blower Services": "Neverlank Anonymous Tipoff Services",
+    "Neverlank Training Services": "Training",
+}
+
+
+def canonical_engagement_type(value):
+    """The current name for an engagement type: the two retired tax names
+    ("Tax Compliance", "Tax Advisory & Health Check") become "Tax Advisory";
+    anything else is returned unchanged. Used wherever a type arrives from a
+    form so an old bookmark or stale page can't recreate a retired type."""
+    if value in LEGACY_TAX_ENGAGEMENT_TYPES:
+        return TAX_ADVISORY_TYPE
+    if value == LEGACY_CONSULTING_TYPE:
+        return CORPFIN_ENGAGEMENT_TYPE
+    return value
+
+
+def template_folder(eng_type):
+    """Folder name (under the Document Templates folders) that holds this type's files. Corporate Finance &
+    Business Advisory keeps the folder the Consulting templates were always stored in, so nothing on disk
+    has to move."""
+    return LEGACY_CONSULTING_TYPE if eng_type in (CORPFIN_ENGAGEMENT_TYPE, LEGACY_CONSULTING_TYPE) else eng_type
+
+
+def resolve_task_category(requested, engagement=None, fallback="Other"):
+    """The category to store: the one asked for if it's valid, otherwise the
+    one implied by the task's engagement type, otherwise `fallback`."""
+    if requested in TASK_CATEGORIES:
+        return requested
+    if engagement is not None:
+        mapped = ENGAGEMENT_TYPE_TASK_CATEGORY.get(getattr(engagement, "type", None))
+        if mapped:
+            return mapped
+    return fallback if fallback in TASK_CATEGORIES else "Other"
+
+
+def effective_task_priority(category, priority):
+    """Tax Services tasks are always High; anything else keeps a valid
+    requested priority (default Normal)."""
+    if category == TAX_TASK_CATEGORY:
+        return "High"
+    return priority if priority in ("Low", "Normal", "High") else "Normal"
+CHECKLIST_STATUSES = ["Not Started", "In Progress", "Done", "N/A"]
+RISK_STATUSES = ["Open", "Mitigated", "Accepted", "Closed"]
+
+USER_ROLES = ["staff", "supervisor", "partner", "admin"]
+# Roles allowed to sign off work as "Reviewed" on checklist items, tasks and
+# timesheets. A reviewer can never sign off their own work - that check is
+# enforced in the route, not here.
+REVIEWER_ROLES = ("supervisor", "partner", "admin")
+# Roles allowed to give the final Engagement Partner sign-off on a workpaper.
+# This is a separate, discretionary tier above the ordinary Preparer/Reviewer
+# sign-off - the partner can sign off any workpaper "where he sees fit"
+# rather than it being a hard gate, but (like a reviewer) can never sign off
+# their own work.
+PARTNER_SIGNOFF_ROLES = ("partner", "admin")
+
+# The two line-item workpaper types WorkpaperReview (below, near
+# EngagementQuery) can be attached to, so far - the user's own requested
+# starting point ("start with the actual line-item workpapers - Substantive
+# Procedures / checklist items - and expand later"). Adding a further
+# workpaper type later is just one more entry here (plus its own `reviews`
+# property and a redirect case in engagements._reviewable_engagement/
+# _reviewable_redirect) - no new table or migration needed, since
+# WorkpaperReview is generic.
+REVIEWABLE_TYPE_SUBSTANTIVE_ITEM = "substantive_item"
+REVIEWABLE_TYPE_CHECKLIST_ITEM = "checklist_item"
+REVIEWABLE_TYPES = (REVIEWABLE_TYPE_SUBSTANTIVE_ITEM, REVIEWABLE_TYPE_CHECKLIST_ITEM)
+
+# The engagement workpaper sections a Partner/Reviewer can raise a review
+# Query against (see EngagementQuery below) - every tab on the engagement
+# detail page, including Overview and Client Acceptance & Continuance, so a
+# reviewer can flag something anywhere in the file, from acceptance right
+# through to finalisation. For "substantive", a query is further scoped to
+# one audit area (EngagementQuery.area_name) since Substantive Procedures
+# has one sign-off per area rather than one for the whole tab.
+QUERY_SECTIONS = [
+    ("overview", "Overview"),
+    ("acceptance", "Client Acceptance & Continuance"),
+    ("entity", "Understanding the Entity"),
+    ("risks", "Risk Assessment"),
+    ("planning", "Planning (Materiality)"),
+    ("analytical", "Analytical Review"),
+    ("checklist", "Checklist"),
+    ("substantive", "Substantive Procedures"),
+    ("documents", "Documents"),
+    ("tasks", "Tasks"),
+    ("income_tax", "Income Tax Computation"),
+    ("deferred_tax", "Deferred Tax Computation"),
+    ("finalisation", "Finalisation (Trial Balance / Financial Statements)"),
+    ("tax", "Tax Advisory"),
+    ("accounting", "Financial, Cost & Management Accounting"),
+]
+QUERY_SECTION_KEYS = {key for key, _ in QUERY_SECTIONS}
+QUERY_SECTION_LABELS = dict(QUERY_SECTIONS)
+
+# Fixed workpaper index - one lettered reference per major engagement
+# section/tab, in file order, so every part of the engagement can be
+# referred to (and filed under, in the Engagement File Summary PDF) the
+# way a paper audit file would be indexed. This is intentionally a fixed
+# firm-standard registry rather than something edited per engagement - a
+# firm's workpaper index rarely changes engagement to engagement. "forensic"
+# entries only appear in the file summary for an "Investigative Engagement".
+#
+# The 4th element, filing_code, is the matching reference from the firm's
+# Audit Working Paper Indexing & Filing Policy (see FilingIndexSection / the
+# Filing Index & Manual page) - None where this app section doesn't
+# correspond to a single numbered working paper in that scheme (the main
+# Engagement Checklist and Substantive Procedures each span many separate
+# working papers/areas, already given their own codes elsewhere; the
+# Forensic Investigation Report has no equivalent in a filing policy scoped
+# to statutory audits). Where a filing_code exists, it's shown in place of
+# the old letter reference on downloads and the File Summary PDF; where it
+# doesn't, the letter reference is kept as the fallback.
+WORKPAPER_SECTIONS = [
+    ("A", "acceptance", "Client Acceptance & Continuance", "N1009"),
+    ("B", "entity", "Understanding the Entity's Business", "N1003"),
+    ("C", "risks", "Risk Assessment", "N1004"),
+    ("D", "planning", "Planning (Materiality)", "N1001"),
+    ("E", "analytical", "Analytical Review", "N1006"),
+    ("F", "checklist", "Engagement Checklist", None),
+    ("G", "substantive", "Substantive Procedures", None),
+    ("H", "financials", "Financial Statements", "N8100"),
+    ("I", "finalisation", "Finalisation Checklist", "N9009"),
+    ("J", "rep_letter", "Management Representation Letter", "N9006"),
+    ("K", "report_to_management", "Report to Management", "N8300"),
+    ("L", "forensic_report", "Forensic Investigation Report", None),
+    ("M", "tax_opinion", "Tax Opinion / Advisory Report", None),
+    ("N", "tax_health_check", "Tax Health Check Report", None),
+    ("O", "management_accounts_report", "Management Accounts Report", None),
+    ("P", "it_audit_report", "IT & Cyber Assurance Report", None),
+]
+WORKPAPER_SECTION_BY_KEY = {key: (code, label, filing_code) for code, key, label, filing_code in WORKPAPER_SECTIONS}
+
+
+def workpaper_reference(section_key):
+    """The fixed "A", "B", "C"... index letter for a workpaper section key
+    (see WORKPAPER_SECTIONS), or None if the key isn't recognised."""
+    entry = WORKPAPER_SECTION_BY_KEY.get(section_key)
+    return entry[0] if entry else None
+
+
+def filing_reference(section_key):
+    """The firm's actual filing-index reference (e.g. "N1003") for a
+    workpaper section key, falling back to the old letter reference (e.g.
+    "B") where this section doesn't correspond to a single numbered working
+    paper in the filing policy. Always returns something displayable."""
+    entry = WORKPAPER_SECTION_BY_KEY.get(section_key)
+    if not entry:
+        return None
+    code, _, filing_code = entry
+    return filing_code or code
+
+
+def effectively_reviewed(record):
+    """True if `record` (any workpaper carrying the standard Preparer/
+    Reviewer/Partner sign-off fields - completed_by/is_reviewed) either has
+    an independent Reviewer sign-off, or its preparer is already a Partner
+    or Admin - in which case a separate Reviewer isn't required, since a
+    Partner's own preparation of a section is treated as definitive.
+
+    This is read-only/display-only: it never sets reviewed_by_id/reviewed_at
+    on the record, and it never changes the existing rule (enforced in the
+    routes) that a reviewer/partner sign-off can never be the same person as
+    the preparer - a Partner still can't click "Review" on their own work.
+    It only affects whether work is treated as "reviewed enough" for things
+    like the Engagement File Summary PDF and the checklist tab's display.
+    """
+    if getattr(record, "is_reviewed", False):
+        return True
+    # Almost every workpaper names its preparer relationship "completed_by",
+    # but MaterialityCalculation (re-saved rather than "completed") instead
+    # calls it "updated_by" - check both rather than special-casing it.
+    preparer = getattr(record, "completed_by", None) or getattr(record, "updated_by", None)
+    return bool(preparer and getattr(preparer, "role", None) in PARTNER_SIGNOFF_ROLES)
+
+# Configurable role permissions: a small set of firm-administration actions
+# (managing shared libraries, deleting whole clients/engagements/documents,
+# managing team members) that an admin can allow or deny per role from the
+# Team > Permissions settings screen, instead of them being hardcoded. This
+# is separate from - and never touches - the Preparer/Reviewer/Partner
+# sign-off workflow above, which stays exactly as it is regardless of these
+# settings. Each entry is (key, label, description, default_roles) where
+# default_roles are the roles allowed=True the very first time this is
+# seeded - chosen to exactly reproduce this app's behaviour before this
+# permissions system existed, so upgrading an existing install changes
+# nothing until an admin actually opens the settings screen and changes it.
+PERMISSIONS = [
+    ("manage_document_templates", "Manage Document Templates",
+     "Add, edit or delete templates in the Document Templates library (previously admin/partner only).",
+     ("partner", "admin")),
+    ("manage_policies", "Manage Policies & Procedures",
+     "Add, edit or delete documents in the Policies & Procedures library (previously admin/partner only).",
+     ("partner", "admin")),
+    ("manage_regulatory_notices", "Manage Regulatory Notices",
+     "Upload or delete RBZ/FIU adverse notice PDFs in the Regulatory Notices library, used by automated sanctions/adverse-notice screening.",
+     ("partner", "admin")),
+    ("manage_sanctions_lists", "Refresh Sanctions Lists",
+     "Trigger a manual refresh of the cached UN, OFAC and EU sanctions lists used by automated screening.",
+     ("partner", "admin")),
+    ("manage_company_documents", "Manage Company Documents",
+     "Upload or delete a client's company documents (incorporation certificate, CR6, share register, etc.), confirm/edit/delete the Directors & Shareholders picked up from them, and run the public-information scan on a client's business.",
+     tuple(USER_ROLES)),
+    ("manage_qpd", "Manage QPD / Provisional Tax Estimates",
+     "Create or edit a client's Quarterly Payment Date (provisional income tax) estimate - import/enter a Trial Balance or monthly VAT turnover, adjust the estimate, and record what's been paid.",
+     tuple(USER_ROLES)),
+    ("manage_vat_schedules", "Upload & Map VAT Schedules",
+     "On an engagement's Tax tab: upload an Output VAT or Input VAT schedule (sales, exports, credit notes, purchases, Bills of Entry) from Excel/CSV, map its columns, confirm the import, and delete an imported batch. Limited to supervisors and above by default (and still only on engagements the person is staffed on, unless Admin); typing in a single VAT document by hand is unaffected.",
+     ("supervisor", "partner", "admin")),
+    ("reopen_vat_periods", "Reopen a Completed VAT Month",
+     "On an engagement's Tax tab: reopen a VAT month that has been marked 'Computation done' so documents dated in it can be added, deleted or imported again. Anyone on the engagement can mark a month as done; only supervisors and above can reopen it by default (a reason is recorded).",
+     ("supervisor", "partner", "admin")),
+    ("send_invoices", "Send Invoices & Reminders to Clients",
+     "Email an invoice (with the PDF attached) or open a WhatsApp message with its link straight from the invoice page, and send overdue-payment reminders. Open to everyone who can see the invoice by default; remove it from a role to stop staff contacting clients themselves.",
+     tuple(USER_ROLES)),
+    ("issue_credit_notes", "Issue & Void Credit Notes",
+     "Finance > Credit notes: issue a credit note against a client invoice (in full or in part) to correct or reduce what the client owes, and void one issued in error. Partners and Admin only by default.",
+     ("partner", "admin")),
+    ("view_attendance", "View Attendance (Check In / Check Out)",
+     "HR & Admin > Attendance: see who is in right now, when everyone checked in and out each day, hours worked, people who have not checked in or forgot to check out, and export the log. Management only by default.",
+     ("partner", "admin")),
+    ("manage_corporate_finance", "Use Corporate Finance & Business Advisory models",
+     "Corporate Finance workspace: build and edit financial forecasts (income statement, balance sheet, cash flow), loans and covenants, valuations, capital-budgeting projects and budget-vs-actual reviews for the clients the person is working on. Making a model Final, and re-opening a Final model, is always limited to Partners and Admin.",
+     ("supervisor", "partner", "admin")),
+    ("manage_whistleblower", "Manage Whistle-blower Service cases",
+     "See and work the confidential reports received through Neverlank's Anonymous Whistle-blower Services - log cases, investigate, update status, reply to reporters and produce client reports. Reports can be highly sensitive, so this is limited to supervisors and above by default (and still only on engagements the person is staffed on, unless Admin).",
+     ("supervisor", "partner", "admin")),
+    ("manage_training", "Manage Training Services",
+     "Set up training sessions, keep attendee registers, upload materials, record feedback and issue certificates under Neverlank Training Services.",
+     tuple(USER_ROLES)),
+    ("manage_checklist_templates", "Manage Checklist Templates",
+     "Create, edit or delete the checklist templates used to start new engagements (previously unrestricted).",
+     tuple(USER_ROLES)),
+    ("manage_users", "Manage Team Members",
+     "Add or edit team members, including their role and password (previously admin only). "
+     "Only an actual admin can ever grant someone the admin role, regardless of this setting.",
+     ("admin",)),
+    ("delete_clients", "Delete Clients",
+     "Delete a client and all of its engagements (previously unrestricted).",
+     tuple(USER_ROLES)),
+    ("delete_engagements", "Delete Engagements",
+     "Delete an engagement and all of its checklist items, risks, documents and tasks (previously unrestricted).",
+     tuple(USER_ROLES)),
+    ("delete_documents", "Delete Documents",
+     "Delete an uploaded working paper/document from an engagement (previously unrestricted).",
+     tuple(USER_ROLES)),
+    ("manage_payroll", "Manage Payroll",
+     "Open the Payroll module: view/add employees (Neverlank staff or client payroll), run payroll periods, "
+     "edit payslips, and change the firm's Payroll Tax Settings. Salary data is sensitive, so this defaults "
+     "to Partner/Admin only.",
+     ("partner", "admin")),
+    ("manage_legislative_updates", "Manage Legislative Update Control",
+     "Upload or delete Acts, Government Notices and Statutory Instruments in the Legislative Update Control "
+     "library, used to drive AI summarisation and client-relevance tagging.",
+     ("partner", "admin")),
+    ("manage_chart_of_accounts", "Manage the Standard Chart of Accounts",
+     "Add, edit, deactivate or delete entries in the firm's Standard Chart of Accounts (Neverlank Standard) - the "
+     "numbered account list used to speed up mapping a client's trial balance accounts to an IAS 1 category.",
+     ("partner", "admin")),
+    ("view_firm_finances", "View Firm Finances & Analytics",
+     "Open the Revenue & Expenses Analytics page (debtors days, ageing, revenue, expenses, profit) and the firm's "
+     "Expense register. These show the firm's overall income and costs, so this defaults to Partner/Admin only.",
+     ("partner", "admin")),
+    ("research_firm_library", "Research the Firm Library",
+     "Use \"Ask the Firm Library\" to query the Policies & Procedures library with AI and see the AI-generated "
+     "summary/key points on each document. Viewing and downloading policies is unaffected by this setting and "
+     "stays open to everyone - this only gates the AI research features, rolled out firm-wide after the pilot.",
+     tuple(USER_ROLES)),
+]
+PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
+
+# The two engagement types that involve PAYE work (see TAX_HEADS below,
+# which includes "PAYE" as one of the areas every Tax engagement's
+# Execution Plan covers) - used by the "manage_payroll" carve-out in
+# user_has_permission below: staff actually staffed on a Tax engagement
+# need the Payroll module's PAYE tax bands/settings for that work, so they
+# get it automatically even where their role wouldn't otherwise grant it.
+TAX_ENGAGEMENT_TYPES = (TAX_ADVISORY_TYPE,) + LEGACY_TAX_ENGAGEMENT_TYPES
+
+
+def user_has_permission(user, key):
+    """The one place this app should ever ask "is this role allowed to do
+    X?" for the administrative actions in PERMISSIONS above - routes call
+    this instead of hardcoding a role check. Admin is always allowed,
+    hardcoded here rather than stored, so a mistaken/mischievous toggle on
+    the settings screen can never lock every admin out of fixing it.
+
+    Below that, three layers are checked in order:
+    1. A per-user override (UserPermissionOverride, "Access Rights" on a
+       team member's own profile) - an explicit, named decision about this
+       one person, so it wins over everything else.
+    2. For "manage_payroll" specifically, whether the user is staffed on an
+       active Tax Advisory engagement (see
+       TAX_ENGAGEMENT_TYPES above) - PAYE review work on a Tax engagement
+       needs the Payroll module's PAYE tax settings, granted automatically
+       rather than requiring every such person to get an explicit override.
+    3. The ordinary role-level Permission toggle (Team > Permissions),
+       falling back to the registry's own default_roles if no row exists
+       yet for this (role, key) - e.g. a permission added by an app update
+       before the next seed/migration runs."""
+    if user.role == "admin":
+        return True
+    override = UserPermissionOverride.query.filter_by(user_id=user.id, permission_key=key).first()
+    if override is not None:
+        return override.allowed
+    if key == "manage_payroll" and _user_has_active_tax_engagement(user):
+        return True
+    perm = Permission.query.filter_by(role=user.role, permission_key=key).first()
+    if perm is not None:
+        return perm.allowed
+    for reg_key, _, _, default_roles in PERMISSIONS:
+        if reg_key == key:
+            return user.role in default_roles
+    return False
+
+
+def _user_has_active_tax_engagement(user):
+    """True if `user` is a team member (Engagement.team_members) on at
+    least one Tax Advisory engagement that
+    isn't yet Completed - see the "manage_payroll" carve-out above."""
+    return any(
+        e.type in TAX_ENGAGEMENT_TYPES and e.status != "Completed"
+        for e in user.engagements
+    )
+
+
+# Standard industry list for clients - lets engagements automatically align
+# their suggested checklist/substantive-procedure content to the client's
+# sector (see the Substantive Procedures module). "Other" is always available
+# as a fallback with a free-text field alongside it.
+INDUSTRY_OPTIONS = [
+    "Agriculture & Agro-processing",
+    "Manufacturing",
+    "Mining & Extractives",
+    "Petroleum & Fuel Distribution",
+    "Retail & Wholesale Trade",
+    "Construction & Real Estate",
+    "Banking & Financial Services",
+    "Insurance",
+    "Insurance Brokers",
+    "Microfinance & Savings/Credit Cooperatives",
+    "NGOs & Non-Profit Organisations",
+    "Hospitality & Tourism",
+    "Transport & Logistics",
+    "Telecommunications",
+    "Information Technology & Software",
+    "Healthcare & Pharmaceuticals",
+    "Education",
+    "Energy & Utilities",
+    "Motor Trade",
+    "Professional & Business Services",
+    "Public Sector & Parastatals",
+    "Media & Entertainment",
+    "Other",
+]
+
+POLICY_CATEGORIES = ["HR Policy", "Firm Procedure", "Quality Control", "IT & Security", "Other"]
+TIMESHEET_STATUSES = ["Submitted", "Approved"]
+STANDARD_HOURS_PER_DAY = 8  # anything beyond this on a given day counts as overtime
+
+
+def _score_rating(score):
+    """Shared Low/Medium/High banding for a likelihood x impact score (1-25),
+    used by both the legacy RiskItem model and the questionnaire-driven
+    RiskAssessment below, so the two ratings always mean the same thing."""
+    if score >= 15:
+        return "High"
+    if score >= 8:
+        return "Medium"
+    return "Low"
+
+
+# The system-based Risk Assessment questionnaire: each question is answered
+# on a 1-5 scale via the labelled options below (index 0 = score 1, ... index
+# 4 = score 5). Likelihood questions assess how likely a misstatement/risk
+# event is; impact questions assess how significant it would be if it
+# happened. This is a general-purpose starting questionnaire covering common
+# audit risk factors - review the wording and, if useful, adjust it to match
+# your firm's own risk assessment methodology; it isn't a substitute for
+# professional judgement or a specific standard's requirements.
+RISK_LIKELIHOOD_QUESTIONS = [
+    ("q_complexity", "How complex are this client's transactions and accounting estimates?", [
+        "Simple, routine transactions",
+        "Mostly routine, some judgement",
+        "Moderate complexity/estimates",
+        "Significant judgement/estimates involved",
+        "Highly complex and/or highly judgemental",
+    ]),
+    ("q_controls", "How reliable is the client's internal control environment?", [
+        "Strong, well-documented controls",
+        "Generally sound controls",
+        "Some control weaknesses",
+        "Significant control weaknesses",
+        "Weak or no meaningful controls",
+    ]),
+    ("q_environment_change", "Has the client's business, industry or regulatory environment changed significantly since the last engagement?", [
+        "No significant change",
+        "Minor changes",
+        "Some notable changes",
+        "Significant changes",
+        "Major upheaval (new regulation, restructuring, new systems, etc.)",
+    ]),
+    ("q_fraud_indicators", "Are there indicators of fraud risk (incentive/pressure, opportunity, rationalisation, management override potential)?", [
+        "None noted",
+        "Minimal indicators",
+        "Some indicators present",
+        "Several indicators present",
+        "Significant fraud risk concerns",
+    ]),
+    ("q_prior_issues", "Did the prior engagement identify unresolved issues, control deficiencies or misstatements?", [
+        "None",
+        "Minor items, all resolved",
+        "Some unresolved items",
+        "Several unresolved/recurring items",
+        "Significant unresolved issues",
+    ]),
+]
+
+RISK_IMPACT_QUESTIONS = [
+    ("q_significance", "How significant/high-profile is this engagement (public interest, regulatory scrutiny, stakeholder reliance)?", [
+        "Low - private, low scrutiny",
+        "Below average",
+        "Average",
+        "Above average",
+        "High - public interest/heavy scrutiny",
+    ]),
+    ("q_magnitude", "What is the potential monetary magnitude of a misstatement in this engagement, relative to materiality?", [
+        "Well below materiality",
+        "Below materiality",
+        "Around materiality",
+        "Above materiality",
+        "Well above materiality",
+    ]),
+    ("q_going_concern", "Are there going concern indicators (recurring losses, liquidity issues, covenant breaches, negative equity)?", [
+        "None",
+        "Minor concerns",
+        "Some concerns",
+        "Significant concerns",
+        "Substantial doubt over going concern",
+    ]),
+    ("q_related_party", "What is the extent of related-party or unusual/non-recurring transactions?", [
+        "None",
+        "Minimal",
+        "Some",
+        "Considerable",
+        "Extensive",
+    ]),
+    ("q_consequences", "What are the potential consequences of an undetected material misstatement (legal, regulatory, reputational)?", [
+        "Minor",
+        "Limited",
+        "Moderate",
+        "Serious",
+        "Severe",
+    ]),
+]
+
+# Forensic-specific Risk Assessment questionnaire, used in place of
+# RISK_LIKELIHOOD_QUESTIONS/RISK_IMPACT_QUESTIONS above for engagements of
+# type "Investigative Engagement" (see RiskAssessment.likelihood_answers/
+# impact_answers below, which branch on engagement.type). Same 1-5 scoring
+# and Low/Medium/High banding, but built around the Fraud Triangle
+# (Incentive/Pressure, Opportunity, Rationalisation) rather than ordinary
+# audit risk of material misstatement - a financial statement audit asks
+# "how likely is an honest error", a forensic engagement asks "how likely
+# is someone here committing, and getting away with, fraud". Deliberately
+# does not apply standard materiality thresholds to the "significance"
+# question - a small number can still indicate a systemic fraud scheme.
+FORENSIC_RISK_LIKELIHOOD_QUESTIONS = [
+    ("q_fraud_incentive", "Incentive/Pressure - how strong is the incentive or pressure to commit fraud (financial distress, unrealistic performance targets, personal greed)?", [
+        "No evident pressure - financially stable, targets are realistic",
+        "Minor pressure - some ambitious targets or mild financial strain",
+        "Moderate pressure - noticeable financial strain or aggressive targets on certain individuals/units",
+        "Significant pressure - clear financial distress, unrealistic targets, or known personal financial difficulty on key individuals",
+        "Severe pressure - the entity or key individuals face acute financial distress, personal ruin, or extreme performance pressure",
+    ]),
+    ("q_fraud_opportunity", "Opportunity - how much opportunity exists to commit and conceal fraud (weak internal controls, poor segregation of duties, management override capability)?", [
+        "Strong controls, clear segregation of duties, no realistic override capability",
+        "Generally sound controls with only minor gaps",
+        "Noticeable control weaknesses or overlapping duties in some areas",
+        "Significant control weaknesses, poor segregation of duties, or meaningful override capability",
+        "Weak or absent controls, duties concentrated in one person, and management can override controls unchecked",
+    ]),
+    ("q_fraud_rationalization", "Rationalisation - how tolerant is the culture of cutting corners, and are there disgruntled or underpaid employees who might feel justified?", [
+        "Strong ethical culture and clear tone at the top; no known grievances",
+        "Generally sound culture; isolated, minor grumbling",
+        "Some tolerance of cutting corners, or a few known grievances",
+        "A noticeable \"everyone does it\" culture, or several disgruntled/underpaid employees",
+        "Widespread tolerance of cutting corners and significant, well-known grievances among staff",
+    ]),
+    ("q_fraud_override", "Management override - how easily could executives or supervisors bypass existing system controls to perpetrate or conceal fraud?", [
+        "No override capability - controls and approvals apply equally at every level",
+        "Limited override capability, subject to independent review",
+        "Some override capability with inconsistent independent review",
+        "Considerable override capability with little independent oversight",
+        "Unchecked override capability - management can bypass controls with no independent oversight at all",
+    ]),
+    ("q_fraud_intel", "Prior intelligence - what do whistleblower/hotline tips, past audit findings, or industry-specific fraud trends suggest about this engagement?", [
+        "No tips, findings or trends suggesting a heightened risk here",
+        "Isolated, unsubstantiated chatter with no supporting detail",
+        "A specific tip or finding exists but is vague or unconfirmed",
+        "A credible tip, finding, or well-known industry trend directly points to this area",
+        "Multiple credible tips/findings, or this exact scheme is a known, active trend in this industry",
+    ]),
+]
+
+FORENSIC_RISK_IMPACT_QUESTIONS = [
+    ("q_scheme_revenue_gl", "Revenue & journal entries - how significant is the exposure to revenue recognition fraud or general ledger manipulation (channel stuffing, bill-and-hold, fictitious sales, manual/backdated/rounded-dollar entries)?", [
+        "No plausible exposure identified",
+        "Minor exposure - isolated, low-value transactions only",
+        "Some exposure in a defined area or period",
+        "Considerable exposure across multiple accounts/periods",
+        "Severe exposure - pervasive, high-value, or long-running",
+    ]),
+    ("q_scheme_asset_misappropriation", "Asset misappropriation - how significant is the exposure to theft or misuse of assets (inventory shrinkage, unauthorised write-offs, missing scrap, cash theft)?", [
+        "No plausible exposure identified",
+        "Minor exposure - isolated, low-value items only",
+        "Some exposure in a defined area or period",
+        "Considerable exposure across multiple assets/locations",
+        "Severe exposure - pervasive, high-value, or long-running",
+    ]),
+    ("q_scheme_procurement_vendor", "Procurement & vendor management - how significant is the exposure to shell companies, bid rigging/kickbacks, or duplicate payments?", [
+        "No plausible exposure identified",
+        "Minor exposure - a small number of vendors/contracts",
+        "Some exposure across a defined category of spend",
+        "Considerable exposure across multiple vendors/contracts",
+        "Severe exposure - pervasive across procurement, or very high-value contracts involved",
+    ]),
+    ("q_scheme_payroll_expenses", "Payroll & expenses - how significant is the exposure to ghost employees or travel & entertainment fraud?", [
+        "No plausible exposure identified",
+        "Minor exposure - isolated, low-value items only",
+        "Some exposure in a defined department or period",
+        "Considerable exposure across multiple departments/individuals",
+        "Severe exposure - pervasive, high-value, or long-running",
+    ]),
+    ("q_scheme_significance", "Overall significance - if any of the above were substantiated, how significant would the financial or reputational impact be? (Do not apply standard materiality thresholds here - a small amount can still indicate a systemic fraud scheme.)", [
+        "Minor - immaterial financial impact, no reputational exposure",
+        "Limited - modest financial impact, low reputational exposure",
+        "Moderate - noticeable financial impact and/or reputational exposure",
+        "Serious - significant financial impact and/or public/regulatory reputational exposure",
+        "Severe - potential for criminal referral, major financial loss, or serious reputational damage",
+    ]),
+]
+
+# Business Intelligence and IT Engagements-specific Risk Assessment
+# questionnaire, used in place of RISK_LIKELIHOOD_QUESTIONS/
+# RISK_IMPACT_QUESTIONS above (the same way FORENSIC_RISK_*_QUESTIONS are,
+# just for the new type) - see RiskAssessment.likelihood_questions/
+# impact_questions below. A cyber/IT/AML-CFT control assurance engagement
+# asks "how likely is a control failure or breach, and how bad would it be
+# if one happened" rather than "how likely is a financial misstatement",
+# so this questionnaire is built around threat exposure, control maturity,
+# environment complexity, third-party/cloud dependency, and AML/CFT
+# customer & channel risk - deliberately general, same as every other risk
+# questionnaire in this app; apply your own methodology and professional
+# judgement on top of it.
+BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS = [
+    ("q_threat_exposure", "How exposed is the entity to external cyber threats (internet-facing systems, remote access, prior incidents, industry targeting)?", [
+        "Minimal external footprint, no history of incidents or targeting",
+        "Limited exposure, no known incidents",
+        "Moderate exposure - some internet-facing systems, industry occasionally targeted",
+        "Significant exposure - substantial internet-facing footprint or a known prior incident",
+        "Severe exposure - heavily targeted sector/entity, and/or repeated prior incidents",
+    ]),
+    ("q_control_maturity", "How mature are the entity's IT general controls (patching, access reviews, segregation of IT duties, logging/monitoring)?", [
+        "Mature, well-documented and independently tested controls",
+        "Generally sound controls with only minor gaps",
+        "Noticeable control weaknesses in some areas",
+        "Significant control weaknesses across multiple areas",
+        "Weak or largely absent IT general controls",
+    ]),
+    ("q_environment_complexity", "How much change or complexity is there in the IT environment (new systems, cloud migration, M&A/integration, outsourced IT)?", [
+        "Stable, unchanged environment",
+        "Minor changes underway",
+        "Some notable changes (a system replacement or cloud move in progress)",
+        "Significant changes (major migration, integration, or outsourcing under way)",
+        "Extensive, concurrent change across multiple systems/providers",
+    ]),
+    ("q_third_party_cloud", "How dependent is the entity on third-party service providers and cloud platforms for critical systems or data?", [
+        "Minimal reliance - systems mostly in-house",
+        "Limited reliance, well-managed vendor relationships",
+        "Moderate reliance across several providers",
+        "Significant reliance, including on providers with limited oversight",
+        "Extensive reliance, including on critical, unaudited third parties",
+    ]),
+    ("q_aml_customer_channel", "What is the entity's AML/CFT customer and channel risk profile (cash-intensive activity, cross-border transactions, high-risk customer types, correspondent relationships)?", [
+        "Low-risk customer base and channels, minimal cash/cross-border activity",
+        "Mostly low-risk, limited higher-risk activity",
+        "Some higher-risk customers, channels, or cross-border activity",
+        "Considerable higher-risk activity (cash-intensive, cross-border, or PEP exposure)",
+        "Extensive higher-risk activity across customers, channels and jurisdictions",
+    ]),
+]
+
+BUSINESS_IT_RISK_IMPACT_QUESTIONS = [
+    ("q_data_sensitivity", "How sensitive is the data at risk (personal information under the Cyber and Data Protection Act [Chapter 12:07], financial data, trade secrets)?", [
+        "No sensitive data held",
+        "Limited sensitive data, low volume",
+        "Moderate volume of sensitive/personal data",
+        "Significant volume of sensitive/personal or regulated data",
+        "Extensive, highly sensitive data (large-scale personal data, payment data, or similar)",
+    ]),
+    ("q_continuity_dependency", "How critical are the affected systems to the entity's ongoing operations (business continuity dependency)?", [
+        "Non-critical - operations continue largely unaffected",
+        "Limited dependency - brief disruption tolerable",
+        "Moderate dependency - a short outage would be disruptive",
+        "High dependency - an outage of more than a few hours would be serious",
+        "Mission-critical - even a brief outage stops operations",
+    ]),
+    ("q_regulatory_legal", "What is the potential regulatory/legal exposure (Cyber and Data Protection Act, sector regulator such as POTRAZ/RBZ, Money Laundering and Proceeds of Crime Act [Chapter 9:24], FIU guidance)?", [
+        "Minimal - no plausible regulatory exposure",
+        "Limited - unlikely to attract regulatory attention",
+        "Moderate - plausible regulatory scrutiny or a minor penalty",
+        "Significant - likely regulatory action or a material penalty",
+        "Severe - potential for major penalties, licence risk, or criminal referral",
+    ]),
+    ("q_reputational", "What would the reputational impact be if a control failure or breach became public?", [
+        "Minimal - unlikely to attract attention",
+        "Limited - some client/stakeholder concern",
+        "Moderate - noticeable reputational impact",
+        "Serious - significant client/public/media attention",
+        "Severe - potential for lasting reputational or business damage",
+    ]),
+    ("q_overall_significance", "Overall, if a control failure or breach in this area were to occur, how significant would the combined financial, operational and reputational impact be?", [
+        "Minor",
+        "Limited",
+        "Moderate",
+        "Serious",
+        "Severe",
+    ]),
+]
+
+# Secretarial-specific answers (1-5 each), used instead of the ten standard
+# fields above on a "Secretarial" engagement - built around the four pillars
+# of secretarial risk under the Companies and Other Business Entities Act
+# [Chapter 24:31] (COBE Act): (1) Statutory Non-Compliance & Penalty Risk,
+# (2) Procedural & Governance Invalidity Risk, (3) Ownership, Capital &
+# Solvency Risk, and (4) Transactional & Change-of-Control Risk. Kept as
+# separate columns, same reasoning as the forensic/BI-IT-specific fields
+# above.
+SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS = [
+    ("q_filing_compliance_history", "What is this entity's track record of lodging Annual Returns (Sec 165: within 21 days of the registration anniversary) and notifying director/officer changes (Sec 217: within one month) within the statutory windows?", [
+        "Consistently on time, no history of late or missed filings",
+        "Mostly on time, isolated minor delays",
+        "Some history of late filings",
+        "Frequent late filings, or at least one lapse into defunct/struck-off status previously remedied",
+        "Currently overdue on Annual Returns, or at imminent risk of being struck off (Sec 52)",
+    ]),
+    ("q_governance_procedural_rigor", "How rigorous are the entity's board/general meeting procedures (quorum under Sec 170 for members and Sec 204 for the board, notice periods under Secs 169 and 175, board decisions by written consent or electronic meeting only as Sec 196 allows)?", [
+        "Well-documented, consistently compliant meeting procedures",
+        "Generally sound, only minor procedural gaps",
+        "Noticeable procedural weaknesses (e.g. occasional quorum or notice issues)",
+        "Significant procedural weaknesses across multiple meetings",
+        "Minute books incomplete/unsigned, or meetings routinely held without proper quorum or notice",
+    ]),
+    ("q_ownership_capital_complexity", "How complex or frequent are this entity's ownership and capital events (share allotments, transfers, beneficial ownership changes under Sec 72, distributions under Sec 102/138 or buy-backs under Sec 128-129)?", [
+        "Simple, stable ownership structure, no capital events pending",
+        "Occasional, straightforward capital events",
+        "Moderate complexity - several shareholders/classes, or an event in progress",
+        "Significant complexity - multiple classes, nominee arrangements, or frequent capital events",
+        "Highly complex ownership/capital structure with unresolved beneficial ownership questions",
+    ]),
+    ("q_transactional_activity", "How much transactional or change-of-control activity (charge/mortgage creation under Sec 154-155, constitutional amendments, restructurings under Sec 227-232) is anticipated or under way?", [
+        "None anticipated",
+        "Limited, routine activity only",
+        "Some non-routine activity anticipated (e.g. a single charge registration)",
+        "Significant activity anticipated (e.g. a restructuring or multiple charges)",
+        "Major, time-critical transactional activity already under way",
+    ]),
+    ("q_registry_standing", "What is this entity's current standing with the Registrar of Companies (up to date vs at risk of deregistration/striking-off under Sec 52)?", [
+        "Fully up to date and in good standing",
+        "Up to date, one historical lapse since remedied",
+        "One or more filings currently outstanding but within a curable window",
+        "Multiple filings outstanding, approaching the striking-off threshold",
+        "Already subject to (or at imminent risk of) Registrar deregistration proceedings",
+    ]),
+]
+
+SECRETARIAL_RISK_IMPACT_QUESTIONS = [
+    ("q_penalty_exposure", "If a filing or deadline is missed, what is the likely exposure to civil penalty orders (Sec 294), late-filing penalties, or Registrar default notices?", [
+        "Minimal - unlikely to attract any penalty",
+        "Limited - a small, one-off penalty at most",
+        "Moderate - a meaningful penalty or formal Registrar notice",
+        "Significant - substantial penalties across multiple lapses",
+        "Severe - deregistration/striking-off exposure (Sec 52)",
+    ]),
+    ("q_governance_invalidity", "If a board or shareholder resolution were later challenged for a quorum, notice, or proxy defect (Secs 169-171, 175, 196), how significant would the consequences be?", [
+        "Minimal - no material decisions at risk",
+        "Limited - only routine matters potentially affected",
+        "Moderate - some commercially significant decisions could be challenged",
+        "Significant - key resolutions (allotments, borrowings) could be voided",
+        "Severe - ultra vires exposure across major corporate actions, litigation risk",
+    ]),
+    ("q_solvency_director_liability", "If a distribution, share buyback, or director loan were found not to have followed the statutory Solvency and Liquidity Test (Secs 102 and 138), the restriction on loans to directors (Sec 208) or the disclosure requirements (Sec 216), what is the exposure?", [
+        "Minimal - no distributions/buybacks/director loans in the period",
+        "Limited - small, well-documented transactions only",
+        "Moderate - some transactions without full contemporaneous documentation",
+        "Significant - material distributions/buybacks with weak solvency evidence",
+        "Severe - unlawful distribution exposure and personal director liability",
+    ]),
+    ("q_encumbrance_control_risk", "If a mortgage, security interest or debenture were left out of the register beyond the 14-day period (Sec 155) or not registered as Sec 154 requires, or a change-of-control step were taken without required consents, what is the exposure?", [
+        "Minimal - no charges or change-of-control steps in the period",
+        "Limited - registrations well within statutory deadlines",
+        "Moderate - some risk of a registration slipping past deadline",
+        "Significant - security could be rendered void against liquidators/competing creditors",
+        "Severe - a material charge or change-of-control step already outside the statutory window",
+    ]),
+    ("q_overall_significance", "Overall, if a secretarial compliance failure in this area were to occur, how significant would the combined statutory, financial and reputational impact be for the entity and its directors?", [
+        "Minor",
+        "Limited",
+        "Moderate",
+        "Serious",
+        "Severe",
+    ]),
+]
+
+# A starting-point suggested audit approach per overall risk rating, shown on
+# the Planning tab. Deliberately general - always apply professional
+# judgement and your firm's own methodology on top of this.
+SCOPE_SUGGESTIONS = {
+    "High": (
+        "Consider a lower tolerance for detection risk: extend substantive testing and sample sizes, "
+        "reduce reliance on controls unless independently tested, assign more experienced staff with "
+        "closer supervision/review, and design specific procedures for each identified fraud risk factor "
+        "and significant risk area."
+    ),
+    "Medium": (
+        "A standard risk-based approach is likely appropriate: a blend of tests of controls (where reliance "
+        "is intended) and substantive procedures, with sample sizes and staffing set at your firm's normal "
+        "benchmarks, and extra attention on any specific factors flagged as higher risk in the questionnaire."
+    ),
+    "Low": (
+        "A reduced level of substantive testing may be appropriate, with greater reliance on analytical "
+        "procedures and (if reliance is intended) tests of controls - but still confirm materiality and any "
+        "individually significant risk areas are specifically addressed, and revisit this if circumstances change."
+    ),
+}
+
+# "Obtain an understanding of the client's business and industry" - a
+# structured set of narrative prompts (rather than a scored questionnaire,
+# since this is background knowledge to document, not something with a
+# numeric answer) covering the standard areas: the entity itself, its
+# industry/regulatory/external environment, its accounting policies, its
+# objectives/strategies/business risks, and how management measures and
+# reviews its own performance. General-purpose starting prompts - adjust the
+# wording to match your firm's own methodology.
+ENTITY_UNDERSTANDING_FIELDS = [
+    ("nature_of_entity", "Nature of the entity",
+     "Operations, ownership and governance structure, key investments, financing structure, and any recent or planned changes (acquisitions, restructuring, new products/services)."),
+    ("industry_environment", "Industry, regulatory and other external factors",
+     "Industry conditions (competition, supply/demand, cyclicality), the regulatory environment, applicable financial reporting framework, and general economic conditions affecting the client."),
+    ("accounting_policies", "Accounting policies",
+     "Significant accounting policies applied, any changes since the prior period and the reasons for them, and appropriateness for the industry."),
+    ("objectives_strategies_risks", "Objectives, strategies and related business risks",
+     "The entity's objectives and strategies, and the business risks that could result in a material misstatement of the financial statements."),
+    ("performance_measurement", "Measurement and review of financial performance",
+     "Key performance indicators, budgets, variance analysis, employee performance measures, and other information management itself uses to assess results."),
+]
+
+# Seeded ALONGSIDE the five free-text ENTITY_UNDERSTANDING_FIELDS above (not
+# instead of them, unlike the three type-specific checklists below) for
+# every engagement type that isn't "Investigative Engagement", "Business
+# Intelligence and IT Engagements" or "Secretarial" - i.e. Audit, Assurance,
+# Consulting, the two Tax types, and "Accounting & Bookkeeping". Same
+# presentation and same ISA 315 (Revised)-style five headings as
+# ENTITY_UNDERSTANDING_FIELDS, but broken into individual Yes/No/N-A +
+# comment questions - the "Client Acceptance" tab pairs a single top-level
+# narrative/checkbox with a per-section "Detailed checklist" underneath it
+# (see DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS below); this gives Understanding
+# the Entity the same two-layer treatment: the five free-text write-ups
+# stay as the narrative record, and this is the itemised, tickable version
+# underneath, so nothing gets missed and progress is visible at a glance
+# (see EntityUnderstanding.checklist_assessment).
+DEFAULT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
+    ("Nature of the Entity", "Have the entity's principal business activities, products/services and key markets been identified and documented?"),
+    ("Nature of the Entity", "Has the ownership structure been established, including parent/subsidiary/related entities and any recent changes in ownership or group structure?"),
+    ("Nature of the Entity", "Has the entity's governance structure been documented (board composition, audit/risk committees, key management personnel)?"),
+    ("Nature of the Entity", "Have the entity's sources of financing been identified, including related-party financing and any recent or planned debt/equity transactions?"),
+    ("Nature of the Entity", "Have any recent or planned significant transactions been identified (acquisitions, disposals, restructurings, new product/service lines)?"),
+    ("Industry, Regulatory and Other External Factors", "Has the competitive and market environment been considered (demand, competition, cyclicality, seasonality)?"),
+    ("Industry, Regulatory and Other External Factors", "Has the applicable financial reporting framework been confirmed, along with any recent or pending changes to it?"),
+    ("Industry, Regulatory and Other External Factors", "Have the specific laws, regulations and licensing requirements applicable to the entity's industry been identified?"),
+    ("Industry, Regulatory and Other External Factors", "Have general economic conditions relevant to the entity been considered (inflation, exchange rate volatility, interest rates)?"),
+    ("Industry, Regulatory and Other External Factors", "Have any industry-specific risks been identified (e.g. technological change, supply chain disruption)?"),
+    ("Accounting Policies", "Have the entity's significant accounting policies been identified and assessed for appropriateness to the industry?"),
+    ("Accounting Policies", "Have any changes in accounting policy since the prior period been identified, along with the reasons for the change?"),
+    ("Accounting Policies", "Have areas involving significant management judgement or estimation uncertainty been identified?"),
+    ("Accounting Policies", "Has the accounting treatment of unusual or complex transactions during the period been considered?"),
+    ("Accounting Policies", "Has consistency of accounting policy application across the group (if applicable) been assessed?"),
+    ("Objectives, Strategies and Related Business Risks", "Have the entity's key business objectives and strategies been identified?"),
+    ("Objectives, Strategies and Related Business Risks", "Have the business risks that could result in a material misstatement of the financial statements been identified?"),
+    ("Objectives, Strategies and Related Business Risks", "Has management's process for identifying and responding to business risk been considered?"),
+    ("Objectives, Strategies and Related Business Risks", "Have any new products, services or markets being entered been identified, along with the associated risks?"),
+    ("Objectives, Strategies and Related Business Risks", "Has the entity's going concern status and any related uncertainties been considered?"),
+    ("Measurement and Review of Financial Performance", "Have the key performance indicators management uses to assess financial performance been identified?"),
+    ("Measurement and Review of Financial Performance", "Has the entity's budgeting and forecasting process been considered?"),
+    ("Measurement and Review of Financial Performance", "Have significant period-on-period variances in financial performance been identified and explained?"),
+    ("Measurement and Review of Financial Performance", "Have any performance measures tied to management or employee incentive schemes been identified?"),
+    ("Measurement and Review of Financial Performance", "Has external benchmarking against industry peers been considered, where relevant?"),
+]
+
+# Seeded instead of the five free-text ENTITY_UNDERSTANDING_FIELDS above when
+# the engagement's type is "Investigative Engagement" (see
+# engagements.seed_entity_checklist) - understanding the business for a
+# forensic investigation is about the specifics of the assignment (why now,
+# what's alleged, who's involved, what data exists, who to loop in, and
+# whether it's safe to proceed), not the ISA 315-style entity/industry/
+# accounting-policy prompts the general fields ask for. Presented the same
+# way as the Client Acceptance detailed checklist - tick Yes/No/N-A and add
+# a comment on each question (see EntityUnderstandingChecklistItem below).
+FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
+    ("Objectives & Scope of the Engagement", "What is the core trigger for this investigation (e.g. whistleblower report, regulatory red flag, internal audit finding, sudden cash shortfall)?"),
+    ("Objectives & Scope of the Engagement", "What specific allegations or suspicions need to be investigated (e.g. asset misappropriation, financial statement fraud, bribery and corruption, cyber fraud)?"),
+    ("Objectives & Scope of the Engagement", "What is the precise target period for the investigation?"),
+    ("Objectives & Scope of the Engagement", "Which business units, physical locations, or subsidiaries are included in the scope?"),
+    ("Objectives & Scope of the Engagement", "Who are the known subjects or persons of interest, if any?"),
+    ("Objectives & Scope of the Engagement", "What is the ultimate goal of the deliverable - internal disciplinary action, filing an insurance claim, submission to law enforcement for criminal prosecution, or civil litigation to recover assets?"),
+    ("Legal, Regulatory & Governance Context", "Is this engagement protected by attorney-client privilege - are we being retained directly by the client, or by their outside legal counsel, to protect the work product?"),
+    ("Legal, Regulatory & Governance Context", "What specific laws or regulations govern the subject matter (e.g. anti-corruption legislation, local anti-money laundering laws, specific industry regulations)?"),
+    ("Legal, Regulatory & Governance Context", "What are the client's internal policies regarding employee privacy - can we search corporate emails and personal devices used for work without explicit consent?"),
+    ("Legal, Regulatory & Governance Context", "Are there data privacy laws (e.g. the Cyber and Data Protection Act, GDPR, or other local equivalents) that restrict data transfer across borders?"),
+    ("Legal, Regulatory & Governance Context", "Is there an active or pending lawsuit related to this matter?"),
+    ("Data, Systems & Access Checklist", "Financial systems: what ERP or accounting software does the company use, and can they provision read-only administrator access?"),
+    ("Data, Systems & Access Checklist", "Communication channels: where do employees communicate (e.g. Microsoft Teams, Slack, corporate email, WhatsApp on company phones)?"),
+    ("Data, Systems & Access Checklist", "Data preservation: has a legal hold or data preservation order been issued, and have IT backups been frozen to prevent wiping or altering logs?"),
+    ("Data, Systems & Access Checklist", "Supporting documentation: where are physical or digital invoices, receipts, contracts, and bank statements stored, and who controls access to them?"),
+    ("Data, Systems & Access Checklist", "External data: will bank confirmations, vendor verifications, or customer circularisations be required and permitted?"),
+    ("Stakeholders, Logistics & Timeline", "Who is the primary point of contact for the investigation, and who receives updates?"),
+    ("Stakeholders, Logistics & Timeline", "Who needs to be kept out of the loop to maintain confidentiality (e.g. is the CFO or Head of HR a subject of suspicion)?"),
+    ("Stakeholders, Logistics & Timeline", "Will the investigation be overt (everyone knows we are there) or covert (disguised as a routine internal audit or IT upgrade)?"),
+    ("Stakeholders, Logistics & Timeline", "What is the target deadline for the preliminary findings and the final report?"),
+    ("Stakeholders, Logistics & Timeline", "What budget constraints or billing caps apply to this phase of the engagement?"),
+    ("Risk Assessment & Safety", "Is there any physical safety risk to the investigative team (e.g. organised crime, high-level corruption, a hostile work environment)?"),
+    ("Risk Assessment & Safety", "Is there a risk of collusion - could the subjects destroy evidence if they realise an investigation is underway?"),
+    ("Risk Assessment & Safety", "Does the forensic team have any conflict of interest with the client, its competitors, or the suspected individuals?"),
+]
+
+# Seeded instead of the five free-text ENTITY_UNDERSTANDING_FIELDS above when
+# the engagement's type is "Business Intelligence and IT Engagements" (see
+# engagements.seed_entity_checklist) - same Yes/No/N-A + comment presentation
+# as FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS above, but scoped to
+# understanding the entity's IT environment, data holdings, prior incident
+# history and AML/CFT exposure ahead of a cyber/IT/AML-CFT control
+# assurance engagement, rather than ISA 315's entity/industry/accounting-
+# policy prompts.
+BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
+    # These two were originally one compound question ("What is the overall
+    # IT environment (on-premise, cloud, or hybrid) and how is it organised
+    # (in-house IT function, outsourced/managed service provider, or a
+    # mix)?") with its answer choices spelled out in brackets rather than
+    # asked/answered as a proper dropdown - split into two, each carrying
+    # its own bracketed choices as response_options (see
+    # EntityUnderstandingChecklistItem.response_options) so the item's own
+    # dropdown offers exactly those choices instead of the generic
+    # Yes/No/N-A one.
+    ("IT Environment & Infrastructure Overview", "What is the overall IT environment?", ["On-premise", "Cloud", "Hybrid"]),
+    ("IT Environment & Infrastructure Overview", "How is the entity's IT function organised?", ["In-house IT function", "Outsourced / Managed Service Provider", "A mix"]),
+    ("IT Environment & Infrastructure Overview", "Which core business systems (ERP, banking platforms, core application systems) does the entity rely on, and who are the key vendors/service providers?"),
+    ("IT Environment & Infrastructure Overview", "Has the IT environment changed materially in the period under review (new system implementations, cloud migration, mergers/acquisitions, outsourcing changes)?"),
+    ("IT Environment & Infrastructure Overview", "Is there a documented IT governance structure (IT steering committee, CIO/IT Manager, board-level IT oversight)?"),
+    ("IT Environment & Infrastructure Overview", "Is there up-to-date network architecture/topology documentation (network diagrams) covering the entity's on-premise and cloud environments?"),
+    ("IT Environment & Infrastructure Overview", "If cloud platforms are used (e.g. AWS, Azure, Google Cloud Platform), which services/regions are in use, and is there a documented cloud architecture diagram?"),
+    ("IT Environment & Infrastructure Overview", "Have the data flows between the entity's critical financial and operational applications been mapped (source systems, integration points, and where financial data ultimately resides)?"),
+    ("Data Holdings & Classification", "What categories of data does the entity hold or process (customer personal information, financial data, employee data, trade secrets/intellectual property)?"),
+    ("Data Holdings & Classification", "Is data classified by sensitivity, and is there a documented data retention and disposal policy?"),
+    # Same compound-question split as the IT Environment items above - the
+    # original bracketed "(on-premise servers, local cloud provider,
+    # offshore cloud provider)" becomes this item's own dropdown choices,
+    # with the Cyber and Data Protection Act follow-up kept as a separate
+    # (ordinary Yes/No/N-A) question.
+    ("Data Holdings & Classification", "Where is data physically/logically stored?", ["On-premise servers", "Local cloud provider", "Offshore cloud provider"]),
+    ("Data Holdings & Classification", "Does the data storage location raise any cross-border data transfer considerations under the Cyber and Data Protection Act [Chapter 12:07]?"),
+    ("Cyber Security Posture & Incident History", "Has the entity experienced any cyber security incidents, breaches, or significant near-misses in recent years, and how were they handled?"),
+    ("Cyber Security Posture & Incident History", "Does the entity have documented policies for threat and vulnerability management, perimeter/endpoint protection, and security monitoring and logging?"),
+    ("Cyber Security Posture & Incident History", "Is there a documented and tested incident response and recovery plan?"),
+    ("Cyber Security Posture & Incident History", "Has the entity engaged any third party (internal audit, external specialist) to perform a penetration test, vulnerability assessment, or security review in recent years?"),
+    ("Information Security & Access Management", "How are user access and privileges granted, reviewed, and revoked (including for third parties and departing staff)?"),
+    ("Information Security & Access Management", "What third-party and cloud service providers have access to the entity's systems or data, and how is that access governed (contracts, SLAs, security clauses)?"),
+    ("Information Security & Access Management", "Is there a documented information/data classification and handling policy, and how is compliance monitored?"),
+    ("ICT Governance & Operations", "Is there a documented ICT strategy aligned to the entity's business objectives, and how is it approved and monitored?"),
+    ("ICT Governance & Operations", "What change and release management process is followed for system changes, and how are new systems developed or acquired?"),
+    ("ICT Governance & Operations", "What backup and disaster recovery arrangements are in place, and have they been tested?"),
+    ("ICT Governance & Operations", "Is there a documented and tested business continuity plan covering IT-dependent operations?"),
+    ("ICT Governance & Operations", "Based on the above, what are the entity's baseline inherent IT risks - system downtime/availability, unauthorised or poorly controlled changes, and data integrity - and how significant is each considered to be?"),
+    ("AML/CFT Framework & Regulatory Context", "Does the entity fall within a sector subject to AML/CFT obligations under the Money Laundering and Proceeds of Crime Act [Chapter 9:24], and if so, is there a designated Money Laundering Reporting Officer?"),
+    ("AML/CFT Framework & Regulatory Context", "What customer due diligence (CDD)/know-your-customer procedures are in place, including for higher-risk customers or channels?"),
+    ("AML/CFT Framework & Regulatory Context", "What transaction monitoring and screening arrangements are in place (sanctions screening, unusual-activity monitoring)?"),
+    ("AML/CFT Framework & Regulatory Context", "Has the entity filed any suspicious transaction reports with the Financial Intelligence Unit, or received any regulatory findings/guidance relevant to AML/CFT compliance?"),
+    ("AML/CFT Framework & Regulatory Context", "What record-keeping arrangements are in place for CDD information and transaction records, and for how long are they retained?"),
+    ("Regulatory Landscape & Standards Alignment", "Has the entity adopted, or aligned itself to, any recognised information security/IT control framework or standard (e.g. ISO/IEC 27001, the NIST Cybersecurity Framework/NIST SP 800-53), whether formally certified or only informally applied?"),
+    ("Regulatory Landscape & Standards Alignment", "Is the entity registered/licensed with, or otherwise subject to oversight by, the Postal and Telecommunications Regulatory Authority of Zimbabwe (POTRAZ) or another sector-specific ICT/telecoms regulator?"),
+    ("Regulatory Landscape & Standards Alignment", "How does the entity's data protection practice map to the Cyber and Data Protection Act [Chapter 12:07] and, where the entity has cross-border operations or customers, to equivalent data protection regimes (e.g. GDPR) that may also apply?"),
+    ("Regulatory Landscape & Standards Alignment", "Has the entity received any guidance, directive or finding from the Reserve Bank of Zimbabwe (RBZ), the Financial Intelligence Unit, or another regulator specifically relating to its IT, cyber security or AML/CFT systems?"),
+    ("Regulatory Landscape & Standards Alignment", "Are there any pending or upcoming regulatory changes (local or, where relevant, international) that could affect the entity's IT, cyber security, information security or AML/CFT compliance posture?"),
+]
+
+# Seeded instead of the five free-text ENTITY_UNDERSTANDING_FIELDS above when
+# the engagement's type is "Secretarial" - the firm's Secretarial Client
+# Business Understanding Questionnaire, mapped to the Companies and Other
+# Business Entities Act [Chapter 24:31] (COBE Act). Same Yes/No/N-A +
+# comment presentation as FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS /
+# BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS above, with one addition:
+# each item also carries a tuple of SECRETARIAL_ACTIVITIES keys it's
+# relevant to, so engagements.seed_entity_checklist can seed only the
+# sections relevant to the Activities selected for this engagement (see
+# Engagement.secretarial_activities) - or every item, if none were selected.
+SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS = [
+    ("Entity Classification & Scope", "Is the entity registered as a Private Limited Company, Public Limited Company, Company Limited by Guarantee, Private Business Corporation (PBC), or Foreign Company under Section 5?", ("incorporation",)),
+    ("Entity Classification & Scope", "Does the entity operate in banking, building societies, insurance, or microfinance - noting that these financial institutions are excluded from the COBE Act under Section 4 and governed by sector-specific statutes?", ("incorporation",)),
+    ("Constitutional Documents & Corporate Governance", "Does the Memorandum clearly specify all authorised share types and classes pursuant to the disclosure standards for share capital?", ("constitutional", "share_capital")),
+    ("Constitutional Documents & Corporate Governance", "What are the specific rules and thresholds set out in the Articles regarding board powers, borrowing limits, execution of documents (Section 35), and pre-emption rights (Sections 99 and 139)?", ("constitutional", "directorship")),
+    ("Constitutional Documents & Corporate Governance", "Does the company meet the director requirements of Section 195 (a private company with more than one and fewer than ten shareholders: at least two directors; ten or more shareholders: at least three; a public company: seven to fifteen), including at least one director ordinarily resident in Zimbabwe (Section 195(2))?", ("directorship",)),
+    ("Constitutional Documents & Corporate Governance", "For public companies, does the board have 7 to 15 directors (Section 195(1)), including at least three non-executive or independent directors (Section 206(2))?", ("directorship",)),
+    ("Constitutional Documents & Corporate Governance", "Are directors aware of their statutory duty of care, skill, and good faith (Section 54) and duty of loyalty (Section 55)?", ("directorship",)),
+    ("Constitutional Documents & Corporate Governance", "Does the company have at least one company secretary who is ordinarily resident in Zimbabwe (Section 198(1)); for a public company, is the secretary qualified under Section 198(4) and not holding another office; and does the secretary certify in the annual financial statements whether the returns and notices required by the Act have been filed (Section 198(3)(f))?", ('directorship', 'incorporation', 'statutory_records')),
+    ("Statutory Registers & Ownership Transparency", "Does the company maintain an up-to-date Register of Beneficial Owners under Section 72 (kept where the register of members is kept, with a custodian resident in Zimbabwe), identifying natural persons who directly or indirectly hold MORE than 20% of the shares or voting rights, can appoint or remove a majority of the directors, or otherwise exercise significant control (Section 2), and are updates filed with the Registrar within seven days of a material change?", ("statutory_records", "share_capital")),
+    ("Statutory Registers & Ownership Transparency", "Does any nominee shareholding comply with Section 73, which allows shares to be held through a nominee only where the beneficial owner (with associates) holds less than 20%?", ("statutory_records", "share_capital")),
+    ("Statutory Registers & Ownership Transparency", "Are the Register of Members (Section 159), Register of Directors and Secretaries (Section 217), Register of Allotments (Section 121), Register of Mortgages and Debentures (Section 155) and, for a company other than a private company, the Register of Directors' Share Holdings (Section 213) maintained at the registered office and reconciled?", ("statutory_records",)),
+    ("Statutory Registers & Ownership Transparency", "Has the company appointed a person resident in Zimbabwe as custodian of the register of beneficial owners, and are the name and contact details recorded in the form filed with the Registrar (Section 72(4)-(5))?", ('statutory_records', 'share_capital')),
+    ("Capital Structure, Distributions & Solvency", "Have any variations of share rights, share allotments, or capital changes been executed in accordance with board powers and properly reflected in the Memorandum/Articles?", ("share_capital",)),
+    ("Capital Structure, Distributions & Solvency", "Before making any distribution, has the board authorised it and acknowledged by resolution that the Solvency and Liquidity Test is met (Sections 102 and 138); and before a share buy-back or financial assistance for the purchase of shares (Sections 128-129 and 123), has a general meeting authorised it in advance?", ("share_capital",)),
+    ("Capital Structure, Distributions & Solvency", "Are there any proposed structural changes or class variations that might trigger minority shareholder appraisal remedies (Section 233, which applies to a variation of class rights under Section 143 and a merger under Section 228)?", ("share_capital", "constitutional")),
+    ("Capital Structure, Distributions & Solvency", "Is the register of allotments kept at the registered office, and is the return of allotments (with the contract, for shares not paid in cash) lodged with the Registrar within one month of each allotment (Section 121)?", ('share_capital',)),
+    ("Board Operations, Meetings & Documentation", "Are all loans, guarantees, or security provided by the company for directors or officers within the exceptions to the prohibition in Section 208 (for a private company, with the consent of holders of nine-tenths of the shares) and disclosed in the accounts as Section 216 requires?", ("directorship", "meetings")),
+    ("Board Operations, Meetings & Documentation", "Does the board act only at meetings (in person, or by electronic or conference means where the articles allow it) or by written consent signed by ALL directors entitled to vote, as Section 196 provides, applying the board quorum in the articles (Section 204)?", ("meetings",)),
+    ("Board Operations, Meetings & Documentation", "Are minute books kept up-to-date for all board meetings, committee meetings, and AGMs/EGMs, capturing key commercial decisions, risk evaluations, and conflict disclosures (Section 180 for members' meetings, prepared within 20 days; Section 205 for the board and committees)?", ("meetings",)),
+    ("Statutory Filings & Registry Compliance", "Is the company compliant with filing its Annual Return within 21 days of the anniversary of its incorporation, registration or re-registration (Section 165(2)), with the private-company certificate where it applies (Section 165(3))?", ("incorporation", "statutory_records")),
+    ("Statutory Filings & Registry Compliance", "Have changes in directors/secretaries (within one month, Section 217), the registered office or postal address (Section 31), share allotments (one month, Section 121), capital increases (one month, Section 141) and special resolutions (one month, Section 178) been lodged with the Registrar within the periods the Act sets?", ("statutory_records", "directorship")),
+    ("Statutory Filings & Registry Compliance", "Has the entity completed its mandatory administrative re-registration process under the COBE Act (Section 303(9) and the Tenth Schedule; a company that did not re-register in time is struck off, Section 303(12))?", ("incorporation", "statutory_records", "re_registration")),
+    ("Statutory Filings & Registry Compliance", "Is the date of incorporation, registration or re-registration recorded on the Secretarial Engagement Plan, so the annual return can be diarised for 21 days after each anniversary (Section 165(2)), and has an AGM been held within the last twelve months (Section 167(2))?", ('incorporation', 'statutory_records', 'meetings')),
+    ("Company Re-registration", "Has the company already been re-registered on the Registrar's online system, and are the new certificate and registration details held on the client file?", ("re_registration",)),
+    ("Company Re-registration", "If not yet re-registered, what is the Registrar's current re-registration deadline and fee (both have been extended and revised before; the Act's own period was twelve months from the effective date, Section 303(9)), and has the board been told that a company not re-registered by the deadline risks being treated as non-operational and struck off the register (Section 303(12))?", ("re_registration",)),
+    ("Company Re-registration", "Are all annual returns filed up to date? The Registrar asks for proof of this with the application, so any outstanding returns must be cleared first.", ("re_registration", "statutory_records")),
+    ("Company Re-registration", "Are the existing registration documents available as clear scans - Certificate of Incorporation, Memorandum and Articles of Association, the registered-office and directors forms (CR5, CR6) and the latest annual return?", ("re_registration",)),
+    ("Company Re-registration", "Are the details of every director, secretary and shareholder (full names, ID or passport numbers, dates of birth, addresses and contact details) current and consistent with the statutory registers and the Register of Beneficial Ownership (Section 72)?", ("re_registration", "statutory_records")),
+    ("Company Re-registration", "Do the Memorandum and Articles need to be amended to conform with the COBE Act, and will the members approve those amendments by special resolution (Sections 79, 81 and 175)? Section 303(11) does not allow such changes 'under the guise of' re-registration: they follow the ordinary formalities, before, after or together with it.", ("re_registration", "constitutional")),
+    ("Company Re-registration", "Who is authorised to sign the board resolution, the members' resolution and any authority or affidavit the Registrar requires, and are they available to sign?", ("re_registration",)),
+]
+
+
+# Standard audit areas for the system-based Substantive Procedures module -
+# each becomes one section of the audit programme for an engagement, with
+# its own suggested procedures (seeded from the dictionaries below) and its
+# own Preparer/Reviewer/Partner sign-off (see SubstantiveProcedureArea).
+AUDIT_AREAS = [
+    "Cash and Bank",
+    "Trade Receivables",
+    "Inventories",
+    "Property, Plant and Equipment",
+    "Investments",
+    "Trade Payables and Accruals",
+    "Borrowings and Finance Costs",
+    "Revenue",
+    "Payroll and Employee Costs",
+    "Taxation",
+    "Equity and Reserves",
+    "Related Party Transactions",
+    "Going Concern",
+]
+
+# Baseline substantive procedures suggested for every engagement, regardless
+# of risk rating or industry - general-purpose starting points covering the
+# standard assertions (existence, completeness, valuation, rights and
+# obligations, presentation). Always review and tailor to the engagement.
+BASELINE_SUBSTANTIVE_PROCEDURES = {
+    "Cash and Bank": [
+        "Obtain bank confirmations for all bank accounts held during the year and agree confirmed balances to the trial balance/bank reconciliations.",
+        "Review bank reconciliations for all accounts and test reconciling items, agreeing outstanding items to subsequent bank statements.",
+        "Perform a cash count/confirmation for any material petty cash or cash-in-hand balances.",
+        "Test cut-off of significant receipts and payments around year end.",
+    ],
+    "Trade Receivables": [
+        "Circularise a sample of trade receivables (positive confirmation) and follow up non-replies with alternative procedures.",
+        "Review the aged receivables listing and evaluate the adequacy of the allowance for expected credit losses/doubtful debts.",
+        "Test a sample of post year-end receipts against year-end receivable balances.",
+        "Review credit notes issued after year end for evidence of overstated revenue/receivables.",
+    ],
+    "Inventories": [
+        "Attend (or review the results of) the year-end inventory count and reconcile count results to the inventory listing.",
+        "Test the valuation of a sample of inventory items against cost records and net realisable value.",
+        "Review for slow-moving, obsolete or damaged inventory and assess the adequacy of any write-down/provision.",
+        "Test cut-off of goods received/despatched around year end.",
+    ],
+    "Property, Plant and Equipment": [
+        "Agree a sample of additions to supporting invoices/contracts and confirm appropriate capitalisation.",
+        "Agree a sample of disposals to sale documentation and recompute the gain/loss on disposal.",
+        "Recompute depreciation for a sample of assets and assess the reasonableness of useful lives/rates applied.",
+        "Consider whether indicators of impairment exist and, if so, evaluate management's impairment assessment.",
+        "Physically inspect a sample of significant assets and confirm existence/condition.",
+    ],
+    "Investments": [
+        "Agree investment holdings to third-party statements/confirmations at year end.",
+        "Test the valuation basis applied (fair value, cost, equity method as applicable) and recompute for a sample.",
+        "Review for any impairment indicators and assess management's impairment conclusion.",
+    ],
+    "Trade Payables and Accruals": [
+        "Perform a search for unrecorded liabilities by reviewing post year-end payments/invoices.",
+        "Circularise a sample of suppliers (or review supplier statements) and reconcile to recorded balances.",
+        "Test the completeness and reasonableness of significant accruals.",
+        "Test cut-off of purchases around year end.",
+    ],
+    "Borrowings and Finance Costs": [
+        "Confirm outstanding loan/borrowing balances, terms and security directly with lenders.",
+        "Recompute finance costs for the year and agree to loan agreements/amortisation schedules.",
+        "Review loan covenants for compliance and consider classification (current/non-current) implications of any breach.",
+    ],
+    "Revenue": [
+        "Test a sample of revenue transactions to supporting contracts/invoices/dispatch documentation.",
+        "Perform cut-off testing on revenue recognised immediately before and after year end.",
+        "Perform analytical procedures on revenue (e.g. by month/product/customer) and investigate significant fluctuations.",
+        "Evaluate the appropriateness of the revenue recognition policy applied against the applicable financial reporting framework.",
+    ],
+    "Payroll and Employee Costs": [
+        "Test a sample of payroll transactions to supporting records (contracts, timesheets, statutory returns).",
+        "Recompute statutory deductions (PAYE, pension, other) for a sample of employees and agree to remittances.",
+        "Perform analytical procedures on payroll costs (e.g. headcount x average pay) and investigate significant variances.",
+        "Test for the existence of terminated/fictitious employees still receiving pay.",
+    ],
+    "Taxation": [
+        "Recompute the current tax charge/liability and agree to the tax computation and return.",
+        "Assess the recoverability and appropriateness of any deferred tax asset/liability recognised.",
+        "Review correspondence with the tax authority for unresolved matters or additional assessments.",
+    ],
+    "Equity and Reserves": [
+        "Agree share capital/share premium movements to statutory records (share register, resolutions).",
+        "Agree dividends declared/paid to board resolutions and recompute amounts.",
+        "Review the statement of changes in equity for completeness and correct classification of movements.",
+    ],
+    "Related Party Transactions": [
+        "Review minutes, contracts and disclosures for evidence of related party relationships and transactions not otherwise identified.",
+        "Test a sample of identified related party transactions for appropriate authorisation, terms and disclosure.",
+        "Confirm the completeness of related party disclosures against the applicable financial reporting framework.",
+    ],
+    "Going Concern": [
+        "Evaluate management's going concern assessment, including cash flow forecasts, for the foreseeable future (at least 12 months from year end).",
+        "Review for indicators of going concern issues (recurring losses, liquidity problems, covenant breaches, negative equity).",
+        "Assess the adequacy of going concern disclosures in the financial statements.",
+    ],
+}
+
+# Extra procedures added on top of the baseline when the engagement's Risk
+# Assessment rating is "High" - extending the nature/timing/extent of
+# testing for a higher assessed risk of material misstatement.
+HIGH_RISK_EXTRA_PROCEDURES = {
+    "Cash and Bank": [
+        "Extend bank confirmation coverage to all accounts (including dormant/nil-balance accounts) and obtain confirmations directly rather than relying on client-provided statements alone.",
+    ],
+    "Trade Receivables": [
+        "Increase the receivables circularisation sample size and consider negative confirmations for non-responses to positive confirmations.",
+        "Independently recalculate the allowance for doubtful debts using an aging/experience-based model.",
+    ],
+    "Inventories": [
+        "Attend the inventory count in person (rather than reviewing client-performed count results) and perform more extensive test counts.",
+        "Consider engaging an expert for specialised or high-value inventory valuation.",
+    ],
+    "Property, Plant and Equipment": [
+        "Obtain independent valuations or engage an expert for significant/specialised assets.",
+        "Extend physical verification to a larger sample of assets, including those at remote locations.",
+    ],
+    "Investments": [
+        "Obtain independent valuations for level 2/3 fair value investments rather than relying solely on management's valuation.",
+    ],
+    "Trade Payables and Accruals": [
+        "Extend the unrecorded liabilities search period further beyond year end.",
+        "Increase the supplier circularisation/statement reconciliation sample size.",
+    ],
+    "Borrowings and Finance Costs": [
+        "Obtain legal confirmation of loan terms/security in addition to lender confirmations.",
+        "Extend covenant compliance testing across the full facility term, not just at year end.",
+    ],
+    "Revenue": [
+        "Extend cut-off testing to a longer period either side of year end.",
+        "Perform detailed testing of manual journal entries affecting revenue for evidence of manipulation.",
+    ],
+    "Payroll and Employee Costs": [
+        "Extend testing for ghost/fictitious employees using independent verification (e.g. ID/attendance corroboration).",
+        "Increase the sample size for statutory deduction recomputation.",
+    ],
+    "Taxation": [
+        "Engage a tax specialist to review complex tax positions and the adequacy of provisions for uncertain tax treatments.",
+    ],
+    "Equity and Reserves": [
+        "Obtain independent confirmation of share register details from the transfer secretary/registrar.",
+    ],
+    "Related Party Transactions": [
+        "Extend procedures to identify related parties not disclosed by management (review of significant/unusual transactions, board minutes, legal confirmations).",
+        "Confirm the terms of significant related party transactions directly with the counterparty.",
+    ],
+    "Going Concern": [
+        "Extend the going concern assessment period and stress-test management's cash flow forecast assumptions.",
+        "Consider the need for a material uncertainty related to going concern paragraph and discuss with the engagement partner.",
+    ],
+}
+
+# Extra procedures added when the client's industry (Client.industry, one of
+# INDUSTRY_OPTIONS) makes a particular audit area especially relevant.
+# Deliberately not exhaustive - covers the combinations most likely to
+# matter; any industry/area combination without an entry here just gets the
+# baseline (and, if applicable, high-risk) procedures above.
+INDUSTRY_EXTRA_PROCEDURES = {
+    "Agriculture & Agro-processing": {
+        "Inventories": ["Assess the valuation of biological assets/agricultural produce at fair value less costs to sell (or the industry-appropriate basis) and consider the need for an expert valuation."],
+        "Revenue": ["Consider seasonality and weather/climate risk factors when performing analytical review of revenue."],
+    },
+    "Manufacturing": {
+        "Inventories": ["Test standard costing/overhead absorption rates used to value work-in-progress and finished goods."],
+        "Property, Plant and Equipment": ["Assess whether plant and machinery carrying values are supported given capacity utilisation and technological obsolescence risk."],
+    },
+    "Mining & Extractives": {
+        "Property, Plant and Equipment": ["Assess the reasonableness of mine/asset useful lives against reserve estimates and life-of-mine plans, and consider the need for an expert."],
+        "Going Concern": ["Evaluate commodity price assumptions and reserve/resource estimates used in going concern and impairment assessments."],
+    },
+    "Petroleum & Fuel Distribution": {
+        "Inventories": ["Test fuel stock reconciliations (dip/meter readings vs. book stock) and assess the adequacy of provisions for evaporation, temperature variance and shrinkage losses."],
+        "Revenue": ["Test compliance with regulated fuel pricing (where applicable) and reconcile pump/meter sales data to recorded revenue for a sample of days."],
+        "Property, Plant and Equipment": ["Assess the condition and remaining useful life of storage tanks, pipelines and dispensing equipment, and consider environmental decommissioning/rehabilitation obligations."],
+    },
+    "Retail & Wholesale Trade": {
+        "Inventories": ["Consider shrinkage/theft risk in inventory valuation and review the adequacy of the shrinkage provision."],
+        "Revenue": ["Test point-of-sale system controls and reconcile daily takings to bank deposits for a sample of days."],
+    },
+    "Banking & Financial Services": {
+        "Trade Receivables": ["Test the expected credit loss (ECL) model and staging of loans/advances in line with IFRS 9, including a sample of individually assessed impairments."],
+        "Cash and Bank": ["Confirm statutory reserve/liquidity requirements held with the central bank and assess compliance."],
+    },
+    "Insurance": {
+        "Trade Payables and Accruals": ["Test the adequacy of insurance/claims reserves (outstanding claims, IBNR) with reference to actuarial valuations."],
+        "Revenue": ["Test premium recognition and unearned premium reserve calculations."],
+    },
+    "Insurance Brokers": {
+        "Cash and Bank": ["Confirm that client/premium monies are held in a segregated trust or premium bank account separate from the firm's own funds, and reconcile the trust account to the underlying client/policy listing."],
+        "Trade Receivables": ["Test premiums due from clients and brokerage/commission income due from insurers for recoverability and correct ageing."],
+        "Revenue": ["Test the recognition of brokerage/commission income (including any profit or contingent commissions) against underlying policy placements and insurer statements."],
+        "Trade Payables and Accruals": ["Test amounts held/due to insurers for premiums collected on their behalf but not yet remitted, and confirm timely remittance after year end."],
+    },
+    "Microfinance & Savings/Credit Cooperatives": {
+        "Trade Receivables": ["Test loan portfolio at risk (PAR) classification and provisioning against the entity's credit policy and regulatory guidelines."],
+    },
+    "NGOs & Non-Profit Organisations": {
+        "Revenue": ["Test donor/grant income recognition against grant agreement terms and conditions, and confirm restricted vs unrestricted classification."],
+        "Trade Payables and Accruals": ["Confirm compliance with donor reporting and fund utilisation restrictions."],
+    },
+    "Construction & Real Estate": {
+        "Revenue": ["Test percentage-of-completion/input-method calculations for long-term contracts and recompute contract revenue and costs for a sample."],
+        "Trade Receivables": ["Assess the recoverability of retention receivables and amounts due from customers on construction contracts."],
+    },
+    "Hospitality & Tourism": {
+        "Revenue": ["Consider seasonality in analytical review of revenue and test occupancy/average-rate based revenue calculations for a sample of periods."],
+    },
+    "Telecommunications": {
+        "Revenue": ["Test multiple-element revenue arrangements (e.g. handset plus airtime bundles) for appropriate allocation and recognition under the applicable standard."],
+    },
+    "Healthcare & Pharmaceuticals": {
+        "Inventories": ["Assess expiry dating and obsolescence provisioning for pharmaceutical/medical inventory."],
+    },
+    "Public Sector & Parastatals": {
+        "Trade Payables and Accruals": ["Confirm compliance with public procurement regulations for a sample of significant payables/commitments."],
+    },
+}
+
+# Forensic equivalent of AUDIT_AREAS/BASELINE_SUBSTANTIVE_PROCEDURES above,
+# used for the Substantive Procedures tab on an Investigative Engagement
+# instead of the financial-statement-line-item areas, which don't apply to
+# a fraud investigation. Grouped into the four buckets investigative
+# procedures are generally organised into, by the type of evidence
+# required, rather than by balance sheet/income statement caption.
+# HIGH_RISK_EXTRA_PROCEDURES / INDUSTRY_EXTRA_PROCEDURES above are
+# deliberately not applied on top of these - they're keyed to AUDIT_AREAS
+# captions and don't map onto these categories - so an Investigative
+# Engagement's suggested procedures are always just this baseline list.
+FORENSIC_SUBSTANTIVE_AREAS = [
+    "Advanced Data Analytics & Forensic Technology",
+    "Asset Tracing & Financial Reconstruction",
+    "Document Examination & Verification",
+    "Physical & Observational Procedures",
+]
+
+FORENSIC_BASELINE_SUBSTANTIVE_PROCEDURES = {
+    "Advanced Data Analytics & Forensic Technology": [
+        "Perform a Benford's Law analysis on transaction data (e.g. invoice amounts, journal entries) to identify anomalies in number patterns consistent with manufactured or fabricated figures.",
+        "Search emails, chat logs and deleted/recovered files for red-flag keywords (e.g. \"override\", \"off-books\", \"hide\", \"urgent wire\", \"don't tell\", \"cash only\").",
+        "Run gap and duplicate-testing scripts to identify missing cheque/invoice number sequences, duplicate invoice numbers, and identical payment amounts made to different vendors.",
+        "Extract and review document/file metadata (creation and modification dates, authorship, last-saved-by) on key records to identify backdating or after-the-fact alteration.",
+        "Use fuzzy/similarity matching on vendor and employee master data to identify near-duplicate names that may indicate a shell company or a ghost employee.",
+    ],
+    "Asset Tracing & Financial Reconstruction": [
+        "Apply the net worth method: reconstruct an individual's financial profile from changes in assets and liabilities over the period to identify unexplained wealth.",
+        "Trace the exact path of funds from the entity's operating account(s) through to ultimate beneficiaries, including any shell companies or offshore accounts identified.",
+        "Perform a lifestyle audit comparing an individual's known legal income against their actual spending, real estate purchases, vehicles and other high-value assets.",
+        "Reconstruct incomplete, deleted or destroyed accounting records from surviving source documents and third-party data where the general ledger itself cannot be relied upon.",
+    ],
+    "Document Examination & Verification": [
+        "Vouch and trace a sample of specific suspicious transactions back to physical source documents (contracts, purchase orders, shipping/delivery receipts) to verify they actually occurred.",
+        "Submit external confirmation requests directly to independent third parties (banks, suppliers, customers) to confirm balances and transaction terms, bypassing internal staff entirely.",
+        "Search public/corporate registries for undisclosed related parties or conflicts of interest, such as an employee or a family member secretly owning a vendor or customer.",
+        "Examine questioned documents for signs of forgery, alteration, or inconsistent fonts, ink or signatures, engaging a qualified document examiner where warranted.",
+    ],
+    "Physical & Observational Procedures": [
+        "Perform surprise (unannounced) cash counts and/or inventory counts of high-value stock or cash drawers to identify misappropriation before records can be altered.",
+        "Conduct site visitations to physically verify that a vendor genuinely exists and is not a \"ghost vendor\" operating out of a P.O. Box or residential address.",
+        "Physically observe and photograph key locations, assets or processes relevant to the allegations, maintaining a clear chain of custody for anything collected as evidence.",
+        "Where relevant and legally permissible, conduct discreet observation of a subject's day-to-day activities to corroborate (or contradict) their stated role, access and conduct.",
+    ],
+}
+
+# Working-paper reference codes shown next to each area's heading on the
+# Substantive Procedures tab and embedded in the generated Word/Excel
+# workpapers, so a reviewer can cite "see N3100" the same way they would in
+# a paper file. AUDIT_AREA_REFERENCES uses the firm's actual Current File
+# (N-series) codes from the Audit Working Paper Indexing & Filing Policy
+# (see FilingIndexSection / the Filing Index & Manual page) - N3100 through
+# N6200, matching the policy's Statement of Financial Position / Statement
+# of Comprehensive Income / Other Audit Areas sections one-for-one, with one
+# addition: the policy's tables don't include a code for Inventories, so
+# N3700 has been added here (and in the Filing Index) to fill that gap,
+# extending the Assets range immediately after Prepayments & Other Assets
+# (N3600). FORENSIC_AREA_REFERENCES keeps its own short mnemonic codes,
+# since the filing policy is scoped to statutory audits and doesn't cover
+# investigative/forensic engagement areas at all.
+AUDIT_AREA_REFERENCES = {
+    "Cash and Bank": "N3100",
+    "Trade Receivables": "N3200",
+    "Inventories": "N3700",
+    "Property, Plant and Equipment": "N3300",
+    "Investments": "N3500",
+    "Trade Payables and Accruals": "N4100",
+    "Borrowings and Finance Costs": "N4200",
+    "Revenue": "N5100",
+    "Payroll and Employee Costs": "N5200",
+    "Taxation": "N4300",
+    "Equity and Reserves": "N4600",
+    "Related Party Transactions": "N6100",
+    "Going Concern": "N6200",
+}
+
+FORENSIC_AREA_REFERENCES = {
+    "Advanced Data Analytics & Forensic Technology": "DA",
+    "Asset Tracing & Financial Reconstruction": "AT",
+    "Document Examination & Verification": "DE",
+    "Physical & Observational Procedures": "PO",
+}
+
+# Equivalent of AUDIT_AREAS/BASELINE_SUBSTANTIVE_PROCEDURES above, used for
+# the Substantive Procedures tab on a "Business Intelligence and IT
+# Engagements" engagement instead of the financial-statement-line-item
+# areas - this engagement type gives assurance over an entity's cyber
+# security, information security, IT/ICT, and AML/CFT control environment,
+# not its financial statements. Grouped into the same four assurance
+# domains the engagement type itself was scoped around. Same as the
+# forensic areas above, HIGH_RISK_EXTRA_PROCEDURES/INDUSTRY_EXTRA_
+# PROCEDURES are not applied on top of these (they're keyed to AUDIT_AREAS
+# captions), so this engagement type's suggested procedures are always just
+# this baseline list.
+BUSINESS_IT_SUBSTANTIVE_AREAS = [
+    "Cyber Security",
+    "Information Security",
+    "Information Technology (ICT)",
+    "AML/CFT Compliance",
+]
+
+BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES = {
+    "Cyber Security": [
+        "Evaluate the entity's threat and vulnerability management process, including the frequency and remediation of vulnerability scans/penetration tests over a sample period.",
+        "Test perimeter and endpoint protection controls (firewalls, intrusion detection/prevention, endpoint protection/EDR) for a sample of critical systems.",
+        "Assess security monitoring and logging arrangements - what is logged, for how long, who reviews it, and how alerts are escalated - and test operation for a sample period.",
+        "Evaluate the incident response and recovery plan for completeness and currency, and test it against a sample of actual incidents (if any) or a walkthrough of the response process.",
+        "Confirm whether an independent penetration test or vulnerability assessment has been performed in the period, and review the findings and remediation status.",
+        "Review the entity's network defense architecture documentation (firewall rule sets, network segmentation, DMZ design) and assess whether it reflects the risk profile of internet-facing and critical systems.",
+        "For a sample of periods/systems, obtain evidence of penetration test or vulnerability scan execution and test that critical/high findings were remediated within the entity's defined SLA.",
+    ],
+    "Information Security": [
+        "Test the information/data classification and handling policy against a sample of actual data holdings to assess whether classification is applied in practice.",
+        "Test user access and privilege management - new user provisioning, periodic access reviews, and timely revocation for a sample of leavers - for a sample of critical systems.",
+        "Assess data protection and privacy compliance arrangements against the requirements of the Cyber and Data Protection Act [Chapter 12:07], including any data subject/consent processes and breach notification arrangements.",
+        "Review third-party and cloud security arrangements - contracts, security clauses/SLAs, and any independent assurance reports (e.g. SOC 2) obtained over key providers - for a sample of critical third parties.",
+        "Evaluate the entity's encryption policy/standard for data at rest and in transit (e.g. database/disk encryption, TLS enforcement) and confirm it has been formally approved.",
+        "Test encryption configuration for a sample of critical systems/databases holding sensitive data (at rest) and key data transmission channels (in transit) against the entity's encryption standard.",
+        "Evaluate Data Loss Prevention (DLP) arrangements - policy coverage and any DLP tooling over sensitive data egress channels (email, removable media, cloud upload) - for design adequacy.",
+        "Test Identity & Access Management (IAM) controls for a sample of critical systems - authentication strength (including multi-factor authentication for privileged/remote access), privileged access management, and segregation of duties.",
+    ],
+    "Information Technology (ICT)": [
+        "Review the ICT governance and strategy documentation and assess whether it is approved, current, and aligned to the entity's objectives.",
+        "Test the change and release management process for a sample of system changes, including authorisation, testing, and segregation between development and production environments.",
+        "For a sample of systems developed or acquired in the period, assess whether appropriate project governance, testing, and user acceptance procedures were followed.",
+        "Test IT operations controls (job scheduling, incident/problem management, capacity management) for a sample period.",
+        "Test backup and disaster recovery arrangements, including evidence of successful backup completion and a recent restore/recovery test.",
+        "Review the business continuity plan for IT-dependent operations and assess whether it has been tested within a reasonable period.",
+        "Review the entity's IT asset and software lifecycle management process - hardware/software inventory, patch management, end-of-life/end-of-support tracking, and software licensing compliance.",
+        "Test a sample of IT assets against the asset register/inventory and confirm patch levels and support status, in particular for any end-of-life hardware or software identified.",
+    ],
+    "AML/CFT Compliance": [
+        "Evaluate the entity's AML/CFT policies and procedures against the Money Laundering and Proceeds of Crime Act [Chapter 9:24] and applicable Financial Intelligence Unit guidance.",
+        "Test customer due diligence (CDD) procedures for a sample of new customer onboardings, including identification, verification, and risk-rating.",
+        "Test transaction monitoring and sanctions screening arrangements for a sample period, including follow-up of any alerts generated.",
+        "Review suspicious transaction reporting arrangements and, for any reports filed in the period, assess timeliness and record-keeping.",
+        "Test record-keeping of CDD information and transaction records for a sample of customers/transactions against the entity's retention policy and statutory requirements.",
+        "Evaluate the configuration of the automated transaction monitoring and sanctions/PEP screening system - rule/scenario library, name-matching thresholds and fuzzy-matching logic - and assess whether calibration is periodically reviewed and approved.",
+        "Test a sample of system-generated alerts for evidence of false-positive/false-negative tuning effectiveness, including review of any threshold or rule changes made in the period and their authorisation.",
+        "Test the completeness and integrity of data ingested into the transaction monitoring/screening system from core banking or other source systems for a sample period (e.g. reconciling transaction counts/values between the source system and the monitoring system).",
+        "Evaluate the system's audit trail/logging of screening decisions, alert dispositions and manual overrides for completeness, and confirm it is tamper-evident/access-restricted.",
+    ],
+}
+
+# Tags each BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES entry above as either
+# an "ITGC" (a test of the underlying control environment - policy/design
+# review, walkthroughs, configuration standards) or a "Substantive" audit
+# procedure (data-driven/technical validation - sampling, reconciliation,
+# technical testing) - the Phase 3 distinction requested for the IT Audit
+# methodology. Looked up by sync_substantive_procedures (engagements.py) and
+# written to SubstantiveProcedureItem.procedure_kind for each Business
+# Intelligence and IT Engagement procedure as it's seeded; shown as a "Kind"
+# column on the Substantive Procedures tab and in the generated Word/Excel
+# programme, for this engagement type only. A procedure with no entry here
+# (i.e. any procedure added manually) is left untagged.
+BUSINESS_IT_PROCEDURE_KIND = {
+    "Evaluate the entity's threat and vulnerability management process, including the frequency and remediation of vulnerability scans/penetration tests over a sample period.": "ITGC",
+    "Test perimeter and endpoint protection controls (firewalls, intrusion detection/prevention, endpoint protection/EDR) for a sample of critical systems.": "Substantive",
+    "Assess security monitoring and logging arrangements - what is logged, for how long, who reviews it, and how alerts are escalated - and test operation for a sample period.": "ITGC",
+    "Evaluate the incident response and recovery plan for completeness and currency, and test it against a sample of actual incidents (if any) or a walkthrough of the response process.": "ITGC",
+    "Confirm whether an independent penetration test or vulnerability assessment has been performed in the period, and review the findings and remediation status.": "ITGC",
+    "Review the entity's network defense architecture documentation (firewall rule sets, network segmentation, DMZ design) and assess whether it reflects the risk profile of internet-facing and critical systems.": "ITGC",
+    "For a sample of periods/systems, obtain evidence of penetration test or vulnerability scan execution and test that critical/high findings were remediated within the entity's defined SLA.": "Substantive",
+    "Test the information/data classification and handling policy against a sample of actual data holdings to assess whether classification is applied in practice.": "Substantive",
+    "Test user access and privilege management - new user provisioning, periodic access reviews, and timely revocation for a sample of leavers - for a sample of critical systems.": "Substantive",
+    "Assess data protection and privacy compliance arrangements against the requirements of the Cyber and Data Protection Act [Chapter 12:07], including any data subject/consent processes and breach notification arrangements.": "ITGC",
+    "Review third-party and cloud security arrangements - contracts, security clauses/SLAs, and any independent assurance reports (e.g. SOC 2) obtained over key providers - for a sample of critical third parties.": "ITGC",
+    "Evaluate the entity's encryption policy/standard for data at rest and in transit (e.g. database/disk encryption, TLS enforcement) and confirm it has been formally approved.": "ITGC",
+    "Test encryption configuration for a sample of critical systems/databases holding sensitive data (at rest) and key data transmission channels (in transit) against the entity's encryption standard.": "Substantive",
+    "Evaluate Data Loss Prevention (DLP) arrangements - policy coverage and any DLP tooling over sensitive data egress channels (email, removable media, cloud upload) - for design adequacy.": "ITGC",
+    "Test Identity & Access Management (IAM) controls for a sample of critical systems - authentication strength (including multi-factor authentication for privileged/remote access), privileged access management, and segregation of duties.": "Substantive",
+    "Review the ICT governance and strategy documentation and assess whether it is approved, current, and aligned to the entity's objectives.": "ITGC",
+    "Test the change and release management process for a sample of system changes, including authorisation, testing, and segregation between development and production environments.": "Substantive",
+    "For a sample of systems developed or acquired in the period, assess whether appropriate project governance, testing, and user acceptance procedures were followed.": "Substantive",
+    "Test IT operations controls (job scheduling, incident/problem management, capacity management) for a sample period.": "Substantive",
+    "Test backup and disaster recovery arrangements, including evidence of successful backup completion and a recent restore/recovery test.": "Substantive",
+    "Review the business continuity plan for IT-dependent operations and assess whether it has been tested within a reasonable period.": "ITGC",
+    "Review the entity's IT asset and software lifecycle management process - hardware/software inventory, patch management, end-of-life/end-of-support tracking, and software licensing compliance.": "ITGC",
+    "Test a sample of IT assets against the asset register/inventory and confirm patch levels and support status, in particular for any end-of-life hardware or software identified.": "Substantive",
+    "Evaluate the entity's AML/CFT policies and procedures against the Money Laundering and Proceeds of Crime Act [Chapter 9:24] and applicable Financial Intelligence Unit guidance.": "ITGC",
+    "Test customer due diligence (CDD) procedures for a sample of new customer onboardings, including identification, verification, and risk-rating.": "Substantive",
+    "Test transaction monitoring and sanctions screening arrangements for a sample period, including follow-up of any alerts generated.": "Substantive",
+    "Review suspicious transaction reporting arrangements and, for any reports filed in the period, assess timeliness and record-keeping.": "ITGC",
+    "Test record-keeping of CDD information and transaction records for a sample of customers/transactions against the entity's retention policy and statutory requirements.": "Substantive",
+    "Evaluate the configuration of the automated transaction monitoring and sanctions/PEP screening system - rule/scenario library, name-matching thresholds and fuzzy-matching logic - and assess whether calibration is periodically reviewed and approved.": "ITGC",
+    "Test a sample of system-generated alerts for evidence of false-positive/false-negative tuning effectiveness, including review of any threshold or rule changes made in the period and their authorisation.": "Substantive",
+    "Test the completeness and integrity of data ingested into the transaction monitoring/screening system from core banking or other source systems for a sample period (e.g. reconciling transaction counts/values between the source system and the monitoring system).": "Substantive",
+    "Evaluate the system's audit trail/logging of screening decisions, alert dispositions and manual overrides for completeness, and confirm it is tamper-evident/access-restricted.": "ITGC",
+}
+
+BUSINESS_IT_AREA_REFERENCES = {
+    "Cyber Security": "CS",
+    "Information Security": "IS",
+    "Information Technology (ICT)": "IT",
+    "AML/CFT Compliance": "AC",
+}
+
+# The Secretarial Execution Plan - what the Substantive Procedures tab is
+# replaced with on a "Secretarial" engagement (per the firm's instruction to
+# change Substantive Procedures under Secretarial to an Execution Plan).
+# Reuses the SubstantiveProcedureArea/SubstantiveProcedureItem machinery
+# exactly like FORENSIC_SUBSTANTIVE_AREAS/BUSINESS_IT_SUBSTANTIVE_AREAS
+# above (same sync/generate/sign-off/Word-Excel-export engine) - only the
+# five "areas" (here, Operational Workstreams) and their baseline tasks
+# differ. Each workstream becomes one section of the Execution Plan, built
+# around statutory filing deadlines and deliverables under the Companies
+# and Other Business Entities Act [Chapter 24:31] (COBE Act) rather than
+# financial-statement assertions.
+SECRETARIAL_SUBSTANTIVE_AREAS = [
+    "Onboarding & Diagnostics",
+    "Board & General Meeting Cycle",
+    "Annual Returns & Filings Log",
+    "Statutory Register Audit",
+    "Corporate Actions",
+]
+
+# A sixth workstream that only appears on a Secretarial engagement that has
+# the "Company Re-registration" activity ticked (or already has the area).
+SECRETARIAL_RE_REGISTRATION_AREA = "Company Re-registration"
+
+
+def secretarial_substantive_areas(engagement):
+    """The Execution Plan workstreams for a Secretarial engagement: the five
+    standard ones, plus Company Re-registration when that service is ticked on
+    the engagement (kept visible if its area already exists, so unticking the
+    service later never hides work already done)."""
+    areas = list(SECRETARIAL_SUBSTANTIVE_AREAS)
+    wants = "re_registration" in engagement.secretarial_activity_list
+    if not wants and engagement.id is not None:
+        wants = SubstantiveProcedureArea.query.filter_by(
+            engagement_id=engagement.id, area=SECRETARIAL_RE_REGISTRATION_AREA).first() is not None
+    if wants:
+        areas.append(SECRETARIAL_RE_REGISTRATION_AREA)
+    return areas
+
+SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES = {
+    "Onboarding & Diagnostics": [
+        "Perform initial search with the Registrar of Companies.",
+        "Reconcile the Memorandum and Articles of Association for any borrowing limits and for share capital authorisation (Sec 96).",
+        "Run the Secretarial Risk Assessment Matrix (see the Risk Assessment tab) to flag overdue filings or missing records.",
+        "Compile the Client Statutory Diagnostic & Baseline Report.",
+    ],
+    "Board & General Meeting Cycle": [
+        "Draft and circulate the annual governance calendar to board members.",
+        "Issue formal Notice of AGM at least 21 days prior to the meeting (Sec 169(1)); a meeting to pass a special resolution also needs 21 days (Sec 175(1)).",
+        "Compile, collate and dispatch board packs 7-10 days prior to scheduled meetings.",
+        "Attend meetings, record proceedings, and produce draft minutes within 5 working days post-meeting (the Act allows 20 days for members' meetings, Sec 180; board minutes, Sec 205).",
+        "File the signed board packs, approved minute books and action trackers.",
+        "Diarise the next AGM so that no more than twelve months pass between annual general meetings (Sec 167(2)), and send members a copy of the financial statements at least 14 days before it where Sec 190(1) applies.",
+    ],
+    "Annual Returns & Filings Log": [
+        "Prepare the annual return certificates: for a private company, the certificate signed by a director and the secretary (no invitation to the public; number of members - Sec 165(3)); have the return certified by a director and the secretary and keep a signed duplicate at the registered office (Sec 165(4)).",
+        "Lodge the Annual Return with the Registrar within 21 days of the anniversary of the company's incorporation, registration or re-registration (Sec 165(2)), with the private-company certificate where it applies (Sec 165(3)).",
+        "File Form CR6 for any change in directors or secretaries within one month (Sec 217(4)-(5)).",
+        "Record any change of registered office or postal address in the constitutive documents and notify the Registrar on Form CR5 (Sec 31; the Act sets no number of days).",
+        "File the return of allotments with the Registrar within one month of each allotment (Sec 121(2)).",
+        "Confirm with the Registrar whether the 'Company Summary' return is the same document as the annual return (Sec 165(1) calls the annual return a summary) or a separate return, and reconfirm its form reference and filing deadline - it is not mentioned in the COBE Act as supplied.",
+        "File the stamped registry certificates and official filing acknowledgments.",
+    ],
+    "Statutory Register Audit": [
+        "Maintain and update the Register of Beneficial Owners (Sec 72), file updates with the Registrar within seven days of a material change (Sec 72(2)), and verify any nominee holds only for a beneficial owner with less than 20% (Sec 73(2)(a)).",
+        "Update the Register of Members (Sec 159) following executed share transfers made on a proper instrument of transfer (Sec 151).",
+        "Reconcile the Register of Mortgages and Debentures (Sec 155) against outstanding corporate debt facilities; each entry is due within 14 days of the hypothecation.",
+        "Confirm the company has a secretary ordinarily resident in Zimbabwe (Sec 198(1)), at least one director ordinarily resident in Zimbabwe (Sec 195(2)) and the number of directors Sec 195(1) requires, and that the secretary certifies in the annual financial statements whether the returns and notices required by the Act have been filed (Sec 198(3)(f)).",
+        "File the up-to-date statutory register file and the annual UBO verification declaration.",
+    ],
+    "Company Re-registration": [
+        "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current re-registration deadline, fee and document list with the Registrar (these have been extended and revised before). The Act's own period was twelve months from the effective date (Sec 303(9)); a company not re-registered is struck off (Sec 303(12)).",
+        "Run a Registrar search to confirm the company's registration number and status, and clear any outstanding annual returns before applying.",
+        "Collect the existing registration documents: Certificate of Incorporation, Memorandum and Articles of Association, CR5, CR6 and the latest annual return.",
+        "Confirm and update the details of every director, secretary and shareholder (names, ID numbers, dates of birth, addresses, contact details) and reconcile them to the statutory registers and the Register of Beneficial Ownership (Sec 72).",
+        "Review the Memorandum and Articles against the COBE Act and prepare any amendments needed for approval by special resolution. Amendments follow the ordinary formalities (Secs 79, 81 and 175) and may not be made 'under the guise of' re-registration (Sec 303(11)).",
+        "Prepare the board resolution and the members' special resolution approving re-registration, and the signed authority or affidavit the Registrar requires.",
+        "Submit the re-registration application on the Registrar's online portal, upload the supporting documents and pay the prescribed fee.",
+        "Track the application with the Registrar and respond to any query or rejection until it is approved.",
+        "File the new registration certificate, the Registrar's acknowledgment and the updated company documents on the client file, and update the statutory registers and governance calendar.",
+    ],
+    "Corporate Actions": [
+        "Coordinate board evaluation and drafting of the statutory Solvency and Liquidity Test acknowledgment (Secs 102 and 138) prior to executing distributions, and obtain general-meeting authority before any share buy-back (Secs 128-129).",
+        "Draft special resolutions for constitutional amendments (memorandum Sec 79, articles Sec 81) or a change of name (Sec 26, with the Registrar's written approval first), give 21 days' notice and lodge a copy with the Registrar within one month (Secs 175 and 178).",
+        "Enter each mortgage, registered security interest or debenture in the Register of Mortgages and Debentures within 14 days (Sec 155(1)(a)) and register the security as Sec 154 requires (Movable Property Security Interest Act or Deeds Registry); confirm any time limit under those Acts.",
+        "File the executed solvency certificates, filed special resolutions and registered security extracts.",
+    ],
+}
+
+SECRETARIAL_AREA_REFERENCES = {
+    "Onboarding & Diagnostics": "W1",
+    "Board & General Meeting Cycle": "W2",
+    "Annual Returns & Filings Log": "W3",
+    "Statutory Register Audit": "W4",
+    "Corporate Actions": "W5",
+    "Company Re-registration": "W6",
+}
+
+# Trigger/Event, Lead Responsible and Target Output/Deliverable metadata for
+# each SECRETARIAL_BASELINE_SUBSTANTIVE_PROCEDURES task above, from the
+# firm's Practical Secretarial Execution Plan Schedule - keyed by the exact
+# procedure_text so sync_substantive_procedures (engagements.py) can attach
+# it to the SubstantiveProcedureItem it creates, populating that item's
+# trigger_event/responsible_role/target_output columns (see
+# SubstantiveProcedureItem below). Only used for Secretarial engagements;
+# every other engagement type leaves those three columns blank.
+SECRETARIAL_EXECUTION_TASK_DETAILS = {
+    "Perform initial search with the Registrar of Companies.": ("Engagement start", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
+    "Reconcile the Memorandum and Articles of Association for any borrowing limits and for share capital authorisation (Sec 96).": ("Engagement start", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
+    "Run the Secretarial Risk Assessment Matrix (see the Risk Assessment tab) to flag overdue filings or missing records.": ("T+14 days from onboarding", "Senior Secretariat", "Diagnostic Report & Risk Matrix"),
+    "Compile the Client Statutory Diagnostic & Baseline Report.": ("T+14 days from onboarding", "Senior Secretariat", "Client Statutory Diagnostic & Baseline Report"),
+    "Draft and circulate the annual governance calendar to board members.": ("FYE + 5 months", "Corporate Secretary", "Annual governance calendar"),
+    "Issue formal Notice of AGM at least 21 days prior to the meeting (Sec 169(1)); a meeting to pass a special resolution also needs 21 days (Sec 175(1)).": ("FYE + 5 months", "Corporate Secretary", "Notice Pack & Proxy Forms"),
+    "Compile, collate and dispatch board packs 7-10 days prior to scheduled meetings.": ("Each board/committee meeting", "Corporate Secretary", "Board pack dispatched"),
+    "Attend meetings, record proceedings, and produce draft minutes within 5 working days post-meeting (the Act allows 20 days for members' meetings, Sec 180; board minutes, Sec 205).": ("FYE + 6 months (AGM) / each meeting", "Lead Secretary", "Signed AGM/board minutes"),
+    "File the signed board packs, approved minute books and action trackers.": ("Post-meeting", "Minutes Secretary", "Signed Board Packs, Approved Minute Books & Action Trackers"),
+    "Diarise the next AGM so that no more than twelve months pass between annual general meetings (Sec 167(2)), and send members a copy of the financial statements at least 14 days before it where Sec 190(1) applies.": ("After each AGM", "Corporate Secretary", "Updated governance calendar"),
+    "Prepare the annual return certificates: for a private company, the certificate signed by a director and the secretary (no invitation to the public; number of members - Sec 165(3)); have the return certified by a director and the secretary and keep a signed duplicate at the registered office (Sec 165(4)).": ("Before the annual return is lodged", "Compliance Officer", "Signed certificates & duplicate return"),
+    "Lodge the Annual Return with the Registrar within 21 days of the anniversary of the company's incorporation, registration or re-registration (Sec 165(2)), with the private-company certificate where it applies (Sec 165(3)).": ("Anniversary of incorporation / registration / re-registration (+21 days)", "Compliance Officer", "Stamped annual return receipt"),
+    "File Form CR6 for any change in directors or secretaries within one month (Sec 217(4)-(5)).": ("Director/secretary resignation or appointment", "Assistant Secretary", "Certified Form CR6 copy"),
+    "Record any change of registered office or postal address in the constitutive documents and notify the Registrar on Form CR5 (Sec 31; the Act sets no number of days).": ("Registered office change", "Assistant Secretary", "Certified Form CR5 copy"),
+    "File the return of allotments with the Registrar within one month of each allotment (Sec 121(2)).": ("Share allotment approved", "Secretariat Staff", "Stamped Return of Allotment"),
+    "Confirm with the Registrar whether the 'Company Summary' return is the same document as the annual return (Sec 165(1) calls the annual return a summary) or a separate return, and reconfirm its form reference and filing deadline - it is not mentioned in the COBE Act as supplied.": ("Annual - reconfirm trigger/deadline", "Compliance Officer", "Company Summary filing confirmation (reconfirm form reference)"),
+    "File the stamped registry certificates and official filing acknowledgments.": ("On receipt from Registrar", "Compliance Officer", "Stamped Registry Certificates & Filing Acknowledgments"),
+    "Maintain and update the Register of Beneficial Owners (Sec 72), file updates with the Registrar within seven days of a material change (Sec 72(2)), and verify any nominee holds only for a beneficial owner with less than 20% (Sec 73(2)(a)).": ("Annual review / update within 7 days of a material change", "Compliance Officer", "Reconciled Register of Beneficial Owners"),
+    "Update the Register of Members (Sec 159) following executed share transfers made on a proper instrument of transfer (Sec 151).": ("Share transfer executed", "Compliance Officer", "Updated Register of Members"),
+    "Reconcile the Register of Mortgages and Debentures (Sec 155) against outstanding corporate debt facilities; each entry is due within 14 days of the hypothecation.": ("Debt creation / annual review", "Legal/Secretariat", "Reconciled Register of Charges"),
+    "Confirm the company has a secretary ordinarily resident in Zimbabwe (Sec 198(1)), at least one director ordinarily resident in Zimbabwe (Sec 195(2)) and the number of directors Sec 195(1) requires, and that the secretary certifies in the annual financial statements whether the returns and notices required by the Act have been filed (Sec 198(3)(f)).": ("Annual / on appointment", "Compliance Officer", "Director and secretary compliance note"),
+    "File the up-to-date statutory register file and the annual UBO verification declaration.": ("Annual", "Compliance Officer", "Up-to-date Statutory Register File & Annual UBO Verification Declaration"),
+    "Coordinate board evaluation and drafting of the statutory Solvency and Liquidity Test acknowledgment (Secs 102 and 138) prior to executing distributions, and obtain general-meeting authority before any share buy-back (Secs 128-129).": ("Distribution/buyback proposed", "Engagement Partner", "Signed Board Solvency Declaration"),
+    "Draft special resolutions for constitutional amendments (memorandum Sec 79, articles Sec 81) or a change of name (Sec 26, with the Registrar's written approval first), give 21 days' notice and lodge a copy with the Registrar within one month (Secs 175 and 178).": ("Ad-hoc - constitutional amendment", "Corporate Secretary", "Filed Special Resolutions"),
+    "Enter each mortgage, registered security interest or debenture in the Register of Mortgages and Debentures within 14 days (Sec 155(1)(a)) and register the security as Sec 154 requires (Movable Property Security Interest Act or Deeds Registry); confirm any time limit under those Acts.": ("Debt/charge creation", "Legal/Secretariat", "Stamped Certificate of Mortgage/Charge"),
+    "File the executed solvency certificates, filed special resolutions and registered security extracts.": ("Ad-hoc", "Legal/Secretariat", "Executed Solvency Certificates, Filed Special Resolutions & Registered Security Extracts"),
+    "Check on the Registrar's online portal whether the company has already been re-registered; if not, confirm the current re-registration deadline, fee and document list with the Registrar (these have been extended and revised before). The Act's own period was twelve months from the effective date (Sec 303(9)); a company not re-registered is struck off (Sec 303(12)).": ("Engagement start", "Senior Secretariat", "Re-registration status note & confirmed deadline/fee"),
+    "Run a Registrar search to confirm the company's registration number and status, and clear any outstanding annual returns before applying.": ("Engagement start", "Compliance Officer", "Registrar search report & up-to-date annual returns"),
+    "Collect the existing registration documents: Certificate of Incorporation, Memorandum and Articles of Association, CR5, CR6 and the latest annual return.": ("Engagement start", "Assistant Secretary", "Scanned registration document set"),
+    "Confirm and update the details of every director, secretary and shareholder (names, ID numbers, dates of birth, addresses, contact details) and reconcile them to the statutory registers and the Register of Beneficial Ownership (Sec 72).": ("Before application", "Compliance Officer", "Verified director/shareholder/beneficial owner schedule"),
+    "Review the Memorandum and Articles against the COBE Act and prepare any amendments needed for approval by special resolution. Amendments follow the ordinary formalities (Secs 79, 81 and 175) and may not be made 'under the guise of' re-registration (Sec 303(11)).": ("Before application", "Legal/Secretariat", "Amended Memorandum & Articles (draft)"),
+    "Prepare the board resolution and the members' special resolution approving re-registration, and the signed authority or affidavit the Registrar requires.": ("Before application", "Corporate Secretary", "Signed board resolution, special resolution & authority/affidavit"),
+    "Submit the re-registration application on the Registrar's online portal, upload the supporting documents and pay the prescribed fee.": ("Documents signed and complete", "Compliance Officer", "Submitted application & fee receipt"),
+    "Track the application with the Registrar and respond to any query or rejection until it is approved.": ("After submission", "Compliance Officer", "Registrar approval"),
+    "File the new registration certificate, the Registrar's acknowledgment and the updated company documents on the client file, and update the statutory registers and governance calendar.": ("On receipt from Registrar", "Compliance Officer", "New registration certificate & updated company file"),
+}
+
+
+engagement_team = db.Table(
+    "engagement_team",
+    db.Column("engagement_id", db.Integer, db.ForeignKey("engagement.id"), primary_key=True),
+    db.Column("user_id", db.Integer, db.ForeignKey("user.id"), primary_key=True),
+)
+
+
+class User(UserMixin, db.Model):
+    # How recently a user must have been seen (see last_seen_at/_update_last_
+    # seen in app.py) to count as "online now" for the Messages "who's in the
+    # app" indicator (models.User.is_online) - requested by the user to show
+    # which colleagues are currently active when composing/reading a
+    # message. Wider than the once-a-minute throttle on updating
+    # last_seen_at, so the throttle itself never makes someone look offline
+    # early.
+    ONLINE_THRESHOLD_MINUTES = 5
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(80), unique=True, nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    email = db.Column(db.String(120))
+    password_hash = db.Column(db.String(255), nullable=False)
+    role = db.Column(db.String(20), default="staff")  # staff | supervisor | partner | admin
+    is_active_flag = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Stamped on every authenticated request (throttled - see app.py's
+    # _update_last_seen), purely for the is_online presence indicator below.
+    # Never a precise "last activity" audit log - just recent enough to
+    # drive an online/offline dot.
+    last_seen_at = db.Column(db.DateTime)
+
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+
+    @property
+    def is_active(self):
+        return self.is_active_flag
+
+    @property
+    def is_online(self):
+        """True if this user has been seen within ONLINE_THRESHOLD_MINUTES -
+        the Messages "who's in the app" indicator. A user who has never
+        logged in (last_seen_at is None) is never online."""
+        if not self.last_seen_at:
+            return False
+        return (datetime.utcnow() - self.last_seen_at).total_seconds() <= self.ONLINE_THRESHOLD_MINUTES * 60
+
+    def __repr__(self):
+        return f"<User {self.username}>"
+
+
+class Client(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    contact_person = db.Column(db.String(120))
+    email = db.Column(db.String(120))
+    phone = db.Column(db.String(50))
+    address = db.Column(db.String(255))
+    industry = db.Column(db.String(120))
+    # Company registration number (e.g. a companies-office registration
+    # number). Optional - not every client is a registered company - but
+    # when it IS given, clients.py checks it against every other client's
+    # company_number before saving, so the same company can't accidentally
+    # be onboarded twice under two different client records.
+    company_number = db.Column(db.String(80))
+    # ZIMRA identifiers, captured at onboarding. Both optional (an individual
+    # or a small client may have no VAT registration - a blank VAT number
+    # simply means "not VAT registered"), and each is checked for duplicates
+    # across clients in clients.py the same way company_number is. Shown on
+    # the client page and on the Bill-to block of printed quotations/invoices.
+    tin_number = db.Column(db.String(40))   # Taxpayer Identification Number (BP number)
+    vat_number = db.Column(db.String(40))   # VAT registration number
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Who onboarded the client - they keep access to it even before any
+    # engagement exists (see client_scope_ids). Blank on clients created before
+    # this was recorded.
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    # The client's own logo (as opposed to the firm's, which is baked into
+    # every generated document's letterhead - see workpapers._LOGO_PATH) -
+    # used only on the Financial Statements cover page. Stored on disk under
+    # Config.CLIENT_LOGOS_DATA_DIR, one file per client (replaced, not
+    # accumulated, each time a new one is uploaded), same pattern as
+    # CompanyDocument's own file storage.
+    logo_filename = db.Column(db.String(255))
+
+    engagements = db.relationship("Engagement", backref="client", lazy=True, cascade="all, delete-orphan")
+
+    @property
+    def has_tax_or_accounting_engagement(self):
+        """Whether this client has ever had a Tax or Accounting engagement
+        (Engagement.has_tax_module/has_accounting_module, checked across
+        every engagement rather than only open ones) - gates whether the
+        Tax & Accounting Filing Archive card (see TaxAccountingFilingDocument
+        below) is shown on this client's page at all. Checked against every
+        engagement rather than just currently-open ones because the archive
+        is meant to keep clearance certificates/returns/schedules findable
+        for a client across tax years, long after the engagement they were
+        filed under has closed."""
+        return any(e.has_tax_module or e.has_accounting_module for e in self.engagements)
+
+    @property
+    def has_tax_engagement(self):
+        """Whether this client has at least one engagement with a Tax
+        service switched on (see Engagement.has_tax_module) - narrower than
+        has_tax_or_accounting_engagement above (Tax only, not Accounting).
+        Used to gate whether QPD / provisional tax applies to this client at
+        all - see qualifies_for_qpd below."""
+        return any(e.has_tax_module for e in self.engagements)
+
+    @property
+    def qualifies_for_qpd(self):
+        """Whether the Quarterly Payment Dates (QPD) / provisional tax
+        module applies to this client. QPD is only relevant to clients with
+        a Tax Services engagement ticked - but any QPD data already on file
+        is grandfathered in even if that engagement is later removed or
+        changes type, so historical work a preparer already did here is
+        never hidden or orphaned."""
+        return self.has_tax_engagement or bool(self.qpd_estimates)
+
+    def __repr__(self):
+        return f"<Client {self.name}>"
+
+
+class Engagement(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    type = db.Column(db.String(60), nullable=False, default="Audit")
+    subdivision = db.Column(db.String(50))  # only meaningful when type == "Secretarial"
+
+    # Comma-separated SECRETARIAL_ACTIVITIES keys - which corporate
+    # secretarial activities this engagement covers (only meaningful when
+    # type == "Secretarial"). Used to filter which Understanding the
+    # Business/Assignment questionnaire sections get seeded - see
+    # SECRETARIAL_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS and
+    # engagements.seed_entity_checklist. Blank/None means "no filter", i.e.
+    # every section is seeded.
+    secretarial_activities = db.Column(db.Text)
+
+    # Comma-separated TAX_SERVICES keys - which Tax Advisory & Tax
+    # Compliance services this engagement covers. Unlike
+    # secretarial_activities, meaningful (and settable) on ANY engagement
+    # type - see TAX_SERVICES above and has_tax_module/has_tax_advisory
+    # below. Blank/None means the Tax tab is hidden entirely for this
+    # engagement.
+    tax_services = db.Column(db.Text)
+
+    # Comma-separated ACCOUNTING_SERVICES keys - which Financial Accounting,
+    # Cost Accounting & Management Accounting services this engagement
+    # covers. Combinable onto ANY engagement type, exactly like tax_services
+    # above - see ACCOUNTING_SERVICES and has_accounting_module/
+    # has_cost_accounting/has_management_accounting below.
+    accounting_services = db.Column(db.Text)
+    status = db.Column(db.String(30), nullable=False, default="Planning")
+    period_end = db.Column(db.Date)
+    start_date = db.Column(db.Date, default=date.today)
+    deadline = db.Column(db.Date)
+    description = db.Column(db.Text)
+
+    partner_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    manager_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    # Whether this engagement must clear Client Acceptance & Continuance
+    # (see ClientAcceptance below) before Understanding the Entity and every
+    # later tab can be opened. Defaults True for every engagement created
+    # from here on. Existing engagements from before this feature shipped
+    # are migrated to False (see _add_missing_columns in app.py) so they are
+    # completely unaffected - nobody has to retroactively fill in an
+    # acceptance record for work already under way.
+    acceptance_required = db.Column(db.Boolean, default=True, nullable=False)
+
+    # Which financial reporting framework the Financial Statements
+    # (Finalisation tab) are prepared under - see REPORTING_FRAMEWORKS
+    # above. Defaults to "full_ifrs" for every engagement (existing ones
+    # included, via _add_missing_columns in app.py), matching how the
+    # Financial Statements have always been presented here; change it on
+    # the Finalisation tab if a given engagement is on IFRS for SMEs or a
+    # local framework instead.
+    reporting_framework = db.Column(db.String(20), default="full_ifrs", nullable=False)
+
+    # Which method the Cash Flow Statement's operating activities section
+    # uses - see CASH_FLOW_METHODS above and financials.build_cash_flow.
+    # Defaults to "indirect" for every engagement (existing ones included),
+    # matching how the Cash Flow Statement has always been presented here.
+    cash_flow_method = db.Column(db.String(10), default="indirect", nullable=False)
+
+    # Public Interest Entity checklist - see PIE_CRITERIA above. Any one of
+    # these true makes the entity a Public Interest Entity for the purposes
+    # of the "Company classification" guidance on the Finalisation tab.
+    # All default False, i.e. "not (yet) known to be a PIE" - matching every
+    # existing engagement, none of which is retroactively assumed to be one.
+    pie_listed = db.Column(db.Boolean, default=False, nullable=False)
+    pie_financial_institution = db.Column(db.Boolean, default=False, nullable=False)
+    pie_insurer = db.Column(db.Boolean, default=False, nullable=False)
+    pie_asset_manager = db.Column(db.Boolean, default=False, nullable=False)
+    pie_pension_fund = db.Column(db.Boolean, default=False, nullable=False)
+    pie_medical_aid = db.Column(db.Boolean, default=False, nullable=False)
+    pie_debt_equity_issuer = db.Column(db.Boolean, default=False, nullable=False)
+
+    # Small and Medium Enterprises Act classification - recorded, informational
+    # client information only (see SME_ACT_SECTORS / SME_ACT_SIZE_BANDS
+    # above); it does not drive reporting_framework. sme_size_band is the
+    # preparer's own final selection - annual_turnover/gross_assets/staff_
+    # headcount, when all three are entered, feed financials.classify_sme_size()
+    # for a recommended band shown alongside the dropdown (see the
+    # Finalisation tab's "Company classification" card), never overwriting
+    # the preparer's own choice on their own.
+    sme_sector = db.Column(db.String(50))
+    sme_size_band = db.Column(db.String(10))
+    sme_annual_turnover = db.Column(db.Float)
+    sme_gross_assets = db.Column(db.Float)
+    sme_staff_headcount = db.Column(db.Integer)
+
+    partner = db.relationship("User", foreign_keys=[partner_id])
+    manager = db.relationship("User", foreign_keys=[manager_id])
+    team_members = db.relationship("User", secondary=engagement_team, backref="engagements")
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    checklist_items = db.relationship("EngagementChecklistItem", backref="engagement", lazy=True, cascade="all, delete-orphan", order_by="EngagementChecklistItem.order")
+    risk_items = db.relationship("RiskItem", backref="engagement", lazy=True, cascade="all, delete-orphan")
+    documents = db.relationship("Document", backref="engagement", lazy=True, cascade="all, delete-orphan")
+    tasks = db.relationship("EngagementTask", backref="engagement", lazy=True, cascade="all, delete-orphan")
+
+    @property
+    def checklist_progress(self):
+        items = self.checklist_items
+        if not items:
+            return 0
+        done = sum(1 for i in items if i.status in ("Done", "N/A"))
+        return round(100 * done / len(items))
+
+    @property
+    def is_overdue(self):
+        return bool(self.deadline and self.deadline < date.today() and self.status != "Completed")
+
+    @property
+    def is_public_interest_entity(self):
+        """Whether any Public Interest Entity checklist box (see
+        PIE_CRITERIA) is ticked - PAAB's own test for which entities must
+        report under Full IFRS rather than being eligible for IFRS for
+        SMEs. Recomputed from the checklist every time, never stored
+        separately, so it can never drift out of sync with the checklist."""
+        return any(getattr(self, code) for code, _ in PIE_CRITERIA)
+
+    @property
+    def recommended_reporting_framework(self):
+        """A hint only - see the "Company classification" card on the
+        Finalisation tab. The preparer always makes the final call in the
+        Financial reporting framework dropdown below it; this never changes
+        reporting_framework on its own."""
+        return "full_ifrs" if self.is_public_interest_entity else "ifrs_for_smes"
+
+    @property
+    def secretarial_activity_list(self):
+        """The selected SECRETARIAL_ACTIVITIES keys for this engagement, as
+        a plain list - only meaningful when type == "Secretarial". Empty
+        list means "no filter selected" (every questionnaire section is
+        seeded)."""
+        if not self.secretarial_activities:
+            return []
+        return [a for a in self.secretarial_activities.split(",") if a]
+
+    @property
+    def tax_service_list(self):
+        """The selected TAX_SERVICES keys for this engagement, as a plain
+        list. Empty on every engagement until Tax services are explicitly
+        turned on (see form.html) - unlike secretarial_activities, an empty
+        list here means "no Tax module at all", not "no filter"."""
+        if not self.tax_services:
+            return []
+        return [s for s in self.tax_services.split(",") if s]
+
+    @property
+    def is_whistleblower_service(self):
+        return self.type == WHISTLEBLOWER_SERVICE_TYPE
+
+    @property
+    def is_training_service(self):
+        return self.type == TRAINING_SERVICE_TYPE
+
+    @property
+    def is_corporate_finance(self):
+        return self.type in (CORPFIN_ENGAGEMENT_TYPE, LEGACY_CONSULTING_TYPE)
+
+    @property
+    def is_standalone_service(self):
+        """True for the service lines that run in their own workspace
+        (no audit planning/fieldwork/finalisation/tax-computation tabs):
+        Whistle-blower, Training and Corporate Finance & Business Advisory
+        (including engagements still carrying the old "Consulting" type)."""
+        return self.type in (WHISTLEBLOWER_SERVICE_TYPE, TRAINING_SERVICE_TYPE, CORPFIN_ENGAGEMENT_TYPE, LEGACY_CONSULTING_TYPE)
+
+    @property
+    def has_tax_module(self):
+        """Whether the Tax tab should appear on this engagement at all -
+        either a dedicated Tax engagement type, or any Tax service
+        explicitly turned on for another engagement type (e.g. tax
+        compliance work bundled into an Audit engagement)."""
+        return self.type in TAX_ENGAGEMENT_TYPES or bool(self.tax_service_list)
+
+    @property
+    def is_tax_advisory_type(self):
+        """A dedicated Tax Advisory engagement (or one of the two legacy tax
+        types), as opposed to another engagement type that merely has a Tax
+        service ticked. These get the lean tax tab set - no Analytical
+        Review, Risk Assessment, Trial Balance or Substantive Procedures -
+        and the tax-head Execution Plan sits on the Tax tab itself."""
+        return self.type in TAX_ENGAGEMENT_TYPES
+
+    @property
+    def has_tax_advisory(self):
+        """Whether the Tax tab's advisory-only sections (Technical Research
+        Log, Structuring Options Analysis, Tax Dispute Management - Module
+        7B) should be shown - only when the Tax Advisory or Representation
+        service is actually on, never just because some other Tax service
+        is."""
+        services = self.tax_service_list
+        return "advisory" in services or "representation" in services or self.type in TAX_ENGAGEMENT_TYPES
+
+    @property
+    def accounting_service_list(self):
+        """The selected ACCOUNTING_SERVICES keys for this engagement, as a
+        plain list. Empty on every engagement until an Accounting service is
+        explicitly turned on (see form.html) - same "empty means off"
+        convention as tax_service_list, not secretarial_activity_list's
+        "empty means unfiltered"."""
+        if not self.accounting_services:
+            return []
+        return [s for s in self.accounting_services.split(",") if s]
+
+    @property
+    def has_accounting_module(self):
+        """Whether the Accounting tab should appear on this engagement at
+        all - either the dedicated Accounting & Bookkeeping engagement type,
+        or any Accounting service explicitly turned on for another
+        engagement type (e.g. a bookkeeping clean-up bundled into an Audit
+        engagement)."""
+        return self.type == "Accounting & Bookkeeping" or bool(self.accounting_service_list)
+
+    @property
+    def has_cost_accounting(self):
+        """Whether the Accounting tab's Cost Accounting sections (Cost
+        Centres, Job/Process/Standard Costing, Variance Analysis, CVP
+        Analysis) should be shown - only when the Cost Accounting service is
+        actually on, never just because some other Accounting service is."""
+        return "costing" in self.accounting_service_list
+
+    @property
+    def has_management_accounting(self):
+        """Whether the Accounting tab's Management Accounting sections
+        (Budgets, KPI Dashboard, the Management Accounts Report) should be
+        shown - only when the Management Accounting service is actually
+        on."""
+        return "budgeting" in self.accounting_service_list
+
+    def __repr__(self):
+        return f"<Engagement {self.title}>"
+
+
+# ---------- Client access (which clients a person may see) ----------
+# Staff and Supervisors only see the clients they actually work on: a client
+# where they are the Partner, the Manager or a team member on at least one of
+# its engagements, or that they onboarded themselves. Partners and Admins see
+# every client. The same rule is applied everywhere client data appears (client
+# list and pages, search, invoices, quotations, receipts, ZIMRA cases, QPD,
+# payroll, documents and the client dropdowns) - see app._enforce_client_scope
+# and the helpers below.
+CLIENT_RESTRICTED_ROLES = ("staff", "supervisor")
+
+
+def client_scope_ids(user):
+    """None if `user` may see every client; otherwise the set of client ids
+    they work on (cached for the length of one web request)."""
+    if user is None or getattr(user, "role", None) not in CLIENT_RESTRICTED_ROLES:
+        return None
+    cache = request.environ.setdefault("neverlank.client_scope", {}) if has_request_context() else None
+    if cache is not None and user.id in cache:
+        return cache[user.id]
+    on_team = db.session.query(engagement_team.c.engagement_id).filter(engagement_team.c.user_id == user.id)
+    ids = {cid for (cid,) in db.session.query(Engagement.client_id).filter(
+        db.or_(Engagement.partner_id == user.id, Engagement.manager_id == user.id, Engagement.id.in_(on_team))).all()}
+    ids |= {cid for (cid,) in db.session.query(Client.id).filter(Client.created_by_id == user.id).all()}
+    if cache is not None:
+        cache[user.id] = ids
+    return ids
+
+
+def user_can_access_client(user, client):
+    """Whether `user` may see this client (a Client or a client id)."""
+    scope = client_scope_ids(user)
+    if scope is None:
+        return True
+    client_id = client.id if hasattr(client, "id") else client
+    return client_id in scope
+
+
+def visible_clients(user):
+    """Every client `user` may see, by name - use for lists and dropdowns."""
+    query = Client.query
+    scope = client_scope_ids(user)
+    if scope is not None:
+        query = query.filter(Client.id.in_(scope)) if scope else query.filter(db.false())
+    return query.order_by(Client.name).all()
+
+
+def user_can_access_engagement(user, engagement):
+    """Confidentiality gate: everyone except Admin can only open an
+    engagement (any tab, its documents, its workpapers) if they're actually
+    on it - its Partner, its Manager, or listed in its Team. Admin always
+    sees everything, same as user_has_permission's own admin bypass.
+    Engagements a user can't access also don't appear in their dashboard,
+    engagements list, or the firm-wide Queries board."""
+    if user.role == "admin":
+        return True
+    if engagement.partner_id == user.id or engagement.manager_id == user.id:
+        return True
+    return user in engagement.team_members
+
+
+def engagement_acceptance_cleared(engagement):
+    """Whether this engagement's Client Acceptance & Continuance gate (see
+    ClientAcceptance below) has been cleared, i.e. whether Understanding the
+    Entity and every later tab may be opened. An engagement that doesn't
+    require acceptance at all (every engagement created before this feature
+    shipped - see Engagement.acceptance_required) is always cleared.
+
+    An engagement that does require it clears the gate either of two ways,
+    both needing the recorded decision to be "Accepted" (a declined
+    acceptance, or one still awaiting a decision, always keeps the gate
+    shut regardless of either flag below):
+      - the full Engagement Partner sign-off (ClientAcceptance.
+        partner_signed_at) - only possible once every item is complete; or
+      - the Partner's narrower interim "authorise continuing with work"
+        (ClientAcceptance.partner_authorized_continue_at) - for when the
+        decision to accept is genuinely final but one item (typically the
+        client's countersigned engagement letter) is still in process, so
+        the team isn't blocked waiting on paperwork the Partner has already
+        decided doesn't change the outcome.
+    """
+    if not engagement.acceptance_required:
+        return True
+    ca = engagement.client_acceptance
+    if not ca or ca.decision != "Accepted":
+        return False
+    return bool(ca.partner_signed_at or ca.partner_authorized_continue_at)
+
+
+class ChecklistTemplate(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(150), nullable=False)
+    type = db.Column(db.String(60), nullable=False, default="Audit")
+    description = db.Column(db.Text)
+
+    items = db.relationship("ChecklistTemplateItem", backref="template", lazy=True, cascade="all, delete-orphan", order_by="ChecklistTemplateItem.order")
+
+
+class ChecklistTemplateItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    template_id = db.Column(db.Integer, db.ForeignKey("checklist_template.id"), nullable=False)
+    section = db.Column(db.String(150))
+    item_text = db.Column(db.String(500), nullable=False)
+    order = db.Column(db.Integer, default=0)
+
+
+class Tickmark(db.Model):
+    """One entry in the firm's tickmark legend - a short symbol (e.g. "TB",
+    "PY", "V", "CB") plus its meaning, in the standard audit-workpaper
+    convention. Firm-wide (not per-engagement), managed from the Tickmarks
+    settings screen, and attachable to any Substantive Procedures item so a
+    procedure can point at which tie-out/agreement a tick represents. The
+    Engagement File Summary PDF prints the legend for whichever tickmarks
+    were actually used in that engagement's file. Matches the filing
+    policy's own rule (see FilingIndexSection below) that tick marks are
+    defined once per working paper and never redefined elsewhere in the
+    same file - this firm-wide legend is that one definition."""
+    id = db.Column(db.Integer, primary_key=True)
+    symbol = db.Column(db.String(20), nullable=False, unique=True)
+    meaning = db.Column(db.String(300), nullable=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<Tickmark {self.symbol!r}>"
+
+
+class FilingIndexSection(db.Model):
+    """One numbered entry in the firm's Audit Working Paper Indexing &
+    Filing Policy (see FILING_INDEX_MANUAL below for the full written
+    policy) - a Current File (N-series, is_permanent=False) or Permanent
+    File (P-series, is_permanent=True) working-paper reference, e.g.
+    "N1001" = Materiality, "P1000" = Incorporation & Statutory. Firm-wide
+    (not per-engagement), seeded once from the firm's filing index document
+    (see seed.seed_filing_index) and editable from the Filing Index page -
+    including retiring a number as "not used" (is_active=False) rather than
+    deleting it outright, per the policy's own rule that a number, once
+    used, is never reused even after the working paper it named is no
+    longer needed."""
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(10), nullable=False, unique=True)  # "N1001", "P1000"
+    is_permanent = db.Column(db.Boolean, default=False)  # False = Current File (N-series), True = Permanent File (P-series)
+    category = db.Column(db.String(150))  # e.g. "Planning & Risk Assessment", "Incorporation & Statutory"
+    section = db.Column(db.String(200), nullable=False)  # e.g. "Materiality"
+    typical_contents = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True)  # False = retired/"not used" - see docstring above
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+
+    @property
+    def display_label(self):
+        return f"{self.code} — {self.section}"
+
+    def __repr__(self):
+        return f"<FilingIndexSection {self.code!r} {self.section!r}>"
+
+
+# The firm's Audit Working Paper Indexing & Filing Policy, written out for
+# the in-app Filing Index & Manual page - each entry is a section heading,
+# its explanatory paragraph(s), and (where the policy itself uses a list)
+# its bullet points. This is the policy as documented, plus a closing
+# section explaining how this app implements it - it isn't itself the
+# editable index of codes (see FilingIndexSection / seed.seed_filing_index
+# for that); it's the "why" and "how" that goes with it.
+FILING_INDEX_MANUAL = [
+    {
+        "heading": "Purpose",
+        "paragraphs": [
+            "To establish a single, consistent numbering and filing convention for audit working papers "
+            "across all engagements, so that any file can be located, cross-referenced and reviewed "
+            "without ambiguity, and so that files remain audit-trail compliant under ISA 230 (Audit "
+            "Documentation).",
+        ],
+    },
+    {
+        "heading": "1. File Structure Overview",
+        "paragraphs": ["Every client audit file is split into two parts:"],
+        "bullets": [
+            "Permanent File (P-series) — information of continuing relevance across audit years "
+            "(incorporation documents, engagement letters, accounting policies, group structure, "
+            "standing instructions).",
+            "Current File (N-series) — working papers specific to the year under audit, organised by "
+            "the numbered sections below.",
+        ],
+        "paragraphs_after": [
+            "Each working paper is assigned a single, unique reference in the form:",
+            "N [4-digit code] _ [Short Description] _ [Year]",
+            "Example: N1001_Determination_of_Materiality_2025.xlsx",
+            "The leading digit of the 4-digit code identifies the section (see the Filing Index page "
+            "for the full, current list); the remaining three digits identify the specific working "
+            "paper within that section, allocated sequentially and never reused, even if a working "
+            "paper is later deleted or merged.",
+        ],
+    },
+    {
+        "heading": "2. Current File — Section Index",
+        "paragraphs": [
+            "The section ranges extend the numbering already in use on existing files into a complete "
+            "scheme covering every audit area. The full, editable list of every working paper reference "
+            "within each range is on the Filing Index page - the ranges themselves are:",
+        ],
+        "bullets": [
+            "1000–1999: Planning & Risk Assessment",
+            "2000–2999: Internal Control & Systems",
+            "3000–3999: Statement of Financial Position — Assets",
+            "4000–4999: Statement of Financial Position — Liabilities & Equity",
+            "5000–5999: Statement of Comprehensive Income",
+            "6000–6999: Other Audit Areas",
+            "7000–7999: Compliance & Statutory",
+            "8000–8999: Reporting & Disclosure",
+            "9000–9999: Completion & Review",
+        ],
+    },
+    {
+        "heading": "3. Permanent File (P-series)",
+        "paragraphs": [
+            "Five fixed sections (P1000–P5000) covering incorporation & statutory documents, engagement "
+            "administration, accounting policies, prior year financial statements, and structure & "
+            "governance - see the Permanent File section of the Filing Index page for the complete "
+            "list, and the Permanent File tab on each client's page to file documents under them.",
+        ],
+    },
+    {
+        "heading": "4. Filing Conventions",
+        "bullets": [
+            "Folder structure: [Client Name] / [Financial Year] / Permanent File | Current File, "
+            "mirroring the sections above.",
+            "File naming: N[code]_[Short Description]_[Year].[ext] — no spaces other than underscores, "
+            "no client name repeated inside the current-year folder.",
+            "Every working paper carries a header block: Client, Year End, Prepared By/Date, Reviewed "
+            "By/Date, Objective, and Conclusion.",
+            "Tick marks are defined once per working paper (on a 'Tickmarks' tab or footnote) and never "
+            "redefined elsewhere in the same file.",
+            "Cross-references between working papers use the WP number only (e.g. \"agreed to N1000\"), "
+            "never a page number or free-text description.",
+            "Numbers are never reused. If a working paper is no longer required, its number is left "
+            "vacant and noted as \"not used\" in the index, not reassigned.",
+            "Each file is superseded, not overwritten, when revised after initial sign-off; the review "
+            "trail (e.g. queries raised and cleared) is retained, not deleted.",
+        ],
+    },
+    {
+        "heading": "How this app applies the policy",
+        "paragraphs": [
+            "The Filing Index page is the firm-wide, editable list of every N-series and P-series code - "
+            "add a code, correct one, or mark a number \"not used\" (per the convention above, numbers "
+            "are never deleted or reassigned, only retired).",
+            "Every Substantive Procedures area already carries its matching N-code (shown on its heading "
+            "and in the generated Word/Excel workpapers), and the fixed workpaper sections that have a "
+            "direct equivalent in the index (Materiality, Understanding the Entity, the Management "
+            "Representation Letter, Report to Management, and others) show that code on their downloads "
+            "and in the Engagement File Summary PDF, in place of the app's older lettered references.",
+            "Uploading a working paper under Documents (or under a Substantive Procedures area) lets you "
+            "tag it with its WP number from the index; its download name then follows the "
+            "N[code]_[Description]_[Year] convention automatically.",
+            "Permanent File items (P-series) are filed once per client, on that client's own Permanent "
+            "File tab, rather than being re-uploaded to every engagement.",
+            "The firm's shared Tickmark legend (its own page) is exactly the \"defined once per working "
+            "paper, never redefined elsewhere\" tick mark convention above, applied firm-wide rather than "
+            "file-by-file.",
+        ],
+    },
+]
+
+
+class EngagementChecklistItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    section = db.Column(db.String(150))
+    item_text = db.Column(db.String(500), nullable=False)
+    order = db.Column(db.Integer, default=0)
+    status = db.Column(db.String(20), default="Not Started")
+    notes = db.Column(db.Text)
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    # Review sign-off: separate from completed_by/completed_at (the preparer)
+    # so a supervisor/partner/admin can independently confirm the work -
+    # never the same person as the preparer.
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    # Engagement Partner sign-off: a third, separate tier the partner can
+    # apply to any workpaper at their discretion - not gated on the
+    # reviewer step, and never the same person as the preparer.
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def reviews(self):
+        """Every dated review entry left against this checklist item - see
+        WorkpaperReview. Purely additive alongside reviewed_by_id/at above
+        (the single quick "mark as reviewed" toggle stays exactly as it
+        was): this lets more than one reviewer - a Manager as well as a
+        Supervisor, say - each leave their own note on the same item,
+        without one overwriting the other. The Partner's own sign-off
+        (partner_signed_by_id/at above) remains the ultimate, file-closing
+        authority - this log never gates or replaces it."""
+        return (
+            WorkpaperReview.query
+            .filter_by(reviewable_type=REVIEWABLE_TYPE_CHECKLIST_ITEM, reviewable_id=self.id)
+            .order_by(WorkpaperReview.reviewed_at).all()
+        )
+
+
+class RiskItem(db.Model):
+    """A single likelihood x impact risk register entry. Used by the Tax
+    module's Risk Register ("tax") and the Accounting module's Risk
+    Register ("accounting") - `module` tags which register a row belongs to
+    so the two (and any future register on the same engagement) can never
+    mix rows with each other."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    module = db.Column(db.String(20))  # "tax" | "accounting" - see docstring above
+    category = db.Column(db.String(120))
+    risk_description = db.Column(db.Text, nullable=False)
+    likelihood = db.Column(db.Integer, default=3)  # 1-5
+    impact = db.Column(db.Integer, default=3)  # 1-5
+    mitigation = db.Column(db.Text)
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    status = db.Column(db.String(20), default="Open")
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    owner = db.relationship("User", foreign_keys=[owner_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    @property
+    def score(self):
+        return (self.likelihood or 0) * (self.impact or 0)
+
+    @property
+    def rating(self):
+        return _score_rating(self.score)
+
+
+class Document(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    category = db.Column(db.String(100), default="General")
+    reference = db.Column(db.String(100))  # e.g. a filing/working-paper reference like "A-1" or "SA-01/2026"
+    version = db.Column(db.Integer, default=1)
+    notes = db.Column(db.Text)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Optional link to the Substantive Procedures section this working paper
+    # was filed under (e.g. "Cash and Bank") - lets evidence supporting a
+    # section's procedures be filed and found alongside them, rather than
+    # only in the engagement's general Documents tab. Nullable: a document
+    # doesn't have to belong to any particular audit area.
+    substantive_area_id = db.Column(db.Integer, db.ForeignKey("substantive_procedure_area.id"))
+    # Optional tag to a specific Current File (N-series) working-paper
+    # number from the firm's Filing Index (see FilingIndexSection) - when
+    # set, the document's download name follows the firm's
+    # N[code]_[Description]_[Year] filing convention instead of its
+    # original filename. Nullable: tagging is optional, same as the older
+    # free-text `reference` field above (kept for anything the index
+    # doesn't cover, or for firms/engagements not using it).
+    filing_index_id = db.Column(db.Integer, db.ForeignKey("filing_index_section.id"))
+
+    # System-generated workpapers (see engagements.py's
+    # _file_generated_workpaper and the "Generate & File" buttons on the
+    # Finalisation/Checklist/Substantive Procedures tabs) are filed as
+    # ordinary Documents - reusing the same storage, versioning-by-count,
+    # download and Filing-Index tagging already built for uploads - plus
+    # these extra fields so a generated workpaper carries its own
+    # Prepared/Reviewed/Partner sign-off, same as every other workpaper in
+    # the app (Trial Balance, Analytical Review, Audit Adjustments, ...).
+    # is_generated distinguishes these from a person's own upload (which
+    # never has this sign-off asked of it); workpaper_kind is the stable
+    # machine key (e.g. "financial_statements") used to group every
+    # version of the SAME generated workpaper together and to work out the
+    # next version number - regenerating never overwrites or deletes a
+    # prior version (the firm's own Filing Index policy: "superseded, not
+    # overwritten"), it only flips is_current_version to False on the ones
+    # it replaces.
+    is_generated = db.Column(db.Boolean, default=False)
+    workpaper_kind = db.Column(db.String(40))
+    is_current_version = db.Column(db.Boolean, default=True)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    uploaded_by = db.relationship("User", foreign_keys=[uploaded_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    substantive_area = db.relationship("SubstantiveProcedureArea", backref=db.backref("documents", lazy=True, order_by="Document.uploaded_at.desc()"))
+    filing_index = db.relationship("FilingIndexSection")
+
+    # Aliases so the standard effectively_reviewed()/sign-off display
+    # pattern used everywhere else in the app (which reads
+    # completed_by/completed_by_id as "who prepared this") works unchanged
+    # on a generated Document too, without a duplicate pair of columns -
+    # "prepared" a generated workpaper IS "uploaded" it, from the system's
+    # point of view.
+    @property
+    def completed_by(self):
+        return self.uploaded_by
+
+    @property
+    def completed_by_id(self):
+        return self.uploaded_by_id
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+
+class PermanentFileDocument(db.Model):
+    """A Permanent File (P-series) working paper, filed once against a
+    Client rather than any one engagement - the firm's Audit Working Paper
+    Indexing & Filing Policy describes this as "information of continuing
+    relevance across audit years" (incorporation documents, the standing
+    engagement letter, the accounting policy manual, prior-year financial
+    statements, structure & governance records) as distinct from an
+    engagement's own Current File (N-series) documents, which are specific
+    to the year under audit. Deliberately a simple file + tag + notes
+    record (unlike CompanyDocument, which runs AI extraction to find
+    Directors/Shareholders) - the Permanent File just needs a place to live
+    and a P-code, not extraction.
+
+    Two more things layered on top of that original design:
+
+    1. Sub-references. A FilingIndexSection P-code (e.g. "P1000") names a
+       whole category ("Incorporation & Statutory"), not one specific
+       document - a client may have several actual documents that belong
+       under it (certificate of incorporation, memorandum & articles, CR6,
+       ...). Rather than every one of them sharing the literal code
+       "P1000", each document filed under a P-code is given its own
+       sequential sub-reference the moment it's filed - P1001, P1002,
+       P1003, etc (see permanent_file._next_reference_number) - stored in
+       reference_number below. Numbering is per client, per P-code, and
+       (like the Filing Index's own codes) never reused even if a document
+       is later deleted, so a deleted P1002 never gets silently reassigned
+       to a different document later. reference_code is the computed
+       display/filename form ("P1001"); a document filed with no P-code at
+       all (filing_index_id is None) has no reference_code either.
+
+    2. Auto-filing from Company Documents. Certain CompanyDocument types
+       (certificate of incorporation, CR6, share register, etc - see
+       models.COMPANY_DOCUMENT_TYPE_TO_FILING_CODE) are themselves exactly
+       the kind of "continuing relevance" document the Permanent File
+       exists for, so uploading one there also files a copy here
+       automatically (see company_documents.upload_document /
+       permanent_file.file_upload_to_permanent_file) - a preparer never has
+       to upload the same file twice. source_company_document_id records
+       where an auto-filed copy came from, purely for display ("auto-filed
+       from Company Documents"); it's cleared (not cascaded) if that source
+       document is later deleted, the same "detach, don't delete"
+       treatment ClientKeyPerson.source_document_id gets - the Permanent
+       File copy is independent and continues to exist once filed."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    filing_index_id = db.Column(db.Integer, db.ForeignKey("filing_index_section.id"))
+    # The auto- or preparer-assigned sub-reference number under filing_index's
+    # own code - see point 1 in the docstring above. e.g. 1001 under "P1000"
+    # displays as "P1001" (see reference_code below).
+    reference_number = db.Column(db.Integer)
+    notes = db.Column(db.Text)
+    version = db.Column(db.Integer, default=1)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Set only when this row was filed automatically from a CompanyDocument
+    # upload - see point 2 in the docstring above.
+    source_company_document_id = db.Column(db.Integer, db.ForeignKey("company_document.id"))
+
+    client = db.relationship("Client", backref=db.backref("permanent_file_documents", lazy=True, order_by="PermanentFileDocument.uploaded_at.desc()", cascade="all, delete-orphan"))
+    filing_index = db.relationship("FilingIndexSection")
+    uploaded_by = db.relationship("User")
+    source_company_document = db.relationship("CompanyDocument", backref=db.backref("permanent_file_entry", uselist=False))
+
+    @property
+    def reference_code(self):
+        """"P1001"-style display/filename reference: the filing_index
+        code's leading letter plus this document's own reference_number -
+        see point 1 in the class docstring. Falls back to the bare
+        filing_index code (e.g. "P1000") for an older row filed before
+        sub-references existed (reference_number is None), and to None if
+        no P-code was chosen at all."""
+        if not self.filing_index:
+            return None
+        if self.reference_number:
+            return f"{self.filing_index.code[0]}{self.reference_number}"
+        return self.filing_index.code
+
+    def __repr__(self):
+        return f"<PermanentFileDocument {self.original_filename!r}>"
+
+
+class PermanentFileReferenceCounter(db.Model):
+    """Tracks the highest Permanent File sub-reference number ever handed
+    out per (client, P-code) - see PermanentFileDocument's docstring, point
+    1. Needed because PermanentFileDocument rows can be deleted: looking at
+    MAX(PermanentFileDocument.reference_number) directly would happily go
+    backwards and hand out an already-used number again once the document
+    that had it is gone. This table remembers the high-water mark
+    independently of which documents currently exist, so a number is never
+    reused - the same principle the Filing Index's own codes follow (see
+    FilingIndexSection's docstring), applied here to the per-client, per-
+    code sequence underneath each one. Entirely internal bookkeeping - never
+    shown in the UI, only read/written by
+    permanent_file._next_reference_number."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    filing_index_id = db.Column(db.Integer, db.ForeignKey("filing_index_section.id"), nullable=False)
+    last_number = db.Column(db.Integer, nullable=False, default=0)
+
+    __table_args__ = (db.UniqueConstraint("client_id", "filing_index_id", name="uq_permfile_refcounter_client_code"),)
+
+    def __repr__(self):
+        return f"<PermanentFileReferenceCounter client={self.client_id} filing_index={self.filing_index_id} last={self.last_number}>"
+
+
+class TaxAccountingFilingDocument(db.Model):
+    """One filed document in a client's Tax & Accounting Filing Archive - a
+    Tax Clearance certificate, a filed Return, or a supporting Schedule (see
+    FILING_ARCHIVE_SECTIONS above) - kept once per Client, exactly like
+    PermanentFileDocument above, rather than tied to whichever Tax
+    Compliance/Accounting & Bookkeeping engagement happened to be open when
+    it was filed: clearance certificates and filed returns need to stay
+    findable for a client across tax years and engagements, not just the one
+    they happened to be filed under (see Client.has_tax_or_accounting_
+    engagement, which gates whether this archive is even shown for a given
+    client). tax_head (one of TAX_HEADS above) is optional - a Tax Clearance
+    Certificate is usually issued covering all tax heads at once, and a
+    Schedule may be a purely accounting one with no tax head at all - but is
+    the natural way to categorise a Return, mirroring TaxReturnRecord's own
+    tax_head field."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    section = db.Column(db.String(20), nullable=False)  # a FILING_ARCHIVE_SECTIONS key
+    tax_head = db.Column(db.String(80))  # optional - one of TAX_HEADS, blank = not tax-head-specific
+    title = db.Column(db.String(200))  # free description, e.g. "Debtors Schedule" - optional
+    period_label = db.Column(db.String(80))  # e.g. "2026", "2026 Q1"
+    reference = db.Column(db.String(100))  # ZIMRA clearance/acknowledgement/certificate number
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    notes = db.Column(db.Text)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("filing_archive_documents", lazy=True, order_by="TaxAccountingFilingDocument.uploaded_at.desc()", cascade="all, delete-orphan"))
+    uploaded_by = db.relationship("User")
+
+    @property
+    def section_label(self):
+        return FILING_ARCHIVE_SECTION_LABELS.get(self.section, self.section)
+
+    def __repr__(self):
+        return f"<TaxAccountingFilingDocument {self.section} {self.original_filename!r}>"
+
+
+class DocumentTemplate(db.Model):
+    """A downloadable, fillable Word/Excel template in the Document Templates
+    library (engagement letters, workpapers, etc). The actual file lives on
+    disk under Config.DOCUMENT_TEMPLATES_DATA_DIR/<type>/<filename> - this
+    row holds the metadata plus the filename to serve, and is what the
+    in-app Edit/New/Delete screens modify.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    type = db.Column(db.String(60), nullable=False, default="Audit")  # an ENGAGEMENT_TYPES value
+    ref_code = db.Column(db.String(20))  # e.g. "SA-01" - shown on the document itself
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    filename = db.Column(db.String(255), nullable=False)  # stored filename on disk, within type subfolder
+    order = db.Column(db.Integer, default=0)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    updated_by = db.relationship("User")
+
+    @property
+    def file_ext(self):
+        return self.filename.rsplit(".", 1)[-1].lower() if "." in self.filename else ""
+
+    def __repr__(self):
+        return f"<DocumentTemplate {self.ref_code} {self.title}>"
+
+
+class EngagementTask(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    assigned_to_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    due_date = db.Column(db.Date)
+    category = db.Column(db.String(60))  # one of TASK_CATEGORIES - see effective_task_priority
+    priority = db.Column(db.String(20), default="Normal")  # Low | Normal | High
+    status = db.Column(db.String(20), default="To Do")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Preparer sign-off: auto-recorded when the task is marked Done.
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    # Reviewer sign-off: a supervisor/partner/admin confirming the completed
+    # work - always someone other than the preparer.
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    # Engagement Partner sign-off: a third, separate tier the partner can
+    # apply to any workpaper at their discretion - never the same person
+    # as the preparer.
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    # Billing: the invoice line this finished task was billed on (NULL = not
+    # billed yet; the link clears itself if that line or its invoice is
+    # deleted), and a "not billable" flag for completed work that should never
+    # be invoiced (internal, covered by a fixed fee already billed, ...).
+    invoice_line_id = db.Column(db.Integer, db.ForeignKey("invoice_line_item.id"))
+    billing_waived = db.Column(db.Boolean, default=False, nullable=False, server_default="0")
+
+    assigned_to = db.relationship("User", foreign_keys=[assigned_to_id])
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_overdue(self):
+        return bool(self.due_date and self.due_date < date.today() and self.status != "Done")
+
+    @property
+    def invoice(self):
+        """The invoice this task has been billed on, if any."""
+        return self.invoice_line.invoice if self.invoice_line_id and self.invoice_line else None
+
+    @property
+    def is_ready_to_bill(self):
+        """Finished, not yet invoiced and not marked not-billable."""
+        return self.status == "Done" and self.invoice_line_id is None and not self.billing_waived
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+
+# Task categories that are the firm's own housekeeping rather than client work:
+# their finished tasks are left out of "Ready to bill" unless asked for.
+NON_BILLABLE_TASK_CATEGORIES = ("Admin Work", "Personal", "Other")
+
+
+def ready_to_bill_tasks(engagement, include_internal=False):
+    """Finished client work on `engagement` that has not been invoiced (and
+    has not been marked not-billable), oldest completion first."""
+    tasks = [
+        t for t in engagement.tasks
+        if t.is_ready_to_bill and (include_internal or (t.category or "") not in NON_BILLABLE_TASK_CATEGORIES)
+    ]
+    return sorted(tasks, key=lambda t: (t.completed_at or datetime.min, t.id))
+
+
+class PersonalTask(db.Model):
+    """A to-do item that isn't tied to any specific engagement - the "upload
+    work and tasks they are working on" side of the firm-wide Task / To-Do
+    List tab (see hr.project_board, which combines these with EngagementTask
+    rows into one view). Kept as its own table rather than making
+    EngagementTask.engagement_id nullable, so nothing about the existing
+    per-engagement Tasks tab or Project Management board changes for any
+    engagement already using it.
+
+    Deliberately lighter than EngagementTask: general/admin work ("book my
+    leave", "read the updated AML policy", "prep the training slides") isn't
+    audit-file evidence, so it gets a simple Preparer sign-off (completed_by/
+    completed_at, set automatically when marked Done) rather than the full
+    Reviewer/Partner sign-off chain.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    assigned_to_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    # Optional context link - e.g. "chase the PBC list for Client X" without
+    # this being a formal audit-file task on that engagement's own Tasks tab.
+    # Confidentiality is still respected: see hr.project_board's filtering.
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    due_date = db.Column(db.Date)
+    category = db.Column(db.String(60))  # one of TASK_CATEGORIES - see effective_task_priority
+    priority = db.Column(db.String(20), default="Normal")  # Low | Normal | High
+    status = db.Column(db.String(20), default="To Do")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    assigned_to = db.relationship("User", foreign_keys=[assigned_to_id])
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    engagement = db.relationship("Engagement")
+
+    @property
+    def is_overdue(self):
+        return bool(self.due_date and self.due_date < date.today() and self.status != "Done")
+
+    def __repr__(self):
+        return f"<PersonalTask {self.id} {self.title!r}>"
+
+
+class PersonalSubtask(db.Model):
+    """A smaller step under a general to-do (PersonalTask), each with its
+    own deadline - e.g. a to-do "Prepare training day" might be broken into
+    "Book venue" (due Mon), "Send invites" (due Wed), "Print handouts" (due
+    Fri), so the work can be tracked piece by piece instead of one lump due
+    date.
+
+    A "pure task" in its own right for completion purposes: it carries the
+    same To Do / In Progress / Review / Done status as every other task in
+    the app (TASK_STATUSES), set independently of the parent PersonalTask's
+    own status - moving a subtask to Done (or back) never touches the
+    parent task's status, and the parent's status never touches a subtask's
+    either. It's otherwise deliberately lighter than a full task - no
+    assignee, priority or sign-off of its own, since it belongs to (and is
+    only ever seen alongside) its parent."""
+    id = db.Column(db.Integer, primary_key=True)
+    personal_task_id = db.Column(db.Integer, db.ForeignKey("personal_task.id"), nullable=False)
+    title = db.Column(db.String(200), nullable=False)
+    due_date = db.Column(db.Date)
+    status = db.Column(db.String(20), default="To Do")
+    completed_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    personal_task = db.relationship(
+        "PersonalTask",
+        backref=db.backref(
+            "subtasks", lazy=True, cascade="all, delete-orphan",
+            order_by="PersonalSubtask.due_date.asc().nullslast(), PersonalSubtask.id.asc()",
+        ),
+    )
+
+    @property
+    def is_overdue(self):
+        return bool(self.due_date and self.due_date < date.today() and self.status != "Done")
+
+    def __repr__(self):
+        return f"<PersonalSubtask {self.id} {self.title!r}>"
+
+
+def notify_task_assignment(actor, recipient_id, subject, body):
+    """Sends a one-off internal Message (see Message/MessageRecipient) from
+    `actor` to `recipient_id` - used whenever a task (EngagementTask or
+    PersonalTask) is created or changed in a way that affects someone other
+    than the person making the change, e.g. assigning a task to a colleague,
+    or updating the due date/status of a task assigned to someone else. This
+    is the notification mechanism for the Task / To-Do List tab: task
+    updates surface to the affected person the same way any other internal
+    message does (their Messages inbox, and its unread-count badge).
+
+    No-op if there's no recipient, or the recipient is the actor themselves
+    - nothing to notify anyone about in that case. Does not commit; the
+    caller's own db.session.commit() picks this up along with the task
+    change itself."""
+    if not recipient_id or recipient_id == actor.id:
+        return
+    message = Message(sender_id=actor.id, subject=subject, body=body)
+    db.session.add(message)
+    db.session.flush()
+    db.session.add(MessageRecipient(message_id=message.id, user_id=recipient_id))
+
+
+# ---------- HR & Administration ----------
+
+class PolicyDocument(db.Model):
+    """A firm policy/procedure/form in the HR & Administration > Policies and
+    Procedures library ("the Firm Library") - same download/edit pattern as
+    DocumentTemplate, but grouped by a free-standing category list rather
+    than engagement type, and stored in its own data folder
+    (Config.POLICIES_DATA_DIR).
+
+    The fields below let this library also work as an AI-powered research
+    hub, not just a static depository: text is extracted from the uploaded
+    file (see file_text_extraction.py - PDF/Word/Excel/PowerPoint) and then
+    summarised by AI (see policy_summary.py) into ai_summary/ai_key_points,
+    the same "AI suggests, person confirms" pattern already used for
+    Legislative Update Control (see LegislativeUpdate) - purely
+    informational, never applied automatically. ai_suggested_category is
+    only ever a suggestion shown on the add/edit form; the category a
+    document actually lives under is always the person's own choice.
+    Chunked (see policy_chunking.py, PolicyDocumentChunk) so "Ask the Firm
+    Library" (policy_search.py) can retrieve the specific relevant part of a
+    long policy rather than only ever seeing its first few pages. A document
+    with no extractable text (an empty file, a slide deck of images only,
+    or a legacy .doc/.xls/.ppt - see file_text_extraction.EXTRACTABLE_EXTENSIONS)
+    is unaffected by any of this: it's simply not searched or summarised,
+    same graceful-degradation principle as everywhere else AI is used in
+    this app.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(50), nullable=False, default="Other")
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    filename = db.Column(db.String(255), nullable=False)
+    order = db.Column(db.Integer, default=0)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    # ---- Firm Library research hub: extraction + AI summary ----
+    extracted_text = db.Column(db.Text)
+    extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error", "unsupported_format" - see file_text_extraction.py
+    page_count = db.Column(db.Integer)  # rough per-type analogue (sheet/slide count) - informational only
+
+    ai_summary = db.Column(db.Text)
+    ai_key_points_json = db.Column(db.Text)  # JSON-encoded list of short bullet strings
+    ai_suggested_category = db.Column(db.String(50))  # a suggestion only, shown on the form - never auto-applied
+    ai_status = db.Column(db.String(20))  # "done", "not_configured", "error" - see policy_summary.py
+    ai_error = db.Column(db.Text)
+    ai_processed_at = db.Column(db.DateTime)
+
+    updated_by = db.relationship("User")
+
+    @property
+    def file_ext(self):
+        return self.filename.rsplit(".", 1)[-1].lower() if "." in self.filename else ""
+
+    @property
+    def ai_key_points(self):
+        try:
+            return json.loads(self.ai_key_points_json) if self.ai_key_points_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_ai_key_points(self, value):
+        self.ai_key_points_json = json.dumps(value or [])
+
+    def __repr__(self):
+        return f"<PolicyDocument {self.title}>"
+
+
+class PolicyDocumentChunk(db.Model):
+    """One section-sized slice of a filed policy/procedure's extracted_text
+    (see policy_chunking.py, which reuses legislation_chunking.chunk_text) -
+    the Firm Library research hub's counterpart to LegislativeUpdateChunk,
+    letting "Ask the Firm Library" (policy_search.py) retrieve the specific
+    relevant part of a long document rather than only ever seeing a
+    fixed-size excerpt from its start. Chunked once per document (at
+    filing/edit time, or lazily the first time it's needed for an
+    already-filed document) and never re-chunked automatically afterwards.
+    Purely a search index over text that's already filed - deleting the
+    parent PolicyDocument deletes its chunks with it (cascade below);
+    nothing here is ever shown to a person directly, only used internally
+    as retrieval context."""
+    __tablename__ = "policy_document_chunk"
+    id = db.Column(db.Integer, primary_key=True)
+    policy_document_id = db.Column(db.Integer, db.ForeignKey("policy_document.id"), nullable=False)
+    chunk_index = db.Column(db.Integer, nullable=False)  # 0-based order within the document
+    heading = db.Column(db.String(300))  # the nearest Part/Chapter/numbered-section heading, if any was detected
+    text = db.Column(db.Text, nullable=False)
+
+    policy_document = db.relationship(
+        "PolicyDocument",
+        backref=db.backref("chunks", lazy=True, cascade="all, delete-orphan", order_by="PolicyDocumentChunk.chunk_index"),
+    )
+
+    def __repr__(self):
+        return f"<PolicyDocumentChunk {self.policy_document_id}#{self.chunk_index}>"
+
+
+class PolicyAskCache(db.Model):
+    """A fast-recall cache of "Ask the Firm Library" question/answer pairs
+    (see policy_search.py) - the Firm Library's counterpart to
+    LegislativeAskCache, same verbatim-recall design: asking the same or a
+    very similar question again returns the earlier answer instantly and
+    consistently instead of re-searching and re-calling the AI, while a
+    genuinely new question is still answered fresh from the filed material
+    every time. A cached answer never feeds into, or changes the answer to,
+    any OTHER question, and is always visibly flagged as reused wherever
+    it's shown. Only "done" and "no_answer" results are ever cached - a
+    transient failure, an unconfigured API key, or "nothing filed matches at
+    all" is never cached, so those always retry fresh."""
+    __tablename__ = "policy_ask_cache"
+    id = db.Column(db.Integer, primary_key=True)
+    question_normalized = db.Column(db.String(500), nullable=False, index=True)
+    question_original = db.Column(db.String(500), nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # "done" or "no_answer" only
+    answer = db.Column(db.Text, nullable=False)
+    citation_ids_json = db.Column(db.Text)  # JSON list of PolicyDocument ids cited (status "done")
+    candidate_ids_json = db.Column(db.Text)  # JSON list of PolicyDocument ids considered but not sufficient (status "no_answer")
+    asked_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    hit_count = db.Column(db.Integer, default=1)
+    last_hit_at = db.Column(db.DateTime)
+
+    asked_by = db.relationship("User", foreign_keys=[asked_by_id])
+
+    def __repr__(self):
+        return f"<PolicyAskCache {self.question_original!r} ({self.status})>"
+
+
+class TimeSheet(db.Model):
+    """One staff member's timesheet for a given week, filled in directly in
+    the app (see TimeEntry). Kept separate from TimeSheetUpload, which is for
+    a filled-in copy of the downloadable Excel template instead."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    week_start = db.Column(db.Date, nullable=False)  # Monday of the week
+    status = db.Column(db.String(20), default="Submitted")  # Submitted | Approved
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # Reviewer sign-off - a supervisor/partner/admin approving the timesheet,
+    # never the timesheet's own owner.
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+
+    user = db.relationship("User", foreign_keys=[user_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    entries = db.relationship(
+        "TimeEntry", backref="timesheet", lazy=True,
+        cascade="all, delete-orphan", order_by="TimeEntry.work_date",
+    )
+
+    @property
+    def total_hours(self):
+        return round(sum(e.hours or 0 for e in self.entries), 2)
+
+    @property
+    def regular_hours(self):
+        return round(sum(min(e.hours or 0, STANDARD_HOURS_PER_DAY) for e in self.entries), 2)
+
+    @property
+    def overtime_hours(self):
+        return round(sum(max((e.hours or 0) - STANDARD_HOURS_PER_DAY, 0) for e in self.entries), 2)
+
+    @property
+    def leave_entries(self):
+        return [e for e in self.entries if e.leave_type_id]
+
+    @property
+    def total_leave_days(self):
+        return round(sum(e.leave_days or 0 for e in self.entries if e.leave_type_id), 2)
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    def __repr__(self):
+        return f"<TimeSheet {self.user_id} w/o {self.week_start}>"
+
+
+class TimeEntry(db.Model):
+    """One day's entry on a TimeSheet - EITHER hours worked (the original
+    purpose: `hours` set, `leave_type_id`/`leave_days` left blank) OR leave
+    taken (`leave_type_id`/`leave_days` set instead, `hours` left at 0) -
+    never both on the same entry. A day with both hours worked and leave
+    taken (e.g. a half day) is two separate entries for that same
+    `work_date`, exactly like two different engagements worked in one day
+    are already two separate entries today."""
+    id = db.Column(db.Integer, primary_key=True)
+    timesheet_id = db.Column(db.Integer, db.ForeignKey("time_sheet.id"), nullable=False)
+    work_date = db.Column(db.Date, nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    description = db.Column(db.String(255))
+    hours = db.Column(db.Float, default=0)
+    # Leave taken on this day - see LeaveType/LeaveBalance below and
+    # hr.add_time_entry, which is what actually moves days out of the
+    # employee's LeaveBalance.taken_days when one of these entries is added
+    # (and back when it's deleted).
+    leave_type_id = db.Column(db.Integer, db.ForeignKey("leave_type.id"))
+    leave_days = db.Column(db.Float)
+
+    engagement = db.relationship("Engagement")
+    leave_type = db.relationship("LeaveType")
+
+    @property
+    def is_leave(self):
+        return self.leave_type_id is not None
+
+    @property
+    def regular_hours(self):
+        return min(self.hours or 0, STANDARD_HOURS_PER_DAY)
+
+    @property
+    def overtime_hours(self):
+        return max((self.hours or 0) - STANDARD_HOURS_PER_DAY, 0)
+
+
+class TimeSheetUpload(db.Model):
+    """A completed copy of the downloadable Excel timesheet template,
+    uploaded as-is rather than entered into the app - for staff who prefer
+    filling it in Excel offline."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    period_label = db.Column(db.String(100))  # free text, e.g. "Week of 14 Sep 2026"
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(255), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User")
+
+
+class CheckInRecord(db.Model):
+    """One check-in/check-out pair, logged via the "Check In"/"Check Out"
+    button in the top bar (available on every page, next to the user's
+    name). On check-out, the elapsed time is used to add (or top up) a
+    TimeEntry on that day's TimeSheet automatically - same self-service,
+    reviewer-approved flow as an entry typed in by hand on the Time Sheets
+    page, just with the hours worked out from the clock instead of typed in.
+    A user can only have one OPEN record (check_out_at is None) at a time;
+    checking in again while already checked in is a no-op, and checking out
+    with nothing open is a no-op - both just flash a message rather than
+    erroring.
+
+    time_entry_id is left blank when check-out happens for a week whose
+    timesheet is already Approved (locked) - the check-in/check-out itself
+    is still recorded, but nothing is added to the timesheet until a
+    reviewer reopens it and the hours are added by hand, exactly like a
+    manual entry attempted against an Approved timesheet."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    work_date = db.Column(db.Date, nullable=False)  # calendar day this belongs to (= check_in_at's date)
+    check_in_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    check_out_at = db.Column(db.DateTime)
+    time_entry_id = db.Column(db.Integer, db.ForeignKey("time_entry.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    user = db.relationship("User", foreign_keys=[user_id])
+    time_entry = db.relationship("TimeEntry", foreign_keys=[time_entry_id])
+
+    @property
+    def is_open(self):
+        return self.check_out_at is None
+
+    @property
+    def elapsed_hours(self):
+        """Hours between check-in and check-out, rounded to 2dp. None while
+        still checked in (no check-out yet)."""
+        if not self.check_out_at:
+            return None
+        return round((self.check_out_at - self.check_in_at).total_seconds() / 3600, 2)
+
+    def __repr__(self):
+        return f"<CheckInRecord user={self.user_id} {self.work_date}>"
+
+
+# ---------------------------------------------------------------------------
+# Leave Management
+#
+# Ties into Time Sheets above (a TimeEntry can record leave taken instead of
+# hours worked - see TimeEntry.leave_type_id/leave_days) and Payroll's
+# PayrollEmployee (LeaveBalance keys off PayrollEmployee, not User directly,
+# since date_joined - needed to compute accrual from completed months of
+# service - lives there; see hr.py's leave routes for how a logged-in User
+# is matched to their own PayrollEmployee record).
+#
+# Zimbabwe's Labour Act [Chapter 28:01] s.14A sets Annual/Vacation Leave's
+# statutory minimum: 2.5 calendar days per completed month of continuous
+# service (30/year), accumulating up to a 90-day ceiling (no further accrual
+# once reached, until leave is taken), but normally only TAKEN after 1 year
+# of continuous service. Sick Leave, Special/Compassionate Leave and
+# Maternity Leave are each a fixed annual (or per-event) entitlement instead
+# - non-accumulative, so unused days simply lapse rather than rolling into
+# the next year. See LEAVE_TYPES_STATUTORY_ZW/seed.seed_leave_types for the
+# exact pre-loaded figures - every field is firm-editable, since a firm's
+# own policy or a collective bargaining agreement may be more generous than
+# the statutory minimum (never less).
+#
+# Only Annual/Vacation Leave is an obligation the firm actively tracks a
+# running balance for, per employee (confirmed with the Managing Partner:
+# accrual continues to run from each employee's own date_joined, same as
+# before). Sick/Special/Compassionate/Maternity leave are kept as statutory
+# PROVISIONS - their figures are defined once on the Leave Types screen and
+# can still be captured on a Time Sheet for record-keeping, but the firm
+# does not maintain a per-employee LeaveBalance (no accrual, no running
+# total, no cap enforcement) for them - see leave_calc.sync_all_balances_for_employee
+# and hr._add_leave_entry, both of which gate this on LeaveType.is_accumulative.
+LEAVE_TYPES_STATUTORY_ZW = [
+    # (name, accrual_days_per_month, annual_entitlement_days, max_accumulation_days,
+    #  is_accumulative, full_pay_days, half_pay_pct, min_service_months_to_take, notes)
+    (
+        "Annual/Vacation Leave", 2.5, 30.0, 90.0, True, None, None, 12,
+        "Labour Act [Chapter 28:01] s.14A: 2.5 calendar days per completed month of continuous "
+        "service (30/year). Accumulates up to a 90-day cap - no further accrual once reached, "
+        "until leave is taken. Normally only TAKEN after 1 year of continuous service (it still "
+        "accrues from day one) unless the firm's own policy allows earlier taking.",
+    ),
+    (
+        "Sick Leave", 0.0, 180.0, None, False, 90.0, 50.0, 0,
+        "180 days per leave year: the first 90 days on full pay, the next 90 on half pay (a medical "
+        "certificate would normally be required, though this app doesn't enforce that). "
+        "Non-accumulative - granted afresh each leave year, unused days lapse.",
+    ),
+    (
+        "Special/Compassionate Leave", 0.0, 12.0, None, False, None, None, 0,
+        "12 days per calendar year, for bereavement, court attendance or trade union business. "
+        "Non-accumulative - granted afresh each leave year, unused days lapse.",
+    ),
+    (
+        "Maternity Leave", 0.0, 98.0, None, False, None, None, 0,
+        "98 consecutive days, full pay, regardless of tenure or number of previous pregnancies. "
+        "Modelled here as a 98-day annual entitlement rather than a rolling balance - "
+        "non-accumulative, since it's a per-event entitlement, not something that accrues monthly.",
+    ),
+]
+
+
+class LeaveType(db.Model):
+    """A firm-editable leave category - pre-loaded with Zimbabwe's statutory
+    minimums (see LEAVE_TYPES_STATUTORY_ZW/seed.seed_leave_types) but every
+    field can be edited, since a firm's own policy or a collective
+    bargaining agreement may be more generous than the statutory minimum.
+
+    `is_accumulative` distinguishes the two accrual models the Labour Act
+    actually uses: Annual/Vacation Leave accrues monthly and carries over
+    (up to `max_accumulation_days`), while Sick/Special/Maternity leave are
+    each a fixed `annual_entitlement_days` granted afresh every leave year -
+    see leave_calc.sync_leave_balance for exactly how each is kept current.
+    It ALSO decides whether this leave type gets a tracked per-employee
+    LeaveBalance at all: True (e.g. Annual/Vacation Leave) means the firm
+    is treating it as an obligation it actively accrues and tracks a running
+    balance for; False (e.g. Sick/Special/Maternity) means it's kept as a
+    statutory PROVISION instead - still definable here and still capturable
+    on a Time Sheet, but with no per-employee balance, accrual or cap (see
+    leave_calc.sync_all_balances_for_employee and hr._add_leave_entry).
+
+    `full_pay_days`/`half_pay_pct` model Sick Leave's 90-full-pay/90-half-pay
+    split (None for a leave type that's either all full pay or doesn't
+    distinguish); `min_service_months_to_take` is Annual Leave's "only after
+    1 year of continuous service" rule (0 for a leave type with no such
+    qualifying period)."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), nullable=False, unique=True)
+    accrual_days_per_month = db.Column(db.Float, default=0.0)
+    annual_entitlement_days = db.Column(db.Float)  # None = uncapped
+    max_accumulation_days = db.Column(db.Float)  # None = no cap
+    is_accumulative = db.Column(db.Boolean, default=True, nullable=False)
+    full_pay_days = db.Column(db.Float)  # None = the whole annual_entitlement_days is at full pay
+    half_pay_pct = db.Column(db.Float, default=50.0)
+    min_service_months_to_take = db.Column(db.Integer, default=0)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    notes = db.Column(db.Text)
+
+    def __repr__(self):
+        return f"<LeaveType {self.name!r}>"
+
+
+class LeaveBalance(db.Model):
+    """One PayrollEmployee's running balance for one LeaveType - created
+    on demand (see leave_calc.get_or_create_balance) the first time it's
+    needed, not seeded up front.
+
+    `brought_forward` is a one-time, manually-entered OPENING balance (e.g.
+    migrating from a previous system or spreadsheet) - set once via the
+    Leave screen and never touched again by the automatic accrual logic in
+    leave_calc.sync_leave_balance, which only ever adds to `accrued_days`
+    (Annual/Vacation Leave) or resets it for a new leave year (Sick/
+    Special/Maternity). `leave_year` is the calendar year a NON-accumulative
+    type's current `accrued_days`/`taken_days` apply to - rolled over
+    automatically the first time this balance is touched in a later year.
+    `last_accrual_date` is the last calendar date accrual was calculated
+    through, for an accumulative type, so re-running the sync never
+    double-counts an already-completed month."""
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("payroll_employee.id"), nullable=False)
+    leave_type_id = db.Column(db.Integer, db.ForeignKey("leave_type.id"), nullable=False)
+    brought_forward = db.Column(db.Float, default=0.0)
+    accrued_days = db.Column(db.Float, default=0.0)
+    taken_days = db.Column(db.Float, default=0.0)
+    leave_year = db.Column(db.Integer)  # only meaningful for a non-accumulative LeaveType
+    last_accrual_date = db.Column(db.Date)  # only meaningful for an accumulative LeaveType
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    employee = db.relationship("PayrollEmployee")
+    leave_type = db.relationship("LeaveType")
+
+    @property
+    def current_balance(self):
+        return round((self.brought_forward or 0.0) + (self.accrued_days or 0.0) - (self.taken_days or 0.0), 2)
+
+    def __repr__(self):
+        return f"<LeaveBalance employee={self.employee_id} type={self.leave_type_id} balance={self.current_balance}>"
+
+
+class StaffAllocation(db.Model):
+    """A staff member booked onto an engagement for a specific date range,
+    optionally at less than 100% of their time. Powers the HR & Admin >
+    Planner staffing grid (who's booked where, and who's over/under
+    allocated in a given week) as well as the audit timetable's clash
+    detection."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    allocation_pct = db.Column(db.Integer, default=100)  # % of the staff member's time, per day, over this range
+    notes = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("allocations", lazy=True, cascade="all, delete-orphan"))
+    user = db.relationship("User")
+
+    def overlaps(self, range_start, range_end):
+        return self.start_date <= range_end and self.end_date >= range_start
+
+    def __repr__(self):
+        return f"<StaffAllocation user={self.user_id} engagement={self.engagement_id} {self.start_date}..{self.end_date}>"
+
+
+class RiskAssessment(db.Model):
+    """The system-based Risk Assessment for one engagement: answer the
+    questionnaire (RISK_LIKELIHOOD_QUESTIONS / RISK_IMPACT_QUESTIONS above
+    for most engagement types, or FORENSIC_RISK_LIKELIHOOD_QUESTIONS /
+    FORENSIC_RISK_IMPACT_QUESTIONS above for an Investigative Engagement -
+    see likelihood_answers/impact_answers below - each 1-5) and the app
+    computes likelihood, impact, score and an overall Low/Medium/High
+    rating - no manual likelihood/impact picking. One row per engagement;
+    re-answering the questionnaire updates it in place rather than creating
+    a new one, since risk should be kept current rather than accumulated as
+    a history.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    # Likelihood factor answers (1-5 each) - see RISK_LIKELIHOOD_QUESTIONS
+    q_complexity = db.Column(db.Integer)
+    q_controls = db.Column(db.Integer)
+    q_environment_change = db.Column(db.Integer)
+    q_fraud_indicators = db.Column(db.Integer)
+    q_prior_issues = db.Column(db.Integer)
+
+    # Impact factor answers (1-5 each) - see RISK_IMPACT_QUESTIONS
+    q_significance = db.Column(db.Integer)
+    q_magnitude = db.Column(db.Integer)
+    q_going_concern = db.Column(db.Integer)
+    q_related_party = db.Column(db.Integer)
+    q_consequences = db.Column(db.Integer)
+
+    # Forensic-specific answers (1-5 each), used instead of the ten fields
+    # above on an Investigative Engagement - see FORENSIC_RISK_LIKELIHOOD_
+    # QUESTIONS / FORENSIC_RISK_IMPACT_QUESTIONS above. Kept as separate
+    # columns (rather than reusing q_complexity etc. under a different
+    # meaning) so a completed audit-style assessment and a completed
+    # forensic assessment can never be confused with each other.
+    q_fraud_incentive = db.Column(db.Integer)
+    q_fraud_opportunity = db.Column(db.Integer)
+    q_fraud_rationalization = db.Column(db.Integer)
+    q_fraud_override = db.Column(db.Integer)
+    q_fraud_intel = db.Column(db.Integer)
+
+    q_scheme_revenue_gl = db.Column(db.Integer)
+    q_scheme_asset_misappropriation = db.Column(db.Integer)
+    q_scheme_procurement_vendor = db.Column(db.Integer)
+    q_scheme_payroll_expenses = db.Column(db.Integer)
+    q_scheme_significance = db.Column(db.Integer)
+
+    # Business Intelligence and IT Engagements-specific answers (1-5 each),
+    # used instead of the ten standard fields above on that engagement type -
+    # see BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS / BUSINESS_IT_RISK_IMPACT_
+    # QUESTIONS above. Kept as separate columns, same reasoning as the
+    # forensic-specific fields above.
+    q_threat_exposure = db.Column(db.Integer)
+    q_control_maturity = db.Column(db.Integer)
+    q_environment_complexity = db.Column(db.Integer)
+    q_third_party_cloud = db.Column(db.Integer)
+    q_aml_customer_channel = db.Column(db.Integer)
+
+    q_data_sensitivity = db.Column(db.Integer)
+    q_continuity_dependency = db.Column(db.Integer)
+    q_regulatory_legal = db.Column(db.Integer)
+    q_reputational = db.Column(db.Integer)
+    q_overall_significance = db.Column(db.Integer)
+
+    # Secretarial-specific answers (1-5 each), used instead of the ten
+    # standard fields above on a "Secretarial" engagement - see
+    # SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS / SECRETARIAL_RISK_IMPACT_
+    # QUESTIONS above. Kept as separate columns, same reasoning as the
+    # forensic/BI-IT-specific fields above. Note q_overall_significance is
+    # shared with the Business Intelligence and IT Engagements impact
+    # questions above (both use it as their final "overall" question, and
+    # since only one engagement type's question set is ever active for a
+    # given record, reusing the column is safe).
+    q_filing_compliance_history = db.Column(db.Integer)
+    q_governance_procedural_rigor = db.Column(db.Integer)
+    q_ownership_capital_complexity = db.Column(db.Integer)
+    q_transactional_activity = db.Column(db.Integer)
+    q_registry_standing = db.Column(db.Integer)
+
+    q_penalty_exposure = db.Column(db.Integer)
+    q_governance_invalidity = db.Column(db.Integer)
+    q_solvency_director_liability = db.Column(db.Integer)
+    q_encumbrance_control_risk = db.Column(db.Integer)
+
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("risk_assessment", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def _is_forensic(self):
+        return bool(self.engagement and self.engagement.type == "Investigative Engagement")
+
+    @property
+    def _is_business_it(self):
+        return bool(self.engagement and self.engagement.type == "Business Intelligence and IT Engagements")
+
+    @property
+    def _is_secretarial(self):
+        return bool(self.engagement and self.engagement.type == "Secretarial")
+
+    @property
+    def likelihood_questions(self):
+        """The question set actually in play for this record - the Fraud
+        Triangle questionnaire on an Investigative Engagement, the cyber/IT/
+        AML-CFT control questionnaire on a Business Intelligence and IT
+        Engagement, the COBE-based four-pillar secretarial questionnaire on
+        a Secretarial engagement, the ordinary audit questionnaire
+        otherwise. Everything below (likelihood_answers, is_complete,
+        likelihood/impact/score/rating) is driven from this and
+        impact_questions, so the four engagement flavours never mix."""
+        if self._is_forensic:
+            return FORENSIC_RISK_LIKELIHOOD_QUESTIONS
+        if self._is_business_it:
+            return BUSINESS_IT_RISK_LIKELIHOOD_QUESTIONS
+        if self._is_secretarial:
+            return SECRETARIAL_RISK_LIKELIHOOD_QUESTIONS
+        return RISK_LIKELIHOOD_QUESTIONS
+
+    @property
+    def impact_questions(self):
+        if self._is_forensic:
+            return FORENSIC_RISK_IMPACT_QUESTIONS
+        if self._is_business_it:
+            return BUSINESS_IT_RISK_IMPACT_QUESTIONS
+        if self._is_secretarial:
+            return SECRETARIAL_RISK_IMPACT_QUESTIONS
+        return RISK_IMPACT_QUESTIONS
+
+    @property
+    def likelihood_answers(self):
+        return [getattr(self, field) for field, _, _ in self.likelihood_questions]
+
+    @property
+    def impact_answers(self):
+        return [getattr(self, field) for field, _, _ in self.impact_questions]
+
+    @property
+    def is_complete(self):
+        return all(a is not None for a in self.likelihood_answers + self.impact_answers)
+
+    @property
+    def likelihood(self):
+        answers = [a for a in self.likelihood_answers if a is not None]
+        return round(sum(answers) / len(answers)) if answers else None
+
+    @property
+    def impact(self):
+        answers = [a for a in self.impact_answers if a is not None]
+        return round(sum(answers) / len(answers)) if answers else None
+
+    @property
+    def score(self):
+        l, i = self.likelihood, self.impact
+        return (l or 0) * (i or 0)
+
+    @property
+    def rating(self):
+        return _score_rating(self.score) if self.is_complete else None
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<RiskAssessment engagement={self.engagement_id} rating={self.rating}>"
+
+
+class MaterialityCalculation(db.Model):
+    """A simple planning materiality calculator for one engagement: enter a
+    few key financial figures and a basis, and the app computes suggested
+    overall materiality, performance materiality and a "clearly trivial"
+    threshold using adjustable benchmark percentages. These percentages are
+    common starting points in practice, not a substitute for professional
+    judgement or your firm's own methodology - review and adjust them for
+    each engagement.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    total_revenue = db.Column(db.Float)
+    profit_before_tax = db.Column(db.Float)
+    total_assets = db.Column(db.Float)
+
+    revenue_pct = db.Column(db.Float, default=1.0)
+    pbt_pct = db.Column(db.Float, default=5.0)
+    assets_pct = db.Column(db.Float, default=1.0)
+
+    basis = db.Column(db.String(20), default="highest")  # revenue | pbt | assets | highest | lowest
+    performance_pct = db.Column(db.Float, default=75.0)  # % of overall materiality
+    trivial_pct = db.Column(db.Float, default=5.0)  # % of overall materiality
+
+    # Whether financial-figure-based (quantitative) materiality is actually
+    # relevant to this engagement - defaults True (unchanged behaviour for
+    # every existing engagement). A preparer can mark it False for an
+    # engagement where a dollar threshold doesn't drive materiality the way
+    # it does on a financial statement audit (e.g. a Business Intelligence
+    # and IT Engagement, or one with unusually sparse financial figures) -
+    # see the Qualitative Materiality Index (QualitativeMaterialityFactor
+    # below) as the alternative basis in that case.
+    quantitative_important = db.Column(db.Boolean, default=True, nullable=False)
+
+    notes = db.Column(db.Text)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # preparer - set whenever the calculation is (re)saved
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("materiality", uselist=False, cascade="all, delete-orphan"))
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def revenue_materiality(self):
+        return self.total_revenue * self.revenue_pct / 100 if self.total_revenue else None
+
+    @property
+    def pbt_materiality(self):
+        return self.profit_before_tax * self.pbt_pct / 100 if self.profit_before_tax else None
+
+    @property
+    def assets_materiality(self):
+        return self.total_assets * self.assets_pct / 100 if self.total_assets else None
+
+    @property
+    def overall_materiality(self):
+        candidates = {
+            "revenue": self.revenue_materiality,
+            "pbt": self.pbt_materiality,
+            "assets": self.assets_materiality,
+        }
+        values = [v for v in candidates.values() if v is not None]
+        if not values:
+            return None
+        if self.basis in candidates and candidates[self.basis] is not None:
+            return candidates[self.basis]
+        if self.basis == "lowest":
+            return min(values)
+        return max(values)  # "highest" (default) or a stale/invalid basis value
+
+    @property
+    def performance_materiality(self):
+        om = self.overall_materiality
+        return om * self.performance_pct / 100 if om is not None else None
+
+    @property
+    def trivial_threshold(self):
+        om = self.overall_materiality
+        return om * self.trivial_pct / 100 if om is not None else None
+
+    def __repr__(self):
+        return f"<MaterialityCalculation engagement={self.engagement_id}>"
+
+
+# The Qualitative Materiality Index - a lightweight, judgement-based
+# alternative/complement to the dollar-figure-driven MaterialityCalculation
+# above, for the (common in practice) cases where a matter can be material
+# regardless of its size: a small misstatement that turns a profit into a
+# loss, reveals a regulatory breach, or exposes a related-party dealing.
+# Rated per factor (Low/Medium/High, or unrated) rather than averaged into
+# a single score - qualitative materiality is conventionally driven by
+# whichever factor is most significant, not by a blend of all of them, so
+# the "index" (see QualitativeMaterialityFactor.overall_rating_for) is the
+# highest rating recorded across the factors below rather than a mean.
+QUALITATIVE_MATERIALITY_FACTORS = [
+    ("nature_sensitivity", "Nature and sensitivity of the matter",
+     "e.g. related party dealings, fraud or suspected fraud, an illegal or possibly illegal act, a breach of covenant or regulatory requirement."),
+    ("regulatory_legal_impact", "Effect on compliance with laws, regulations or contractual requirements",
+     "e.g. loan covenants, licence conditions, statutory filing requirements, AML/CFT or data protection obligations."),
+    ("trend_consistency", "Effect on trends, consistency or comparability",
+     "e.g. changes a profit into a loss, reverses a positive trend, or breaks comparability with the prior period."),
+    ("stakeholder_reliance", "Effect on a key stakeholder's understanding or decision-making",
+     "e.g. lenders, regulators, shareholders, or the investing/donor public relying on the information."),
+    ("reputational_impact", "Potential reputational or public-interest impact",
+     "e.g. media/public attention, loss of stakeholder confidence, or damage to the entity's standing if the matter went unaddressed."),
+]
+QUALITATIVE_MATERIALITY_FACTOR_KEYS = {f[0] for f in QUALITATIVE_MATERIALITY_FACTORS}
+QUALITATIVE_MATERIALITY_RATINGS = ["Low", "Medium", "High"]
+_QUALITATIVE_MATERIALITY_RATING_ORDER = {"Low": 1, "Medium": 2, "High": 3}
+
+
+class QualitativeMaterialityFactor(db.Model):
+    """One rated factor (see QUALITATIVE_MATERIALITY_FACTORS above) in an
+    engagement's Qualitative Materiality Index - one row per
+    (engagement, factor_key), created on demand as each factor is rated
+    rather than all seeded up front, since a preparer may only ever rate
+    the factors actually relevant to this engagement."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    factor_key = db.Column(db.String(50), nullable=False)
+    rating = db.Column(db.String(10))  # "Low" | "Medium" | "High" | "" (not yet assessed)
+    notes = db.Column(db.Text)
+
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint("engagement_id", "factor_key", name="uq_qual_materiality_engagement_factor"),)
+
+    engagement = db.relationship("Engagement", backref=db.backref("qualitative_materiality_factors", lazy=True, cascade="all, delete-orphan"))
+    updated_by = db.relationship("User")
+
+    @staticmethod
+    def overall_rating_for(factors):
+        """The Qualitative Materiality Index for a list of
+        QualitativeMaterialityFactor rows - the highest rating among them
+        (see the module note above), or None if none has been rated yet."""
+        rated = [f.rating for f in factors if f.rating in _QUALITATIVE_MATERIALITY_RATING_ORDER]
+        if not rated:
+            return None
+        return max(rated, key=lambda r: _QUALITATIVE_MATERIALITY_RATING_ORDER[r])
+
+    def __repr__(self):
+        return f"<QualitativeMaterialityFactor engagement={self.engagement_id} {self.factor_key}={self.rating}>"
+
+
+class EntityUnderstanding(db.Model):
+    """Obtain an understanding of the client's business and industry - a
+    structured, system-guided form (see ENTITY_UNDERSTANDING_FIELDS above)
+    rather than one free-text box, so nothing gets missed. One row per
+    engagement; saving again updates it in place."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    nature_of_entity = db.Column(db.Text)
+    industry_environment = db.Column(db.Text)
+    accounting_policies = db.Column(db.Text)
+    objectives_strategies_risks = db.Column(db.Text)
+    performance_measurement = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("entity_understanding", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def field_values(self):
+        return [getattr(self, field) for field, _, _ in ENTITY_UNDERSTANDING_FIELDS]
+
+    @property
+    def is_complete(self):
+        """On an Investigative Engagement (see FORENSIC_ENTITY_UNDERSTANDING_
+        CHECKLIST_ITEMS above) or a Business Intelligence and IT Engagement
+        (see BUSINESS_IT_ENTITY_UNDERSTANDING_CHECKLIST_ITEMS above), the
+        five free-text fields aren't shown at all - completion instead means
+        every detailed checklist question has been answered. Every other
+        engagement type keeps the original all-fields-filled-in check."""
+        if self.engagement and self.engagement.type in ("Investigative Engagement", "Business Intelligence and IT Engagements", "Secretarial"):
+            items = list(self.checklist_items)
+            return bool(items) and all(i.response for i in items)
+        return all((v or "").strip() for v in self.field_values)
+
+    @property
+    def checklist_assessment(self):
+        """Advisory-only read of the detailed checklist, same pattern as
+        ClientAcceptance.checklist_assessment - never overrides anything,
+        just a plain-language pointer to what still needs attention."""
+        items = list(self.checklist_items)
+        total = len(items)
+        if total == 0:
+            return {"label": "No checklist items added yet.", "level": "muted", "flagged": 0, "outstanding": 0, "total": 0}
+        flagged = sum(1 for i in items if i.response == "No")
+        outstanding = sum(1 for i in items if not i.response)
+        if flagged:
+            label = f"{flagged} of {total} item{'s' if total != 1 else ''} flagged for follow-up."
+            level = "danger"
+        elif outstanding:
+            label = f"{outstanding} of {total} item{'s' if total != 1 else ''} not yet assessed."
+            level = "warning"
+        else:
+            label = f"All {total} checklist item{'s' if total != 1 else ''} assessed."
+            level = "success"
+        return {"label": label, "level": level, "flagged": flagged, "outstanding": outstanding, "total": total}
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<EntityUnderstanding engagement={self.engagement_id}>"
+
+
+class EntityUnderstandingChecklistItem(db.Model):
+    """A single tick + comment line within an EntityUnderstanding record -
+    the Understanding Business/Assignment equivalent of
+    ClientAcceptanceChecklistItem, used for the Forensic Audit questions on
+    Investigative Engagements (see FORENSIC_ENTITY_UNDERSTANDING_CHECKLIST_
+    ITEMS above)."""
+    id = db.Column(db.Integer, primary_key=True)
+    entity_understanding_id = db.Column(db.Integer, db.ForeignKey("entity_understanding.id"), nullable=False)
+    section = db.Column(db.String(150))
+    item_text = db.Column(db.Text, nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # A "|"-separated list of custom answer choices for this one item,
+    # replacing the generic Yes/No/N-A dropdown wherever it's set - used
+    # where the question itself is really "pick one of these" rather than a
+    # yes/no (e.g. "What is the overall IT environment?" -> On-premise /
+    # Cloud / Hybrid, seeded from BUSINESS_IT_ENTITY_UNDERSTANDING_
+    # CHECKLIST_ITEMS above). Blank/None (every other checklist item, on
+    # every engagement type) keeps the standard Yes/No/N-A dropdown exactly
+    # as before - see response_option_list and the entity_checklist_row
+    # template macro.
+    response_options = db.Column(db.Text)
+
+    entity_understanding = db.relationship(
+        "EntityUnderstanding",
+        backref=db.backref("checklist_items", lazy=True, cascade="all, delete-orphan", order_by="EntityUnderstandingChecklistItem.order"),
+    )
+    created_by = db.relationship("User")
+
+    @property
+    def response_option_list(self):
+        """This item's own custom answer choices, or None to fall back to
+        the standard Yes/No/N-A dropdown - see response_options above."""
+        if not self.response_options:
+            return None
+        return [o for o in self.response_options.split("|") if o]
+
+    def __repr__(self):
+        return f"<EntityUnderstandingChecklistItem {self.item_text!r} response={self.response!r}>"
+
+
+# Governance/compliance analytical points for a Secretarial engagement's
+# Analytical Review - seeded as plain AnalyticalReviewLine rows (label only,
+# no prior/current $ amounts, since secretarial analytical procedures look
+# at compliance trends and governance metrics rather than financial
+# ratios - see AnalyticalReviewLine.explanation, used here as the narrative
+# write-up rather than a variance explanation) when a Secretarial engagement
+# ticks Analytical Review as necessary. Mirrors the firm's Secretarial
+# Analytical Review guidance under the Companies and Other Business
+# Entities Act [Chapter 24:31] (COBE Act).
+SECRETARIAL_ANALYTICAL_REVIEW_POINTS = [
+    ("Board & Governance Activity Trends", "Meeting frequency vs. business events - compare board/committee meeting frequency against major operational events (acquisitions, debt issuances, capital expenditure)."),
+    ("Board & Governance Activity Trends", "Attendance & quorum patterns - verify statutory quorum compliance (e.g. independent director presence under Section 206) and identify persistent non-attendance risks."),
+    ("Board & Governance Activity Trends", "Resolution volume vs. statutory triggers - track circular/written resolutions vs. physical meetings to check management isn't bypassing formal board deliberation on restricted matters."),
+    ("Ownership & Capital Structure Analytics", "Share allotment vs. authorised capital ratios - variance check between issued share capital, share premium, and authorised limits in the Memorandum/Articles before processing new allotments (Sections 96 and 121)."),
+    ("Ownership & Capital Structure Analytics", "Beneficial ownership threshold analysis - analyse voting rights/shareholding aggregation to identify individuals holding more than 20% of the shares or voting rights (Sections 2 and 72)."),
+    ("Ownership & Capital Structure Analytics", "Dividend & distribution vs. solvency - cross-analyse cash/reserves against proposed distributions to check compliance with the statutory Solvency and Liquidity Test (Section 102)."),
+    ("Statutory Filing & Timeline Variance Analysis", "Filing lag analysis - measure the time gap between corporate triggers (director appointments, share allotments, charge creations) and their actual filing dates with the Registrar."),
+    ("Statutory Filing & Timeline Variance Analysis", "Annual Return and AGM timing - track AGM dates against the statutory requirement (once in every twelve months, Section 167(2)) and Annual Return filing against the 21 days after the anniversary of incorporation, registration or re-registration (Section 165(2))."),
+    ("Charge & Encumbrance Reconciliation", "Debt/security analytics - compare total registered mortgages, charges and debentures in the Register of Mortgages and Debentures (Section 155) against outstanding borrowing facilities to identify unrecorded or unregistered security (Sections 154-155)."),
+]
+
+# Same non-numeric label+narrative treatment as SECRETARIAL_ANALYTICAL_
+# REVIEW_POINTS above, but for a Business Intelligence and IT Engagement -
+# operational/technical trend indicators rather than financial ratios, since
+# an IT Audit's analytical review looks at system-generated metrics (change
+# volumes, alert counts, access-review completion) rather than P&L/balance
+# sheet variances. Seeded by seed_business_it_analytical_review
+# (engagements.py), the IT-Audit equivalent of seed_secretarial_analytical_
+# review above.
+BUSINESS_IT_ANALYTICAL_REVIEW_POINTS = [
+    ("Access Review Completion & Exception Trends", "Periodic user access review completion rate - the proportion of scheduled access reviews actually completed on time this period, and the volume/nature of access removed as a result."),
+    ("Access Review Completion & Exception Trends", "Privileged/admin account count trend - period-on-period movement in the number of privileged or administrative accounts, and whether growth is explained by legitimate business change."),
+    ("Change/Release Volume & Failure Rate Trends", "Change volume vs. prior period - the number of production changes/releases this period compared with the prior period, and whether the trend is consistent with the entity's stated pace of IT change."),
+    ("Change/Release Volume & Failure Rate Trends", "Change failure/rollback rate - the proportion of changes that failed, were rolled back, or required an emergency fix, and whether this rate is trending up or down."),
+    ("Security Alert Volume & False-Positive Trends", "Security alert volume trend - period-on-period movement in the number of security alerts/incidents raised, and whether it correlates with any known change in the threat environment or control weakening."),
+    ("Security Alert Volume & False-Positive Trends", "False-positive rate trend - the proportion of alerts closed as false positives, and whether persistent high false-positive rates suggest under-tuned detection controls."),
+    ("Vulnerability & Patch Remediation Aging", "Open vulnerability aging - the number and age profile of open critical/high vulnerabilities, and whether remediation is keeping pace with new findings."),
+    ("Vulnerability & Patch Remediation Aging", "Patch compliance rate trend - the proportion of in-scope systems patched within the entity's defined SLA, period-on-period."),
+    ("AML/CFT Alert Volume & Disposition Trends", "Transaction monitoring/screening alert volume trend - period-on-period movement in system-generated AML/CFT alerts, and whether volume changes correlate with business/customer growth or a system/rule change."),
+    ("AML/CFT Alert Volume & Disposition Trends", "Alert disposition and SAR/STR rate trend - the proportion of alerts escalated to a suspicious transaction report, and whether this rate has moved materially period-on-period."),
+    ("System Availability & Downtime Trends", "System availability/downtime trend - unplanned downtime (hours/incidents) for critical financial or operational systems this period compared with the prior period."),
+]
+
+
+class AnalyticalReview(db.Model):
+    """System-based analytical review for one engagement: log current vs
+    prior year figures for whichever line items matter and the app computes
+    the variance and flags any fluctuation at or above threshold_pct as
+    significant, prompting an explanation - rather than a free-form write-up.
+    One row per engagement (holds settings + sign-off); its line items live
+    in AnalyticalReviewLine below.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    threshold_pct = db.Column(db.Float, default=10.0)  # flag |variance %| >= this as significant
+
+    # Whether the preparer has ticked Analytical Review as NOT necessary for
+    # this assignment - only offered as a choice on Secretarial engagements
+    # (per the firm's Secretarial Analytical Review guidance: not every
+    # secretarial assignment, e.g. a one-off filing, warrants a full
+    # governance/compliance analytical review), but kept as a plain column
+    # (default False) rather than a Secretarial-only field so it behaves
+    # like every other sign-off flag on this model.
+    not_necessary = db.Column(db.Boolean, default=False, nullable=False)
+    not_necessary_reason = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("analytical_review", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    lines = db.relationship(
+        "AnalyticalReviewLine", backref="review", lazy=True,
+        cascade="all, delete-orphan", order_by="AnalyticalReviewLine.id",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def significant_lines(self):
+        return [l for l in self.lines if l.is_significant]
+
+    def __repr__(self):
+        return f"<AnalyticalReview engagement={self.engagement_id}>"
+
+
+class AnalyticalReviewLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    analytical_review_id = db.Column(db.Integer, db.ForeignKey("analytical_review.id"), nullable=False)
+    label = db.Column(db.String(150), nullable=False)  # e.g. "Revenue", "Gross profit"
+    prior_amount = db.Column(db.Float)
+    current_amount = db.Column(db.Float)
+    explanation = db.Column(db.Text)
+    # "manual" (typed in by hand, the only option before this column existed),
+    # "auto" (last written by "Generate from Trial Balance" - see
+    # generate_analytical_review_from_trial_balance in engagements.py), or
+    # "tb_account" (added via the "pick an account" dropdown on the Add
+    # line item form - see add_analytical_review_line - its label and
+    # prior/current amounts came directly from one specific
+    # TrialBalanceLine rather than a rolled-up IAS 1 category or a typed
+    # figure). Regenerating only overwrites the amounts on "auto" lines
+    # that share a label with a freshly computed figure, so a
+    # manually-typed line, a tb_account-picked line, and any explanation
+    # already typed against an auto line, all survive a re-generate.
+    source = db.Column(db.String(10), default="manual")
+
+    @property
+    def variance_amount(self):
+        if self.prior_amount is None or self.current_amount is None:
+            return None
+        return self.current_amount - self.prior_amount
+
+    @property
+    def variance_pct(self):
+        if self.prior_amount in (None, 0) or self.current_amount is None:
+            return None
+        return (self.current_amount - self.prior_amount) / abs(self.prior_amount) * 100
+
+    @property
+    def is_significant(self):
+        pct = self.variance_pct
+        threshold = self.review.threshold_pct if self.review else 10.0
+        return pct is not None and abs(pct) >= (threshold or 10.0)
+
+    def __repr__(self):
+        return f"<AnalyticalReviewLine {self.label}>"
+
+
+IT_CHANGE_PLAN_RISK_LEVELS = ["Low", "Medium", "High"]
+
+
+class ITChangePlanItem(db.Model):
+    """A single known or planned system change during the audit period, on a
+    Business Intelligence and IT Engagement's Planning tab - the "Change
+    Planning" register the team uses to log what's changing in the client's
+    environment and decide which changes to pull into the ITGC change-
+    management sample tested under Substantive Procedures (see the "Test the
+    change and release management process for a sample of system changes..."
+    procedure in BUSINESS_IT_BASELINE_SUBSTANTIVE_PROCEDURES). Purely a
+    planning aid - selecting an item here doesn't create or link to a
+    SubstantiveProcedureItem automatically; the team still records the test
+    itself under Substantive Procedures once performed."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    change_description = db.Column(db.Text, nullable=False)
+    planned_date = db.Column(db.Date)
+    risk_level = db.Column(db.String(10))  # "Low" | "Medium" | "High" | "" (not yet assessed)
+    selected_for_testing = db.Column(db.Boolean, default=False, nullable=False)
+    notes = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship(
+        "Engagement",
+        backref=db.backref("it_change_plan_items", lazy=True, cascade="all, delete-orphan", order_by="ITChangePlanItem.order"),
+    )
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<ITChangePlanItem engagement={self.engagement_id}>"
+
+
+# ---------- Trial Balance import & IAS 1 Financial Statements ----------
+
+class StandardChartOfAccounts(db.Model):
+    """The firm's own Standard Chart of Accounts ("Neverlank Standard") - a
+    single firm-wide, numbered list of accounts (not per client), seeded
+    once with a sensible draft (see seed.seed_chart_of_accounts) and fully
+    firm-editable from there, same "editable starting point" convention as
+    QPDInstalmentRate/StatutoryDeadline. Each account carries one of
+    financials.FS_CATEGORIES's codes, so picking a standard account for a
+    client's trial balance line (see COAMapping.coa_account_number below)
+    both gives that line a firm-standard account number AND fills in its
+    IAS 1 category in one step. account_number is kept as a string (not an
+    integer) so it can carry a leading-zero or non-numeric convention if
+    the structure is ever extended (e.g. sub-accounts like "1000.1")."""
+    id = db.Column(db.Integer, primary_key=True)
+    account_number = db.Column(db.String(20), nullable=False, unique=True)
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50), nullable=False)  # code from financials.FS_CATEGORIES
+    is_active = db.Column(db.Boolean, default=True)  # inactive accounts stay on file (history) but drop out of the picker
+    notes = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<StandardChartOfAccounts {self.account_number} {self.account_name}>"
+
+
+class COAMapping(db.Model):
+    """A remembered mapping from one of a client's trial balance account
+    names to an IAS 1 financial statement category (see financials.py) -
+    reusable across every engagement/period for that client, so a repeat
+    engagement's trial balance mostly auto-maps itself. Keyed on the
+    account name as typed/imported (matched case-insensitively).
+
+    coa_account_number optionally links this account name to one of the
+    firm's own Standard Chart of Accounts entries (see StandardChartOfAccounts
+    above) - a plain string reference (not a hard foreign key) so
+    renumbering or deactivating a standard account never breaks an existing
+    mapping. None means this account name is only mapped to a bare IAS 1
+    category, with no firm-standard account number chosen (always true for
+    every mapping made before this feature existed)."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50), nullable=False)
+    coa_account_number = db.Column(db.String(20))
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("coa_mappings", cascade="all, delete-orphan"))
+    updated_by = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("client_id", "account_name", name="uq_coa_mapping_client_account"),)
+
+    def __repr__(self):
+        return f"<COAMapping {self.client_id}:{self.account_name}={self.fs_category}>"
+
+
+class TrialBalance(db.Model):
+    """One per engagement - the PRELIMINARY trial balance imported/entered
+    at planning, holding both current-year and prior-year (comparative)
+    columns per account. This preliminary version - before any audit
+    adjustments - is what the Analytical Review and Substantive Procedures
+    tabs work from. Audit adjustments (see AuditAdjustment below) are
+    layered on top of it, current year only, to produce the FINAL/ADJUSTED
+    trial balance that the Financial Statements are built from. See
+    financials.py for the maths."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    source = db.Column(db.String(20), default="manual")  # "upload" | "manual"
+    original_filename = db.Column(db.String(255))
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    # Some engagements genuinely have no trial balance (e.g. a Consulting or
+    # Secretarial engagement, or an Investigative Engagement scoped to a
+    # specific matter rather than the whole set of accounts) - rather than
+    # leaving the Trial Balance tab looking unfinished/broken, the team can
+    # explicitly record why and move on. Deliberately kept on this row
+    # rather than a separate table: a TrialBalance row with no lines and
+    # not_applicable=True IS the "no trial balance, and here's why" record.
+    not_applicable = db.Column(db.Boolean, default=False)
+    not_applicable_reason = db.Column(db.Text)
+    marked_na_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    marked_na_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("trial_balance", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    marked_na_by = db.relationship("User", foreign_keys=[marked_na_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    lines = db.relationship(
+        "TrialBalanceLine", backref="trial_balance", lazy=True,
+        cascade="all, delete-orphan", order_by="TrialBalanceLine.id",
+    )
+    adjustments = db.relationship(
+        "AuditAdjustment", backref="trial_balance", lazy=True,
+        cascade="all, delete-orphan", order_by="AuditAdjustment.id",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def unmapped_count(self):
+        return sum(1 for l in self.lines if not l.fs_category)
+
+    @property
+    def is_fully_mapped(self):
+        return len(self.lines) > 0 and self.unmapped_count == 0
+
+    @property
+    def current_totals(self):
+        return sum(l.current_debit or 0 for l in self.lines), sum(l.current_credit or 0 for l in self.lines)
+
+    @property
+    def prior_totals(self):
+        return sum(l.prior_debit or 0 for l in self.lines), sum(l.prior_credit or 0 for l in self.lines)
+
+    @property
+    def is_current_balanced(self):
+        d, c = self.current_totals
+        return abs(d - c) < 0.01
+
+    @property
+    def is_prior_balanced(self):
+        d, c = self.prior_totals
+        return abs(d - c) < 0.01
+
+    def __repr__(self):
+        return f"<TrialBalance engagement={self.engagement_id}>"
+
+
+class TrialBalanceLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    trial_balance_id = db.Column(db.Integer, db.ForeignKey("trial_balance.id"), nullable=False)
+    account_code = db.Column(db.String(50))  # the CLIENT's own account code, as uploaded/typed - not the firm's standard numbering below
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50))  # code from financials.FS_CATEGORIES, or "excluded" / blank if unmapped
+    coa_account_number = db.Column(db.String(20))  # optional link to one of the firm's own Standard Chart of Accounts entries - see StandardChartOfAccounts/COAMapping
+    current_debit = db.Column(db.Float, default=0.0)
+    current_credit = db.Column(db.Float, default=0.0)
+    prior_debit = db.Column(db.Float, default=0.0)
+    prior_credit = db.Column(db.Float, default=0.0)
+
+    def __repr__(self):
+        return f"<TrialBalanceLine {self.account_name}>"
+
+
+class AuditAdjustment(db.Model):
+    """One audit adjustment (journal entry) proposed against the
+    preliminary trial balance, affecting the CURRENT year only - the
+    trial balance plus all of its adjustments together make up the
+    final/adjusted trial balance the Financial Statements are drawn from.
+    Carries its own Preparer/Reviewer/Partner sign-off, same as every
+    other workpaper, so adjustments get the same scrutiny as anything
+    else. Its line items live in AuditAdjustmentLine below."""
+    id = db.Column(db.Integer, primary_key=True)
+    trial_balance_id = db.Column(db.Integer, db.ForeignKey("trial_balance.id"), nullable=False)
+    reference = db.Column(db.String(50))  # e.g. "AJE 1"
+    description = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    lines = db.relationship(
+        "AuditAdjustmentLine", backref="adjustment", lazy=True,
+        cascade="all, delete-orphan", order_by="AuditAdjustmentLine.id",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def total_debit(self):
+        return sum(l.debit or 0 for l in self.lines)
+
+    @property
+    def total_credit(self):
+        return sum(l.credit or 0 for l in self.lines)
+
+    @property
+    def is_balanced(self):
+        return abs(self.total_debit - self.total_credit) < 0.01
+
+    def __repr__(self):
+        return f"<AuditAdjustment {self.reference}>"
+
+
+class AuditAdjustmentLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    adjustment_id = db.Column(db.Integer, db.ForeignKey("audit_adjustment.id"), nullable=False)
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50), nullable=False)
+    debit = db.Column(db.Float, default=0.0)
+    credit = db.Column(db.Float, default=0.0)
+
+    def __repr__(self):
+        return f"<AuditAdjustmentLine {self.account_name}>"
+
+
+class FinancialStatements(db.Model):
+    """The Financial Statements pack for an engagement - mostly a sign-off
+    and notes wrapper, since the statements themselves are computed live
+    from the adjusted TrialBalance (see financials.py) rather than
+    stored."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    basis_of_preparation = db.Column(db.Text)
+    # Notes to the Financial Statements - free text, editable in-app (unlike
+    # the figures throughout the statements themselves, which are always
+    # computed live from the adjusted TrialBalance via financials.py and are
+    # never independently editable/overridable here). Kept as a catch-all
+    # "other matters" section alongside the structured, auto-generated
+    # notes (accounting policies + numbered breakdown notes, built fresh
+    # from the trial balance every time - see financials.build_notes) for
+    # engagements on a Full IFRS / IFRS for SMEs reporting_framework.
+    notes_to_financial_statements = db.Column(db.Text)
+    # The three standard closing notes every set of financial statements
+    # needs but that no trial balance account can supply on its own - free
+    # text, seeded with a sensible placeholder default the first time the
+    # Finalisation tab is opened (see engagements._default_closing_note_text).
+    related_party_note = db.Column(db.Text)
+    commitments_note = db.Column(db.Text)
+    subsequent_events_note = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("financial_statements", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<FinancialStatements engagement={self.engagement_id}>"
+
+
+class DirectorsStatement(db.Model):
+    """The Directors' Statement (Statement of Responsibility) working paper
+    - content that goes INTO the client's Financial Statements for their
+    own directors to sign, not an internal audit sign-off record. Placed
+    right after the Client Details/Table of Contents page and before the
+    Audit Opinion/Review Report (if any) in the generated Word document,
+    matching normal Zimbabwean financial statement ordering. One per
+    engagement, seeded with standard boilerplate the first time the
+    Finalisation tab is opened (see financials.DEFAULT_DIRECTORS_STATEMENT_TEXT)."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    statement_text = db.Column(db.Text)
+    director1_name = db.Column(db.String(150))
+    director1_title = db.Column(db.String(100), default="Director")
+    director2_name = db.Column(db.String(150))
+    director2_title = db.Column(db.String(100), default="Director")
+    statement_date = db.Column(db.Date)
+
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("directors_statement", uselist=False, cascade="all, delete-orphan"))
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+
+    def __repr__(self):
+        return f"<DirectorsStatement engagement={self.engagement_id}>"
+
+
+# The report basis the preparer picks on the Audit Opinion tab - an Audit
+# engagement gets a full ISA 700 audit opinion, an Assurance engagement
+# more usually gets an ISRE 2400 review conclusion (a limited-assurance
+# report, not a full opinion) - kept as an explicit choice rather than
+# inferred purely from Engagement.type, since a firm occasionally performs
+# the other basis on either engagement type.
+AUDIT_OPINION_BASES = ["audit", "review"]
+AUDIT_OPINION_BASIS_LABELS = {
+    "audit": "Audit opinion (ISA 700)",
+    "review": "Review / limited assurance conclusion (ISRE 2400)",
+}
+OPINION_MODIFICATIONS = ["unmodified", "qualified", "adverse", "disclaimer"]
+OPINION_MODIFICATION_LABELS = {
+    "unmodified": "Unmodified (unqualified)",
+    "qualified": "Qualified",
+    "adverse": "Adverse",
+    "disclaimer": "Disclaimer of opinion / conclusion",
+}
+
+
+class AuditOpinion(db.Model):
+    """The Independent Auditor's Report / Independent Reviewer's Report
+    working paper - one per engagement, shown only for Audit and Assurance
+    engagement types (see AUDIT_OPINION_BASES above), placed before the
+    primary statements in the generated Financial Statements Word document.
+    The four report paragraphs are seeded with standard ISA 700/ISRE 2400
+    boilerplate for the chosen basis/modification (see
+    financials.default_audit_opinion_paragraphs) and are always editable -
+    the same "system drafts, preparer tailors" pattern as every other
+    boilerplate paragraph in this app. Only a Partner sign-off actually
+    issues the report - completed_by/reviewed_by exist for drafting/review
+    before it reaches that point, the same 3-stage pattern as every other
+    working paper in this app."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    report_basis = db.Column(db.String(10), default="audit")  # "audit" | "review"
+    modification = db.Column(db.String(15), default="unmodified")  # see OPINION_MODIFICATIONS
+    basis_for_modification = db.Column(db.Text)  # only meaningful when modification != "unmodified"
+    opinion_paragraph = db.Column(db.Text)
+    basis_paragraph = db.Column(db.Text)
+    management_responsibility_paragraph = db.Column(db.Text)
+    auditor_responsibility_paragraph = db.Column(db.Text)
+    report_date = db.Column(db.Date)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("audit_opinion", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<AuditOpinion engagement={self.engagement_id}>"
+
+
+# Zimbabwean corporate tax rates and capital allowance rates change with
+# each year's Finance Act, and reliable current figures could not be
+# sourced with confidence at the time this was built (published sources
+# disagreed even on the headline corporate rate) - so unlike, say,
+# NOTE_DEFINITIONS' accounting policy wording, NOTHING here hardcodes a
+# statutory rate as fact. tax_rate_percent/aids_levy_percent are entirely
+# preparer-entered, with no pre-filled default, and every add-back/
+# deduction/capital allowance line is entered by the preparer too - the
+# computation only does the arithmetic once those figures are supplied.
+INCOME_TAX_ITEM_TYPES = ["addback", "deduction", "capital_allowance"]
+INCOME_TAX_ITEM_TYPE_LABELS = {
+    "addback": "Add back (disallowable / non-taxable item)",
+    "deduction": "Less: allowable deduction",
+    "capital_allowance": "Less: capital allowance",
+}
+
+
+class IncomeTaxComputation(db.Model):
+    """The Income Tax Computation working paper - reconciles accounting
+    profit before tax (taken live from the Statement of Profit or Loss,
+    never re-entered here) to taxable income and the resulting current tax
+    charge, via preparer-entered add-back/deduction/capital allowance
+    lines. See the module comment above on why no rate is pre-filled.
+    One per engagement."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    tax_rate_percent = db.Column(db.Float)
+    aids_levy_percent = db.Column(db.Float)
+    tax_loss_brought_forward = db.Column(db.Float, default=0.0)
+    # Profit before tax typed in by the preparer, used only when the engagement
+    # has no Trial Balance to take it from (a Tax Advisory engagement works from
+    # the client's finished accounts and has no Trial Balance tab).
+    profit_before_tax_manual = db.Column(db.Float)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("income_tax_computation", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    items = db.relationship(
+        "IncomeTaxAdjustmentLine", backref="computation", lazy=True,
+        cascade="all, delete-orphan", order_by="IncomeTaxAdjustmentLine.order",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<IncomeTaxComputation engagement={self.engagement_id}>"
+
+
+class IncomeTaxAdjustmentLine(db.Model):
+    """One add-back, allowable deduction, or capital allowance line on the
+    Income Tax Computation working paper - entirely preparer-entered (see
+    the module comment above IncomeTaxComputation)."""
+    id = db.Column(db.Integer, primary_key=True)
+    computation_id = db.Column(db.Integer, db.ForeignKey("income_tax_computation.id"), nullable=False)
+    item_type = db.Column(db.String(20), default="addback")  # see INCOME_TAX_ITEM_TYPES
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, default=0.0)
+    order = db.Column(db.Integer, default=0)
+    source = db.Column(db.String(30))  # "s16_engine" for lines posted from the Prohibited Deductions schedule (prohibited_deductions.py); null = preparer-entered
+
+    def __repr__(self):
+        return f"<IncomeTaxAdjustmentLine computation={self.computation_id}>"
+
+
+class DeferredTaxComputation(db.Model):
+    """The Deferred Tax Computation working paper - one temporary
+    difference per row (DeferredTaxItem below), each contributing
+    (accounting amount - tax base) x tax rate to a single net deferred tax
+    asset/liability. The Property, Plant and Equipment temporary difference
+    - almost always the most material one, and the one this app can help
+    with directly - gets its own dedicated field (ppe_tax_base) so its
+    accounting-amount side can be pulled live from the Asset Register's own
+    movement schedule (financials.build_ppe_movement_schedule) rather than
+    retyped; the preparer only has to supply its tax base (the cumulative
+    tax written-down value), since this app has no prior-year capital
+    allowance history to derive that from on its own. Every other temporary
+    difference (provisions, unrealised amounts, assessed losses not
+    recognised elsewhere, etc.) is a plain manual DeferredTaxItem row.
+    One per engagement."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    tax_rate_percent = db.Column(db.Float)
+    ppe_tax_base = db.Column(db.Float)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("deferred_tax_computation", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    items = db.relationship(
+        "DeferredTaxItem", backref="computation", lazy=True,
+        cascade="all, delete-orphan", order_by="DeferredTaxItem.order",
+    )
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<DeferredTaxComputation engagement={self.engagement_id}>"
+
+
+class DeferredTaxItem(db.Model):
+    """One temporary difference (other than PPE - see DeferredTaxComputation
+    above) on the Deferred Tax Computation working paper: an accounting
+    amount, its tax base, and the resulting (accounting - tax base) x rate
+    deferred tax effect."""
+    id = db.Column(db.Integer, primary_key=True)
+    computation_id = db.Column(db.Integer, db.ForeignKey("deferred_tax_computation.id"), nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    accounting_amount = db.Column(db.Float, default=0.0)
+    tax_base_amount = db.Column(db.Float, default=0.0)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<DeferredTaxItem computation={self.computation_id}>"
+
+
+# ---------- Quarterly Payment Dates (QPDs) / Provisional Income Tax ----------
+# Zimbabwe requires a company to pay its estimated corporate income tax in
+# four instalments DURING the tax year itself (QPDs), based on an ESTIMATE
+# of annual taxable income - underestimating exposes the client to ZIMRA
+# interest/penalties (see PenaltyInterestCalculation above), so the whole
+# point of this working paper is to let the estimate be refined quarter by
+# quarter as better information comes in (an updated Trial Balance, another
+# month or two of VAT turnover), not to get it right once and forget it.
+#
+# Deliberately CLIENT-level (client_id, not engagement_id) and one per
+# (client, tax_year): a client owes QPDs every year whether or not the firm
+# happens to have an open engagement for them that year - same reasoning as
+# TaxAccountingFilingDocument above, and unlike IncomeTaxComputation/
+# TaxReturnRecord, which are tied to one specific engagement's own file.
+#
+# Per the firm's own choice, NEITHER the QPD due dates NOR the statutory
+# cumulative percentages (QPDInstalmentRate below) are hardcoded - both stay
+# firm-editable, consistent with this app's long-standing rule of never
+# hardcoding a figure that could change with a Finance Act (see
+# IncomeTaxComputation's own module comment above: tax_rate_pct/
+# aids_levy_pct on QPDEstimate below are preparer-entered the same way, with
+# no pre-filled default).
+#
+# Two ways to arrive at an estimate of annual taxable income, offered side
+# by side with no system preference (the firm picks per client/quarter):
+#   - "Trial Balance": a YTD trial balance is entered/imported (QPDTrialBalanceLine,
+#     mapped to the SAME IAS 1 categories as an audit engagement's Trial
+#     Balance - reusing financials.compute_totals/build_income_statement to
+#     get a YTD profit before tax), annualized by tb_months_covered, then
+#     reconciled to taxable income via the SAME engine as an audited
+#     engagement's Income Tax Computation (financials.build_income_tax_
+#     computation, with QPDAdjustmentLine add-back/deduction rows - reusing
+#     IncomeTaxAdjustmentLine's own item_type/INCOME_TAX_ITEM_TYPES values
+#     so no translation layer is needed between the two). More accurate
+#     once there's a TB to work from, since it's built on actual YTD
+#     results rather than a margin assumption.
+#   - "VAT Turnover": monthly VAT-return turnover figures (QPDMonthlyTurnover
+#     - this app has no monthly VAT Return tracking model to pull from
+#     automatically; VATInvoice above is an engagement-scoped invoice
+#     register, not a return-filing history, so these are entered by hand)
+#     are annualized and multiplied by a preparer-entered net margin % -
+#     turnover is not profit, so this is inherently a rougher estimate, but
+#     useful early in the year before a TB is ready.
+# Whichever method was used, the result only becomes the estimate QPDs are
+# actually computed from once copied into estimated_annual_taxable_income/
+# estimated_annual_tax_charge below - the same "system suggests, preparer's
+# save action commits it, and it stays directly editable afterwards" pattern
+# as Payslip.is_auto_calculated, so a Partner can always see (and override)
+# today's best figure regardless of how it was arrived at.
+QPD_ESTIMATION_METHODS = ["Trial Balance", "VAT Turnover", "Manual"]
+
+
+class QPDInstalmentRate(db.Model):
+    """One of the firm-wide QPD instalments - ordinarily four (25 March,
+    25 June, 25 September, 20 December) - firm-editable, including the date
+    and cumulative_pct themselves (see module comment above on why, unlike
+    most of this app's "well-corroborated" statutory dates, the firm asked
+    for these to stay adjustable too). cumulative_pct is the % of the
+    ESTIMATED ANNUAL tax charge that should have been paid BY this
+    instalment's due date - ZIMRA publishes these as cumulative figures
+    (e.g. 10%, 35%, 65%, 100%), not as four independent slices - so each
+    instalment's own amount is this instalment's cumulative_pct minus the
+    previous instalment's cumulative_pct, of the CURRENT estimate at the
+    time it's computed (see qpd_calc.build_instalments)."""
+    id = db.Column(db.Integer, primary_key=True)
+    label = db.Column(db.String(60), nullable=False)
+    due_month = db.Column(db.Integer, nullable=False)  # 1-12
+    due_day = db.Column(db.Integer, nullable=False)  # 1-31
+    cumulative_pct = db.Column(db.Float, nullable=False)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<QPDInstalmentRate {self.label!r} {self.cumulative_pct}% by {self.due_month}/{self.due_day}>"
+
+
+class FxRate(db.Model):
+    """A firm-wide, dated USD:ZWG (ZiG) exchange rate - e.g. the RBZ
+    auction/interbank rate on a given day - logged by a preparer once filed/
+    observed, so QPD instalments (see QPDInstalmentRecord.fx_rate_snapshot
+    below) can convert the USD-equivalent ZWG-denominated portion of an
+    instalment into the actual ZWG currency amount payable, using whatever
+    rate was in effect at the time, rather than this app hardcoding or
+    guessing one. `rate` is expressed as ZWG per 1 USD (e.g. 35.5 means
+    USD 1 = ZWG 35.50). One row per calendar date - re-logging the same date
+    updates that day's rate rather than creating a duplicate."""
+    id = db.Column(db.Integer, primary_key=True)
+    rate_date = db.Column(db.Date, nullable=False, unique=True)
+    rate = db.Column(db.Float, nullable=False)  # ZWG per 1 USD
+    source = db.Column(db.String(120))  # e.g. "RBZ auction", "RBZ interbank", "Bank rate"
+    notes = db.Column(db.Text)
+    # Set only when this rate was converted from ZWL per USD to ZWG per USD
+    # by the "Convert ZWL rates to ZWG" tool (qpd.convert_zwl_rates): holds
+    # the ORIGINAL ZWL figure, so the conversion can't be applied twice and
+    # can be undone. NULL for every rate entered directly in ZWG.
+    original_rate_zwl = db.Column(db.Float)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<FxRate {self.rate_date} {self.rate}>"
+
+
+FX_AVERAGE_PERIODS = [
+    ("Q1", "Quarter 1 (Jan - Mar)"),
+    ("Q2", "Quarter 2 (Apr - Jun)"),
+    ("Q3", "Quarter 3 (Jul - Sep)"),
+    ("Q4", "Quarter 4 (Oct - Dec)"),
+    ("FY", "Annual average (full year)"),
+]
+FX_AVERAGE_PERIOD_LABELS = dict(FX_AVERAGE_PERIODS)
+
+
+class FxAverageRate(db.Model):
+    """A manually captured USD:ZWG AVERAGE exchange rate for one calendar
+    quarter (Q1-Q4) or for the full year ("FY"), kept separately from the
+    dated spot-rate log (FxRate above) because an average is a figure the
+    preparer works out/obtains themselves (e.g. from the RBZ's published
+    averages) for a whole period, not an observation on one day. `rate` is
+    ZWG per 1 USD, same convention as FxRate. One row per (rate_year,
+    period) - capturing the same period again updates it rather than
+    duplicating."""
+    id = db.Column(db.Integer, primary_key=True)
+    rate_year = db.Column(db.Integer, nullable=False)
+    period = db.Column(db.String(2), nullable=False)  # "Q1".."Q4" or "FY"
+    rate = db.Column(db.Float, nullable=False)  # ZWG per 1 USD
+    source = db.Column(db.String(120))
+    notes = db.Column(db.Text)
+    original_rate_zwl = db.Column(db.Float)  # see FxRate.original_rate_zwl
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("rate_year", "period", name="uq_fx_average_rate_year_period"),)
+
+    @property
+    def period_label(self):
+        return FX_AVERAGE_PERIOD_LABELS.get(self.period, self.period)
+
+    def __repr__(self):
+        return f"<FxAverageRate {self.rate_year} {self.period} {self.rate}>"
+
+
+class QPDEstimate(db.Model):
+    """One client's provisional income tax estimate for one tax year - see
+    the module comment above for the client-level scoping and the two
+    estimation methods. estimated_annual_revenue/estimated_annual_taxable_
+    income/tax_rate_pct/aids_levy_pct/estimated_annual_tax_charge are the
+    "current best estimate" - always directly editable regardless of which
+    method (or neither) last touched them. QPDInstalmentRecord rows (below)
+    are computed FROM this estimate on demand, each one a frozen snapshot,
+    so recomputing instalments after revising the estimate never silently
+    rewrites an instalment already recorded as paid.
+
+    Dual-currency (USD/ZWG) split: Zimbabwe taxpayers earning revenue in
+    more than one currency must split their provisional tax liability
+    between USD and ZWG (ZiG) - and ZIMRA's rule for HOW to split it is
+    asymmetric, not a straight read of the actual currency mix both ways:
+      - If more than 50% of revenue was earned in USD, the tax is split
+        evenly 50:50 USD/ZWG regardless of exactly how far over 50% USD
+        actually was.
+      - If ZWG is instead the majority currency (USD is 50% or less), the
+        split follows the ACTUAL proportion earned - e.g. 30% USD/70% ZWG
+        stays 30:70, it is never forced to 50:50.
+    revenue_usd_pct is the preparer-entered ACTUAL % of revenue earned in
+    USD for the year (the figure a preparer reads off the client's own
+    records); effective_usd_pct below applies the rule above to it, and
+    that effective split is what Revenue/Expenses/Taxable Income/Tax
+    Charge (and, frozen per instalment, each QPDInstalmentRecord) are
+    actually divided by - see currency_split()."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    tax_year = db.Column(db.Integer, nullable=False)  # calendar tax year, e.g. 2026
+
+    estimation_method = db.Column(db.String(20), default="Manual")  # QPD_ESTIMATION_METHODS
+
+    # ---- Trial Balance method working fields ----
+    tb_months_covered = db.Column(db.Integer)  # how many months of the tax year the TB below covers, for annualizing
+    tb_tax_loss_brought_forward = db.Column(db.Float, default=0.0)
+
+    # ---- VAT Turnover method working fields ----
+    vat_net_margin_pct = db.Column(db.Float)  # preparer's estimated net profit margin on annualized turnover
+
+    # ---- The current best estimate - the "flex" layer, see module comment ----
+    estimated_annual_revenue = db.Column(db.Float)  # preparer-entered/suggested annualized revenue - see effective_usd_pct/currency_split below
+    estimated_annual_taxable_income = db.Column(db.Float, default=0.0)
+    tax_rate_pct = db.Column(db.Float)  # preparer-entered, never hardcoded - see module comment
+    aids_levy_pct = db.Column(db.Float)
+    estimated_annual_tax_charge = db.Column(db.Float, default=0.0)
+
+    # ---- Dual-currency (USD/ZWG) split - see class docstring above ----
+    revenue_usd_pct = db.Column(db.Float)  # preparer-entered ACTUAL % of revenue earned in USD; remainder assumed ZWG (ZiG)
+    # Salaries & wages (annual), entered by hand: the return shows Salaries
+    # and Other expenses as separate lines of the expenses total, so the
+    # Currency Split table breaks the (implied) expenses figure into the two.
+    # NULL = not entered yet (Other expenses then shows the whole total).
+    estimated_annual_salaries = db.Column(db.Float)
+
+    notes = db.Column(db.Text)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("qpd_estimates", lazy=True, cascade="all, delete-orphan"))
+    updated_by = db.relationship("User")
+    tb_lines = db.relationship("QPDTrialBalanceLine", backref="estimate", lazy=True, cascade="all, delete-orphan", order_by="QPDTrialBalanceLine.id")
+    adjustment_lines = db.relationship("QPDAdjustmentLine", backref="estimate", lazy=True, cascade="all, delete-orphan", order_by="QPDAdjustmentLine.order")
+    monthly_turnovers = db.relationship("QPDMonthlyTurnover", backref="estimate", lazy=True, cascade="all, delete-orphan", order_by="QPDMonthlyTurnover.month")
+    instalments = db.relationship("QPDInstalmentRecord", backref="estimate", lazy=True, cascade="all, delete-orphan", order_by="QPDInstalmentRecord.order")
+
+    __table_args__ = (db.UniqueConstraint("client_id", "tax_year", name="uq_qpd_estimate_client_year"),)
+
+    @property
+    def annualized_turnover(self):
+        """Average monthly turnover entered so far x 12 - 0 if none entered
+        yet, so templates can show a clear "enter at least one month" state
+        rather than a misleading 0.00 estimate."""
+        months = len(self.monthly_turnovers)
+        if not months:
+            return 0.0
+        total = sum(t.turnover_amount or 0.0 for t in self.monthly_turnovers)
+        return round((total / months) * 12, 2)
+
+    @property
+    def unmapped_tb_line_count(self):
+        return sum(1 for l in self.tb_lines if not l.fs_category)
+
+    @property
+    def effective_usd_pct(self):
+        """The USD % actually used to split Revenue/Expenses/Taxable
+        Income/Tax Charge/Instalments between USD and ZWG - ZIMRA's "50%
+        rule" described in the class docstring. None until revenue_usd_pct
+        has been entered."""
+        if self.revenue_usd_pct is None:
+            return None
+        return 50.0 if self.revenue_usd_pct > 50 else self.revenue_usd_pct
+
+    @property
+    def effective_zwg_pct(self):
+        if self.effective_usd_pct is None:
+            return None
+        return 100.0 - self.effective_usd_pct
+
+    @property
+    def implied_annual_expenses(self):
+        """Estimated annual revenue less estimated annual taxable income -
+        a simple derived figure that exists purely so the dual-currency
+        split has an "Expenses" amount to apply to alongside Revenue/
+        Taxable Income/Tax Charge. Not a substitute for an actual expense
+        schedule - the Trial Balance method's own expense lines are already
+        folded into Taxable Income via its add-back/deduction
+        reconciliation. None if either figure hasn't been entered yet."""
+        if self.estimated_annual_revenue is None or self.estimated_annual_taxable_income is None:
+            return None
+        return round(self.estimated_annual_revenue - self.estimated_annual_taxable_income, 2)
+
+    @property
+    def other_annual_expenses(self):
+        """Implied total expenses less Salaries & wages - the "Other
+        expenses" line of the return. The whole expenses total when
+        salaries haven't been entered; None if expenses can't be derived."""
+        total = self.implied_annual_expenses
+        if total is None:
+            return None
+        return round(total - (self.estimated_annual_salaries or 0.0), 2)
+
+    def currency_split_table(self, zwg_rate=None):
+        """Rows for the annual Currency Split table, laid out like the
+        return: Revenue; Expenses broken into Salaries and Other expenses
+        (each its own line, both divided with the same effective USD % as
+        everything else); Taxable income; Tax charge. Each row is a dict:
+        label, amount, usd, zwg (USD-equivalent, as split), zwg_local (the
+        ZWG column converted into actual ZWG at zwg_rate - ZWG per 1 USD -
+        or None without a rate) and sub (indented breakdown line).
+        Other expenses is derived as total expenses less Salaries in EACH
+        currency, so Salaries + Other always adds back to the Expenses
+        line exactly, with no rounding drift."""
+        def row(label, amount, usd, zwg, sub=False):
+            local = round(zwg * zwg_rate, 2) if (zwg is not None and zwg_rate) else None
+            return {"label": label, "amount": amount, "usd": usd, "zwg": zwg, "zwg_local": local, "sub": sub}
+
+        def plain(label, amount, sub=False):
+            usd, zwg = self.currency_split(amount)
+            return row(label, amount, usd, zwg, sub)
+
+        exp_total = self.implied_annual_expenses
+        exp_usd, exp_zwg = self.currency_split(exp_total)
+        rows = [plain("Revenue", self.estimated_annual_revenue),
+                row("Expenses (implied: Revenue less Taxable Income)", exp_total, exp_usd, exp_zwg)]
+        sal = self.estimated_annual_salaries
+        sal_usd, sal_zwg = self.currency_split(sal)
+        rows.append(row("Salaries & wages", sal, sal_usd, sal_zwg, sub=True))
+        other_amount = self.other_annual_expenses
+        other_usd = round(exp_usd - (sal_usd or 0.0), 2) if exp_usd is not None else None
+        other_zwg = round(exp_zwg - (sal_zwg or 0.0), 2) if exp_zwg is not None else None
+        rows.append(row("Other expenses", other_amount, other_usd, other_zwg, sub=True))
+        rows.append(plain("Taxable income", self.estimated_annual_taxable_income))
+        rows.append(plain("Tax charge", self.estimated_annual_tax_charge))
+        return rows
+
+    def currency_split(self, amount):
+        """(usd_amount, zwg_amount) for `amount` using effective_usd_pct -
+        (None, None) if no currency mix has been entered yet or amount
+        itself is None."""
+        if self.effective_usd_pct is None or amount is None:
+            return None, None
+        usd = round(amount * self.effective_usd_pct / 100.0, 2)
+        return usd, round(amount - usd, 2)
+
+    def __repr__(self):
+        return f"<QPDEstimate client={self.client_id} tax_year={self.tax_year}>"
+
+
+class QPDTrialBalanceLine(db.Model):
+    """One account on a QPDEstimate's YTD trial balance - same shape as
+    TrialBalanceLine above (duck-type compatible with financials.
+    compute_totals/build_income_statement: .fs_category, .current_debit,
+    .current_credit, .prior_debit, .prior_credit) so this estimate's YTD
+    profit before tax is computed with the EXACT same engine as an audited
+    engagement's Statement of Profit or Loss - deliberately not a full
+    second trial balance implementation. prior_debit/prior_credit are
+    always 0 here (a QPD estimate has no "prior year comparative" of its
+    own) but kept for duck-type compatibility rather than a parallel
+    current-year-only version of compute_totals."""
+    id = db.Column(db.Integer, primary_key=True)
+    estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
+    account_code = db.Column(db.String(50))
+    account_name = db.Column(db.String(200), nullable=False)
+    fs_category = db.Column(db.String(50))  # code from financials.FS_CATEGORIES, or blank if unmapped
+    coa_account_number = db.Column(db.String(20))  # optional link to one of the firm's own Standard Chart of Accounts entries - see StandardChartOfAccounts/COAMapping
+    current_debit = db.Column(db.Float, default=0.0)
+    current_credit = db.Column(db.Float, default=0.0)
+    prior_debit = db.Column(db.Float, default=0.0)
+    prior_credit = db.Column(db.Float, default=0.0)
+
+    def __repr__(self):
+        return f"<QPDTrialBalanceLine {self.account_name}>"
+
+
+class QPDAdjustmentLine(db.Model):
+    """One add-back/deduction/capital-allowance line reconciling a
+    QPDEstimate's annualized Trial Balance profit to estimated taxable
+    income - reuses IncomeTaxAdjustmentLine's own item_type values
+    (INCOME_TAX_ITEM_TYPES above) so financials.build_income_tax_
+    computation() can be called with these rows directly, unchanged, the
+    same way it already is for an audited engagement's own computation."""
+    id = db.Column(db.Integer, primary_key=True)
+    estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
+    item_type = db.Column(db.String(20), default="addback")  # see INCOME_TAX_ITEM_TYPES
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, default=0.0)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<QPDAdjustmentLine estimate={self.estimate_id}>"
+
+
+class QPDMonthlyTurnover(db.Model):
+    """One month's VAT-return turnover figure, as filed with ZIMRA - entered
+    by hand (see the module comment above on why this app has no monthly
+    VAT Return model to pull from automatically)."""
+    id = db.Column(db.Integer, primary_key=True)
+    estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
+    month = db.Column(db.Date, nullable=False)  # first day of the month it covers
+    turnover_amount = db.Column(db.Float, default=0.0)
+
+    __table_args__ = (db.UniqueConstraint("estimate_id", "month", name="uq_qpd_monthly_turnover"),)
+
+    def __repr__(self):
+        return f"<QPDMonthlyTurnover estimate={self.estimate_id} {self.month}>"
+
+
+class QPDInstalmentRecord(db.Model):
+    """One computed QPD instalment for one QPDEstimate - a frozen snapshot
+    of a QPDInstalmentRate row (label/due date/cumulative_pct) AND the
+    annual estimate that was current at the moment this instalment was
+    (re)computed (see qpd_calc.build_instalments), so neither editing the
+    firm-wide QPDInstalmentRate table nor revising the estimate later
+    silently changes an instalment already recorded as paid.
+    paid_amount/paid_date/paid_reference are then recorded separately, once
+    actually remitted to ZIMRA.
+
+    usd_pct_snapshot freezes QPDEstimate.effective_usd_pct (the dual-
+    currency USD/ZWG split - see QPDEstimate's class docstring) at the same
+    moment, for the same reason as annual_tax_charge_snapshot: editing the
+    estimate's currency mix later must never reshuffle how much of an
+    already-computed (or already-paid) instalment was USD vs ZWG.
+
+    fx_rate_snapshot freezes the firm's logged FxRate (ZWG per 1 USD) as of
+    the day this instalment was (re)computed, for the same reason again -
+    see zwg_amount_converted below, which is the actual ZWG currency amount
+    payable (as opposed to zwg_amount, which is only the USD-equivalent
+    value of the ZWG-denominated portion). None if no FxRate had been logged
+    yet on or before the computation date.
+
+    paid_amount/paid_date/paid_reference record what was actually remitted
+    to ZIMRA, as a single USD-equivalent total (unchanged, original
+    behaviour). paid_amount_usd/paid_amount_zwg are an optional, independent
+    record of the actual currency breakdown of that payment - e.g. off the
+    ZIMRA receipt - entered separately rather than derived, since the real
+    payment may not exactly match the computed split (the FX rate can move
+    between computation and actual payment)."""
+    id = db.Column(db.Integer, primary_key=True)
+    estimate_id = db.Column(db.Integer, db.ForeignKey("qpd_estimate.id"), nullable=False)
+    label = db.Column(db.String(60))
+    due_date = db.Column(db.Date)
+    cumulative_pct = db.Column(db.Float)
+    computed_amount = db.Column(db.Float, default=0.0)  # this instalment's own share (cumulative - previous), of the estimate at computation time
+    annual_tax_charge_snapshot = db.Column(db.Float)  # what estimated_annual_tax_charge was when this was computed
+    usd_pct_snapshot = db.Column(db.Float)  # what estimate.effective_usd_pct was when this was computed - see class docstring
+    fx_rate_snapshot = db.Column(db.Float)  # ZWG per 1 USD, as of the computation date - see class docstring
+    computed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    order = db.Column(db.Integer, default=0)
+
+    paid_amount = db.Column(db.Float)
+    paid_date = db.Column(db.Date)
+    paid_reference = db.Column(db.String(100))  # e.g. a ZIMRA payment reference/receipt number
+    paid_amount_usd = db.Column(db.Float)  # actual USD remitted - optional, see class docstring
+    paid_amount_zwg = db.Column(db.Float)  # actual ZWG (local currency units) remitted - optional, see class docstring
+
+    @property
+    def is_paid(self):
+        return self.paid_amount is not None
+
+    @property
+    def usd_amount(self):
+        """This instalment's own USD portion, using the currency split
+        frozen at computation time - None if no currency mix was entered
+        when it was computed."""
+        if self.usd_pct_snapshot is None:
+            return None
+        return round((self.computed_amount or 0.0) * self.usd_pct_snapshot / 100.0, 2)
+
+    @property
+    def zwg_amount(self):
+        """The USD-EQUIVALENT value of the portion that must be remitted in
+        ZWG - not yet converted to actual ZWG currency units. See
+        zwg_amount_converted for the actual amount of ZWG to pay."""
+        if self.usd_amount is None:
+            return None
+        return round((self.computed_amount or 0.0) - self.usd_amount, 2)
+
+    @property
+    def zwg_amount_converted(self):
+        """The actual ZWG currency amount payable for this instalment's
+        ZWG-denominated portion - zwg_amount (a USD-equivalent figure)
+        multiplied by the USD:ZWG rate frozen at computation time
+        (fx_rate_snapshot). None until both the currency split AND a logged
+        FX rate were available when this instalment was computed."""
+        if self.zwg_amount is None or self.fx_rate_snapshot is None:
+            return None
+        return round(self.zwg_amount * self.fx_rate_snapshot, 2)
+
+    def __repr__(self):
+        return f"<QPDInstalmentRecord {self.label!r} estimate={self.estimate_id}>"
+
+
+class SubstantiveProcedureArea(db.Model):
+    """One row per (engagement, standard audit area) - e.g. "Cash and Bank"
+    for a given engagement - each forming one section of the substantive
+    audit programme. Suggested procedures (SubstantiveProcedureItem below)
+    are seeded into it by the "Generate suggested procedures" action, driven
+    by the engagement's Risk Assessment rating and the client's industry
+    (see AUDIT_AREAS / BASELINE_SUBSTANTIVE_PROCEDURES / etc. above), and
+    ticked off one by one - but the whole area carries a single
+    Preparer/Reviewer/Partner sign-off, like a section of an audit file
+    rather than each individual procedure needing its own."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    area = db.Column(db.String(80), nullable=False)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("substantive_procedure_areas", lazy=True, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    items = db.relationship(
+        "SubstantiveProcedureItem", backref="area_record", lazy=True,
+        cascade="all, delete-orphan", order_by="SubstantiveProcedureItem.id",
+    )
+
+    __table_args__ = (db.UniqueConstraint("engagement_id", "area", name="uq_subprocedure_area_engagement"),)
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def is_complete(self):
+        return len(self.items) > 0 and all(i.status in ("Done", "N/A") for i in self.items)
+
+    def __repr__(self):
+        return f"<SubstantiveProcedureArea {self.area} engagement={self.engagement_id}>"
+
+
+class SubstantiveProcedureItem(db.Model):
+    """A single substantive procedure within an audit area - either
+    system-suggested (source "baseline"/"risk"/"industry", from the
+    dictionaries above) or added by hand (source "manual")."""
+    id = db.Column(db.Integer, primary_key=True)
+    area_id = db.Column(db.Integer, db.ForeignKey("substantive_procedure_area.id"), nullable=False)
+    procedure_text = db.Column(db.Text, nullable=False)
+    source = db.Column(db.String(20), default="manual")  # "baseline" | "risk" | "industry" | "manual"
+    status = db.Column(db.String(20), default="Not Started")
+    notes = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    tickmark_id = db.Column(db.Integer, db.ForeignKey("tickmark.id"))
+    tickmark = db.relationship("Tickmark", foreign_keys=[tickmark_id])
+
+    # Only populated on a Secretarial engagement's Execution Plan (see
+    # SECRETARIAL_EXECUTION_TASK_DETAILS above) - the Trigger/Event, Lead
+    # Responsible and Target Output columns of the firm's Practical
+    # Secretarial Execution Plan Schedule. Left blank (and not shown) on
+    # every other engagement type's Substantive Procedures, where `status`
+    # above already serves as the "Status Tracking" column.
+    trigger_event = db.Column(db.String(200))
+    responsible_role = db.Column(db.String(100))
+    target_output = db.Column(db.String(200))
+
+    # Only populated on a Business Intelligence and IT Engagement (see
+    # BUSINESS_IT_PROCEDURE_KIND above) - "ITGC" for a test of the underlying
+    # IT general control environment, "Substantive" for a data-driven/
+    # technical validation procedure. Left blank (and not shown) on every
+    # other engagement type, same "reuse a generic column for one type's
+    # extra detail" approach as trigger_event/responsible_role/target_output
+    # above for Secretarial.
+    procedure_kind = db.Column(db.String(20))
+
+    @property
+    def reviews(self):
+        """Every dated review entry left against this specific procedure -
+        see WorkpaperReview. Unlike the area-level Preparer/Reviewer/Partner
+        sign-off on SubstantiveProcedureArea (which covers the whole area
+        as one unit), any number of reviewers can each leave their own note
+        on one individual procedure here."""
+        return (
+            WorkpaperReview.query
+            .filter_by(reviewable_type=REVIEWABLE_TYPE_SUBSTANTIVE_ITEM, reviewable_id=self.id)
+            .order_by(WorkpaperReview.reviewed_at).all()
+        )
+
+    def __repr__(self):
+        return f"<SubstantiveProcedureItem area={self.area_id}>"
+
+
+# Depreciation methods offered on the PPE Depreciation policy working paper
+# (see PPEAssetClass below). Kept short and standard rather than exhaustive -
+# a preparer needing something else can still describe it in the class name.
+PPE_DEPRECIATION_METHODS = ["Straight-line", "Reducing balance"]
+
+
+class PPEAssetClass(db.Model):
+    """One row of the Property, Plant and Equipment Depreciation policy
+    working paper - a single asset class (e.g. "Motor vehicles", "Office
+    equipment") with the method and rate/useful life applied to it. This
+    structured table is what the PPE Asset Register (PPEAsset below) draws
+    its own per-asset method/rate from, and what the auto-generated PPE
+    accounting policy note (financials.ppe_accounting_policy_text) is built
+    from once at least one class exists here - replacing the generic
+    boilerplate that note otherwise falls back to.
+
+    `order` controls both display order here and the order asset classes
+    are listed in the Asset Register/movement schedule, so the preparer's
+    own ordering (usually largest/most material class first) carries
+    through everywhere this data is used."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    name = db.Column(db.String(120), nullable=False)
+    depreciation_method = db.Column(db.String(30), default="Straight-line")
+    rate_percent = db.Column(db.Float)
+    useful_life_years = db.Column(db.Float)
+    order = db.Column(db.Integer, default=0)
+
+    engagement = db.relationship(
+        "Engagement",
+        backref=db.backref("ppe_asset_classes", lazy=True, cascade="all, delete-orphan", order_by="PPEAssetClass.order"),
+    )
+
+    @property
+    def rate_display(self):
+        parts = []
+        if self.rate_percent is not None:
+            parts.append(f"{self.rate_percent:g}% p.a.")
+        if self.useful_life_years is not None:
+            parts.append(f"{self.useful_life_years:g} yrs")
+        return " / ".join(parts) if parts else "—"
+
+    def __repr__(self):
+        return f"<PPEAssetClass {self.name} engagement={self.engagement_id}>"
+
+
+class PPEAsset(db.Model):
+    """One row of the Property, Plant and Equipment Asset Register working
+    paper - a single fixed asset, editable directly in the app (with an
+    Excel export for filing) rather than only as a downloaded spreadsheet.
+    The standard column set: asset code/description, category (asset_class),
+    date acquired, cost, opening accumulated depreciation, depreciation
+    method/rate (via asset_class), current-year depreciation charge,
+    disposals (cost and accumulated depreciation), and closing NBV
+    (computed, not stored - see financials.build_ppe_movement_schedule).
+
+    Whether an asset's cost is an opening balance or a current-year
+    addition for the movement schedule is inferred from date_acquired
+    falling inside the engagement's reporting period or before it - see
+    financials._infer_period_start for the (disclosed) assumption this
+    relies on when the app doesn't otherwise record a period start date."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    asset_class_id = db.Column(db.Integer, db.ForeignKey("ppe_asset_class.id"))
+    asset_code = db.Column(db.String(40))
+    description = db.Column(db.String(200), nullable=False)
+    date_acquired = db.Column(db.Date)
+    cost = db.Column(db.Float, default=0.0)
+    opening_accumulated_depreciation = db.Column(db.Float, default=0.0)
+    current_year_depreciation = db.Column(db.Float, default=0.0)
+    disposal_cost = db.Column(db.Float, default=0.0)
+    disposal_accumulated_depreciation = db.Column(db.Float, default=0.0)
+    # For the Capital Allowances tab only: when the asset was sold and what it
+    # fetched, which the allowance schedule needs (recoupment / scrapping).
+    tax_disposed_on = db.Column(db.Date)
+    tax_disposal_proceeds = db.Column(db.Float)
+    order = db.Column(db.Integer, default=0)
+
+    engagement = db.relationship(
+        "Engagement",
+        backref=db.backref("ppe_assets", lazy=True, cascade="all, delete-orphan", order_by="PPEAsset.order"),
+    )
+    asset_class = db.relationship("PPEAssetClass", backref=db.backref("assets", lazy=True))
+
+    @property
+    def closing_nbv(self):
+        return (self.cost or 0.0) - (self.disposal_cost or 0.0) - (
+            (self.opening_accumulated_depreciation or 0.0) + (self.current_year_depreciation or 0.0)
+            - (self.disposal_accumulated_depreciation or 0.0)
+        )
+
+    def __repr__(self):
+        return f"<PPEAsset {self.description!r} engagement={self.engagement_id}>"
+
+
+# Evidence-gathering phase statuses for AuditStrategy below - reuses the
+# same vocabulary as CHECKLIST_STATUSES so the UI stays consistent, but
+# named separately since the two lists are conceptually different things
+# and CHECKLIST_STATUSES may not always evolve in lockstep with this one.
+AUDIT_STRATEGY_PHASE_STATUSES = CHECKLIST_STATUSES
+
+
+
+class EngagementTaxAssetRule(db.Model):
+    """The capital allowance treatment of one asset class on a client
+    engagement - the same fields as the firm's own FirmTaxAssetRule, so the one
+    engine in firm_tax.py works the schedule for both. Starter rules are
+    "not verified" until the Partner has checked them against the Income Tax
+    Act. One per (engagement, class)."""
+    __tablename__ = "engagement_tax_asset_rule"
+    __table_args__ = (db.UniqueConstraint("engagement_id", "asset_class_id", name="uq_eng_tax_rule"),)
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    asset_class_id = db.Column(db.Integer, db.ForeignKey("ppe_asset_class.id"), nullable=False)
+    method = db.Column(db.String(10), nullable=False, default="WT_SL")   # NONE, WT_SL, WT_RB, SIA
+    wt_rate_percent = db.Column(db.Float, default=0.0)
+    sia_percent = db.Column(db.Float, default=25.0)
+    sia_years = db.Column(db.Integer, default=4)
+    sia_first_percent = db.Column(db.Float)
+    cost_cap = db.Column(db.Float)
+    prorata_first_year = db.Column(db.Boolean, default=False, nullable=False)
+    verified = db.Column(db.Boolean, default=False, nullable=False)
+    note = db.Column(db.String(250))
+    engagement = db.relationship("Engagement", backref=db.backref("tax_asset_rules", lazy=True, cascade="all, delete-orphan"))
+    asset_class = db.relationship("PPEAssetClass", backref=db.backref("tax_rule", uselist=False, cascade="all, delete-orphan"))
+
+
+class AuditStrategy(db.Model):
+    """The forensic Audit Strategy for one Investigative Engagement - what
+    the "Planning" tab is replaced with for that engagement type (every
+    other type keeps the ordinary Materiality/Suggested-approach/Trial
+    Balance Planning tab untouched). One row per engagement.
+
+    Built around the four pillars of a forensic engagement plan: (1) Scope,
+    Objectives & Legal Framework, (2) a Preliminary Fraud Theory - the
+    working hypothesis of how the fraud was committed, by whom, and where
+    the evidence is - (3) Resource Allocation & Specialised Skills, and
+    (4) an Evidence Gathering Strategy sequenced periphery-to-centre
+    (digital/data evidence, then third-party/public records, then
+    interviews - saving direct confrontation of the target for last). The
+    "Assessment summary" shown alongside this on the tab isn't stored here
+    at all - it's read live off EntityUnderstanding's Objectives & Scope
+    checklist answers, ClientAcceptance's legal/evidence conclusion, and
+    RiskAssessment's Fraud Triangle rating, so this strategy is always
+    built on top of (never duplicating) what was already captured earlier
+    in the engagement.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    # 1. Scope, Objectives & Legal Framework
+    objective_statement = db.Column(db.Text)
+    chain_of_custody_notes = db.Column(db.Text)
+    reporting_destination = db.Column(db.Text)
+
+    # 2. Preliminary Fraud Theory
+    potential_perpetrators = db.Column(db.Text)
+    fraud_vulnerability = db.Column(db.Text)
+    evidentiary_red_flags = db.Column(db.Text)
+
+    # 3. Resource Allocation & Specialised Skills - one available/not toggle
+    # plus notes per specialist role.
+    resource_forensic_tech_available = db.Column(db.Boolean, default=False)
+    resource_forensic_tech_notes = db.Column(db.Text)
+    resource_data_analysts_available = db.Column(db.Boolean, default=False)
+    resource_data_analysts_notes = db.Column(db.Text)
+    resource_interviewers_available = db.Column(db.Boolean, default=False)
+    resource_interviewers_notes = db.Column(db.Text)
+    resource_legal_counsel_available = db.Column(db.Boolean, default=False)
+    resource_legal_counsel_notes = db.Column(db.Text)
+
+    # 4. Evidence Gathering Strategy - sequenced Phase 1 (digital & data) ->
+    # Phase 2 (third-party & public records) -> Phase 3 (interviews).
+    phase1_status = db.Column(db.String(20), default="Not Started")
+    phase1_notes = db.Column(db.Text)
+    phase2_status = db.Column(db.String(20), default="Not Started")
+    phase2_notes = db.Column(db.Text)
+    phase3_status = db.Column(db.String(20), default="Not Started")
+    phase3_notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("audit_strategy", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def is_complete(self):
+        """The strategy is considered documented once its six core
+        narrative fields are filled in - the two operational checklists
+        (resource availability, evidence-gathering phase status) are
+        expected to keep evolving as fieldwork proceeds even after
+        sign-off, so they aren't part of this gate."""
+        core_fields = [
+            self.objective_statement, self.chain_of_custody_notes, self.reporting_destination,
+            self.potential_perpetrators, self.fraud_vulnerability, self.evidentiary_red_flags,
+        ]
+        return all((v or "").strip() for v in core_fields)
+
+    def __repr__(self):
+        return f"<AuditStrategy engagement={self.engagement_id}>"
+
+
+class SecretarialPlan(db.Model):
+    """The Secretarial Engagement Plan for one Secretarial engagement -
+    what the "Planning" tab is replaced with for that engagement type
+    (mirrors AuditStrategy above, which does the same job for Investigative
+    Engagements). One row per engagement.
+
+    Built around the five pillars of a secretarial engagement plan under
+    the Companies and Other Business Entities Act [Chapter 24:31] (COBE
+    Act): (1) Entity Profile & Scope Map, (2) the Annual Statutory
+    Compliance Calendar anchored on the client's financial year-end, (3)
+    Board & Committee Meeting Cycle planning, (4) Operational &
+    Transactional Trigger Mapping, and (5) Risk Assessment & Quality
+    Control - unlike audit planning (financial materiality, sampling,
+    account balances), secretarial planning centres on statutory deadlines,
+    governance calendars, capital events and registry filings, so it does
+    not reuse MaterialityCalculation at all.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    # Pillar 1: Entity Profile & Scope Map
+    entity_categorization = db.Column(db.Text)
+    sector_regulators = db.Column(db.Text)
+    constitutional_constraints = db.Column(db.Text)
+
+    # Pillar 2: The Annual Statutory Compliance Calendar - four milestones
+    # anchored on the client's financial year-end (Engagement.period_end).
+    # Left blank by default (never auto-filled) - the Planning tab shows a
+    # suggested date computed live from period_end next to each field (see
+    # engagements._secretarial_compliance_calendar_suggestions), which the
+    # preparer can accept by typing it in, same "suggested, never
+    # fabricated" pattern as scope_suggestion/suggested_categories
+    # elsewhere in this app.
+    draft_financials_target = db.Column(db.Date)  # firm target: FYE + 4 months (statements laid before the AGM, Sec 183)
+    agm_notice_target = db.Column(db.Date)  # 21 days before the AGM (Sec 169(1))
+    agm_target = db.Column(db.Date)  # firm target FYE + 6 months; the Act requires an AGM once in every 12 months (Sec 167(2))
+    annual_return_target = db.Column(db.Date)  # 21 days after the anniversary of incorporation / registration / re-registration (Sec 165(2))
+    # The date of incorporation, registration or re-registration whose anniversary the annual return is tied to (Sec 165(2)),
+    # and the date of the last AGM (Sec 167(2): one AGM in every twelve months). Both feed cobe_checks.calendar_suggestions.
+    registration_date = db.Column(db.Date)
+    last_agm_date = db.Column(db.Date)
+    compliance_calendar_notes = db.Column(db.Text)
+
+    # Pillar 3: Board & Committee Meeting Cycle
+    meeting_schedule_notes = db.Column(db.Text)
+    agenda_preplanning_notes = db.Column(db.Text)
+    document_deadline_notes = db.Column(db.Text)
+
+    # Pillar 4: Operational & Transactional Trigger Mapping
+    transactional_trigger_notes = db.Column(db.Text)
+
+    # Pillar 5: Risk Assessment & Quality Control
+    onboarding_risk_integration_notes = db.Column(db.Text)
+    remediation_milestones_notes = db.Column(db.Text)
+    register_reconciliation_notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("secretarial_plan", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def is_complete(self):
+        """One representative narrative field per pillar filled in - the
+        compliance calendar dates and the more operational notes fields are
+        expected to keep evolving through the engagement so aren't part of
+        this gate, same reasoning as AuditStrategy.is_complete above."""
+        core_fields = [
+            self.entity_categorization, self.sector_regulators,
+            self.meeting_schedule_notes, self.transactional_trigger_notes,
+            self.onboarding_risk_integration_notes,
+        ]
+        return all((v or "").strip() for v in core_fields)
+
+    def __repr__(self):
+        return f"<SecretarialPlan engagement={self.engagement_id}>"
+
+
+# ---------- Tax Advisory & Tax Compliance module ----------
+#
+# Shown on an engagement's "Tax" tab whenever Engagement.has_tax_module is
+# True (a dedicated Tax Compliance/Tax Advisory & Health Check engagement,
+# or any other engagement type with a Tax service explicitly turned on -
+# see TAX_SERVICES above) - see tax.py for the routes and
+# templates/tax/*.html for the tab itself. Deliberately reuses existing
+# machinery wherever it already fits rather than duplicating it:
+#   - the Tax Risk Register reuses RiskItem (module="tax") - see above
+#   - the tax-head-by-tax-head Execution Plan (Module 7) reuses
+#     SubstantiveProcedureArea/SubstantiveProcedureItem, exactly like the
+#     Secretarial engagement type's own Execution Plan does - one area per
+#     TAX_HEADS entry
+#   - the CIT computation (Module 6) reuses the existing
+#     IncomeTaxComputation/DeferredTaxComputation working papers
+#   - Tax Document Management (Module 9) reuses the existing
+#     Documents/Filing Index rather than a new document model
+#   - the Tax Opinion and Tax Health Check Report (Module 10) reuse
+#     WorkpaperNarrative, one row per named part - see TAX_OPINION_PARTS/
+#     TAX_HEALTH_CHECK_PARTS above
+# The models below are the genuinely new pieces that nothing existing
+# already covers.
+
+TAX_REGISTRATION_RECORD_TYPES = [
+    ("registration", "Tax head registration"),
+    ("clearance", "Tax clearance / representation status"),
+    ("portal_access", "Tax authority e-services portal access"),
+]
+
+
+class RegistryFormFiling(db.Model):
+    """One filing with the Registrar of Companies on a Secretarial engagement: which CR form (cr_forms.CR_FORMS), what it is
+    about, the date of the event that triggers it, the date it must be lodged by (worked out from the Act's time limit where
+    there is one, or typed by the preparer), and where it stands. A log for the preparer. It does not file anything and nothing
+    in it is marked verified."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, index=True)
+    form_code = db.Column(db.String(10), nullable=False)  # "CR6", "AR", "RR" ...
+    subject = db.Column(db.String(300))  # e.g. "Appointment of J. Moyo as director"
+    event_date = db.Column(db.Date)  # the date the time limit runs from
+    due_date = db.Column(db.Date)
+    lodged_date = db.Column(db.Date)
+    status = db.Column(db.String(30), nullable=False, default="Not started")
+    registrar_reference = db.Column(db.String(100))
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("registry_form_filings", cascade="all, delete-orphan"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    @property
+    def form(self):
+        import cr_forms
+        return cr_forms.CR_FORM_BY_CODE.get(self.form_code)
+
+    @property
+    def is_overdue(self):
+        import cr_forms
+        return cr_forms.is_overdue(self.status, self.due_date)
+
+    def __repr__(self):
+        return f"<RegistryFormFiling {self.form_code} engagement={self.engagement_id}>"
+
+
+class TaxRegistration(db.Model):
+    """One row of the Tax Client Profile's registration matrix, tax
+    clearance & representation status list, or tax authority portal access
+    log (Module 1) - which of the three it is is `record_type` (see
+    TAX_REGISTRATION_RECORD_TYPES above); all three share the same simple
+    shape (an identifier/reference, a status, and a couple of dates) so
+    there's no good reason to give them three separate tables.
+
+    SECURITY: portal_username is the only credential-shaped field this
+    model has, and deliberately the ONLY one - there is no password field,
+    and there must never be one added here. The tax authority portal
+    passwords/secrets themselves are explicitly never stored in this app;
+    see the "do not store passwords/secrets" note on the Tax tab's Portal
+    Access card."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    record_type = db.Column(db.String(20), nullable=False, default="registration")
+    tax_head = db.Column(db.String(80))  # one of TAX_HEADS, or blank for a general/whole-entity record
+    identifier = db.Column(db.String(150))  # registration number / clearance certificate number / portal name
+    status = db.Column(db.String(50))  # free text - e.g. "Registered", "Valid", "Expired", "Active", "Suspended"
+    issue_date = db.Column(db.Date)
+    expiry_date = db.Column(db.Date)
+    portal_username = db.Column(db.String(150))  # only meaningful when record_type == "portal_access" - NEVER a password, see docstring
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_registrations", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def is_expired(self):
+        return bool(self.expiry_date and self.expiry_date < date.today())
+
+    def __repr__(self):
+        return f"<TaxRegistration {self.record_type} {self.identifier!r} engagement={self.engagement_id}>"
+
+
+TAX_ENTITY_CLASSIFICATIONS = [
+    "Private Company", "Public Company", "Trust", "Partnership", "Sole Trader",
+    "Private Voluntary Organisation (PVO)", "Statutory Body", "Branch of a Foreign Entity", "Other",
+]
+
+
+class TaxEntityProfile(db.Model):
+    """The Tax Entity Understanding & Regulatory Profile (Module 2) - one
+    per engagement. tax_classification/tax_year_end drive nothing
+    automatically elsewhere in the app (there's no basis to infer statutory
+    consequences from them without current legislation to hand); they're
+    recorded here as the working paper of record. regulatory_matrix_notes
+    is the free-text "which regulators/obligations apply" note - a fixed
+    Zimbabwean-tax-authority matrix was deliberately not hardcoded here,
+    since which obligations apply is itself a judgement call that varies by
+    entity and changes with legislation, not a fixed lookup table."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    tax_classification = db.Column(db.String(60))
+    tax_year_end = db.Column(db.Date)
+    regulatory_matrix_notes = db.Column(db.Text)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_entity_profile", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<TaxEntityProfile engagement={self.engagement_id}>"
+
+
+class TaxDeadline(db.Model):
+    """One entry on the Statutory Tax Calendar (Module 2) - a filing/payment
+    deadline for a given tax head, with a 30/14/7/3-day reminder hierarchy
+    computed live from due_date (never stored, so it's never stale) -
+    see reminder_level below."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    description = db.Column(db.String(200), nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    status = db.Column(db.String(20), default="Upcoming")  # "Upcoming" | "Filed" | "Not Applicable"
+    filed_date = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_deadlines", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def days_until_due(self):
+        return (self.due_date - date.today()).days
+
+    @property
+    def is_overdue(self):
+        return self.status == "Upcoming" and self.days_until_due < 0
+
+    @property
+    def reminder_level(self):
+        """Which rung of the 30/14/7/3-day reminder hierarchy this deadline
+        is currently at, or None if it's more than 30 days out, already
+        filed, or marked not applicable - purely a display hint (an
+        "Overdue"/"Due in N days" badge on the calendar), never anything
+        that sends an actual reminder on its own."""
+        if self.status != "Upcoming":
+            return None
+        days = self.days_until_due
+        if days < 0:
+            return "Overdue"
+        if days <= 3:
+            return "3-day"
+        if days <= 7:
+            return "7-day"
+        if days <= 14:
+            return "14-day"
+        if days <= 30:
+            return "30-day"
+        return None
+
+    def __repr__(self):
+        return f"<TaxDeadline {self.description!r} due={self.due_date} engagement={self.engagement_id}>"
+
+
+class TaxAnalyticalReview(db.Model):
+    """The Tax Analytical Review & Historical Exposure working paper
+    (Module 3) - one per engagement. Covers the Effective Tax Rate
+    analysis, a multi-year trend note, VAT input/output analytics, the PAYE
+    reconciliation, and a Red-Flag Engine note - every figure/finding here
+    is preparer-entered analysis, explicitly a review flag for further
+    investigation rather than a conclusion on its own (see red_flags_notes
+    below), same "system prompts, preparer concludes" pattern as the rest
+    of this app's analytical review tabs. is_necessary mirrors the
+    Secretarial Analytical Review's own necessity toggle - not every tax
+    engagement (e.g. a narrow single-issue Tax Opinion) needs a full
+    analytical review."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    is_necessary = db.Column(db.Boolean, default=True, nullable=False)
+    not_necessary_reason = db.Column(db.Text)
+
+    effective_tax_rate_percent = db.Column(db.Float)
+    expected_tax_rate_percent = db.Column(db.Float)
+    etr_variance_notes = db.Column(db.Text)
+    multi_year_trend_notes = db.Column(db.Text)
+    vat_analytics_notes = db.Column(db.Text)
+    paye_reconciliation_notes = db.Column(db.Text)
+    red_flags_notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_analytical_review", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def etr_variance(self):
+        if self.effective_tax_rate_percent is None or self.expected_tax_rate_percent is None:
+            return None
+        return self.effective_tax_rate_percent - self.expected_tax_rate_percent
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<TaxAnalyticalReview engagement={self.engagement_id}>"
+
+
+TAX_POSITION_CLASSIFICATIONS = ["Certain", "Probable", "Possible", "Remote"]
+TAX_POSITION_APPROVAL_STATUSES = ["Draft", "Pending Approval", "Approved", "Rejected"]
+
+
+class TaxPosition(db.Model):
+    """One entry in the Tax Position Register (Module 4) - a specific
+    technical position the firm/client is taking (e.g. "R&D costs treated
+    as fully deductible in the year incurred"), classified by likelihood of
+    the position being sustained and carrying its own approval workflow -
+    distinct from the Tax Risk Register (RiskItem, module="tax"), which
+    tracks entity-level risk factors rather than specific technical
+    positions."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    position_description = db.Column(db.Text, nullable=False)
+    classification = db.Column(db.String(20), default="Possible")
+    estimated_exposure = db.Column(db.Float)
+    approval_status = db.Column(db.String(20), default="Draft")
+    approved_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    approved_at = db.Column(db.DateTime)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_positions", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_id])
+
+    def __repr__(self):
+        return f"<TaxPosition {self.tax_head} {self.classification} engagement={self.engagement_id}>"
+
+
+PENALTY_INTEREST_RATE_TYPES = ["Penalty", "Interest"]
+
+
+class PenaltyInterestRate(db.Model):
+    """One effective-dated penalty or interest rate, firm-wide (not
+    per-engagement - a statutory rate doesn't vary by client) - the
+    Penalty & Interest Engine (Module 4) is built entirely on rates entered
+    here by a preparer, never a hardcoded percentage, for the same reason
+    IncomeTaxComputation.tax_rate_percent is never pre-filled (see the
+    module comment above IncomeTaxComputation): reliable current
+    Zimbabwean penalty/interest rates could not be sourced with confidence
+    at the time this was built, and they change with legislation. Managed
+    from the Tax > Penalty & Interest Rates settings screen; effective_to
+    left blank means "still the current rate" for that (tax_head,
+    rate_type)."""
+    id = db.Column(db.Integer, primary_key=True)
+    tax_head = db.Column(db.String(80), nullable=False)
+    rate_type = db.Column(db.String(10), nullable=False, default="Penalty")
+    rate_percent = db.Column(db.Float, nullable=False)
+    effective_from = db.Column(db.Date, nullable=False)
+    effective_to = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    entered_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    entered_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    entered_by = db.relationship("User")
+
+    @property
+    def is_current(self):
+        today = date.today()
+        return self.effective_from <= today and (self.effective_to is None or self.effective_to >= today)
+
+    def __repr__(self):
+        return f"<PenaltyInterestRate {self.tax_head} {self.rate_type} {self.rate_percent}% from={self.effective_from}>"
+
+
+class PenaltyInterestCalculation(db.Model):
+    """One saved run of the Penalty & Interest Engine (Module 4) for a
+    given engagement - a simple-interest/flat-penalty calculation from a
+    principal amount, days late, and the PenaltyInterestRate the preparer
+    selected, kept as a log entry (rather than overwritten) so a prior
+    exposure estimate isn't lost when circumstances/rates are recalculated
+    later. Purely arithmetic on preparer-supplied figures - see
+    financials.calculate_penalty_interest."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    principal_amount = db.Column(db.Float, nullable=False)
+    days_late = db.Column(db.Integer, nullable=False, default=0)
+    rate_id = db.Column(db.Integer, db.ForeignKey("penalty_interest_rate.id"))
+    rate_percent_used = db.Column(db.Float)  # snapshotted at calculation time, in case the rate record is later changed/retired
+    computed_amount = db.Column(db.Float)
+    notes = db.Column(db.Text)
+    calculated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    calculated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("penalty_interest_calculations", lazy=True, cascade="all, delete-orphan"))
+    rate = db.relationship("PenaltyInterestRate")
+    calculated_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<PenaltyInterestCalculation {self.tax_head} {self.computed_amount} engagement={self.engagement_id}>"
+
+
+# ---------- VAT Invoice Register & Input/Output Tax Working Paper ----------
+#
+# Requested by the user: capture sales (Output) and purchase/expense (Input)
+# invoices on an engagement, compute Input Tax and Output Tax, allow a rate
+# lower than the standard rate to be captured (a reduced rate, or a
+# zero-rated/exempt supply), and import an already-prepared Output/Input Tax
+# schedule (Excel/CSV) rather than only capturing invoices one at a time.
+# Lives on the Tax tab (VAT is already one of TAX_HEADS above) so it's
+# available on any engagement with the Tax module switched on - a dedicated
+# Tax engagement, or Tax compliance bundled into an Accounting/Audit
+# engagement - exactly like every other Tax module section (Penalty &
+# Interest Engine, Dynamic Information Request List) rather than a separate
+# copy under the Accounting tab.
+#
+# VATRate is firm-wide and effective-dated, for the exact same reason
+# PenaltyInterestRate above is: Zimbabwe's VAT rate has changed over time
+# and reliable current rates couldn't be sourced with confidence at build
+# time, so nothing here is ever hardcoded or guessed - a partner enters/
+# confirms each rate (including the standard rate itself, any lower/reduced
+# rate, and zero-rated) on the VAT Rates settings screen, and every invoice
+# picks one of these confirmed rates rather than the app assuming a
+# percentage on its own.
+VAT_RATE_TYPES = ["Standard", "Reduced", "Zero-rated", "Exempt"]
+
+
+class VATRate(db.Model):
+    """One effective-dated VAT rate, firm-wide (not per-engagement - a
+    statutory rate doesn't vary by client) - see the module comment above
+    for why this is never hardcoded. "Reduced" is any confirmed rate lower
+    than the firm's current Standard rate (the user's own "VAT less than
+    the standard rate" case) - captured as its own effective-dated entry
+    rather than a single extra field, so more than one lower rate can exist
+    over time (or even concurrently, for different classes of supply) just
+    like Standard can. "Zero-rated" and "Exempt" are both 0% in practice,
+    but kept as distinct rate_type values because they're treated
+    differently on a VAT return (a zero-rated supply is still a taxable
+    supply reported at 0%; an exempt supply falls outside the VAT system
+    entirely) - effective_to left blank means "still the current rate" for
+    that rate_type."""
+    id = db.Column(db.Integer, primary_key=True)
+    rate_type = db.Column(db.String(20), nullable=False, default="Standard")
+    rate_percent = db.Column(db.Float, nullable=False, default=0.0)
+    effective_from = db.Column(db.Date, nullable=False)
+    effective_to = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    entered_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    entered_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    entered_by = db.relationship("User")
+
+    @property
+    def is_current(self):
+        today = date.today()
+        return self.effective_from <= today and (self.effective_to is None or self.effective_to >= today)
+
+    @property
+    def label(self):
+        return f"{self.rate_type} ({self.rate_percent:g}%)"
+
+    def __repr__(self):
+        return f"<VATRate {self.rate_type} {self.rate_percent}% from={self.effective_from}>"
+
+
+class VATImportBatch(db.Model):
+    """One confirmed import of an already-prepared Output/Input Tax
+    schedule (Excel/CSV) into VATInvoice rows below - the user's own
+    "importing already prepared output tax and input tax schedule"
+    requirement. The uploaded file's column headers rarely match this app's
+    field names exactly, so the import is a two-step flow (see
+    tax.stage_vat_schedule_import/confirm_vat_schedule_import): the file is
+    staged and a best-effort column mapping is suggested (never applied on
+    its own - the same "AI/heuristic suggests, person confirms" pattern
+    used throughout this app, e.g. financials.suggest_fs_category), the
+    preparer reviews/adjusts that mapping, and only on confirmation is this
+    batch (and its VATInvoice rows) actually created. Kept as its own
+    record - rather than only tagging each row's source - so a batch's
+    column_mapping_json and original file stay available for the audit
+    trail, and so an entire mistaken import can be identified and reversed
+    in one place (see tax.delete_vat_import_batch, which deletes every
+    VATInvoice row it produced via the cascade below)."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    direction = db.Column(db.String(10), nullable=False)  # "Output" or "Input" - see VAT_INVOICE_DIRECTIONS
+    doc_type = db.Column(db.String(20), default="Invoice")  # see VAT_DOC_TYPES - applies to every row of the batch
+    currency = db.Column(db.String(3), default="USD")  # currency of trade the schedule is in (a Currency column in the file can override per row)
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))  # kept in Config.VAT_IMPORTS_DATA_DIR for the audit trail
+    column_mapping_json = db.Column(db.Text)  # the confirmed {field: source_column} mapping, for reference
+    row_count = db.Column(db.Integer, default=0)
+    skipped_row_count = db.Column(db.Integer, default=0)
+    imported_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    imported_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("vat_import_batches", lazy=True, cascade="all, delete-orphan"))
+    imported_by = db.relationship("User")
+
+    @property
+    def kind(self):
+        return vat_kind_code(self.direction, self.doc_type)
+
+    @property
+    def kind_label(self):
+        return VAT_KIND_LABELS.get(self.kind) or VAT_INVOICE_DIRECTION_LABELS.get(self.direction, self.direction)
+
+    def __repr__(self):
+        return f"<VATImportBatch {self.direction} rows={self.row_count} engagement={self.engagement_id}>"
+
+
+VAT_INVOICE_DIRECTIONS = ["Output", "Input"]
+VAT_INVOICE_DIRECTION_LABELS = {
+    "Output": "Output Tax (sales invoice)",
+    "Input": "Input Tax (purchase/expense invoice)",
+}
+# Where a VATInvoice row came from - a person capturing it directly on the
+# form, or one row of a confirmed VATImportBatch above. Purely informational
+# (both are treated identically everywhere else); shown on the register so
+# a preparer can tell an imported row apart from one they typed themselves.
+VAT_INVOICE_SOURCES = ["manual", "import"]
+
+# What kind of document a VATInvoice row is. Everything used to be a plain
+# invoice; the firm asked for VAT credit notes, Bills of Entry (imports) and
+# export sales to be handled - and shown - separately:
+#   - Credit Note: a credit note issued to a customer (Output direction) or
+#     received from a supplier (Input direction). Captured as the positive
+#     figures printed on the credit note and SUBTRACTED in the totals.
+#   - Bill of Entry: an import declaration cleared through ZIMRA Customs; the
+#     VAT paid on import is Input Tax (Input direction only). taxable_amount is
+#     the VAT value for customs purposes; customs_duty is informational.
+#   - Export Sale: a zero-rated supply (Output direction only) - the taxable
+#     value is reported but the VAT is always 0.
+VAT_DOC_TYPES = ["Invoice", "Credit Note", "Bill of Entry", "Export Sale"]
+# (kind code, label, direction, doc_type) - the single list the add form and the
+# schedule import use, so a person picks ONE thing and direction/doc type
+# follow from it.
+VAT_DOCUMENT_KINDS = [
+    ("output_invoice", "Sales invoice (Output Tax)", "Output", "Invoice"),
+    ("export_sale", "Export sale - zero-rated (Output Tax)", "Output", "Export Sale"),
+    ("output_credit_note", "Credit note issued to a customer (reduces Output Tax)", "Output", "Credit Note"),
+    ("input_invoice", "Purchase/expense invoice (Input Tax)", "Input", "Invoice"),
+    ("bill_of_entry", "Bill of Entry - imports (Input Tax)", "Input", "Bill of Entry"),
+    ("input_credit_note", "Credit note received from a supplier (reduces Input Tax)", "Input", "Credit Note"),
+]
+VAT_KIND_LABELS = {k: label for k, label, _d, _t in VAT_DOCUMENT_KINDS}
+
+
+def resolve_vat_kind(kind=None, direction=None):
+    """(direction, doc_type) for a posted `kind` code; or, for older forms that
+    only post `direction`, (direction, "Invoice"). None if neither is valid."""
+    for code, _label, d, t in VAT_DOCUMENT_KINDS:
+        if kind == code:
+            return d, t
+    if not kind and direction in VAT_INVOICE_DIRECTIONS:
+        return direction, "Invoice"
+    return None
+
+
+def vat_kind_code(direction, doc_type):
+    for code, _label, d, t in VAT_DOCUMENT_KINDS:
+        if d == direction and t == (doc_type or "Invoice"):
+            return code
+    return None
+
+
+# ZIMRA requires VAT to be accounted for and paid in the currency of trade, so
+# every VAT document carries a currency and the working paper is produced
+# SEPARATELY for each one - ZWG and USD are never added together or netted off.
+VAT_CURRENCIES = ["ZWG", "USD"]
+VAT_DEFAULT_CURRENCY = "USD"  # also what rows captured before currencies existed are treated as
+_VAT_CURRENCY_ALIASES = {
+    "zwg": "ZWG", "zig": "ZWG", "zimgold": "ZWG", "zimbabwe gold": "ZWG", "zwl": "ZWG", "zwg$": "ZWG",
+    "usd": "USD", "us$": "USD", "us dollar": "USD", "us dollars": "USD", "$": "USD", "usd$": "USD",
+}
+
+
+def normalize_vat_currency(value, default=None):
+    """'ZWG' or 'USD' for whatever a person typed or a schedule contained
+    ("ZiG", "zwg", "US$", "USD "...); `default` if it isn't recognised."""
+    text = " ".join(str(value or "").split()).lower()
+    if not text:
+        return default
+    return _VAT_CURRENCY_ALIASES.get(text, default)
+
+
+def vat_working_paper_by_currency(invoices):
+    """{currency: vat_working_paper_summary(...)} for each currency that has
+    documents, in VAT_CURRENCIES order - one independent working paper per
+    currency of trade. A row with no currency counts as VAT_DEFAULT_CURRENCY."""
+    out = {}
+    for cur in VAT_CURRENCIES:
+        subset = [i for i in invoices if (i.currency or VAT_DEFAULT_CURRENCY) == cur]
+        if subset:
+            out[cur] = vat_working_paper_summary(subset)
+    return out
+
+
+# Why input tax is not deductible, with the VAT Act reference (section 16(2) of the Value Added Tax Act [Chapter 23:12]).
+VAT_DENIAL_GROUNDS = [
+    ("entertainment", "Entertainment", "16(2)(a)"),
+    ("club", "Club, association or society subscription", "16(2)(b)"),
+    ("vehicle", "Motor vehicle (not within the proviso)", "16(2)(d)"),
+    ("export_tax", "Export tax on unbeneficiated minerals / hides", "16(2)(e)"),
+    ("scheme", "Medical scheme or superannuation fund supplies", "16(2)(c)"),
+    ("other", "Other - see the document's notes", "16"),
+]
+VAT_DENIAL_LABELS = {k: label for k, label, _r in VAT_DENIAL_GROUNDS}
+VAT_DENIAL_REFS = {k: r for k, _l, r in VAT_DENIAL_GROUNDS}
+
+
+def vat_working_paper_summary(invoices):
+    """Totals for the VAT working paper, each document kind kept SEPARATE:
+    {kind_code: {"count", "taxable", "vat"}} plus net Output/Input tax and
+    taxable values (credit notes subtracted) and the net VAT position.
+    Positive net position = payable to ZIMRA, negative = refundable."""
+    buckets = {code: {"count": 0, "taxable": 0.0, "vat": 0.0, "duty": 0.0} for code, *_ in VAT_DOCUMENT_KINDS}
+    for inv in invoices:
+        code = vat_kind_code(inv.direction, inv.doc_type)
+        if code is None:
+            continue
+        b = buckets[code]
+        b["count"] += 1
+        b["taxable"] += inv.taxable_amount or 0.0
+        b["vat"] += inv.vat_amount or 0.0
+        b["duty"] += inv.customs_duty or 0.0
+    out = {"buckets": buckets}
+    out["output_taxable"] = (buckets["output_invoice"]["taxable"] + buckets["export_sale"]["taxable"]
+                             - buckets["output_credit_note"]["taxable"])
+    out["output_tax"] = buckets["output_invoice"]["vat"] + buckets["export_sale"]["vat"] - buckets["output_credit_note"]["vat"]
+    out["input_taxable"] = (buckets["input_invoice"]["taxable"] + buckets["bill_of_entry"]["taxable"]
+                            - buckets["input_credit_note"]["taxable"])
+    out["input_tax"] = buckets["input_invoice"]["vat"] + buckets["bill_of_entry"]["vat"] - buckets["input_credit_note"]["vat"]
+    # Section 16(2): input tax the Act does not allow. Denied documents stay in the register; their VAT is
+    # taken out of the claimable amount (a denied credit note received is taken out the other way round).
+    denied = 0.0
+    denied_count = 0
+    exempt_taxable = 0.0
+    zero_rated_taxable = 0.0
+    for inv in invoices:
+        code = vat_kind_code(inv.direction, inv.doc_type)
+        if code in ("input_invoice", "bill_of_entry") and getattr(inv, "input_tax_denied", False):
+            denied += inv.vat_amount or 0.0
+            denied_count += 1
+        elif code == "input_credit_note" and getattr(inv, "input_tax_denied", False):
+            denied -= inv.vat_amount or 0.0
+        rt = getattr(getattr(inv, "vat_rate", None), "rate_type", None)
+        sign = -1.0 if code == "output_credit_note" else 1.0
+        if code in ("output_invoice", "output_credit_note"):
+            if rt == "Exempt":
+                exempt_taxable += sign * (inv.taxable_amount or 0.0)
+            elif rt == "Zero-rated":
+                zero_rated_taxable += sign * (inv.taxable_amount or 0.0)
+        elif code == "export_sale":
+            zero_rated_taxable += inv.taxable_amount or 0.0
+    out["input_tax_denied"] = denied
+    out["input_tax_denied_count"] = denied_count
+    out["input_tax_claimable"] = out["input_tax"] - denied
+    out["output_exempt_taxable"] = exempt_taxable      # exempt supplies (section 11) are not taxable supplies
+    out["output_zero_rated_taxable"] = zero_rated_taxable   # zero-rated supplies (section 10) are taxable supplies at 0%
+    out["output_taxable_excl_exempt"] = out["output_taxable"] - exempt_taxable
+    out["net_position"] = out["output_tax"] - out["input_tax_claimable"]
+    return out
+
+
+class VATInvoice(db.Model):
+    """One sales (Output) or purchase/expense (Input) invoice line captured
+    for an engagement's VAT working paper - either typed in directly or
+    produced by a confirmed VATImportBatch above. taxable_amount is always
+    the value excluding VAT; vat_amount is the actual VAT charged/claimed on
+    the invoice, captured directly (an invoice's own stated VAT amount can
+    differ from a plain rate x amount calculation by a cent or two of
+    rounding, and this is a register of what the invoice actually says, not
+    a recalculation of it) rather than only ever derived from vat_rate.
+    vat_rate/vat_rate_percent_used are still recorded for every line (the
+    rate actually used, snapshotted the same way
+    PenaltyInterestCalculation.rate_percent_used is, in case the firm-wide
+    VATRate record is later changed or retired) so the working paper can
+    show which invoices used a rate other than Standard - the user's own
+    "VAT less than the standard rate" case."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    direction = db.Column(db.String(10), nullable=False)  # "Output" or "Input"
+    # Invoice | Credit Note | Bill of Entry | Export Sale - see VAT_DOC_TYPES.
+    # NULL (rows from before this existed) means a plain Invoice.
+    doc_type = db.Column(db.String(20), default="Invoice")
+    # Currency of trade (ZWG | USD) - VAT is declared and paid per currency.
+    # NULL (rows from before this existed) is treated as VAT_DEFAULT_CURRENCY.
+    currency = db.Column(db.String(3), default="USD")
+    # Credit note: the original invoice number it credits. Bill of Entry /
+    # Export Sale: the customs entry / export document reference.
+    related_reference = db.Column(db.String(100))
+    customs_duty = db.Column(db.Float)  # Bill of Entry only - duty paid on the import (informational; not VAT)
+    invoice_date = db.Column(db.Date)
+    invoice_number = db.Column(db.String(100))
+    counterparty_name = db.Column(db.String(200))  # the customer (Output) or supplier (Input) named on the invoice
+    description = db.Column(db.String(300))
+    taxable_amount = db.Column(db.Float, nullable=False, default=0.0)
+    vat_rate_id = db.Column(db.Integer, db.ForeignKey("vat_rate.id"))
+    vat_rate_percent_used = db.Column(db.Float)  # snapshot of the rate actually applied at capture/import time
+    vat_amount = db.Column(db.Float, nullable=False, default=0.0)
+    source = db.Column(db.String(10), nullable=False, default="manual")
+    import_batch_id = db.Column(db.Integer, db.ForeignKey("vat_import_batch.id"))
+    notes = db.Column(db.Text)
+    # Input tax the Act does not allow to be deducted (section 16(2)): the document stays in the register
+    # but its VAT is left out of the claimable Input Tax. denial_ground is one of VAT_DENIAL_GROUNDS.
+    input_tax_denied = db.Column(db.Boolean, nullable=False, default=False)
+    denial_ground = db.Column(db.String(30))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("vat_invoices", lazy=True, cascade="all, delete-orphan"))
+    vat_rate = db.relationship("VATRate")
+    import_batch = db.relationship("VATImportBatch", backref=db.backref("invoices", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def total_amount(self):
+        return (self.taxable_amount or 0.0) + (self.vat_amount or 0.0)
+
+    @property
+    def kind(self):
+        return vat_kind_code(self.direction, self.doc_type)
+
+    @property
+    def is_credit_note(self):
+        return (self.doc_type or "Invoice") == "Credit Note"
+
+    @property
+    def kind_label(self):
+        return VAT_KIND_LABELS.get(self.kind) or VAT_INVOICE_DIRECTION_LABELS.get(self.direction, self.direction)
+
+    def __repr__(self):
+        return f"<VATInvoice {self.direction} {self.invoice_number or ''} {self.vat_amount} engagement={self.engagement_id}>"
+
+
+class VATPeriod(db.Model):
+    """One VAT month of an engagement's VAT register (e.g. September 2026) that
+    the team has finished computing. A row exists only once a month has been
+    marked "Computation done"; a month with no row is "In progress".
+
+    A month that is done is LOCKED: no VAT document dated in it can be added,
+    deleted, re-tagged or imported until someone with the reopen permission
+    (Supervisor, Partner or Admin by default) reopens it. Reopening keeps the
+    row (is_done False) with who/when/why, so the history of a month that was
+    reopened is not lost; marking it done again overwrites the completion
+    details, while `times_reopened` keeps the running count.
+
+    The month a document belongs to is the month of its own invoice_date;
+    documents with no date cannot be placed in a month and are listed apart."""
+    __tablename__ = "vat_period"
+    __table_args__ = (db.UniqueConstraint("engagement_id", "year", "month", name="uq_vat_period"),)
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    month = db.Column(db.Integer, nullable=False)
+    is_done = db.Column(db.Boolean, nullable=False, default=True)
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reopened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reopened_at = db.Column(db.DateTime)
+    reopen_reason = db.Column(db.String(300))
+    times_reopened = db.Column(db.Integer, nullable=False, default=0)
+
+    engagement = db.relationship("Engagement", backref=db.backref("vat_periods", lazy=True, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reopened_by = db.relationship("User", foreign_keys=[reopened_by_id])
+
+    @property
+    def key(self):
+        return vat_period_key(self.year, self.month)
+
+    @property
+    def label(self):
+        return vat_period_label(self.year, self.month)
+
+    def __repr__(self):
+        return f"<VATPeriod {self.key} done={self.is_done} engagement={self.engagement_id}>"
+
+
+def vat_period_key(year, month):
+    """'2026-09' - the form used in URLs and as the lookup key."""
+    return f"{int(year):04d}-{int(month):02d}"
+
+
+def vat_period_label(year, month):
+    return date(int(year), int(month), 1).strftime("%B %Y")
+
+
+def parse_vat_period_key(text):
+    """(year, month) for '2026-09', else None."""
+    try:
+        y, m = str(text).split("-")
+        y, m = int(y), int(m)
+        date(y, m, 1)
+        return y, m
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def vat_period_of(day):
+    """(year, month) a document dated `day` belongs to, or None if undated."""
+    return (day.year, day.month) if day else None
+
+
+def locked_vat_months(engagement_id):
+    """{(year, month)} of this engagement's months marked 'Computation done'."""
+    rows = VATPeriod.query.filter_by(engagement_id=engagement_id, is_done=True).all()
+    return {(r.year, r.month) for r in rows}
+
+
+def vat_locked_months_among(engagement_id, days):
+    """Sorted list of the locked (year, month) pairs that any of `days` falls in."""
+    locked = locked_vat_months(engagement_id)
+    if not locked:
+        return []
+    return sorted({vat_period_of(d) for d in days if d and vat_period_of(d) in locked})
+
+
+TAX_INFO_REQUEST_STATUSES = ["Outstanding", "Received", "Not Applicable"]
+
+
+class TaxInformationRequest(db.Model):
+    """One line of the Dynamic Information Request List (Module 5) - the
+    tax equivalent of a PBC (prepared-by-client) list: an item requested
+    from the client, who it was requested from, and whether it's come back
+    yet. "Dynamic" in the module spec means preparer-curated per engagement
+    rather than a single fixed checklist - hence a plain add/edit/delete
+    list here rather than a seeded template."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    item_description = db.Column(db.String(300), nullable=False)
+    requested_from = db.Column(db.String(150))
+    status = db.Column(db.String(20), default="Outstanding")
+    date_requested = db.Column(db.Date)
+    date_received = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_information_requests", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<TaxInformationRequest {self.item_description!r} status={self.status} engagement={self.engagement_id}>"
+
+
+TAX_RETURN_STATUSES = ["Not Started", "In Preparation", "Filed", "Assessed", "Paid", "Overdue"]
+
+
+class TaxReturnRecord(db.Model):
+    """One tax return/filing being tracked through Tax Execution & Working
+    Papers (Module 7) - CIT, VAT, WHT, PAYE, Customs, or a Provisional Tax
+    (QPD) instalment, all sharing this one model via the `tax_head`
+    discriminator rather than five/six separate bespoke tables (mirrors how
+    Secretarial's Execution Plan reuses SubstantiveProcedureItem rather
+    than a new model - see the module comment at the top of this section).
+    assessed_amount/reconciliation_notes cover the E-Filing & Assessment
+    Reconciliation workflow (Module 10) - comparing what was filed/paid
+    against the tax authority's own assessment, on the same row rather than
+    a separate model."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80), nullable=False)
+    period_label = db.Column(db.String(80))  # e.g. "2026 Q1", "May 2026", "2026 Annual"
+    due_date = db.Column(db.Date)
+    filed_date = db.Column(db.Date)
+    status = db.Column(db.String(20), default="Not Started")
+    amount_due = db.Column(db.Float)
+    amount_paid = db.Column(db.Float)
+    assessed_amount = db.Column(db.Float)
+    reference = db.Column(db.String(100))  # ZIMRA/e-filing acknowledgement reference
+    reconciliation_notes = db.Column(db.Text)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_return_records", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def is_overdue(self):
+        return bool(self.due_date and self.due_date < date.today() and self.status not in ("Filed", "Assessed", "Paid"))
+
+    @property
+    def assessment_variance(self):
+        if self.assessed_amount is None or self.amount_due is None:
+            return None
+        return self.assessed_amount - self.amount_due
+
+    def __repr__(self):
+        return f"<TaxReturnRecord {self.tax_head} {self.period_label} status={self.status} engagement={self.engagement_id}>"
+
+
+class TaxResearchLogEntry(db.Model):
+    """One entry in the Technical Research Log (Module 7B - Tax Advisory
+    Workflow, only shown when Engagement.has_tax_advisory is True): a
+    technical question researched, the conclusion reached, and the
+    authorities relied on."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    topic = db.Column(db.String(200), nullable=False)
+    question = db.Column(db.Text)
+    research_notes = db.Column(db.Text)
+    conclusion = db.Column(db.Text)
+    references = db.Column(db.Text)  # legislation/case law/rulings relied on
+    prepared_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    prepared_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_research_log", lazy=True, cascade="all, delete-orphan"))
+    prepared_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<TaxResearchLogEntry {self.topic!r} engagement={self.engagement_id}>"
+
+
+class TaxStructuringOption(db.Model):
+    """One option within a Structuring Options Analysis scenario comparison
+    (Module 7B, advisory-only) - several rows on the same engagement, one
+    per option under consideration, compared side by side on the Tax tab."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    option_name = db.Column(db.String(150), nullable=False)
+    description = db.Column(db.Text)
+    estimated_tax_impact = db.Column(db.Float)
+    risk_rating = db.Column(db.String(10))  # "Low" | "Medium" | "High"
+    recommended = db.Column(db.Boolean, default=False)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_structuring_options", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<TaxStructuringOption {self.option_name!r} engagement={self.engagement_id}>"
+
+
+TAX_DISPUTE_STAGES = [
+    "Notice Received", "Objection Lodged", "Appeal - Fiscal Appeal Court",
+    "Appeal - Higher Court", "Resolved - Favourable", "Resolved - Unfavourable", "Withdrawn",
+]
+
+
+class TaxDispute(db.Model):
+    """One tax dispute being tracked through the Tax Dispute Management
+    workflow (Module 7B, advisory-only) - from the first notice received
+    through objection/appeal to resolution."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    issue_description = db.Column(db.Text, nullable=False)
+    stage = db.Column(db.String(40), default="Notice Received")
+    amount_in_dispute = db.Column(db.Float)
+    next_action = db.Column(db.String(300))
+    next_action_date = db.Column(db.Date)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_disputes", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+    @property
+    def is_resolved(self):
+        return self.stage.startswith("Resolved") or self.stage == "Withdrawn"
+
+    def __repr__(self):
+        return f"<TaxDispute {self.tax_head} stage={self.stage} engagement={self.engagement_id}>"
+
+
+# ---------- ZIMRA Audits & Correspondence ----------
+# A firm-wide register of every ZIMRA audit, query, assessment, objection and
+# payment-plan matter a client has, with the letters sent and received. A case
+# belongs to a Client and can optionally be linked to the engagement it is being
+# handled under (then it follows that engagement's confidentiality).
+
+ZIMRA_CASE_TYPES = [
+    "Desk audit", "Field audit (comprehensive)", "Issue-specific audit", "VAT audit / refund verification",
+    "PAYE / payroll audit", "Withholding tax review", "Query / information request", "Assessment",
+    "Objection", "Appeal", "Condonation / waiver of penalties", "Payment plan / TCC", "Other",
+]
+ZIMRA_CASE_STATUSES = ["Open", "Awaiting client", "Awaiting ZIMRA", "Objection lodged", "Appeal lodged", "Closed"]
+ZIMRA_CORRESPONDENCE_KINDS = [
+    "Notice of audit", "Information request", "Assessment / findings", "Objection", "Response / submission",
+    "Meeting / call note", "Payment plan", "Tax Clearance Certificate (TCC)", "Other",
+]
+ZIMRA_DIRECTIONS = ["Incoming from ZIMRA", "Outgoing to ZIMRA", "Internal note"]
+ZIMRA_PLAN_STATUSES = ["Proposed", "Agreed", "In default", "Completed"]
+ZIMRA_TCC_STATUSES = ["Not applied", "Applied", "Issued", "Declined", "Expired"]
+ZIMRA_CURRENCIES = ["USD", "ZWG"]
+
+
+class ZimraCase(db.Model):
+    """One ZIMRA audit / query / assessment / objection matter for a client."""
+    __tablename__ = "zimra_case"
+    id = db.Column(db.Integer, primary_key=True)
+    case_number = db.Column(db.String(30), unique=True, nullable=False)  # ZC-YYYY-NNNN
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    title = db.Column(db.String(200), nullable=False)
+    case_type = db.Column(db.String(60), default="Desk audit")
+    tax_head = db.Column(db.String(80))
+    period_from = db.Column(db.Date)
+    period_to = db.Column(db.Date)
+    zimra_reference = db.Column(db.String(100))
+    zimra_officer = db.Column(db.String(150))
+    opened_on = db.Column(db.Date)
+    status = db.Column(db.String(30), nullable=False, default="Open")
+    closed_on = db.Column(db.Date)
+    description = db.Column(db.Text)
+    currency = db.Column(db.String(3), default="USD")
+    amount_assessed = db.Column(db.Float)      # tax assessed by ZIMRA
+    penalties_interest = db.Column(db.Float)   # penalties and interest raised
+    amount_agreed = db.Column(db.Float)        # amount agreed / settled / finally payable
+    amount_paid = db.Column(db.Float)          # paid to date
+    outcome = db.Column(db.Text)
+    # payment plan and Tax Clearance Certificate
+    plan_status = db.Column(db.String(20))
+    plan_notes = db.Column(db.String(300))
+    tcc_status = db.Column(db.String(20))
+    tcc_number = db.Column(db.String(60))
+    tcc_expiry = db.Column(db.Date)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("zimra_cases", lazy=True))
+    engagement = db.relationship("Engagement", backref=db.backref("zimra_cases", lazy=True))
+    created_by = db.relationship("User")
+    correspondence = db.relationship("ZimraCorrespondence", backref="case", cascade="all, delete-orphan",
+                                     order_by="ZimraCorrespondence.corr_date.desc(), ZimraCorrespondence.id.desc()")
+    instalments = db.relationship("ZimraInstalment", backref="case", cascade="all, delete-orphan",
+                                  order_by="ZimraInstalment.due_date")
+
+    @property
+    def is_closed(self):
+        return self.status == "Closed"
+
+    @property
+    def open_deadlines(self):
+        """Incoming letters that still need a reply, soonest deadline first."""
+        items = [c for c in self.correspondence if c.awaiting_response]
+        return sorted(items, key=lambda c: c.response_due)
+
+    @property
+    def overdue_deadlines(self):
+        return [c for c in self.open_deadlines if c.is_overdue]
+
+    @property
+    def next_deadline(self):
+        items = self.open_deadlines
+        return items[0] if items else None
+
+    @property
+    def overdue_instalments(self):
+        return [i for i in self.instalments if i.is_overdue]
+
+    @property
+    def balance(self):
+        """Still to pay: agreed amount (or assessed + penalties if nothing is agreed) less paid."""
+        if self.amount_agreed is not None:
+            due = self.amount_agreed
+        elif self.amount_assessed is not None or self.penalties_interest is not None:
+            due = (self.amount_assessed or 0.0) + (self.penalties_interest or 0.0)
+        else:
+            return None
+        return round(due - (self.amount_paid or 0.0), 2)
+
+    @property
+    def period_label(self):
+        if self.period_from and self.period_to:
+            return f"{self.period_from.strftime('%b %Y')} - {self.period_to.strftime('%b %Y')}"
+        if self.period_from or self.period_to:
+            return (self.period_from or self.period_to).strftime('%b %Y')
+        return None
+
+    def __repr__(self):
+        return f"<ZimraCase {self.case_number} {self.status}>"
+
+
+class ZimraCorrespondence(db.Model):
+    """One letter, notice, response, meeting or call on a ZIMRA case. An
+    incoming item can carry a response deadline; it stays on the deadline
+    list until it is marked as responded to."""
+    __tablename__ = "zimra_correspondence"
+    id = db.Column(db.Integer, primary_key=True)
+    case_id = db.Column(db.Integer, db.ForeignKey("zimra_case.id"), nullable=False)
+    corr_date = db.Column(db.Date, nullable=False)
+    direction = db.Column(db.String(30), nullable=False, default="Incoming from ZIMRA")
+    kind = db.Column(db.String(50))
+    subject = db.Column(db.String(250), nullable=False)
+    reference = db.Column(db.String(100))
+    notes = db.Column(db.Text)
+    response_due = db.Column(db.Date)
+    responded_on = db.Column(db.Date)
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    uploaded_by = db.relationship("User")
+
+    @property
+    def awaiting_response(self):
+        return bool(self.response_due and not self.responded_on and not self.case.is_closed)
+
+    @property
+    def is_overdue(self):
+        return bool(self.awaiting_response and self.response_due < date.today())
+
+    @property
+    def days_left(self):
+        return (self.response_due - date.today()).days if self.response_due else None
+
+
+class ZimraInstalment(db.Model):
+    """One instalment of an agreed ZIMRA payment plan."""
+    __tablename__ = "zimra_instalment"
+    id = db.Column(db.Integer, primary_key=True)
+    case_id = db.Column(db.Integer, db.ForeignKey("zimra_case.id"), nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    paid_on = db.Column(db.Date)
+    paid_amount = db.Column(db.Float)
+
+    @property
+    def is_paid(self):
+        return self.paid_on is not None
+
+    @property
+    def is_overdue(self):
+        return bool(not self.paid_on and self.due_date < date.today() and not self.case.is_closed)
+
+
+ZIMRA_REPLY_STATUSES = ["Draft", "Awaiting approval", "Approved", "Sent"]
+ZIMRA_SEND_METHODS = ["Hand delivery", "Email", "ZIMRA online portal", "Courier / post", "Other"]
+
+
+class ZimraReply(db.Model):
+    """A letter to ZIMRA drafted in the app: usually the reply to a letter logged on the case. It is written from a
+    template, submitted for a Partner's approval, downloaded on the firm letterhead and, once it has gone, marked as
+    sent - which logs it as an outgoing letter on the case and clears the deadline of the letter it answers."""
+    __tablename__ = "zimra_reply"
+    id = db.Column(db.Integer, primary_key=True)
+    case_id = db.Column(db.Integer, db.ForeignKey("zimra_case.id"), nullable=False)
+    in_reply_to_id = db.Column(db.Integer, db.ForeignKey("zimra_correspondence.id"))   # the ZIMRA letter being answered
+    correspondence_id = db.Column(db.Integer, db.ForeignKey("zimra_correspondence.id"))  # the outgoing entry created when sent
+    template_key = db.Column(db.String(40))
+    letter_date = db.Column(db.Date)
+    our_reference = db.Column(db.String(100))
+    addressee = db.Column(db.Text)
+    salutation = db.Column(db.String(100), default="Dear Sir/Madam")
+    subject = db.Column(db.String(300), nullable=False, default="")
+    body = db.Column(db.Text, nullable=False, default="")
+    signatory = db.Column(db.String(150))
+    signatory_title = db.Column(db.String(200))
+    status = db.Column(db.String(20), nullable=False, default="Draft")
+    events = db.Column(db.Text)  # JSON list of {at, by, what, note}
+    # JSON, set when the text was first drafted by AI (see zimra_ai.py): model, who/when, the drafter's instructions,
+    # positions taken, sources, reviewer notes, checks flagged, the text it replaced (prev_body) and who checked it.
+    ai_meta = db.Column(db.Text)
+    returned_note = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    submitted_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    submitted_at = db.Column(db.DateTime)
+    approved_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    approved_at = db.Column(db.DateTime)
+    sent_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    sent_on = db.Column(db.Date)
+    sent_method = db.Column(db.String(40))
+
+    case = db.relationship("ZimraCase", backref=db.backref(
+        "replies", cascade="all, delete-orphan", order_by="ZimraReply.created_at.desc(), ZimraReply.id.desc()"))
+    in_reply_to = db.relationship("ZimraCorrespondence", foreign_keys=[in_reply_to_id])
+    correspondence = db.relationship("ZimraCorrespondence", foreign_keys=[correspondence_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    submitted_by = db.relationship("User", foreign_keys=[submitted_by_id])
+    approved_by = db.relationship("User", foreign_keys=[approved_by_id])
+    sent_by = db.relationship("User", foreign_keys=[sent_by_id])
+
+    @property
+    def history(self):
+        import json as _json
+        try:
+            return _json.loads(self.events) if self.events else []
+        except ValueError:
+            return []
+
+    @property
+    def ai(self):
+        """The AI-draft record (a dict) or None when the letter was written by a person."""
+        import json as _json
+        try:
+            return _json.loads(self.ai_meta) if self.ai_meta else None
+        except ValueError:
+            return None
+
+    def set_ai(self, data):
+        import json as _json
+        self.ai_meta = _json.dumps(data) if data else None
+
+    def log(self, user, what, note=None):
+        import json as _json
+        items = self.history
+        items.append({"at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"), "by": getattr(user, "name", None) or "-",
+                      "what": what, "note": note or ""})
+        self.events = _json.dumps(items)
+
+    @property
+    def is_editable(self):
+        return self.status == "Draft"
+
+    @property
+    def is_locked(self):
+        return self.status in ("Approved", "Sent")
+
+
+# The kinds of instrument that can now be FILED (as an actual document,
+# rather than just logged as a text entry) against a LegislativeUpdate - see
+# the "filing" fields added to that model below. Existing rows logged before
+# this existed have instrument_type None, and are shown simply as "Update".
+# "Case" (added alongside chunked full-text search) is for a court
+# judgment/case - Zimbabwean or foreign - rather than a piece of legislation;
+# see the case_* fields below and legislation_summary.summarize_case_law.
+# "Pub" (added alongside Case) is for a professional publication or journal
+# article - e.g. a SAIT Tax Chronicles Monthly piece, a firm's tax alert, an
+# ICAZ technical note - filed for its analysis/commentary rather than as a
+# primary source of Zimbabwean law. This was added after a real filing
+# mistake: a South African tax journal issue (no Zimbabwean statutory
+# instruments in it at all) had nowhere proper to go and ended up filed as
+# though it were Zimbabwean legislation, which is exactly the kind of
+# mis-framing that produces a wrong AI summary (see legislation_summary.py's
+# PUBLICATION_SYSTEM_PROMPT for the same lesson CASE_SYSTEM_PROMPT already
+# learned from a mis-filed South African case). A Publication is useful,
+# persuasive secondary material - not primary law and not binding - and is
+# summarised and searched that way; see summarize_publication_update.
+LEGISLATIVE_UPDATE_TYPES = ["Act", "Notice", "SI", "Case", "Pub", "News"]
+LEGISLATIVE_UPDATE_TYPE_LABELS = {
+    "Act": "Act of Parliament",
+    "Notice": "Government Notice",
+    "SI": "Statutory Instrument",
+    "Case": "Case Law",
+    "Pub": "Publication",
+    "News": "News Article",
+}
+
+# How a filed Case entry's authority for Zimbabwean practice is classified -
+# by the AI as a first pass (ai_case_authority_status, never applied on its
+# own) and then confirmed/overridden by a person (case_authority_status),
+# same "suggest, then a person confirms" pattern as areas/ai_suggested_areas.
+# A Zimbabwean court's decision is "binding" (subject to the ordinary court
+# hierarchy); a foreign court's decision is never binding, but Zimbabwean
+# courts have long treated South African case law in particular as
+# persuasive authority, given the shared Roman-Dutch/common-law tradition
+# and closely analogous legislation (including much of Zimbabwe's own tax
+# law) - being foreign is not, on its own, a reason to call a case "not
+# relevant". "not_relevant" is reserved for a case whose actual subject
+# matter doesn't bear on Zimbabwean tax/legal practice at all, not merely
+# because it wasn't decided by a Zimbabwean court.
+CASE_AUTHORITY_STATUSES = ["binding", "persuasive", "limited", "not_relevant"]
+CASE_AUTHORITY_LABELS = {
+    "binding": "Binding (Zimbabwean court)",
+    "persuasive": "Persuasive authority",
+    "limited": "Limited/uncertain persuasive value",
+    "not_relevant": "Not relevant to Zimbabwean practice",
+}
+
+# A fixed set of practice-area tags a logged/filed update can be marked
+# against - used both by a person tagging an update by hand and by the AI's
+# own suggested-areas guess (see legislation_summary.py). Deliberately not
+# free text, so "which of our clients might this affect" stays answerable by
+# filtering rather than by guessing at inconsistent wording.
+LEGISLATIVE_UPDATE_AREAS = [
+    "Tax", "Companies & Corporate Law", "Commercial Law", "Estate Duty & Succession",
+    "Labour & Employment", "Banking & Finance", "Insurance & Pensions", "Anti-Money Laundering",
+    "Data Protection & Cyber Security", "Customs & Excise", "Exchange Control",
+    "Accounting & Auditing Standards", "Property & Land", "Other",
+]
+
+
+class LegislativeUpdate(db.Model):
+    """One entry in the firm-wide Legislative Update Control log (Module 8)
+    - a change in legislation/practice the firm has logged and assessed the
+    impact of. Firm-wide rather than per-engagement (a Finance Act change
+    isn't specific to one client) - see tax.py's legislative_updates list
+    page, reachable from HR & Administration, and from a top-nav link
+    alongside the other firm-wide libraries.
+
+    Originally a manually-typed log entry (title/summary/tax_head/
+    effective_date/source_reference/impact_assessment) - those fields are
+    unchanged and still work exactly as before. The fields below let an
+    entry instead FILE the actual instrument (an Act/Notice/SI, a court
+    Case, or a professional Publication, as a PDF or image): text is
+    extracted from it the same way as RegulatoryNotice/CompanyDocument (see
+    sanctions_data.extract_pdf_text), and then summarised by AI (see
+    legislation_summary.py) into ai_summary/ai_key_changes - purely
+    informational, like every other AI-assisted feature in this app: it
+    never decides anything, a person reads it and judges it. "areas" is the
+    firm's own confirmed tagging of which practice areas the instrument
+    touches (used to decide which clients it might be relevant to, and
+    shown on each tagged client's own page - see
+    LegislativeUpdateClientLink); ai_suggested_areas is only the AI's own
+    guess at the same, offered as a starting point - never applied
+    automatically. A logged entry with no file is unaffected: all of the
+    fields below are simply blank.
+
+    A Case entry (instrument_type == "Case") is a court judgment rather
+    than a piece of legislation - Zimbabwean or foreign - and gets the
+    case_* fields below in addition to the usual summary/key-holdings/areas
+    treatment: see CASE_AUTHORITY_STATUSES above for why a foreign judgment
+    (particularly South African) is assessed for persuasive value rather
+    than dismissed outright for not being Zimbabwean law.
+
+    A Pub entry (instrument_type == "Pub") is a professional publication or
+    journal article - not a piece of Zimbabwean legislation and not a court
+    judgment, so it gets neither the case_* fields nor legislation's own
+    framing: see legislation_summary.PUBLICATION_SYSTEM_PROMPT. Use the
+    existing source_reference field for its citation (e.g. "Tax Chronicles
+    Monthly, Issue 90, January 2026, SAIT").
+
+    A News entry (instrument_type == "News") is a general news article about
+    a development the firm wants on record - typically filed by pasting a
+    URL (article_url below) rather than uploading a file: the app fetches
+    the page itself, extracts its text, and summarises it the same way as
+    everything else, but through legislation_summary.NEWS_SYSTEM_PROMPT,
+    which frames it as what it actually is - ordinary news reporting, not a
+    professional/technical analysis (unlike Pub) and never primary law -
+    so a practitioner treats it as an early signal of a possible change to
+    watch for, not something to rely on until the actual instrument is
+    filed and reviewed. has_file is False for a News entry filed this way
+    (there's no uploaded file, only an extracted copy of the page); see
+    has_source below for the check that covers both."""
+    id = db.Column(db.Integer, primary_key=True)
+    tax_head = db.Column(db.String(80))
+    title = db.Column(db.String(200), nullable=False)
+    summary = db.Column(db.Text)
+    effective_date = db.Column(db.Date)
+    source_reference = db.Column(db.String(200))
+    impact_assessment = db.Column(db.Text)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # ---- Filing an actual instrument (Act/Notice/SI) and its AI summary ----
+    instrument_type = db.Column(db.String(10))  # "Act"/"Notice"/"SI" - see LEGISLATIVE_UPDATE_TYPES; None for an old text-only log entry
+    gazette_date = db.Column(db.Date)  # distinct from effective_date - when it was gazetted vs when it takes effect
+    areas_json = db.Column(db.Text)  # JSON-encoded list, confirmed by a person - see LEGISLATIVE_UPDATE_AREAS
+
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))
+    extracted_text = db.Column(db.Text)
+    extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error"
+    page_count = db.Column(db.Integer)
+
+    ai_summary = db.Column(db.Text)
+    ai_key_changes_json = db.Column(db.Text)  # JSON-encoded list of short bullet strings (for a Case: its key holdings)
+    ai_suggested_areas_json = db.Column(db.Text)  # JSON-encoded list - a suggestion only, never auto-applied
+    ai_status = db.Column(db.String(20))  # "done", "not_configured", "error", "skipped" (see legislation_summary.skip_summary_reason - full Acts deliberately aren't auto-summarised)
+    ai_error = db.Column(db.Text)
+    ai_processed_at = db.Column(db.DateTime)
+
+    # ---- Case Law filing only (instrument_type == "Case") ----
+    # citation/court/jurisdiction are read straight off the judgment by the
+    # AI (an extraction, not a judgement call) but stay editable by hand -
+    # see tax.save_legislative_update_areas. authority_status is the actual
+    # judgement call (see CASE_AUTHORITY_STATUSES above): ai_case_authority_*
+    # is the AI's own first pass, never applied on its own; case_authority_
+    # status is what a person has actually confirmed, same pattern as areas.
+    case_citation = db.Column(db.String(300))
+    case_court = db.Column(db.String(200))
+    case_jurisdiction = db.Column(db.String(100))
+    ai_case_authority_status = db.Column(db.String(20))
+    ai_case_authority_reasoning = db.Column(db.Text)
+    case_authority_status = db.Column(db.String(20))
+
+    # ---- News filing only (instrument_type == "News") ----
+    # The URL the article was fetched from - both the source citation (shown
+    # as a "Read online" link) and what "Reprocess" re-fetches from, since a
+    # News entry has no uploaded file of its own to reprocess from.
+    article_url = db.Column(db.String(500))
+
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def type_label(self):
+        return LEGISLATIVE_UPDATE_TYPE_LABELS.get(self.instrument_type, "Update")
+
+    @property
+    def has_file(self):
+        return bool(self.stored_filename)
+
+    @property
+    def has_source(self):
+        """True if there's something to show an AI summary/areas-tagging
+        box for - an uploaded file (has_file) OR a News entry's fetched
+        article_url. Use this instead of has_file when deciding whether to
+        render that box; keep using has_file itself for anything that
+        specifically needs an actual file on disk (downloading it, checking
+        file_ext, and so on)."""
+        return self.has_file or bool(self.article_url)
+
+    @property
+    def areas(self):
+        try:
+            return json.loads(self.areas_json) if self.areas_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_areas(self, value):
+        self.areas_json = json.dumps(value or [])
+
+    @property
+    def ai_key_changes(self):
+        try:
+            return json.loads(self.ai_key_changes_json) if self.ai_key_changes_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_ai_key_changes(self, value):
+        self.ai_key_changes_json = json.dumps(value or [])
+
+    @property
+    def ai_suggested_areas(self):
+        try:
+            return json.loads(self.ai_suggested_areas_json) if self.ai_suggested_areas_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_ai_suggested_areas(self, value):
+        self.ai_suggested_areas_json = json.dumps(value or [])
+
+    @property
+    def file_ext(self):
+        return self.original_filename.rsplit(".", 1)[-1].lower() if self.original_filename and "." in self.original_filename else ""
+
+    @property
+    def authority_label(self):
+        """The person-confirmed authority classification's display label, or
+        None if not yet confirmed - see case_authority_status above."""
+        return CASE_AUTHORITY_LABELS.get(self.case_authority_status)
+
+    @property
+    def ai_authority_label(self):
+        """The AI's own first-pass authority suggestion's display label, or
+        None if not yet processed - see ai_case_authority_status above."""
+        return CASE_AUTHORITY_LABELS.get(self.ai_case_authority_status)
+
+    def __repr__(self):
+        return f"<LegislativeUpdate {self.title!r}>"
+
+
+class StatutoryDeadline(db.Model):
+    """One firm-wide statutory compliance date shown on the Legislative
+    Update Calendar (tax.legislative_updates_calendar) - a QPD instalment,
+    a VAT/PAYE filing or payment date, or any other recurring obligation
+    the firm wants everyone to see at a glance, distinct from TaxDeadline
+    above (which is a per-engagement, per-client deadline tracked on one
+    client's own Statutory Tax Calendar tab).
+
+    Deliberately a firm-maintained list a person types in and edits by
+    hand, not something computed from a rule - the user was asked directly
+    ("Firm-maintained list" vs. having the app compute VAT/PAYE dates
+    itself) and chose this, and it fits the app's existing "nothing
+    tax-specific is fabricated" rule (see PenaltyInterestRate above):
+    VAT/PAYE due dates in particular are NOT a fixed day-of-month in
+    practice - ZIMRA has shifted them via public notice before - so this
+    app does not assume or derive one. QPD dates (25 March, 25 June,
+    25 September, 20 December) are well-corroborated and pre-seeded once,
+    on first startup, as an editable/deletable starting point (see
+    app.py's startup seed step) - never re-seeded afterwards, so deleting
+    or editing a seeded row sticks."""
+    id = db.Column(db.Integer, primary_key=True)
+    tax_head = db.Column(db.String(80))  # one of TAX_HEADS, or blank for something that doesn't fit the list
+    description = db.Column(db.String(200), nullable=False)
+    due_date = db.Column(db.Date, nullable=False)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User")
+
+    @property
+    def is_overdue(self):
+        return self.due_date < date.today()
+
+    def __repr__(self):
+        return f"<StatutoryDeadline {self.description!r} due={self.due_date}>"
+
+
+class LegislativeUpdateChunk(db.Model):
+    """One section-sized slice of a filed instrument's extracted_text (see
+    legislation_chunking.py), so "Ask the library" (legislation_search.py)
+    can retrieve the specific relevant part of a long document - a full Act
+    can run to hundreds of pages, far more than could ever be handed to the
+    AI as a single excerpt - rather than only ever seeing a fixed-size
+    excerpt from the start of the document. Chunked once per document
+    (at filing/import time, or lazily the first time it's needed for an
+    already-filed document - see legislation_chunking.ensure_chunks) and
+    never re-chunked automatically afterwards. Purely a search index over
+    text that's already filed - deleting the parent LegislativeUpdate
+    deletes its chunks with it (cascade below); nothing here is ever shown
+    to a person directly, only used internally as retrieval context."""
+    __tablename__ = "legislative_update_chunk"
+    id = db.Column(db.Integer, primary_key=True)
+    legislative_update_id = db.Column(db.Integer, db.ForeignKey("legislative_update.id"), nullable=False)
+    chunk_index = db.Column(db.Integer, nullable=False)  # 0-based order within the document
+    heading = db.Column(db.String(300))  # the nearest Part/Chapter/numbered-section heading, if any was detected
+    text = db.Column(db.Text, nullable=False)
+
+    legislative_update = db.relationship(
+        "LegislativeUpdate",
+        backref=db.backref("chunks", lazy=True, cascade="all, delete-orphan", order_by="LegislativeUpdateChunk.chunk_index"),
+    )
+
+    def __repr__(self):
+        return f"<LegislativeUpdateChunk {self.legislative_update_id}#{self.chunk_index}>"
+
+
+class LegislativeProvision(db.Model):
+    """One numbered section or schedule of an Act that has been filed in
+    section-by-section form (see act_import.py), kept as its own row so a
+    tax working paper can link straight to "section 16(1)(m)" and show the
+    Act's own words - without a search. The same text is also in the
+    parent LegislativeUpdate's chunks (one chunk per section, long ones
+    split), which is what Deep Search and Ask the library read. `act_code`
+    is a short slug ("ita" = Income Tax Act [Chapter 23:06]) used in
+    links; `number` is the section number as printed ("15", "36G") or the
+    schedule number ("4" for the Fourth Schedule) - kind says which."""
+    __tablename__ = "legislative_provision"
+    id = db.Column(db.Integer, primary_key=True)
+    legislative_update_id = db.Column(db.Integer, db.ForeignKey("legislative_update.id"), nullable=False, index=True)
+    act_code = db.Column(db.String(20), nullable=False, index=True)
+    kind = db.Column(db.String(10), nullable=False)  # "section" or "schedule"
+    number = db.Column(db.String(12), nullable=False)
+    label = db.Column(db.String(40), nullable=False)  # "Section 15" / "Fourth Schedule"
+    title = db.Column(db.String(300))
+    part = db.Column(db.String(30))
+    part_title = db.Column(db.String(200))
+    refers_to = db.Column(db.String(120))  # a schedule's "(Section 15(2)(c))" note
+    sort_order = db.Column(db.Integer, default=0)
+    text = db.Column(db.Text, nullable=False)
+    is_repealed = db.Column(db.Boolean, default=False)
+
+    legislative_update = db.relationship(
+        "LegislativeUpdate",
+        backref=db.backref("provisions", lazy=True, cascade="all, delete-orphan", order_by="LegislativeProvision.sort_order"),
+    )
+
+    def __repr__(self):
+        return f"<LegislativeProvision {self.act_code} {self.label}>"
+
+
+class LegislativeAskCache(db.Model):
+    """A fast-recall cache of "Ask the library" question/answer pairs (see
+    legislation_search.py) - asking the same or a very similar question
+    again returns the earlier answer instantly and consistently instead of
+    re-searching and re-calling the AI, while a genuinely new question is
+    still answered fresh from the filed material every time. Deliberately
+    the simpler of the two designs discussed with the firm: this is a
+    verbatim recall cache, not a growing shared knowledge base - a cached
+    answer never feeds into, or changes the answer to, any OTHER question,
+    and nothing here is reviewed/confirmed by a person before being reused
+    (see legislation_search.ask for the matching logic). Every reused
+    answer is always visibly flagged as such wherever it's shown, never
+    presented as freshly generated. Only "done" and "no_answer" results are
+    ever cached - a transient failure, an unconfigured API key, or "nothing
+    filed matches at all" is never cached, so those always retry fresh."""
+    __tablename__ = "legislative_ask_cache"
+    id = db.Column(db.Integer, primary_key=True)
+    question_normalized = db.Column(db.String(500), nullable=False, index=True)  # lowercased/whitespace-collapsed, for exact-match lookup
+    question_original = db.Column(db.String(500), nullable=False)  # as actually typed, for display/audit only
+    status = db.Column(db.String(20), nullable=False)  # "done" or "no_answer" only - see legislation_search.ask
+    answer = db.Column(db.Text, nullable=False)
+    citation_ids_json = db.Column(db.Text)  # JSON list of LegislativeUpdate ids cited (status "done")
+    candidate_ids_json = db.Column(db.Text)  # JSON list of LegislativeUpdate ids considered but not sufficient (status "no_answer")
+    asked_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    hit_count = db.Column(db.Integer, default=1)  # how many times this cached answer has been reused (starts at 1 for the original answer)
+    last_hit_at = db.Column(db.DateTime)
+    helpful_count = db.Column(db.Integer, default=0)    # "Helpful" clicks from the people it was shown to
+    unhelpful_count = db.Column(db.Integer, default=0)  # "Not right" clicks - see learning.py
+
+    asked_by = db.relationship("User", foreign_keys=[asked_by_id])
+
+    def __repr__(self):
+        return f"<LegislativeAskCache {self.question_original!r} ({self.status})>"
+
+
+# ---------- Firm learning (approved lessons the app's AI features and defaults draw on) ----------
+
+LESSON_AREAS = [
+    ("zimra_letters", "ZIMRA letters"),
+    ("library", "Library answers"),
+    ("fees", "Fees and time"),
+    ("collections", "Collections"),
+    ("audit_risk", "Audit risks and procedures"),
+    ("corpfin", "Corporate finance models"),
+]
+LESSON_AREA_LABELS = dict(LESSON_AREAS)
+LESSON_KINDS = ["Wording", "Position", "Avoid", "Verified answer", "Benchmark", "Pattern"]
+LESSON_STATUSES = ["Proposed", "Approved", "Rejected", "Retired"]
+
+
+class FirmLesson(db.Model):
+    """One thing the firm has learned and a Partner/Admin has approved as its standard: a clause that works, a position
+    to take or avoid, a verified answer to a legislation question, a fee benchmark, a recurring risk. Lessons are
+    ANONYMISED (no client names, TINs or contacts) so they can serve every engagement. A lesson is only ever a
+    suggestion made by a person or by an analysis; nothing changes how the app or its AI behaves until a Partner or
+    Admin approves it, and an approved lesson can be retired at any time. Lessons never carry facts about a client or
+    law - law still comes only from the filed library. See learning.py."""
+    __tablename__ = "firm_lesson"
+    id = db.Column(db.Integer, primary_key=True)
+    area = db.Column(db.String(30), nullable=False)
+    kind = db.Column(db.String(30), nullable=False, default="Wording")
+    title = db.Column(db.String(250), nullable=False)
+    content = db.Column(db.Text, nullable=False)
+    tags_json = db.Column(db.Text)       # {"template_key": ["objection"], "tax_head": ["VAT"]} - when the lesson applies
+    evidence = db.Column(db.Text)        # anonymised before/after or data summary the lesson came from
+    source_kind = db.Column(db.String(30))  # zimra_reply | library_answer | manual | analysis
+    source_id = db.Column(db.Integer)
+    status = db.Column(db.String(20), nullable=False, default="Proposed")
+    proposed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    proposed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    decided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    decided_at = db.Column(db.DateTime)
+    decision_note = db.Column(db.Text)
+    review_due = db.Column(db.Date)      # a lesson that depends on current law is not served after this date
+    times_used = db.Column(db.Integer, default=0)
+    last_used_at = db.Column(db.DateTime)
+    helpful_count = db.Column(db.Integer, default=0)
+    unhelpful_count = db.Column(db.Integer, default=0)
+    events = db.Column(db.Text)          # JSON list of {at, by, what, note}
+
+    proposed_by = db.relationship("User", foreign_keys=[proposed_by_id])
+    decided_by = db.relationship("User", foreign_keys=[decided_by_id])
+
+    @property
+    def tags(self):
+        import json as _json
+        try:
+            data = _json.loads(self.tags_json) if self.tags_json else {}
+        except ValueError:
+            data = {}
+        return data if isinstance(data, dict) else {}
+
+    @property
+    def history(self):
+        import json as _json
+        try:
+            return _json.loads(self.events) if self.events else []
+        except ValueError:
+            return []
+
+    def log(self, user, what, note=None):
+        import json as _json
+        items = self.history
+        items.append({"at": datetime.utcnow().strftime("%Y-%m-%d %H:%M"), "by": getattr(user, "name", None) or "-",
+                      "what": what, "note": note or ""})
+        self.events = _json.dumps(items)
+
+    @property
+    def area_label(self):
+        return LESSON_AREA_LABELS.get(self.area, self.area)
+
+    @property
+    def is_due_for_review(self):
+        return bool(self.status == "Approved" and self.review_due and self.review_due < date.today())
+
+    @property
+    def is_servable(self):
+        return self.status == "Approved" and not self.is_due_for_review
+
+    @property
+    def helpful_rate(self):
+        total = (self.helpful_count or 0) + (self.unhelpful_count or 0)
+        return None if total == 0 else (self.helpful_count or 0) / total
+
+    def __repr__(self):
+        return f"<FirmLesson {self.id} {self.area} {self.status}>"
+
+
+class TaxChecklistItem(db.Model):
+    """One tick + comment line of the configurable Tax Head Checklists /
+    Quality Gates (Module 8) - a lightweight, single-preparer-tick list
+    (unlike FinalisationChecklist, this doesn't carry its own separate
+    3-tier sign-off - the engagement's own Finalisation checklist and the
+    Tax Opinion/Health Check's own sign-offs already cover formal
+    sign-off for tax work; this is the working checklist itself). Grouped
+    by tax_head on the Tax tab; add freely per engagement rather than being
+    seeded from a fixed template, since which quality gates matter varies
+    by which Tax services are on."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    tax_head = db.Column(db.String(80))
+    item_text = db.Column(db.Text, nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_checklist_items", lazy=True, cascade="all, delete-orphan", order_by="TaxChecklistItem.order"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    def __repr__(self):
+        return f"<TaxChecklistItem {self.item_text!r} response={self.response!r} engagement={self.engagement_id}>"
+
+
+# Seeded onto every engagement's Tax Head Checklist the first time its Tax
+# tab is opened (see tax._seed_tax_checklist) - a starting quality-gate
+# checklist a preparer tailors from there, same "system drafts, preparer
+# tailors" pattern as every other seeded checklist in this app. Kept
+# general rather than ZIMRA-form-specific, since exact form numbers/steps
+# change with legislation (same reasoning as PenaltyInterestRate above).
+DEFAULT_TAX_CHECKLIST_ITEMS = [
+    (None, "Has the client's registration status been confirmed current for every applicable tax head?"),
+    (None, "Have all returns due for the period been identified against the Statutory Tax Calendar?"),
+    ("Corporate Income Tax (CIT)", "Has the CIT computation been agreed to the trial balance/financial statements?"),
+    ("Value Added Tax (VAT)", "Has output VAT been reconciled to recorded revenue for the period?"),
+    ("Value Added Tax (VAT)", "Has input VAT claimed been supported by valid tax invoices?"),
+    ("PAYE", "Has PAYE deducted been reconciled to the payroll records for the period?"),
+    ("Withholding Tax (WHT)", "Has withholding tax been correctly applied and remitted on applicable payments?"),
+    (None, "Have all known tax positions been logged on the Tax Position Register with an approval status?"),
+    (None, "Has any legislative change logged since the last review been assessed for impact on this engagement?"),
+    (None, "Has the Quality Control review of the tax working papers been completed before sign-off?"),
+]
+
+
+# ---------- Financial Accounting, Cost Accounting & Management Accounting module ----------
+#
+# Shown on an engagement's "Accounting" tab whenever Engagement.
+# has_accounting_module is True (a dedicated Accounting & Bookkeeping
+# engagement, or any other engagement type with an Accounting service
+# explicitly turned on - see ACCOUNTING_SERVICES above) - see accounting.py
+# for the routes. This module covers work where Neverlank itself prepares
+# a client's books/costing/management reports, as distinct from an Audit/
+# Assurance engagement forming an opinion on figures someone else prepared.
+#
+# Reuses existing machinery wherever it already fits, exactly like the Tax
+# module does (see the module comment above "Tax Advisory & Tax Compliance
+# module"):
+#   - the Accounting Risk Register reuses RiskItem (module="accounting")
+#   - the write-up/close-out Execution Plan reuses SubstantiveProcedureArea/
+#     Item, one area per ACCOUNTING_AREAS entry
+#   - the General Ledger rolls up into the existing TrialBalance/
+#     TrialBalanceLine models, so the existing Trial Balance tab's mapping
+#     UI and the existing financials.py statement-generation pipeline
+#     (Statement of Financial Position, Comprehensive Income, Cash Flow,
+#     IFRS Notes) take over unchanged from there - see
+#     accounting.roll_up_to_trial_balance
+#   - Accounting Document Management reuses the existing Documents/Filing
+#     Index rather than a new document model
+#   - the Management Accounts Report's 10 parts reuse WorkpaperNarrative,
+#     one row per named part - see MANAGEMENT_ACCOUNTS_REPORT_PARTS below
+#   - the Accounting Checklist / Quality Gates reuses the same lightweight
+#     response/comment/completed_by shape as TaxChecklistItem above
+# The models below are the genuinely new pieces that nothing existing
+# already covers: a General Ledger (this app previously had no double-entry
+# bookkeeping model at all - Trial Balance was always a flat imported
+# balances list), Bank Reconciliations, and the Cost/Management Accounting
+# working papers (Cost Centres, Job/Process/Standard Costing, Variance
+# Analysis, CVP Analysis, Budgets, KPI tracking).
+
+GL_ACCOUNT_TYPES = ["Asset", "Liability", "Equity", "Income", "Expense"]
+GL_DEBIT_NORMAL_TYPES = ("Asset", "Expense")  # the rest (Liability/Equity/Income) are credit-normal
+
+
+class GLAccount(db.Model):
+    """One line of an engagement's Chart of Accounts (Financial Accounting/
+    Bookkeeping). Engagement-scoped, like everything else in this app,
+    rather than a continuous multi-period ledger - each accounting
+    engagement/period gets its own chart, opened with whatever
+    opening_balance the preparer brings forward from the prior period's
+    closing trial balance. normal_balance is derived from account_type
+    (never stored separately, so it can never drift out of sync) and is
+    only ever used to decide which side of the rolled-up Trial Balance line
+    an account's net balance lands on - see roll_up_to_trial_balance."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    code = db.Column(db.String(30), nullable=False)
+    name = db.Column(db.String(200), nullable=False)
+    account_type = db.Column(db.String(20), nullable=False, default="Expense")
+    opening_balance = db.Column(db.Float, default=0.0)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    tax_expense_type = db.Column(db.String(60))  # the Prohibited Deductions rule code this expense account maps to (prohibited_deductions.py)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("gl_accounts", lazy=True, cascade="all, delete-orphan", order_by="GLAccount.order, GLAccount.code"))
+    created_by = db.relationship("User")
+
+    @property
+    def normal_balance(self):
+        return "Debit" if self.account_type in GL_DEBIT_NORMAL_TYPES else "Credit"
+
+    def __repr__(self):
+        return f"<GLAccount {self.code} {self.name!r} engagement={self.engagement_id}>"
+
+
+JOURNAL_ENTRY_SOURCES = ["Manual", "Bank", "Sales", "Purchases", "Payroll", "Adjustment"]
+
+
+class JournalEntry(db.Model):
+    """One double-entry journal entry (header) posted to the General
+    Ledger - the genuinely new bookkeeping primitive this app didn't have
+    before (Trial Balance was always a flat imported balances list; see the
+    module comment above). Carries the standard Preparer/Reviewer/Partner
+    sign-off, same as every other workpaper in this app - reviewing a
+    journal here is a bookkeeping quality-control step, distinct from an
+    audit adjustment (AuditAdjustment), which is an auditor's proposed
+    correction to a client-prepared trial balance."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    entry_date = db.Column(db.Date, nullable=False, default=date.today)
+    reference = db.Column(db.String(100))
+    narration = db.Column(db.Text)
+    source = db.Column(db.String(20), default="Manual")
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("journal_entries", lazy=True, cascade="all, delete-orphan", order_by="JournalEntry.entry_date, JournalEntry.id"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    lines = db.relationship("JournalEntryLine", backref="journal_entry", lazy=True, cascade="all, delete-orphan", order_by="JournalEntryLine.id")
+
+    @property
+    def total_debit(self):
+        return sum(l.debit or 0 for l in self.lines)
+
+    @property
+    def total_credit(self):
+        return sum(l.credit or 0 for l in self.lines)
+
+    @property
+    def is_balanced(self):
+        return len(self.lines) > 0 and abs(self.total_debit - self.total_credit) < 0.01
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<JournalEntry {self.reference!r} engagement={self.engagement_id}>"
+
+
+class JournalEntryLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    journal_entry_id = db.Column(db.Integer, db.ForeignKey("journal_entry.id"), nullable=False)
+    gl_account_id = db.Column(db.Integer, db.ForeignKey("gl_account.id"), nullable=False)
+    description = db.Column(db.String(200))
+    debit = db.Column(db.Float, default=0.0)
+    credit = db.Column(db.Float, default=0.0)
+
+    gl_account = db.relationship("GLAccount")
+
+    def __repr__(self):
+        return f"<JournalEntryLine account={self.gl_account_id} dr={self.debit} cr={self.credit}>"
+
+
+BANK_RECONCILIATION_ITEM_TYPES = [
+    "Outstanding Deposit", "Outstanding Cheque", "Bank Error", "Book Error", "Other",
+]
+
+
+class BankReconciliation(db.Model):
+    """One statement-date bank reconciliation working paper - one per
+    engagement per statement date (an engagement typically has several over
+    its history, one per period/month reconciled), rather than one per
+    engagement, since reconciling a bank account is a recurring monthly
+    procedure, not a single point-in-time record like TaxEntityProfile."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    gl_account_id = db.Column(db.Integer, db.ForeignKey("gl_account.id"))
+    statement_date = db.Column(db.Date, nullable=False, default=date.today)
+    bank_statement_balance = db.Column(db.Float, default=0.0)
+    book_balance = db.Column(db.Float, default=0.0)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("bank_reconciliations", lazy=True, cascade="all, delete-orphan", order_by="BankReconciliation.statement_date.desc()"))
+    gl_account = db.relationship("GLAccount")
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    items = db.relationship("BankReconciliationItem", backref="reconciliation", lazy=True, cascade="all, delete-orphan", order_by="BankReconciliationItem.id")
+
+    @property
+    def adjusted_bank_balance(self):
+        return (self.bank_statement_balance or 0) + sum(i.amount or 0 for i in self.items if i.side == "bank")
+
+    @property
+    def adjusted_book_balance(self):
+        return (self.book_balance or 0) + sum(i.amount or 0 for i in self.items if i.side == "book")
+
+    @property
+    def is_reconciled(self):
+        return abs(self.adjusted_bank_balance - self.adjusted_book_balance) < 0.01
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<BankReconciliation {self.statement_date} engagement={self.engagement_id}>"
+
+
+class BankReconciliationItem(db.Model):
+    """One reconciling item - side is which balance it adjusts ("bank" for
+    an item explaining the gap on the bank statement's side, e.g. an
+    outstanding cheque/deposit or a bank error; "book" for an item
+    explaining the gap on the client's own books, e.g. an unrecorded bank
+    charge). amount is signed by the preparer (positive to add, negative to
+    subtract) rather than the model inferring a sign from item_type, since
+    which way an item moves the balance is a judgement call the preparer
+    is best placed to make for that specific item."""
+    id = db.Column(db.Integer, primary_key=True)
+    reconciliation_id = db.Column(db.Integer, db.ForeignKey("bank_reconciliation.id"), nullable=False)
+    side = db.Column(db.String(10), nullable=False, default="bank")  # "bank" | "book"
+    item_type = db.Column(db.String(30), default="Other")
+    description = db.Column(db.String(200))
+    item_date = db.Column(db.Date)
+    amount = db.Column(db.Float, default=0.0)
+
+    def __repr__(self):
+        return f"<BankReconciliationItem {self.item_type} {self.amount} side={self.side}>"
+
+
+COST_CENTRE_TYPES = ["Production", "Service", "Administration"]
+
+
+class CostCentre(db.Model):
+    """One cost centre/department for Cost Accounting - a light grouping
+    tag that CostingRecord entries can optionally be attributed to, not a
+    full departmental-allocation engine."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    code = db.Column(db.String(30))
+    name = db.Column(db.String(150), nullable=False)
+    centre_type = db.Column(db.String(20), default="Production")
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("cost_centres", lazy=True, cascade="all, delete-orphan", order_by="CostCentre.name"))
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<CostCentre {self.name!r} engagement={self.engagement_id}>"
+
+
+COSTING_METHODS = ["Job Order Costing", "Process Costing", "Standard Costing"]
+
+
+class CostingRecord(db.Model):
+    """One job/batch/process cost card - the Cost Accounting service's core
+    working paper. Which of the three classical costing methods it's using
+    is costing_method (a label only - all three share the same "four cost
+    components -> total -> unit cost" shape, so there's no reason to give
+    them three separate tables, same reasoning as TaxRegistration's
+    record_type above)."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    costing_method = db.Column(db.String(30), nullable=False, default="Job Order Costing")
+    reference = db.Column(db.String(150), nullable=False)  # job/batch number or product/process name
+    cost_centre_id = db.Column(db.Integer, db.ForeignKey("cost_centre.id"))
+    units_produced = db.Column(db.Float, default=1.0)
+    direct_material_cost = db.Column(db.Float, default=0.0)
+    direct_labour_cost = db.Column(db.Float, default=0.0)
+    variable_overhead_cost = db.Column(db.Float, default=0.0)
+    fixed_overhead_cost = db.Column(db.Float, default=0.0)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("costing_records", lazy=True, cascade="all, delete-orphan", order_by="CostingRecord.id"))
+    cost_centre = db.relationship("CostCentre")
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def total_cost(self):
+        return (self.direct_material_cost or 0) + (self.direct_labour_cost or 0) + (self.variable_overhead_cost or 0) + (self.fixed_overhead_cost or 0)
+
+    @property
+    def unit_cost(self):
+        return self.total_cost / self.units_produced if self.units_produced else None
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<CostingRecord {self.reference!r} {self.costing_method} engagement={self.engagement_id}>"
+
+
+VARIANCE_TYPES = [
+    "Material Price", "Material Usage", "Labour Rate", "Labour Efficiency",
+    "Variable Overhead Expenditure", "Variable Overhead Efficiency",
+    "Fixed Overhead Expenditure", "Fixed Overhead Volume",
+]
+
+
+class StandardCostVariance(db.Model):
+    """One standard-costing variance calculation. variance is always
+    actual_amount - standard_amount (never the other way round) so its sign
+    is consistent across every variance type; for every type in
+    VARIANCE_TYPES, a cost that came in at or under standard (variance <=
+    0) is favourable - see is_favourable. Optionally linked to a
+    CostingRecord (the job/batch the variance relates to), but can also
+    stand alone (e.g. a period-level overhead variance not tied to one
+    specific job)."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    costing_record_id = db.Column(db.Integer, db.ForeignKey("costing_record.id"))
+    variance_type = db.Column(db.String(40), nullable=False)
+    standard_amount = db.Column(db.Float, nullable=False, default=0.0)
+    actual_amount = db.Column(db.Float, nullable=False, default=0.0)
+    explanation = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("standard_cost_variances", lazy=True, cascade="all, delete-orphan", order_by="StandardCostVariance.id"))
+    costing_record = db.relationship("CostingRecord")
+    created_by = db.relationship("User")
+
+    @property
+    def variance(self):
+        return (self.actual_amount or 0) - (self.standard_amount or 0)
+
+    @property
+    def is_favourable(self):
+        return self.variance <= 0
+
+    def __repr__(self):
+        return f"<StandardCostVariance {self.variance_type} {self.variance} engagement={self.engagement_id}>"
+
+
+class CVPAnalysis(db.Model):
+    """One Cost-Volume-Profit (break-even) analysis for a product/segment -
+    every downstream figure (contribution margin, break-even point, units
+    needed for a target profit) is computed live from the four inputs
+    below, never stored separately, so it can never drift out of sync with
+    them."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    segment_name = db.Column(db.String(150), nullable=False)
+    selling_price_per_unit = db.Column(db.Float, nullable=False, default=0.0)
+    variable_cost_per_unit = db.Column(db.Float, nullable=False, default=0.0)
+    fixed_costs = db.Column(db.Float, nullable=False, default=0.0)
+    target_profit = db.Column(db.Float)
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("cvp_analyses", lazy=True, cascade="all, delete-orphan", order_by="CVPAnalysis.id"))
+    created_by = db.relationship("User")
+
+    @property
+    def contribution_margin_per_unit(self):
+        return (self.selling_price_per_unit or 0) - (self.variable_cost_per_unit or 0)
+
+    @property
+    def contribution_margin_ratio(self):
+        cm = self.contribution_margin_per_unit
+        return (cm / self.selling_price_per_unit) if self.selling_price_per_unit else None
+
+    @property
+    def break_even_units(self):
+        cm = self.contribution_margin_per_unit
+        return (self.fixed_costs / cm) if cm else None
+
+    @property
+    def break_even_revenue(self):
+        units = self.break_even_units
+        return (units * self.selling_price_per_unit) if units is not None else None
+
+    @property
+    def required_units_for_target_profit(self):
+        cm = self.contribution_margin_per_unit
+        if not cm or self.target_profit is None:
+            return None
+        return (self.fixed_costs + self.target_profit) / cm
+
+    def __repr__(self):
+        return f"<CVPAnalysis {self.segment_name!r} engagement={self.engagement_id}>"
+
+
+BUDGET_TYPES = ["Operating", "Capital", "Cash"]
+
+
+class Budget(db.Model):
+    """One budget (header) for the Management Accounting service - Budget/
+    BudgetLine mirrors TrialBalance/TrialBalanceLine's header+lines shape.
+    An engagement can hold more than one budget over time (e.g. an original
+    budget and a mid-year reforecast), unlike the single-per-engagement
+    working papers elsewhere in this app."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    name = db.Column(db.String(150), nullable=False)
+    budget_type = db.Column(db.String(20), default="Operating")
+    period_start = db.Column(db.Date)
+    period_end = db.Column(db.Date)
+    notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("budgets", lazy=True, cascade="all, delete-orphan", order_by="Budget.id"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    lines = db.relationship("BudgetLine", backref="budget", lazy=True, cascade="all, delete-orphan", order_by="BudgetLine.id")
+
+    @property
+    def total_budgeted(self):
+        return sum(l.budgeted_amount or 0 for l in self.lines)
+
+    @property
+    def total_actual(self):
+        return sum(l.actual_amount or 0 for l in self.lines if l.actual_amount is not None)
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    def __repr__(self):
+        return f"<Budget {self.name!r} engagement={self.engagement_id}>"
+
+
+class BudgetLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    budget_id = db.Column(db.Integer, db.ForeignKey("budget.id"), nullable=False)
+    category = db.Column(db.String(150), nullable=False)
+    budgeted_amount = db.Column(db.Float, default=0.0)
+    actual_amount = db.Column(db.Float)
+    notes = db.Column(db.String(200))
+
+    @property
+    def variance(self):
+        return (self.actual_amount - self.budgeted_amount) if self.actual_amount is not None else None
+
+    @property
+    def variance_pct(self):
+        v = self.variance
+        return (v / self.budgeted_amount * 100) if v is not None and self.budgeted_amount else None
+
+    def __repr__(self):
+        return f"<BudgetLine {self.category!r} budgeted={self.budgeted_amount}>"
+
+
+KPI_CATEGORIES = ["Liquidity", "Profitability", "Efficiency", "Leverage", "Other"]
+
+
+class KPIMetric(db.Model):
+    """One tracked KPI on the Management Accounting KPI Dashboard - a plain
+    preparer-entered target/actual pair, not an auto-computed ratio (no
+    figure here is derived from the Trial Balance automatically - the
+    preparer decides which KPIs matter for this client and enters both
+    sides), consistent with this app's "system prompts, preparer concludes"
+    pattern used throughout the analytical review tabs."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    metric_name = db.Column(db.String(150), nullable=False)
+    category = db.Column(db.String(20), default="Other")
+    period_label = db.Column(db.String(50))
+    target_value = db.Column(db.Float)
+    actual_value = db.Column(db.Float)
+    unit = db.Column(db.String(20))  # e.g. "%", "days", "x", "$" - display only
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("kpi_metrics", lazy=True, cascade="all, delete-orphan", order_by="KPIMetric.id"))
+    created_by = db.relationship("User")
+
+    @property
+    def variance(self):
+        if self.target_value is None or self.actual_value is None:
+            return None
+        return self.actual_value - self.target_value
+
+    def __repr__(self):
+        return f"<KPIMetric {self.metric_name!r} engagement={self.engagement_id}>"
+
+
+class AccountingChecklistItem(db.Model):
+    """One tick + comment line of the Accounting module's configurable
+    Checklist / Quality Gates - the accounting-module equivalent of
+    TaxChecklistItem above (same lightweight shape, same reasoning: the
+    engagement's own Finalisation checklist already covers formal overall
+    sign-off, so this is the working checklist itself, not a second layer
+    of formal sign-off). Grouped by `area` on the Accounting tab."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    area = db.Column(db.String(80))
+    item_text = db.Column(db.Text, nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("accounting_checklist_items", lazy=True, cascade="all, delete-orphan", order_by="AccountingChecklistItem.order"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    def __repr__(self):
+        return f"<AccountingChecklistItem {self.item_text!r} response={self.response!r} engagement={self.engagement_id}>"
+
+
+# Seeded onto every engagement's Accounting Checklist the first time its
+# Accounting tab is opened (see accounting._seed_accounting_checklist) -
+# same "system drafts, preparer tailors" pattern as DEFAULT_TAX_CHECKLIST_
+# ITEMS above.
+DEFAULT_ACCOUNTING_CHECKLIST_ITEMS = [
+    (None, "Has the Chart of Accounts been agreed with the client and is it appropriate for the business?"),
+    ("Bookkeeping", "Have all journal entries for the period been posted and reviewed?"),
+    ("Bookkeeping", "Has the General Ledger been rolled up to the Trial Balance and does it balance?"),
+    ("Bookkeeping", "Has the bank account been reconciled for every month in the period?"),
+    ("Costing", "Has each job/batch cost card been agreed to source documents (material requisitions, timesheets)?"),
+    ("Costing", "Have significant standard cost variances been investigated and explained?"),
+    ("Management Accounting", "Has actual performance been compared to budget and material variances explained?"),
+    ("Management Accounting", "Has the Management Accounts Report been reviewed for consistency with the underlying figures?"),
+    (None, "Has the Quality Control review of the accounting working papers been completed before sign-off?"),
+]
+
+
+class Permission(db.Model):
+    """One (role, permission_key) toggle - see PERMISSIONS/user_has_permission
+    above. Seeded with defaults on first install/upgrade (see seed.py); an
+    admin can change them from Team > Permissions. There is deliberately no
+    row needed for admin - user_has_permission() always returns True for
+    admin regardless of what's stored here."""
+    id = db.Column(db.Integer, primary_key=True)
+    role = db.Column(db.String(20), nullable=False)
+    permission_key = db.Column(db.String(50), nullable=False)
+    allowed = db.Column(db.Boolean, default=False)
+
+    __table_args__ = (db.UniqueConstraint("role", "permission_key", name="uq_permission_role_key"),)
+
+    def __repr__(self):
+        return f"<Permission {self.role}:{self.permission_key}={self.allowed}>"
+
+
+class UserPermissionOverride(db.Model):
+    """A per-user override on top of the role-level Permission toggle above
+    - "Access Rights" on one team member's own profile (Team > edit a
+    person), for a firm that wants a named individual to have or lack a
+    capability regardless of what their role defaults to (e.g. restricting
+    one particular Partner from Payroll, or granting one Staff member
+    access to Manage Policies without promoting their role). Checked FIRST
+    in user_has_permission - an explicit per-user decision always wins over
+    both the role default and the "manage_payroll" Tax Engagement carve-out.
+    One row per (user, permission_key); absence means "use the role
+    default" rather than any stored allow/deny."""
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    permission_key = db.Column(db.String(50), nullable=False)
+    allowed = db.Column(db.Boolean, default=False, nullable=False)
+
+    __table_args__ = (db.UniqueConstraint("user_id", "permission_key", name="uq_user_permission_override"),)
+
+    user = db.relationship("User", backref=db.backref("permission_overrides", lazy=True, cascade="all, delete-orphan"))
+
+    def __repr__(self):
+        return f"<UserPermissionOverride user={self.user_id} {self.permission_key}={self.allowed}>"
+
+
+# ---------- Multiple reviews on a line-item workpaper ----------
+
+class WorkpaperReview(db.Model):
+    """One dated review entry against a single line-item workpaper (see
+    REVIEWABLE_TYPES above for which ones) - the generic "multiple reviews"
+    log requested by the user: "Every workpaper must have an option to
+    enable multiple reviews but the Partner is the ultimate reviewer." Any
+    number of these can exist on the same item, each left by a different
+    Supervisor/Partner/Admin reviewer (a Manager sits under one of those
+    roles too - there's no separate "Manager" login role in the app, see
+    Engagement.manager_id) at their own time, with an optional note.
+
+    This is deliberately generic/"polymorphic" rather than its own foreign
+    key per workpaper type: reviewable_type is a short fixed string (one of
+    REVIEWABLE_TYPES) naming which model the review is against, and
+    reviewable_id is that row's own primary key. That's so the SAME table
+    can be reused for further workpaper types later (the user's own
+    request: start with Substantive Procedures/checklist items, expand from
+    there) without a new child table or migration each time - just one more
+    entry in REVIEWABLE_TYPES, a `reviews` property on that model, and a
+    case in engagements._reviewable_engagement/_reviewable_redirect.
+
+    Purely additive, same philosophy as EngagementQuery above: adding a
+    review here never blocks, clears, or replaces that workpaper's own
+    Preparer/Reviewer/Partner sign-off fields (where it has them) - the
+    Partner's own sign-off remains the ultimate, file-closing authority.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    reviewable_type = db.Column(db.String(40), nullable=False)
+    reviewable_id = db.Column(db.Integer, nullable=False)
+    reviewer_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    reviewed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    notes = db.Column(db.Text)
+
+    reviewer = db.relationship("User")
+
+    __table_args__ = (db.Index("ix_workpaper_review_target", "reviewable_type", "reviewable_id"),)
+
+    def __repr__(self):
+        return f"<WorkpaperReview {self.reviewable_type}:{self.reviewable_id} by user={self.reviewer_id}>"
+
+
+# ---------- Review Queries ----------
+
+class EngagementQuery(db.Model):
+    """A review query/point raised by a Partner or other Reviewer against
+    one workpaper section of an engagement (see QUERY_SECTIONS) - the audit
+    equivalent of a reviewer's review note, e.g. "please clarify the
+    variance in Revenue" or "confirm the bank confirmation has been
+    obtained". Distinct from the Preparer/Reviewer/Partner sign-off used
+    elsewhere in the app: raising or resolving a query never blocks or
+    clears a sign-off, it's a lightweight, visible way for a reviewer to
+    flag something and for the team to discuss and close it out.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    section = db.Column(db.String(20), nullable=False)  # one of QUERY_SECTION_KEYS
+    area_name = db.Column(db.String(80))  # only meaningful when section == "substantive"
+    subject = db.Column(db.String(200), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="Open")  # "Open" | "Resolved"
+
+    raised_by_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    raised_at = db.Column(db.DateTime, default=datetime.utcnow)
+    resolved_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    resolved_at = db.Column(db.DateTime)
+    # True only when this resolution came through the Partner-only override
+    # below (partner_override_resolve_query) rather than the ordinary
+    # resolve_query path - i.e. the Partner is the ultimate reviewer and
+    # closed it on their own judgement (e.g. discussed verbally with the
+    # team) without waiting on a written reply. Kept as its own flag rather
+    # than inferred from has_preparer_reply so the file still shows how it
+    # was actually resolved even if a reply gets added afterwards.
+    resolved_via_partner_override = db.Column(db.Boolean, default=False, nullable=False)
+    partner_override_notes = db.Column(db.Text)
+
+    engagement = db.relationship("Engagement", backref=db.backref("queries", lazy=True, cascade="all, delete-orphan"))
+    raised_by = db.relationship("User", foreign_keys=[raised_by_id])
+    resolved_by = db.relationship("User", foreign_keys=[resolved_by_id])
+    replies = db.relationship(
+        "QueryReply", backref="parent_query", lazy=True,
+        # NOTE: backref must not be named "query" - that would shadow
+        # Flask-SQLAlchemy's own QueryReply.query class attribute (the
+        # Model.query convenience property used everywhere else in the
+        # app, e.g. QueryReply.query.filter_by(...)).
+        cascade="all, delete-orphan", order_by="QueryReply.created_at",
+    )
+
+    @property
+    def is_resolved(self):
+        return self.status == "Resolved"
+
+    @property
+    def has_preparer_reply(self):
+        """Whether someone other than whoever raised the query has replied
+        yet - i.e. whether the preparer (or whoever picked the query up)
+        has explained how they addressed it. Required before resolve_query
+        will let a reviewer mark the query resolved (see
+        engagements.resolve_query) - a reviewer can't close out their own
+        review point without hearing back first. A query has no separate
+        "assigned preparer" field, so "a reply from someone other than the
+        reviewer who raised it" is the check - it's exactly what that
+        reviewer is actually waiting to hear before resolving."""
+        return any(r.author_id != self.raised_by_id for r in self.replies)
+
+    @property
+    def section_label(self):
+        return QUERY_SECTION_LABELS.get(self.section, self.section)
+
+    def __repr__(self):
+        return f"<EngagementQuery {self.id} {self.section} engagement={self.engagement_id}>"
+
+
+class QueryReply(db.Model):
+    """One reply in a query's discussion thread - deliberately flat (no
+    nested replies-to-replies) to keep clearing a query simple: read the
+    thread top to bottom, then Resolve."""
+    id = db.Column(db.Integer, primary_key=True)
+    query_id = db.Column(db.Integer, db.ForeignKey("engagement_query.id"), nullable=False)
+    author_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    message = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    author = db.relationship("User")
+
+    def __repr__(self):
+        return f"<QueryReply {self.id} query={self.query_id}>"
+
+
+# ---------- Internal Messaging (intranet) ----------
+
+class Message(db.Model):
+    """One internal message from one sender to one or more recipients (see
+    MessageRecipient) - a simple firm intranet inbox, separate from the
+    per-engagement review Queries above. Not threaded server-side: a
+    "Reply" is just a new Message with the same subject prefixed "Re:" and
+    the original sender/recipients swapped, which keeps the data model
+    simple while still reading like a conversation in the UI.
+    """
+    id = db.Column(db.Integer, primary_key=True)
+    sender_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    subject = db.Column(db.String(200), nullable=False)
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    sender = db.relationship("User")
+    recipients = db.relationship(
+        "MessageRecipient", backref="message", lazy=True,
+        cascade="all, delete-orphan", order_by="MessageRecipient.id",
+    )
+    attachments = db.relationship(
+        "MessageAttachment", backref="message", lazy=True,
+        cascade="all, delete-orphan", order_by="MessageAttachment.id",
+    )
+
+    def __repr__(self):
+        return f"<Message {self.id} {self.subject!r} from={self.sender_id}>"
+
+
+class MessageAttachment(db.Model):
+    """One file attached to a Message - requested by the user so a message
+    can carry a document instead of only text ("messages to allow for
+    attachment of documents for easier communication"). Saved the same way
+    as an engagement Document (see engagements._save_engagement_document):
+    to the shared Config.UPLOAD_FOLDER, under a unique stored_filename, with
+    the same ALLOWED_EXTENSIONS/size-limit rules - this isn't a firm-wide
+    "library" like Policies or Legislative Updates, just a file riding along
+    with one message, so it gets its own small table rather than reusing
+    Document (which is engagement-specific).
+
+    Downloading one follows the exact same access rule as viewing the
+    message itself (see messages._can_view_message): the sender, or a
+    recipient who hasn't had the message recalled out from under them.
+    Deleting the Message cascades to its attachments (row and file both -
+    see messages.py), and a Forward does NOT carry attachments forward,
+    matching the existing text-only quoting behaviour for Reply/Forward."""
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey("message.id"), nullable=False)
+    original_filename = db.Column(db.String(300), nullable=False)
+    stored_filename = db.Column(db.String(300), nullable=False)
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<MessageAttachment {self.original_filename!r} message={self.message_id}>"
+
+
+class MessageRecipient(db.Model):
+    """One recipient of a Message, and whether/when they've read it - a
+    message with several recipients (e.g. a "send to all staff" broadcast)
+    gets one row per recipient here, each tracked as read independently."""
+    id = db.Column(db.Integer, primary_key=True)
+    message_id = db.Column(db.Integer, db.ForeignKey("message.id"), nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    read_at = db.Column(db.DateTime)
+    # Set only when the sender recalls the message WHILE this recipient
+    # still hadn't read it (see messages.py recall_message) - once set, this
+    # recipient can no longer see the message content, but a recipient who
+    # already had read_at set before the recall keeps full access, so
+    # recalled_at and read_at are never both set on the same row.
+    recalled_at = db.Column(db.DateTime)
+    # Set when the recipient deletes the message from their own inbox (or uses
+    # "Clear all read"). Only hides it for them - the sender's copy and every
+    # other recipient's copy are untouched.
+    deleted_at = db.Column(db.DateTime)
+
+    user = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("message_id", "user_id", name="uq_message_recipient"),)
+
+    @property
+    def is_read(self):
+        return self.read_at is not None
+
+    @property
+    def is_recalled(self):
+        return self.recalled_at is not None
+
+    @property
+    def is_deleted(self):
+        return self.deleted_at is not None
+
+    def __repr__(self):
+        return f"<MessageRecipient message={self.message_id} user={self.user_id}>"
+
+
+# ---------- Client Acceptance & Continuance (pre-engagement gate) ----------
+
+CLIENT_ACCEPTANCE_DECISIONS = ["Pending", "Accepted", "Declined"]
+
+# Forensic Audit Risk Evaluation Matrix - used only on engagements of type
+# "Investigative Engagement" (see ClientAcceptance.risk_* fields/properties
+# below). Each tuple is (field_name, category_label, low_description,
+# medium_description, high_description); score each category 1 (low) to 5
+# (high) against these descriptions, then sum all five (range 5-25) to get
+# the risk tier via ClientAcceptance.risk_assessment.
+RISK_CATEGORIES = [
+    (
+        "risk_conflicts_score",
+        "Conflicts & Objectivity",
+        "No matches found in the database. Firm has never serviced the target. No court testimony threats.",
+        "Minor past relationship with a witness/subsidiary, but completely mitigated by separate teams.",
+        "Direct conflict identified. Firm previously audited the target or the exact system under investigation.",
+    ),
+    (
+        "risk_security_score",
+        "Physical & Cyber Security",
+        "Standard office environment. No threat of physical retaliation or complex cyber-attacks.",
+        "Target may be uncooperative or defensive, but there is no history of violence or severe cyber threats.",
+        "Hostile environment, organized crime links, high threat of physical retaliation, or advanced cyber warfare.",
+    ),
+    (
+        "risk_integrity_edd_score",
+        "Client Integrity & EDD",
+        "Established client or reputable entity. Clean background checks and clear corporate structure.",
+        "New client with minor regulatory friction in the past, or slightly complex corporate structure.",
+        "History of bad faith/lawsuits, hidden beneficial owners, or suspected involvement in the fraud themselves.",
+    ),
+    (
+        "risk_evidence_legal_score",
+        "Evidence & Legal Risk",
+        "Client owns all data. Evidence is untouched. Retained via external counsel under privilege.",
+        "Data ownership is mostly clear, but evidence may have been partially handled or looked at by internal IT.",
+        "High risk of privacy law breaches. Evidence is already corrupted/wiped. Client refuses to use outside legal counsel.",
+    ),
+    (
+        "risk_scope_capabilities_score",
+        "Scope & Capabilities",
+        "Exact objectives defined (e.g. specific asset tracing). In-house CFEs and digital experts available immediately.",
+        "Scope is slightly broad but manageable. May need to contract a niche external specialist for a short time.",
+        "Vague \"fishing expedition\" requested. Firm lacks the necessary forensic tools or certified experts for this industry.",
+    ),
+]
+
+
+class ClientAcceptance(db.Model):
+    """One per engagement (for engagements where Engagement.acceptance_required
+    is True) - the pre-engagement work a firm is expected to do before
+    starting an audit/assurance/consulting engagement (ISQM 1 / ISA 220):
+    a background check, an independence assessment, contacting the
+    predecessor auditor, confirming the team's competence, AML/KYC checks,
+    and a signed engagement letter - ending in an Engagement Partner
+    accept/decline decision. See engagement_acceptance_cleared() above for
+    exactly what "cleared" means, and _ensure_engagement_access /
+    _ensure_acceptance_route_access in engagements.py / acceptance.py for
+    how the gate is actually enforced."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    # 1. Background check - management integrity, reputation, financial stability.
+    background_check_notes = db.Column(db.Text)
+    background_check_satisfactory = db.Column(db.Boolean)  # None = not yet assessed
+
+    # 2. Independence assessment - conflicts of interest / ethical threats.
+    independence_notes = db.Column(db.Text)
+    independence_threats_identified = db.Column(db.Boolean)
+    independence_safeguards = db.Column(db.Text)  # only meaningful if threats were identified
+
+    # 3. Predecessor communication - with the CLIENT's permission, contact
+    # the previous auditor for any disagreements / reasons for leaving.
+    predecessor_not_applicable = db.Column(db.Boolean, default=False)  # first audit / no predecessor
+    predecessor_auditor_name = db.Column(db.String(200))
+    client_permission_obtained = db.Column(db.Boolean)
+    predecessor_contacted = db.Column(db.Boolean)
+    predecessor_response_notes = db.Column(db.Text)
+
+    # 4. Competence check - the team has the industry expertise and time.
+    competence_notes = db.Column(db.Text)
+    competence_confirmed = db.Column(db.Boolean)
+
+    # 5. Regulatory checks - AML / KYC.
+    aml_kyc_notes = db.Column(db.Text)
+    aml_kyc_completed = db.Column(db.Boolean)
+
+    # Forensic Audit Client Acceptance Questionnaire - on engagements of type
+    # "Investigative Engagement" these four sections REPLACE sections 1-5
+    # above (Background check / Independence / Predecessor / Competence /
+    # Regulatory) in the Client Acceptance tab - the underlying questions
+    # are different enough (conflicts & threats, enhanced due diligence,
+    # evidence/legal control, scope realism) that reusing the generic
+    # fields above would mean showing fields like "predecessor auditor
+    # name" under a heading about evidence control, which doesn't make
+    # sense. Both sets of columns exist side by side; only one set is shown
+    # (and required for items_complete, below) depending on the engagement's
+    # type, so switching an engagement's type never loses whichever set was
+    # already filled in.
+    conflict_threat_clear = db.Column(db.Boolean)  # 1. Conflict of Interest & Threat Assessment
+    conflict_threat_notes = db.Column(db.Text)
+    edd_completed = db.Column(db.Boolean)  # 2. Enhanced Due Diligence (EDD)
+    edd_notes = db.Column(db.Text)
+    legal_evidence_satisfactory = db.Column(db.Boolean)  # 3. Legal Framework & Evidence Control
+    legal_evidence_notes = db.Column(db.Text)
+    competence_scope_confirmed = db.Column(db.Boolean)  # 4. Competence & Scope Realism
+    competence_scope_notes = db.Column(db.Text)
+
+    # Secretarial Client Acceptance Checklist - on engagements of type
+    # "Secretarial" these five sections REPLACE sections 1-5 above
+    # (Background check / Independence / Predecessor / Competence /
+    # Regulatory), same reasoning and pattern as the forensic columns
+    # above: KYC & Ultimate Beneficial Ownership, Authority Integrity &
+    # Client Background, Nature of Business & Risk Profile, Conflict of
+    # Interest & Dispute Assessment, and Operational Capacity & Commercial
+    # Feasibility - the corporate-secretarial-specific considerations a
+    # generic financial-statement acceptance checklist doesn't cover.
+    kyc_ubo_satisfactory = db.Column(db.Boolean)  # 1. KYC & Ultimate Beneficial Ownership
+    kyc_ubo_notes = db.Column(db.Text)
+    authority_background_satisfactory = db.Column(db.Boolean)  # 2. Authority, Integrity & Client Background
+    authority_background_notes = db.Column(db.Text)
+    nature_of_business_risk_acceptable = db.Column(db.Boolean)  # 3. Nature of Business & Risk Profile
+    nature_of_business_risk_notes = db.Column(db.Text)
+    conflict_dispute_clear = db.Column(db.Boolean)  # 4. Conflict of Interest & Dispute Assessment
+    conflict_dispute_notes = db.Column(db.Text)
+    operational_capacity_confirmed = db.Column(db.Boolean)  # 5. Operational Capacity & Commercial Feasibility
+    operational_capacity_notes = db.Column(db.Text)
+
+    # 6. Engagement letter - scope/timeline/responsibilities/fees, signed by
+    # the client. The signed copy is filed as an ordinary Document (see
+    # acceptance.py's upload route) and linked here.
+    engagement_letter_notes = db.Column(db.Text)
+    engagement_letter_sent_at = db.Column(db.DateTime)
+    engagement_letter_signed_at = db.Column(db.DateTime)
+    engagement_letter_document_id = db.Column(db.Integer, db.ForeignKey("document.id"))
+
+    # Forensic Audit Risk Evaluation Matrix - only shown/used on engagements
+    # of type "Investigative Engagement" (see RISK_CATEGORIES below and the
+    # risk_total_score/risk_tier properties). Each is 1 (low) to 5 (high);
+    # None means that category hasn't been scored yet.
+    risk_conflicts_score = db.Column(db.Integer)
+    risk_security_score = db.Column(db.Integer)
+    risk_integrity_edd_score = db.Column(db.Integer)
+    risk_evidence_legal_score = db.Column(db.Integer)
+    risk_scope_capabilities_score = db.Column(db.Integer)
+    risk_scoring_notes = db.Column(db.Text)
+
+    # The decision itself - this plus the partner sign-off below is what
+    # actually clears (or permanently blocks) the gate.
+    decision = db.Column(db.String(20), default="Pending", nullable=False)
+    decision_notes = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    # Interim "continue working" authorisation: a narrower, separate power
+    # that lets the Engagement Partner unlock the rest of the engagement
+    # (see engagement_acceptance_cleared below) BEFORE the full sign-off
+    # above is possible - e.g. the decision to accept has genuinely been
+    # made but one item is still physically in process (typically the
+    # client hasn't yet returned the countersigned engagement letter).
+    # Unlike the full partner sign-off, this does NOT require
+    # items_complete, and it never lets a "Declined"/"Pending" decision
+    # through - only "Accepted". It's superseded by (and should still be
+    # followed up with) a proper partner sign-off once every item is
+    # actually complete. Cleared automatically by _touch() in acceptance.py
+    # whenever any underlying field changes, same as the review/sign-off
+    # timestamps above, so a stale authorisation can never linger past the
+    # facts it was based on.
+    partner_authorized_continue_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_authorized_continue_at = db.Column(db.DateTime)
+    partner_authorized_continue_notes = db.Column(db.Text)
+
+    engagement = db.relationship("Engagement", backref=db.backref("client_acceptance", uselist=False, cascade="all, delete-orphan"))
+    engagement_letter_document = db.relationship("Document")
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+    partner_authorized_continue_by = db.relationship("User", foreign_keys=[partner_authorized_continue_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def is_authorized_to_continue(self):
+        return self.partner_authorized_continue_at is not None
+
+    @property
+    def items_complete(self):
+        """All items have at least been assessed (not necessarily
+        favourably - an unfavourable background check is a reason to
+        decline, not a reason the form is "incomplete"). Required before a
+        Partner can record the decision as sign-off. Investigative
+        Engagements use the four Forensic Audit Client Acceptance
+        Questionnaire sections instead of the five generic ones (see the
+        columns above), and Secretarial engagements use the five-section
+        Secretarial Client Acceptance Checklist - every other engagement
+        type keeps the original six-item check."""
+        if self.engagement and self.engagement.type == "Investigative Engagement":
+            return all([
+                self.conflict_threat_clear is not None,
+                self.edd_completed is not None,
+                self.legal_evidence_satisfactory is not None,
+                self.competence_scope_confirmed is not None,
+                self.engagement_letter_signed_at is not None,
+            ])
+        if self.engagement and self.engagement.type == "Secretarial":
+            return all([
+                self.kyc_ubo_satisfactory is not None,
+                self.authority_background_satisfactory is not None,
+                self.nature_of_business_risk_acceptable is not None,
+                self.conflict_dispute_clear is not None,
+                self.operational_capacity_confirmed is not None,
+                self.engagement_letter_signed_at is not None,
+            ])
+        predecessor_done = self.predecessor_not_applicable or self.predecessor_contacted is not None
+        return all([
+            self.background_check_satisfactory is not None,
+            self.independence_threats_identified is not None,
+            predecessor_done,
+            self.competence_confirmed is not None,
+            self.aml_kyc_completed is not None,
+            self.engagement_letter_signed_at is not None,
+        ])
+
+    @property
+    def checklist_assessment(self):
+        """A plain-language, advisory-only read of the tick + comment
+        checklist below, surfaced next to the Decision field to help the
+        Partner judge whether to accept, decline, or keep looking into an
+        engagement - it never sets or overrides the `decision` field
+        itself, that's always a deliberate choice made by the Partner.
+        A "No" response on any checklist item is treated as a flagged
+        concern; an item with no response yet is "outstanding"."""
+        items = list(self.checklist_items)
+        total = len(items)
+        if total == 0:
+            return {"label": "No checklist items added yet.", "level": "muted", "flagged": 0, "outstanding": 0, "total": 0}
+        flagged = sum(1 for i in items if i.response == "No")
+        outstanding = sum(1 for i in items if not i.response)
+        if flagged:
+            label = f"{flagged} of {total} item{'s' if total != 1 else ''} flagged as a concern - recommend reviewing these before accepting."
+            level = "danger"
+        elif outstanding:
+            label = f"{outstanding} of {total} item{'s' if total != 1 else ''} not yet assessed."
+            level = "warning"
+        else:
+            label = f"No concerns identified across all {total} checklist item{'s' if total != 1 else ''}."
+            level = "success"
+        return {"label": label, "level": level, "flagged": flagged, "outstanding": outstanding, "total": total}
+
+    @property
+    def client_screenings(self):
+        """The client's sanctions / AML vetting list (see ClientSanctionsScreening) - it applies to every engagement."""
+        client = self.engagement.client if self.engagement is not None else None
+        return list(client.sanctions_screenings) if client is not None else []
+
+    @property
+    def screening_assessment(self):
+        """Advisory-only summary of the client's vetting list, shown on this tab with a link to the client's page, where it is managed.
+        It never sets or overrides the `decision` field, same as checklist_assessment above."""
+        return screening_assessment_for(self.client_screenings)
+
+    @property
+    def risk_scores(self):
+        """The five Forensic Audit Risk Evaluation Matrix scores, in a
+        fixed order matching RISK_CATEGORIES, as (field_name, value)
+        pairs - value is None where that category hasn't been scored."""
+        return [(field, getattr(self, field)) for field, *_ in RISK_CATEGORIES]
+
+    @property
+    def risk_total_score(self):
+        """Sum of the five category scores, or None until every category
+        has been scored (a partial sum would be misleading against the
+        5-25 scale the risk tiers below are calibrated to)."""
+        scores = [v for _, v in self.risk_scores]
+        if any(v is None for v in scores):
+            return None
+        return sum(scores)
+
+    @property
+    def risk_assessment(self):
+        """The risk tier (Low/Medium/High) implied by risk_total_score,
+        with its decision guidance and recommended action, exactly as set
+        out in the firm's Forensic Audit Risk Evaluation Matrix. Purely
+        advisory, like checklist_assessment above - it never sets the
+        `decision` field itself."""
+        total = self.risk_total_score
+        if total is None:
+            scored = sum(1 for _, v in self.risk_scores if v is not None)
+            return {
+                "total": None, "tier": None, "level": "muted",
+                "label": f"{scored} of {len(RISK_CATEGORIES)} risk categories scored so far.",
+                "decision": None, "action": None,
+            }
+        if total <= 10:
+            return {
+                "total": total, "tier": "Low Risk", "level": "success",
+                "label": f"Total score {total}/25 - Low Risk (Fast-Track Acceptance).",
+                "decision": "Accept. Standard engagement setup.",
+                "action": "Draft the engagement letter and assign the team.",
+            }
+        if total <= 17:
+            return {
+                "total": total, "tier": "Medium Risk", "level": "warning",
+                "label": f"Total score {total}/25 - Medium Risk (Conditional Acceptance).",
+                "decision": "Review. Requires approval from the Managing Partner or Risk Committee.",
+                "action": "Put safeguards in place (e.g. a higher upfront retainer, strict information barriers, or mandating outside counsel).",
+            }
+        return {
+            "total": total, "tier": "High Risk", "level": "danger",
+            "label": f"Total score {total}/25 - High Risk (Decline or Heavy Mitigation).",
+            "decision": "High Alert. Recommend declining the engagement unless extraordinary risk mitigations are implemented.",
+            "action": "If accepted, requires formal sign-off from the Board/Global Risk Head, specialised insurance riders, and independent third-party oversight.",
+        }
+
+    @property
+    def flagged_issues(self):
+        """Every concern currently flagged anywhere on this tab, pulled
+        together into one list for the Decision section - a "No" checklist
+        response, a sanctions Potential Match/Confirmed Hit, an unfavourable
+        section answer, an unresolved predecessor-communication step, or a
+        Medium/High forensic risk tier. This is computed fresh from the live
+        data every time (not stored), so an issue that's since been fixed
+        (e.g. a checklist response changed from No to Yes) simply stops
+        appearing - it never needs separate cleanup. Each entry carries
+        whichever AcceptanceFlagReview already exists for it (None if it
+        hasn't been looked at yet) - see that model for what reviewing one
+        does (and, just as importantly, doesn't do)."""
+        issues = []
+        for item in self.checklist_items:
+            if item.response == "No":
+                label = f"Checklist - {item.section}" if item.section else "Checklist item"
+                detail = item.item_text + (f" — {item.comment}" if item.comment else "")
+                issues.append({"key": f"checklist:{item.id}", "label": label, "detail": detail})
+
+        for screening in self.client_screenings:
+            if screening.overall_status in ("Confirmed Hit", "Potential Match"):
+                detail = screening.overall_status + (f" ({screening.role_description})" if screening.role_description else "")
+                issues.append({"key": f"screening:{screening.id}", "label": f"Sanctions screening — {screening.individual_name}", "detail": detail})
+
+        is_forensic = self.engagement and self.engagement.type == "Investigative Engagement"
+        is_secretarial = self.engagement and self.engagement.type == "Secretarial"
+        if is_forensic:
+            section_checks = [
+                ("conflict_threat_clear", False, "Conflict of Interest & Threat Assessment", "conflict_threat_notes"),
+                ("edd_completed", False, "Enhanced Due Diligence", "edd_notes"),
+                ("legal_evidence_satisfactory", False, "Legal Framework & Evidence Control", "legal_evidence_notes"),
+                ("competence_scope_confirmed", False, "Competence & Scope Realism", "competence_scope_notes"),
+            ]
+        elif is_secretarial:
+            section_checks = [
+                ("kyc_ubo_satisfactory", False, "KYC & Ultimate Beneficial Ownership", "kyc_ubo_notes"),
+                ("authority_background_satisfactory", False, "Authority, Integrity & Client Background", "authority_background_notes"),
+                ("nature_of_business_risk_acceptable", False, "Nature of Business & Risk Profile", "nature_of_business_risk_notes"),
+                ("conflict_dispute_clear", False, "Conflict of Interest & Dispute Assessment", "conflict_dispute_notes"),
+                ("operational_capacity_confirmed", False, "Operational Capacity & Commercial Feasibility", "operational_capacity_notes"),
+            ]
+        else:
+            section_checks = [
+                ("background_check_satisfactory", False, "Background check", "background_check_notes"),
+                ("independence_threats_identified", True, "Independence assessment — threats identified", "independence_notes"),
+                ("competence_confirmed", False, "Competence check", "competence_notes"),
+                ("aml_kyc_completed", False, "Regulatory checks (AML/KYC)", "aml_kyc_notes"),
+            ]
+        for field, flag_value, label, notes_field in section_checks:
+            if getattr(self, field) == flag_value:
+                detail = (getattr(self, notes_field) or "").strip() or "No further notes recorded."
+                issues.append({"key": f"section:{field}", "label": label, "detail": detail})
+
+        if not is_forensic and not is_secretarial and not self.predecessor_not_applicable:
+            if self.client_permission_obtained is False:
+                issues.append({"key": "section:predecessor_permission", "label": "Predecessor communication", "detail": "Client permission to contact the predecessor auditor was not obtained."})
+            elif self.predecessor_contacted is False:
+                issues.append({"key": "section:predecessor_contacted", "label": "Predecessor communication", "detail": "The predecessor auditor was not (or could not be) contacted."})
+
+        if is_forensic:
+            tier = self.risk_assessment.get("tier")
+            if tier in ("Medium Risk", "High Risk"):
+                issues.append({"key": "risk:total", "label": "Forensic Risk Evaluation Matrix", "detail": self.risk_assessment["label"]})
+
+        reviews_by_key = {r.flag_key: r for r in self.flag_reviews}
+        for issue in issues:
+            issue["review"] = reviews_by_key.get(issue["key"])
+        return issues
+
+    @property
+    def flagged_issues_summary(self):
+        """Plain-language roll-up of flagged_issues above, for the one-line
+        summary at the top of the Decision section - same advisory-only,
+        never-gates-anything pattern as checklist_assessment/
+        screening_assessment/risk_assessment."""
+        issues = self.flagged_issues
+        total = len(issues)
+        if total == 0:
+            return {"label": "No issues currently flagged elsewhere on this tab.", "level": "success", "total": 0, "open": 0, "consider": 0}
+        open_count = sum(1 for i in issues if not i["review"])
+        consider_count = sum(1 for i in issues if i["review"] and i["review"].status == "Consider")
+        if open_count:
+            label = f"{total} issue{'s' if total != 1 else ''} flagged — {open_count} not yet reviewed below."
+            level = "danger"
+        elif consider_count:
+            label = f"{total} issue{'s' if total != 1 else ''} flagged — all reviewed, {consider_count} marked to still Consider."
+            level = "warning"
+        else:
+            label = f"{total} issue{'s' if total != 1 else ''} flagged — all reviewed and Disregarded."
+            level = "success"
+        return {"label": label, "level": level, "total": total, "open": open_count, "consider": consider_count}
+
+    def __repr__(self):
+        return f"<ClientAcceptance engagement={self.engagement_id} decision={self.decision}>"
+
+
+ACCEPTANCE_FLAG_STATUSES = ["Disregard", "Consider"]
+
+
+class AcceptanceFlagReview(db.Model):
+    """A reviewer's call on one specific issue flagged in
+    ClientAcceptance.flagged_issues, shown in the Decision section's summary.
+    Purely a record for the file of who looked at a flagged concern and what
+    they made of it - "Disregard" it, or still "Consider" it - with an
+    optional note. Like every other advisory signal on this tab
+    (checklist_assessment, screening_assessment, risk_assessment), this
+    NEVER blocks the decision or the partner sign-off; it exists only so the
+    file shows that someone actually looked at each flagged item rather than
+    it just sitting there unaddressed.
+
+    flag_key identifies which specific issue this is about (see
+    ClientAcceptance.flagged_issues for how each key is built - a checklist
+    item, a screening, a named section, or the risk matrix total). If the
+    underlying issue stops applying (e.g. a checklist response changes from
+    No back to Yes) this row is simply no longer shown - it isn't deleted,
+    so if the same concern reappears later its previous review is still
+    here for reference."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_acceptance_id = db.Column(db.Integer, db.ForeignKey("client_acceptance.id"), nullable=False)
+    flag_key = db.Column(db.String(100), nullable=False)
+    status = db.Column(db.String(20), nullable=False)  # "Disregard" or "Consider" - see ACCEPTANCE_FLAG_STATUSES
+    note = db.Column(db.Text)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client_acceptance = db.relationship("ClientAcceptance", backref=db.backref("flag_reviews", lazy=True, cascade="all, delete-orphan"))
+    reviewed_by = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("client_acceptance_id", "flag_key", name="uq_acceptance_flag_review"),)
+
+    def __repr__(self):
+        return f"<AcceptanceFlagReview {self.flag_key!r} status={self.status!r}>"
+
+
+CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES = ["Yes", "No", "N/A"]
+
+# Seeded the first time someone opens a fresh Client Acceptance checklist
+# (see acceptance.seed_acceptance_checklist) - a starting point covering the
+# same six areas above at a finer grain, editable/deletable/extendable like
+# any other item.
+DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS = [
+    ("Background check", "What is the professional background, market reputation, and regulatory track record of key officers (CEO, CFO, Audit Committee Chair)?"),
+    ("Background check", "Have management or principal owners been involved in financial litigation, fraud investigations, tax disputes, or regulatory enforcement action?"),
+    ("Background check", "What is the company's history regarding aggressive accounting choices, internal control overrides, or frequent restatements?"),
+    ("Background check", "Are there indicators of financial stress, such as declining liquidity ratios, impending debt covenant breaches, or reliance on short-term financing to cover operating expenses?"),
+    ("Background check", "What are management's key compensation incentives, and do they link heavily to short-term earnings targets or equity metrics?"),
+    ("Independence", "Does the firm or any engagement team member hold direct or indirect financial interests (e.g., shares, loans) in the prospective client?"),
+    ("Independence", "Do key personnel have close family or personal relationships with client executives, directors, or financial accounting staff?"),
+    ("Independence", "Are non-audit services (tax, advisory, IT implementation) currently provided that would create a self-review threat or act in a management capacity?"),
+    ("Independence", "Does the anticipated audit fee represent a significant percentage of the firm's total revenue, creating an over-reliance or economic self-interest threat?"),
+    ("Independence", "Are key audit team members former employees of the prospective client within the cooling-off period required by professional standards?"),
+    ("Predecessor auditor", "What was the predecessor auditor's understanding of the primary reasons for the change in auditors?"),
+    ("Predecessor auditor", "Were there any significant disagreements regarding accounting principles, auditing procedures, or financial statement disclosures?"),
+    ("Predecessor auditor", "Did management attempt to restrict the scope of the prior audit or withhold relevant information?"),
+    ("Predecessor auditor", "Did the predecessor auditor identify any instances of actual or suspected fraud, non-compliance with laws, or significant internal control deficiencies?"),
+    ("Predecessor auditor", "Were there any communication issues with those charged with governance or the audit committee?"),
+    ("Competence", "Does the firm possess specialists (e.g., IT auditors, valuation experts, actuarial analysts) with relevant experience in this specific industry?"),
+    ("Competence", "Is the engagement team familiar with industry-specific reporting frameworks, complex transactions, and regulatory requirements?"),
+    ("Competence", "Can the firm allocate sufficient staff and partner hours during the required engagement window without overextending personnel?"),
+    ("Competence", "Are there geographic considerations, foreign subsidiaries, or joint ventures that require specialized local audit coverage or network partner support?"),
+    ("Regulatory / AML", "Who are the Ultimate Beneficial Owners (UBOs) holding direct or indirect ownership stakes above the regulatory threshold (e.g., 10% or 25%)?"),
+    ("Regulatory / AML", "Have background screenings been performed against global watchlists, sanctions lists (OFAC, UN, EU), and Politically Exposed Persons (PEP) databases?"),
+    ("Regulatory / AML", "What is the nature, source, and legitimacy of the organization's funding and capital contributions?"),
+    ("Regulatory / AML", "Is the entity incorporated in or operating out of high-risk jurisdictions or tax havens identified by FATF?"),
+    ("Regulatory / AML", "Has management provided verified primary identification documents and corporate registration certificates?"),
+    ("Fee & quality", "The expected fee is commensurate with the work required, without compromising the quality of the engagement."),
+    ("Engagement letter", "The client has agreed to the scope, timeline, responsibilities, and fee basis set out in the engagement letter."),
+]
+
+# Seeded instead of DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS when the engagement's
+# type is "Investigative Engagement" (see acceptance.seed_acceptance_checklist)
+# - forensic/fraud investigation work raises acceptance considerations a
+# standard audit/assurance checklist doesn't cover (evidence chain of
+# custody, legal privilege, adversarial parties). Section names match the
+# four Forensic Audit Client Acceptance Questionnaire sections that REPLACE
+# the five generic narrative sections for this engagement type (see
+# ClientAcceptance.conflict_threat_clear etc. and items_complete above).
+# Grounded in the Zimbabwean legal/regulatory environment the firm
+# operates in - the Money Laundering and Proceeds of Crime Act [Chapter
+# 9:24], the Companies and Other Business Entities Act [Chapter 24:31],
+# the Cyber and Data Protection Act [Chapter 11:12], the Exchange Control
+# Act [Chapter 22:05], FIU Zimbabwe, RBZ, ZIMRA, ZACC, PAAB/ICAZ, and the
+# multicurrency (ZWG/USD) operating environment - rather than generic or
+# foreign-law references.
+FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS = [
+    ("Conflict of Interest & Threat Assessment", "Have we screened all suspects, target entities, key witnesses, and related parties against our firm's active and past client database, including engagements handled by associated offices?"),
+    ("Conflict of Interest & Threat Assessment", "Have we previously provided audit, accounting, tax, or advisory services to this client or target that could create a self-review or advocacy threat, having regard to the ICAZ Code of Professional Conduct and PAAB independence requirements?"),
+    ("Conflict of Interest & Threat Assessment", "Is any partner, manager, or staff member on the proposed team a former employee, director, or close family member of the client, the target, or a related party, within the cooling-off period required by PAAB/ICAZ?"),
+    ("Conflict of Interest & Threat Assessment", "Does the investigation touch on a politically exposed person (PEP), a state enterprise, or an individual/entity connected to ZACC or other politically sensitive networks, requiring heightened partner-level oversight?"),
+    ("Conflict of Interest & Threat Assessment", "Does this investigation involve organised crime, cross-border smuggling (e.g. gold, chrome, tobacco), corporate retaliation, or a hostile environment in a high-risk part of the country, requiring specialised physical security for our staff?"),
+    ("Conflict of Interest & Threat Assessment", "Have we assessed cyber-security threats common in Zimbabwe (SIM-swap fraud, mobile money hijacking, compromised email accounts) that could expose our staff, systems, or evidence to interference?"),
+    ("Enhanced Due Diligence (EDD)", "Have we verified the identity of the engaging entity and its directors through the Companies and Other Business Entities Act [Chapter 24:31] register (Deeds and Companies Office), applying standard KYC/AML protocols under the Money Laundering and Proceeds of Crime Act [Chapter 9:24] and FIU Zimbabwe guidance?"),
+    ("Enhanced Due Diligence (EDD)", "Have we identified the Ultimate Beneficial Owners (UBOs) of both the client and the target, cross-checked against the COBE Act's beneficial ownership register requirements, to rule out hidden conflicts or nominee arrangements?"),
+    ("Enhanced Due Diligence (EDD)", "Have we screened all key individuals against the UN, OFAC and EU sanctions lists, and against any adverse notices issued by the Reserve Bank of Zimbabwe (RBZ) or the Financial Intelligence Unit (FIU)?"),
+    ("Enhanced Due Diligence (EDD)", "Does the source of funds or the transactions under review involve externalisation of foreign currency or RTGS/ZWG-to-USD conversions that may raise issues under the Exchange Control Act [Chapter 22:05] or RBZ exchange control directives?"),
+    ("Enhanced Due Diligence (EDD)", "Do background checks with the High Court of Zimbabwe civil register, the Master of the High Court, ZIMRA (tax clearance status), and media reports reveal a history of bad faith, fraud, tax evasion, or vexatious litigation by any key player?"),
+    ("Enhanced Due Diligence (EDD)", "Has the client itself been the subject of an investigation, freezing order, or adverse finding by ZACC, the ZRP Fraud Section, or a sector regulator (RBZ, IPEC, SECZim, POTRAZ, ZERA) with a bearing on this engagement?"),
+    ("Legal Framework & Evidence Control", "Does the client have the legal authority to grant us access to the target's emails, mobile devices, and financial records without breaching the Cyber and Data Protection Act [Chapter 11:12], the Interception of Communications Act [Chapter 11:20], or the target's constitutional right to privacy?"),
+    ("Legal Framework & Evidence Control", "Has the client or a third party already accessed, copied, altered, or deleted data before engaging us, in a way that could compromise the chain of custody or its admissibility under the Evidence Act [Chapter 8:01] and Zimbabwean court practice?"),
+    ("Legal Framework & Evidence Control", "Will evidence, device images, or personal data need to leave Zimbabwe for analysis, and if so, have we considered the cross-border data transfer restrictions under the Cyber and Data Protection Act and any Data Protection Authority notification requirements?"),
+    ("Legal Framework & Evidence Control", "Should we be retained directly by the client, or engaged through a legal practitioner registered with the Law Society of Zimbabwe, so our work product is shielded, where possible, by legal professional privilege?"),
+    ("Legal Framework & Evidence Control", "If the matter may proceed to the ZRP, the National Prosecuting Authority, ZACC, or the High Court, have we agreed evidence-handling and reporting protocols with the client and their lawyers that will meet those bodies' standards?"),
+    ("Legal Framework & Evidence Control", "Are there Labour Act [Chapter 28:01] considerations around interviewing or suspending implicated employees that need to be cleared with the client's legal counsel before we proceed?"),
+    ("Competence & Scope Realism", "Do we have Certified Fraud Examiners (CFEs), digital forensics specialists, and staff registered with ICAZ/PAAB with genuine experience in this type of fraud and in the relevant Zimbabwean industry?"),
+    ("Competence & Scope Realism", "Is the engagement team familiar with the reporting expectations of the specific Zimbabwean regulator involved (RBZ, IPEC, SECZim, POTRAZ, ZERA, or the Minerals Marketing Corporation of Zimbabwe), where relevant?"),
+    ("Competence & Scope Realism", "Is the scope clearly defined (e.g. quantifying a specific loss, tracing assets domestically or externalised abroad, or preparing a report for possible criminal referral), or is the client asking for an open-ended \"fishing expedition\" our resourcing cannot support?"),
+    ("Competence & Scope Realism", "Given Zimbabwe's multicurrency environment (ZWG, USD, and residual RTGS balances) and exchange rate volatility, can we realistically trace and value the transactions, and have we agreed which currency our findings and fee will be expressed in?"),
+    ("Competence & Scope Realism", "Does the client understand that building court-ready evidence in Zimbabwe takes time (bank statements, court orders, ZIMRA records), and are they willing to pay an upfront retainer - ideally in hard currency - to mitigate non-payment and currency risk?"),
+    ("Competence & Scope Realism", "Will the investigation require statements or affidavits from Shona- or Ndebele-speaking witnesses, and have we budgeted for qualified translation/interpretation so the evidence stays accurate and admissible?"),
+]
+
+# Seeded instead of DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS when the engagement's
+# type is "Business Intelligence and IT Engagements" (see
+# acceptance.seed_acceptance_checklist) - a cyber/IT/AML-CFT control
+# assurance engagement raises acceptance considerations the standard
+# financial-statement checklist doesn't cover (competence to assess
+# technical controls, logistics of accessing client systems, handling of
+# highly confidential data, and the Cyber and Data Protection Act/AML
+# regulatory backdrop). Unlike FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS, this
+# type keeps the standard six narrative sections (Background check/
+# Independence/Predecessor/Competence/Regulatory/Engagement letter) rather
+# than replacing them - only the detailed tick + comment questions under
+# each section change, so the section names below match those six exactly.
+BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS = [
+    ("Background check", "Has the entity had any publicly reported cyber security incidents, data breaches, or regulatory findings relating to IT, information security or AML/CFT compliance?"),
+    ("Background check", "Is there evidence of a mature (or, conversely, an absent/ad hoc) IT governance and control environment based on preliminary enquiry?"),
+    ("Background check", "Are there indicators of significant IT change (system migrations, outsourcing, M&A/integration) that could heighten engagement risk?"),
+    ("Background check", "Does the entity rely on legacy or end-of-life systems for any critical financial or operational processes?"),
+    ("Background check", "Does the entity rely on third-party vendor hosting (SaaS/cloud) for critical systems, and if so, is there visibility over that vendor's own security/compliance posture?"),
+    ("Independence", "Does the firm or any engagement team member have a financial interest in, or a close relationship with, the entity's IT service providers, cloud vendors, or cyber security vendors?"),
+    ("Independence", "Has the firm previously provided IT implementation, cyber security remediation, or AML/CFT advisory services to this entity that would create a self-review threat over the same subject matter now being assessed?"),
+    ("Independence", "Are the proposed engagement team members free of any relationship that could compromise objectivity when assessing the entity's own IT/security/AML controls?"),
+    ("Predecessor", "If a predecessor firm previously performed IT, cyber security or AML/CFT assurance work for this entity, has permission been obtained to make appropriate enquiries of them?"),
+    ("Predecessor", "Were there any disagreements or concerns raised by a predecessor regarding the entity's IT general controls, cyber security posture, or AML/CFT compliance?"),
+    ("Competence", "Does the engagement team include (or have access to) specialists with genuine cyber security, information security, ICT audit, and AML/CFT expertise appropriate to this entity's environment?"),
+    ("Competence", "Is the team familiar with the relevant Zimbabwean legal/regulatory framework - the Cyber and Data Protection Act [Chapter 12:07], the Money Laundering and Proceeds of Crime Act [Chapter 9:24], and applicable FIU guidance?"),
+    ("Competence", "Has the logistics of accessing the entity's systems been agreed (read-only access levels, supervised access, remote vs on-site testing, timing to avoid disrupting live operations)?"),
+    ("Competence", "Can the firm resource this engagement without overextending the specialists required, given other concurrent commitments?"),
+    ("Competence - Management Integrity & Cooperativeness", "Has management indicated a willingness to grant the engagement team full read-only administrative access to system and security logs (e.g. SIEM, firewall, access control logs) for the period under review?"),
+    ("Competence - Management Integrity & Cooperativeness", "Has management indicated a willingness to provide access to relevant source code repositories (for in-house developed systems) for review, where applicable?"),
+    ("Competence - Management Integrity & Cooperativeness", "Has management indicated a willingness to provide system configuration exports/documentation for key infrastructure and application components?"),
+    ("Competence - Management Integrity & Cooperativeness", "Has management indicated a willingness to provide database schema documentation and appropriate read-only database access for testing purposes?"),
+    ("Competence - Management Integrity & Cooperativeness", "Based on preliminary engagement with management, is there any indication of reluctance, evasiveness, or resistance to independent scrutiny of the IT environment that should factor into the accept/decline decision?"),
+    ("Regulatory", "Have appropriate confidentiality and data-handling arrangements been agreed for any highly sensitive data (personal information, security configurations, vulnerability findings) that will be accessed or generated during the engagement?"),
+    ("Regulatory", "Does the scope of testing (e.g. any vulnerability scanning or penetration testing) require a formal rules-of-engagement/authorisation letter to avoid any suggestion of unauthorised system access?"),
+    ("Regulatory", "Are there sector-specific regulatory considerations (e.g. POTRAZ, RBZ) that apply to this entity's IT/cyber/AML obligations and should shape the scope?"),
+    ("Regulatory", "Will any findings need to be reported to, or may trigger obligations with, a regulator or the Financial Intelligence Unit, and has this been discussed with the client in advance?"),
+    ("Fee & quality", "The expected fee is commensurate with the specialist skill and time required, without compromising the quality of the engagement."),
+    ("Engagement letter", "The client has agreed to the scope (which domains - cyber security, information security, ICT, AML/CFT - are covered), timeline, responsibilities, access arrangements, and fee basis set out in the engagement letter."),
+]
+
+# Seeded instead of DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS when the engagement's
+# type is "Secretarial" (see acceptance.seed_acceptance_checklist) -
+# corporate secretarial / company registration work raises acceptance
+# considerations a financial-statement checklist doesn't cover (Ultimate
+# Beneficial Ownership, filing-agent authority, registry/company-formation
+# risk). Section names match the five Secretarial Client Acceptance
+# Checklist sections that REPLACE the five generic narrative sections for
+# this engagement type (see ClientAcceptance.kyc_ubo_satisfactory etc. and
+# items_complete above).
+SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS = [
+    ("KYC & Ultimate Beneficial Ownership", "Who are the Ultimate Beneficial Owners (UBOs) - natural persons holding more than 20% of the shares or voting rights, able to appoint or remove a majority of the directors, or otherwise in significant control (COBE Act Sec 2)?"),
+    ("KYC & Ultimate Beneficial Ownership", "Are any of the directors, shareholders, or UBOs classified as a Politically Exposed Person (PEP) or close associates of a PEP?"),
+    ("KYC & Ultimate Beneficial Ownership", "Do any names appear on international sanctions lists, anti-money laundering (AML) watchlists, or terrorist financing databases?"),
+    ("KYC & Ultimate Beneficial Ownership", "What is the source of wealth and source of funds being used to capitalize the new company or fund the transaction?"),
+    ("KYC & Ultimate Beneficial Ownership", "Have certified/notarized government-issued IDs and proof of residential address been obtained for all key stakeholders?"),
+    ("Authority, Integrity & Client Background", "Does the individual providing the instructions have the legal capacity and explicit authority (e.g. Board Resolution or Power of Attorney) to act on behalf of the entity?"),
+    ("Authority, Integrity & Client Background", "What is the client's reputation and history - are there past involvements in bankruptcies, corporate fraud, or regulatory penalties?"),
+    ("Authority, Integrity & Client Background", "Why is the client looking to register a new company or change structures at this specific time?"),
+    ("Authority, Integrity & Client Background", "If taking over an existing company, why are they changing service providers, and are there outstanding fees or disputes with the previous agent?"),
+    ("Nature of Business & Risk Profile", "What is the detailed intended principal activity of the company?"),
+    ("Nature of Business & Risk Profile", "Does the business operate in a high-risk sector (e.g. cryptocurrency, gambling, arms trade, precious metals, offshore banking)?"),
+    ("Nature of Business & Risk Profile", "Will the company require a specialized regulatory license to operate (e.g. financial services, telecom, mining)?"),
+    ("Nature of Business & Risk Profile", "What is the geographical footprint of the business - where are its main markets, suppliers, and bank accounts located?"),
+    ("Conflict of Interest & Dispute Assessment", "Do we currently represent any competitors, adversaries, or conflicting parties related to this client or transaction?"),
+    ("Conflict of Interest & Dispute Assessment", "Is there an internal dispute or deadlock among the current shareholders or directors regarding the proposed changes?"),
+    ("Conflict of Interest & Dispute Assessment", "Will executing these corporate changes benefit one group of shareholders to the detriment of another?"),
+    ("Conflict of Interest & Dispute Assessment", "Is there any risk that this entity is being created or altered to evade taxes, existing legal liabilities, or court orders?"),
+    ("Operational Capacity & Commercial Feasibility", "Do we have the technical expertise and local licensing to handle this specific corporate structure (e.g. public listed companies, trusts, offshore entities)?"),
+    ("Operational Capacity & Commercial Feasibility", "Is the timeline demanded by the client realistic given local registry (e.g. Companies Office) processing times?"),
+    ("Operational Capacity & Commercial Feasibility", "Has the client agreed to our fee structure, billing terms, and retainer requirements?"),
+    ("Operational Capacity & Commercial Feasibility", "Are the client's expectations regarding our role clearly defined - specifically, do they understand we are acting as a filing agent and not providing formal tax or legal advice?"),
+]
+
+
+class ClientAcceptanceChecklistItem(db.Model):
+    """A single tick + comment line within a Client Acceptance record,
+    letting the team work through a detailed list of individual
+    considerations - beyond the six broad narrative areas above - and
+    record a Yes/No/N-A response with a supporting comment for each. The
+    aggregate of these responses is summarised in
+    ClientAcceptance.checklist_assessment to help (not replace) the
+    Partner's accept/decline decision."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_acceptance_id = db.Column(db.Integer, db.ForeignKey("client_acceptance.id"), nullable=False)
+    section = db.Column(db.String(100))
+    item_text = db.Column(db.String(300), nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client_acceptance = db.relationship(
+        "ClientAcceptance",
+        backref=db.backref("checklist_items", lazy=True, cascade="all, delete-orphan", order_by="ClientAcceptanceChecklistItem.order"),
+    )
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<ClientAcceptanceChecklistItem {self.item_text!r} response={self.response!r}>"
+
+
+# ---------- Company documents & key people (directors/shareholders) ----------
+# Lives on the Client itself, not on any one Engagement, so it's filled in
+# once per client and reused by every engagement that client ever has -
+# and so is Sanctions & AML Vetting (ClientSanctionsScreening), which applies to
+# every engagement for the client. See company_documents.py and
+# entity_extraction.py for the upload/AI-extraction routes and logic.
+
+COMPANY_DOCUMENT_TYPES = [
+    "Certificate of Incorporation",
+    "Memorandum & Articles of Association",
+    "CR6 - Return of Directors",
+    "CR5 - Notice of Situation of Registered Office",
+    "Company Summary",
+    "Share Register / Share Certificates",
+    "Beneficial Ownership Declaration",
+    "Director/Shareholder ID Documents",
+    "Other",
+]
+
+# Which Permanent File (P-series) FilingIndexSection a Company Document is
+# automatically filed under the moment it's uploaded (see
+# company_documents.upload_document / permanent_file.
+# file_upload_to_permanent_file) - so a preparer never has to upload the
+# same incorporation document twice, once here and once to the Permanent
+# File below. Matches the firm's own Filing Index typical_contents for each
+# P-code (see seed.FILING_INDEX_PERMANENT_SEED): statutory
+# incorporation/registry documents go to P1000 "Incorporation & Statutory",
+# documents about who holds/controls the company go to P5000 "Structure &
+# Governance". "Other" is deliberately left unmapped (None) - a
+# miscellaneous upload is left for a preparer to file by hand if it belongs
+# in the Permanent File at all, rather than guessing a P-code for it. If the
+# matching code hasn't been seeded/exists yet on a given install, auto-
+# filing is simply skipped - this never blocks the Company Document upload
+# itself.
+COMPANY_DOCUMENT_TYPE_TO_FILING_CODE = {
+    "Certificate of Incorporation": "P1000",
+    "Memorandum & Articles of Association": "P1000",
+    "CR6 - Return of Directors": "P1000",
+    "CR5 - Notice of Situation of Registered Office": "P1000",
+    "Company Summary": "P1000",
+    "Share Register / Share Certificates": "P5000",
+    "Beneficial Ownership Declaration": "P5000",
+    "Director/Shareholder ID Documents": "P5000",
+    "Other": None,
+}
+
+PERSON_ROLES = ["Director", "Shareholder", "Beneficial Owner", "Company Secretary", "Other"]
+PERSON_STATUSES = ["Suggested", "Confirmed"]
+
+
+class CompanyDocument(db.Model):
+    """One company registration document (certificate of incorporation,
+    CR6, share register, etc.) uploaded once against a Client and reused
+    across every one of that client's engagements. Text is extracted on
+    upload the same way as RegulatoryNotice (see sanctions_data.
+    extract_pdf_text); an image upload (a photographed/scanned page saved
+    directly as a JPG/PNG rather than a PDF) skips straight to the AI
+    extraction step below since there's no PDF text layer to try first.
+    Directors/Shareholders/etc are then extracted from that document by
+    entity_extraction.extract_people (see ClientKeyPerson) - ai_status
+    records whether that step itself succeeded, separately from whether any
+    people were actually found in a document that genuinely doesn't list
+    any (e.g. a certificate of incorporation with no director names on it)."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    document_type = db.Column(db.String(60), nullable=False, default="Other")
+    title = db.Column(db.String(300), nullable=False)
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))
+    extracted_text = db.Column(db.Text)
+    extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error" - PDF uploads only
+    page_count = db.Column(db.Integer)
+
+    ai_status = db.Column(db.String(20))  # "done", "not_configured", "error"
+    ai_error = db.Column(db.Text)
+    ai_processed_at = db.Column(db.DateTime)
+
+    notes = db.Column(db.Text)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("company_documents", lazy=True, cascade="all, delete-orphan", order_by="CompanyDocument.uploaded_at.desc()"))
+    uploaded_by = db.relationship("User")
+
+    @property
+    def file_ext(self):
+        return self.original_filename.rsplit(".", 1)[-1].lower() if self.original_filename and "." in self.original_filename else ""
+
+    def __repr__(self):
+        return f"<CompanyDocument {self.document_type} {self.title!r}>"
+
+
+class ClientKeyPerson(db.Model):
+    """One director/shareholder/beneficial owner/company secretary
+    associated with a Client - either suggested automatically by AI
+    extraction from an uploaded CompanyDocument (status "Suggested",
+    source_document set) or added/edited by a person directly (status
+    "Confirmed", source_document None, or a Suggested row a reviewer has
+    since confirmed). An AI suggestion is never treated as fact on its own -
+    the same conservative principle as automated sanctions matching
+    (SanctionsScreening/sanctions_data.py): it's surfaced for a person to
+    review, correct if needed, and confirm. Feeds Sanctions & Adverse Notice
+    Screening (see acceptance.py's add-to-screening action) so the people
+    found here don't have to be retyped into that per-engagement list."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    full_name = db.Column(db.String(200), nullable=False)
+    role = db.Column(db.String(30), nullable=False, default="Other")
+    # Number of shares, shareholding %, ID/passport number, nationality and
+    # address each get their own field (previously all jumbled into one
+    # free-text "details" box) so they can be read, sorted and reused
+    # individually - e.g. nationality feeding a future PEP/adverse-media
+    # check without having to re-parse a sentence. Number of shares and
+    # percentage are kept separate rather than one combined field since a
+    # document/register may state either or both, and they're not always
+    # simple to derive from each other (e.g. the total shares in issue
+    # isn't always stated). "details" is kept for anything else stated that
+    # doesn't fit one of those fields (date of appointment, a second role
+    # also held, etc).
+    number_of_shares = db.Column(db.String(50))
+    shareholding_percentage = db.Column(db.String(50))
+    id_number = db.Column(db.String(100))
+    nationality = db.Column(db.String(100))
+    address = db.Column(db.String(300))
+    details = db.Column(db.Text)  # other notes not covered by the fields above
+    status = db.Column(db.String(20), nullable=False, default="Confirmed")  # "Suggested" or "Confirmed" - see PERSON_STATUSES
+    # True only for a person who already existed before the four fields
+    # above did, whose old free-text "details" note was AI-split into them -
+    # a separate, narrower review flag from `status` above: it never flips
+    # an already-Confirmed identity back to Suggested, it just marks that
+    # the *split itself* (not the person's identity) hasn't been checked by
+    # a human yet. See entity_extraction.split_legacy_details.
+    needs_detail_review = db.Column(db.Boolean, nullable=False, default=False)
+
+    source_document_id = db.Column(db.Integer, db.ForeignKey("company_document.id"))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # null for an AI-suggested row until confirmed
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    confirmed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    confirmed_at = db.Column(db.DateTime)
+
+    client = db.relationship("Client", backref=db.backref("key_people", lazy=True, cascade="all, delete-orphan", order_by="ClientKeyPerson.full_name"))
+    source_document = db.relationship("CompanyDocument", backref=db.backref("extracted_people", lazy=True))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    confirmed_by = db.relationship("User", foreign_keys=[confirmed_by_id])
+
+    def __repr__(self):
+        return f"<ClientKeyPerson {self.full_name!r} role={self.role!r} status={self.status!r}>"
+
+
+# ---------- Understanding the Entity's Business - public information scan ----------
+# A manual, on-demand check of what's publicly available (news, social media,
+# etc.) about a client's business, directors/shareholders and products - see
+# entity_research.py and company_documents.py's run_public_research. Lives on
+# the Client, same reasoning as company documents/key people above: the
+# firm's understanding of a client's business doesn't reset between
+# engagements, so it's run and kept once per client rather than once per
+# engagement. Never triggered automatically (each run is a billed AI web
+# search) and never overwritten - each run adds a new dated row, the same
+# keep-a-record philosophy as SanctionsScreening's auto_* notes.
+
+PUBLIC_RESEARCH_SCOPES = [
+    ("profile", "Business profile only"),
+    ("risk", "Risk / adverse-media check only"),
+    ("both", "Both"),
+]
+
+
+class EntityPublicResearch(db.Model):
+    """One run of the public-information scan against a Client - purely
+    informational, like every other AI-assisted feature in this app it never
+    marks anything Confirmed or decides anything on its own; a person reads
+    the findings (and the sources listed) and judges them."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    scope = db.Column(db.String(10), nullable=False, default="both")  # "profile" | "risk" | "both" - see PUBLIC_RESEARCH_SCOPES
+    status = db.Column(db.String(20), nullable=False, default="done")  # "done", "not_configured", "error"
+    business_profile = db.Column(db.Text)
+    risk_findings = db.Column(db.Text)
+    sources_json = db.Column(db.Text)  # JSON-encoded list of {"title", "url"}
+    error_message = db.Column(db.Text)
+
+    requested_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    requested_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship(
+        "Client",
+        backref=db.backref(
+            "public_research_runs", lazy=True, cascade="all, delete-orphan",
+            order_by="EntityPublicResearch.requested_at.desc()",
+        ),
+    )
+    requested_by = db.relationship("User")
+
+    @property
+    def sources(self):
+        try:
+            return json.loads(self.sources_json) if self.sources_json else []
+        except (TypeError, ValueError):
+            return []
+
+    def set_sources(self, value):
+        self.sources_json = json.dumps(value or [])
+
+    @property
+    def scope_label(self):
+        return dict(PUBLIC_RESEARCH_SCOPES).get(self.scope, self.scope)
+
+    def __repr__(self):
+        return f"<EntityPublicResearch client={self.client_id} scope={self.scope!r} status={self.status!r}>"
+
+
+# ---------- Sanctions & adverse notice screening ----------
+
+# The five lists/registers every key individual is screened against, in
+# display order - the three international sanctions lists first, then the
+# two Zimbabwean regulators. Each is its own column/field on
+# SanctionsScreening below (un_result, ofac_result, eu_result, rbz_result,
+# fiu_result) rather than one combined result, since a hit on one list but
+# not another is itself a meaningful finding worth recording separately.
+SANCTIONS_SCREENING_SOURCES = [
+    ("un_result", "UN Sanctions List"),
+    ("ofac_result", "OFAC (US Treasury)"),
+    ("eu_result", "EU Sanctions List"),
+    ("rbz_result", "Reserve Bank of Zimbabwe (RBZ) adverse notices"),
+    ("fiu_result", "Financial Intelligence Unit (FIU) adverse notices"),
+]
+
+SANCTIONS_SCREENING_RESULTS = ["Not Checked", "Clear", "Potential Match", "Confirmed Hit"]
+
+# The three sources with a free, official, machine-readable feed the app can
+# fetch and cache itself (see sanctions_data.py) - matched automatically
+# against SanctionsWatchlistEntry rows cached from that feed. Maps each
+# source's short code to its result-field/auto-notes-field prefix on
+# SanctionsScreening and to its SanctionsListStatus row.
+SANCTIONS_AUTO_SOURCES = ["UN", "OFAC", "EU"]
+
+# RBZ and FIU Zimbabwe publish no such feed (RBZ posts occasional PDF
+# "Public Notices"; FIU Zimbabwe has no searchable list at all) - so instead
+# the firm uploads the PDFs it receives to the Regulatory Notices library
+# (see RegulatoryNotice below) and an auto-screen searches their extracted
+# text for a name match, in place of a live API call.
+REGULATORY_NOTICE_SOURCES = ["RBZ", "FIU"]
+REGULATORY_NOTICE_SOURCE_LABELS = {
+    "RBZ": "Reserve Bank of Zimbabwe (RBZ)",
+    "FIU": "Financial Intelligence Unit (FIU) Zimbabwe",
+}
+
+
+class SanctionsScreening(db.Model):
+    """One row per key individual (director, beneficial owner, authorised
+    signatory, or - on an Investigative Engagement - a suspect/target/key
+    witness) screened against the UN, OFAC and EU sanctions lists and
+    against adverse notices from the Reserve Bank of Zimbabwe (RBZ) and the
+    Financial Intelligence Unit (FIU), as part of Client Acceptance's
+    regulatory/AML checks (ordinary engagements) or Enhanced Due Diligence
+    (Investigative Engagements) - see ClientAcceptance.screening_assessment
+    for the aggregate, advisory-only read of this list. Each of the five
+    lists gets its own result rather than one combined field, since a hit
+    on one list but a clear result on the others is itself worth recording."""
+    id = db.Column(db.Integer, primary_key=True)
+    client_acceptance_id = db.Column(db.Integer, db.ForeignKey("client_acceptance.id"), nullable=False)
+    individual_name = db.Column(db.String(200), nullable=False)
+    role_description = db.Column(db.String(150))  # e.g. "Director", "Beneficial Owner (30%)", "Authorised Signatory", "Investigation target"
+
+    un_result = db.Column(db.String(20), default="Not Checked")
+    ofac_result = db.Column(db.String(20), default="Not Checked")
+    eu_result = db.Column(db.String(20), default="Not Checked")
+    rbz_result = db.Column(db.String(20), default="Not Checked")
+    fiu_result = db.Column(db.String(20), default="Not Checked")
+
+    notes = db.Column(db.Text)  # match details, reference/search numbers, follow-up/escalation actions
+    order = db.Column(db.Integer, default=0)
+
+    # Populated by the auto-screen action (acceptance.auto_screen_individual)
+    # alongside the *_result columns above - a short, human-readable note on
+    # what the automated match (or lack of one) against the cached UN/OFAC/EU
+    # lists or the uploaded RBZ/FIU notice library actually found, kept
+    # separate from the shared `notes` field above so a reviewer's own
+    # manual notes are never silently overwritten by a later auto-screen.
+    un_auto_notes = db.Column(db.Text)
+    ofac_auto_notes = db.Column(db.Text)
+    eu_auto_notes = db.Column(db.Text)
+    rbz_auto_notes = db.Column(db.Text)
+    fiu_auto_notes = db.Column(db.Text)
+    auto_screened_at = db.Column(db.DateTime)
+    auto_screened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    screened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    screened_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # Screening now lives on the Client (see ClientSanctionsScreening below) because it
+    # applies to every engagement. Rows here are the old per-engagement records; once one
+    # has been merged into its client's list this is set so the migration never repeats.
+    migrated_to_client = db.Column(db.Boolean, default=False)
+
+    client_acceptance = db.relationship(
+        "ClientAcceptance",
+        backref=db.backref("screenings", lazy=True, cascade="all, delete-orphan", order_by="SanctionsScreening.order"),
+    )
+    screened_by = db.relationship("User", foreign_keys=[screened_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    auto_screened_by = db.relationship("User", foreign_keys=[auto_screened_by_id])
+
+    def auto_notes_for(self, field):
+        """auto_notes_for('un_result') -> self.un_auto_notes, etc - lets the
+        template loop over SANCTIONS_SCREENING_SOURCES once and look up the
+        matching auto-note without a second parallel list to keep in sync."""
+        return getattr(self, field.replace("_result", "_auto_notes"), None)
+
+    @property
+    def is_screened(self):
+        """Whether every one of the five lists has actually been checked
+        (as opposed to left at its "Not Checked" default)."""
+        return all(getattr(self, field) != "Not Checked" for field, _ in SANCTIONS_SCREENING_SOURCES)
+
+    @property
+    def overall_status(self):
+        results = [getattr(self, field) for field, _ in SANCTIONS_SCREENING_SOURCES]
+        if "Confirmed Hit" in results:
+            return "Confirmed Hit"
+        if "Potential Match" in results:
+            return "Potential Match"
+        if self.is_screened:
+            return "Clear"
+        return "Not Checked"
+
+    def __repr__(self):
+        return f"<SanctionsScreening {self.individual_name!r} status={self.overall_status!r}>"
+
+
+class ClientSanctionsScreening(db.Model):
+    """Sanctions, PEP and AML vetting of one key individual (director, beneficial owner,
+    authorised signatory, or - on an Investigative Engagement - a suspect/target/key witness),
+    kept on the CLIENT rather than on an engagement: the vetting applies to every engagement the
+    firm does for the client, so it is done once and shown wherever it matters (the client's
+    page, and as a summary on each engagement's Acceptance tab). Same five lists and the same
+    conservative automatic matching as the old per-engagement SanctionsScreening (which this
+    replaces; its rows were merged into here on upgrade)."""
+    __tablename__ = "client_sanctions_screening"
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    individual_name = db.Column(db.String(200), nullable=False)
+    role_description = db.Column(db.String(150))
+
+    un_result = db.Column(db.String(20), default="Not Checked")
+    ofac_result = db.Column(db.String(20), default="Not Checked")
+    eu_result = db.Column(db.String(20), default="Not Checked")
+    rbz_result = db.Column(db.String(20), default="Not Checked")
+    fiu_result = db.Column(db.String(20), default="Not Checked")
+
+    notes = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+
+    un_auto_notes = db.Column(db.Text)
+    ofac_auto_notes = db.Column(db.Text)
+    eu_auto_notes = db.Column(db.Text)
+    rbz_auto_notes = db.Column(db.Text)
+    fiu_auto_notes = db.Column(db.Text)
+    auto_screened_at = db.Column(db.DateTime)
+    auto_screened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    screened_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    screened_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship(
+        "Client",
+        backref=db.backref("sanctions_screenings", lazy=True, cascade="all, delete-orphan", order_by="ClientSanctionsScreening.order"),
+    )
+    screened_by = db.relationship("User", foreign_keys=[screened_by_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    auto_screened_by = db.relationship("User", foreign_keys=[auto_screened_by_id])
+
+    # identical behaviour to the legacy model
+    auto_notes_for = SanctionsScreening.auto_notes_for
+    is_screened = SanctionsScreening.is_screened
+    overall_status = SanctionsScreening.overall_status
+
+    def __repr__(self):
+        return f"<ClientSanctionsScreening {self.individual_name!r} status={self.overall_status!r}>"
+
+
+def screening_assessment_for(individuals):
+    """Plain-language, advisory-only read of a client's vetting list (see ClientSanctionsScreening).
+    A confirmed hit on even one list, for even one individual, is the most severe outcome."""
+    individuals = list(individuals)
+    total = len(individuals)
+    if total == 0:
+        return {"label": "No key individuals have been added for sanctions and AML vetting on the client's page yet.", "level": "muted", "hits": 0, "potential": 0, "outstanding": 0, "total": 0}
+    hits = sum(1 for i in individuals if i.overall_status == "Confirmed Hit")
+    potential = sum(1 for i in individuals if i.overall_status == "Potential Match")
+    outstanding = sum(1 for i in individuals if not i.is_screened)
+    s = "s" if total != 1 else ""
+    if hits:
+        label, level = f"{hits} of {total} individual{s} returned a confirmed hit - escalate to the Partner/MLRO before proceeding.", "danger"
+    elif potential:
+        label, level = f"{potential} of {total} individual{s} returned a potential match - resolve before proceeding.", "warning"
+    elif outstanding:
+        label, level = f"{outstanding} of {total} individual{s} not yet screened against all five lists.", "warning"
+    else:
+        label, level = f"All {total} individual{s} screened clear against the UN, OFAC, EU, RBZ and FIU lists.", "success"
+    return {"label": label, "level": level, "hits": hits, "potential": potential, "outstanding": outstanding, "total": total}
+
+
+
+class SanctionsWatchlistEntry(db.Model):
+    """One cached name from the UN, OFAC or EU sanctions list (see
+    SANCTIONS_AUTO_SOURCES and sanctions_data.py), refreshed periodically
+    from each source's own free, official, machine-readable feed and stored
+    here so screening a name is an instant local lookup rather than a live
+    call to three different government/international-body servers on every
+    keystroke. The whole table for a given source is replaced wholesale on
+    each refresh (see sanctions_data.refresh_source) rather than diffed, since
+    these feeds don't expose an incremental/delta API."""
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(10), nullable=False)  # "UN", "OFAC", "EU" - see SANCTIONS_AUTO_SOURCES
+    name = db.Column(db.String(300), nullable=False)
+    aliases = db.Column(db.Text)  # other known names/spellings, if the feed provides them, newline-separated
+    reference = db.Column(db.String(150))  # the source's own reference/ID number for this listing, if provided
+    programme = db.Column(db.String(300))  # sanctions programme/regime this listing falls under, if provided
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    def __repr__(self):
+        return f"<SanctionsWatchlistEntry {self.source} {self.name!r}>"
+
+
+class SanctionsListStatus(db.Model):
+    """One row per SANCTIONS_AUTO_SOURCES entry, tracking when that source's
+    cache (SanctionsWatchlistEntry rows) was last refreshed, how many entries
+    it holds, and the last error (if the most recent refresh attempt failed) -
+    shown on the Sanctions & Adverse Notice Screening card so staff can see
+    how current the automated screening actually is, and surfaced per-source
+    since one feed being temporarily unreachable shouldn't hide the status of
+    the other two (see sanctions_data.refresh_all_sources)."""
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(10), nullable=False, unique=True)
+    last_refreshed_at = db.Column(db.DateTime)
+    entry_count = db.Column(db.Integer, default=0)
+    last_error = db.Column(db.Text)
+    last_refreshed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    last_refreshed_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<SanctionsListStatus {self.source} entries={self.entry_count}>"
+
+
+class RegulatoryNotice(db.Model):
+    """One RBZ or FIU Zimbabwe adverse-notice PDF the firm has uploaded to
+    the firm-wide Regulatory Notices library (see regulatory_notices.py) -
+    the practical substitute for the automated feed those two regulators
+    don't publish (see REGULATORY_NOTICE_SOURCES). Text is extracted from
+    the PDF on upload (see sanctions_data.extract_pdf_text) and stored here
+    so an auto-screen can search it for a name match without re-reading the
+    PDF from disk every time; extraction_status records whether that
+    actually worked (a scanned, image-only PDF has no selectable text to
+    extract, so it's left searchable only by its title/notes)."""
+    id = db.Column(db.Integer, primary_key=True)
+    source = db.Column(db.String(10), nullable=False)  # "RBZ" or "FIU" - see REGULATORY_NOTICE_SOURCES
+    title = db.Column(db.String(300), nullable=False)
+    notice_date = db.Column(db.Date)
+    original_filename = db.Column(db.String(300))
+    stored_filename = db.Column(db.String(300))
+    extracted_text = db.Column(db.Text)
+    extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error"
+    page_count = db.Column(db.Integer)
+    notes = db.Column(db.Text)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    uploaded_by = db.relationship("User")
+
+    @property
+    def file_ext(self):
+        return self.original_filename.rsplit(".", 1)[-1] if self.original_filename and "." in self.original_filename else ""
+
+    def __repr__(self):
+        return f"<RegulatoryNotice {self.source} {self.title!r}>"
+
+
+class LegislativeUpdateClientLink(db.Model):
+    """Tags a LegislativeUpdate (see the existing LegislativeUpdate model
+    and its new filing/AI-summary fields, above in the "Firm-wide
+    Legislative Update Control (Module 8)" section) as relevant to a
+    specific Client - "taggable relevance": filing an update doesn't push
+    anything to anyone by itself, a person decides which clients it
+    actually affects (see tax.py's link_client_to_update/unlink_client
+    routes), and each tagged client then shows it on their own page (see
+    clients/detail.html's "Relevant Legislative Updates" card). From there,
+    a Tax Advisory engagement can pull the update's AI summary straight
+    into its Technical Research Log (see tax.py's
+    import_research_log_entry_from_legislative_update)."""
+    id = db.Column(db.Integer, primary_key=True)
+    legislative_update_id = db.Column(db.Integer, db.ForeignKey("legislative_update.id"), nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    notes = db.Column(db.Text)
+    linked_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    linked_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    legislative_update = db.relationship(
+        "LegislativeUpdate",
+        backref=db.backref("client_links", lazy=True, cascade="all, delete-orphan", order_by="LegislativeUpdateClientLink.linked_at.desc()"),
+    )
+    client = db.relationship(
+        "Client",
+        backref=db.backref("legislative_update_links", lazy=True, cascade="all, delete-orphan", order_by="LegislativeUpdateClientLink.linked_at.desc()"),
+    )
+    linked_by = db.relationship("User")
+
+    __table_args__ = (db.UniqueConstraint("legislative_update_id", "client_id", name="uq_legislative_update_client"),)
+
+    def __repr__(self):
+        return f"<LegislativeUpdateClientLink update={self.legislative_update_id} client={self.client_id}>"
+
+
+# ---------- Finalisation checklist ("what's left to close this engagement") ----------
+
+# Standard file-closing checklist for every engagement type EXCEPT
+# Investigative Engagements (see FORENSIC_FINALISATION_CHECKLIST_ITEMS
+# below) - the standard steps a financial-statement audit/assurance/
+# consulting/secretarial engagement works through before the file can be
+# archived. Same tick (Yes/No/N-A) + comment pattern as every other
+# checklist in this app.
+DEFAULT_FINALISATION_CHECKLIST_ITEMS = [
+    ("Subsequent Events & Going Concern", "Has a subsequent events review been performed through to the date of the report, with nothing further requiring adjustment or disclosure?"),
+    ("Subsequent Events & Going Concern", "Has the going concern conclusion been reassessed in light of the final (adjusted) financial statements?"),
+    ("Overall Conclusions", "Has the summary of uncorrected misstatements been evaluated, individually and in aggregate, against overall and performance materiality?"),
+    ("Overall Conclusions", "Has an overall analytical review of the final financial statements been performed, with the results consistent with our understanding of the entity?"),
+    ("Overall Conclusions", "Have all significant risks and key audit/engagement matters been addressed and the conclusions documented?"),
+    ("Overall Conclusions", "Has the engagement partner formed and documented an overall conclusion on the engagement?"),
+    ("Management Communication", "Has the management representation letter been obtained, signed and dated on or before the date of the report?"),
+    ("Management Communication", "Has communication with those charged with governance been completed (significant findings, control deficiencies, etc.)?"),
+    ("File Completion & Archiving", "Have all working papers been reviewed and cleared, with every review point resolved?"),
+    ("File Completion & Archiving", "Has independence and quality control compliance been reconfirmed as at the date of the report?"),
+    ("File Completion & Archiving", "Is the engagement file assembled and ready for the archiving deadline?"),
+]
+
+# Forensic-specific finalisation checklist for Investigative Engagements -
+# closing out an investigation looks nothing like closing out a financial
+# statement audit, so this replaces the list above entirely for that
+# engagement type (see acceptance/entity-understanding/risk-assessment/
+# substantive-procedures above for the same type-branching pattern).
+FORENSIC_FINALISATION_CHECKLIST_ITEMS = [
+    ("Findings & Conclusions", "Has the preliminary fraud theory (see Audit Strategy) been tested against the evidence gathered and confirmed, revised or ruled out?"),
+    ("Findings & Conclusions", "Has the quantum of loss/exposure been calculated and is it fully supported by the underlying evidence?"),
+    ("Findings & Conclusions", "Have the root-cause control weaknesses been identified and documented for remediation recommendations?"),
+    ("Reporting & Referral", "Has the final forensic report been drafted, reviewed and approved by the engagement partner?"),
+    ("Reporting & Referral", "Has the reporting destination been reconfirmed (Audit Committee/Board/law enforcement/insurance), with the report meeting their requirements?"),
+    ("Reporting & Referral", "Has a decision on referral to law enforcement, insurers, or regulators been made, documented, and taken with legal counsel's input?"),
+    ("Evidence & Chain of Custody", "Is all evidence collected logged, indexed, and its chain of custody documented end to end?"),
+    ("Evidence & Chain of Custody", "Has original evidence been secured or returned appropriately, with working copies retained per the firm's retention policy?"),
+    ("File Completion", "Have interview notes/statements been finalised, signed where applicable, and filed?"),
+    ("File Completion", "Is the engagement file assembled, reviewed, and ready for archiving, with confidentiality/access restrictions reconfirmed?"),
+]
+
+# Finalisation checklist for "Business Intelligence and IT Engagements" -
+# closing out a cyber/IT/AML-CFT control assurance engagement is closer in
+# shape to closing out an investigation than a financial-statement audit
+# (findings and recommendations rather than a materiality-based opinion on
+# numbers), so this replaces DEFAULT_FINALISATION_CHECKLIST_ITEMS entirely
+# for this engagement type, same pattern as FORENSIC_FINALISATION_
+# CHECKLIST_ITEMS above.
+BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS = [
+    ("Findings & Recommendations", "Have control gaps/exceptions identified across Cyber Security, Information Security, IT (ICT), and AML/CFT Compliance been evaluated for significance and consolidated?"),
+    ("Findings & Recommendations", "Have practical remediation recommendations been drafted for each significant finding, with input from the relevant specialists?"),
+    ("Findings & Recommendations", "Has management been given the opportunity to respond to the findings before the report is finalised?"),
+    ("Reporting & Communication", "Has the final report/opinion been drafted, reviewed and approved by the engagement partner?"),
+    ("Reporting & Communication", "Has communication with those charged with governance been completed, covering significant findings and control deficiencies identified?"),
+    ("Reporting & Communication", "Where a finding could give rise to a regulatory notification obligation (e.g. under the Cyber and Data Protection Act or AML/CFT legislation), has this been discussed with the client and, where appropriate, legal counsel?"),
+    ("Evidence & Documentation", "Is all evidence gathered (system configurations, logs, screenshots, test results, interview notes) indexed and retained in line with the firm's retention policy?"),
+    ("Evidence & Documentation", "Have any highly sensitive artefacts (e.g. vulnerability details, access credentials used during testing) been securely disposed of or returned once no longer required?"),
+    ("File Completion", "Have all working papers been reviewed and cleared, with every review point resolved?"),
+    ("File Completion", "Is the engagement file assembled and ready for the archiving deadline, with confidentiality/access restrictions reconfirmed?"),
+]
+
+# Finalisation checklist for "Secretarial" engagements - the COBE-compliant
+# five-phase Secretarial Finalisation Stage (Registry & Reconciliations;
+# Board & Governance Audit Trail; UBO & Capital Reconciliation; Final
+# Deliverable Reporting Pack; Billing & Archiving), using the updated
+# statutory form names under the Companies and Other Business Entities Act
+# [Chapter 24:31] (COBE Act) - replaces DEFAULT_FINALISATION_CHECKLIST_ITEMS
+# entirely for this engagement type, same pattern as FORENSIC_FINALISATION_
+# CHECKLIST_ITEMS / BUSINESS_IT_FINALISATION_CHECKLIST_ITEMS above.
+SECRETARIAL_FINALISATION_CHECKLIST_ITEMS = [
+    ("Registry & Reconciliations", "Final registry search made (Form CR35, application to inspect entity documents and registers) to verify all lodgments processed during the period reflect on the public register? [SEC-FIN-01]"),
+    ("Registry & Reconciliations", "Annual return reconciled and stamped - filed within 21 days of the anniversary of incorporation, registration or re-registration (Sec 165(2); the Fourth Schedule form, which has no CR number on the Registrar's list), and the AGM held within twelve months of the last one (Sec 167(2)) with Form CR17 (declaration that the AGM was held) lodged where the Registrar asks for it? For a company other than a private company, check the statutory report went in on Form CR23 within one month of being certified (Sec 166(5)). [SEC-FIN-03]"),
+    ("Registry & Reconciliations", "Director/Secretary changes confirmed - all appointments, resignations, or address changes lodged on Form CR6 within one month (Sec 217(4)-(5))? [SEC-FIN-04]"),
+    ("Registry & Reconciliations", "Registered office and postal address changes verified on Form CR5 (Notice of Registered Office) under Sec 31? [SEC-FIN-05]"),
+    ("Registry & Reconciliations", "Share allotments verified on Form CR11 (Return of Allotments), lodged within one month of each allotment under Sec 121?"),
+    ("Registry & Reconciliations", "Company Summary - confirmed with the Registrar whether it is the same document as the annual return (Sec 165(1) calls the annual return a summary) or a separate return, and filed on the current form and deadline (not mentioned in the COBE Act as supplied)?"),
+    ("Board & Governance Audit Trail", "Board/AGM minutes signed and bound - all draft minutes from Board, Committee, and General Meetings reviewed, signed by the Board Chairperson, and entered into the master minute book (Sec 180 for members' meetings; Sec 205 for the board)? [SEC-FIN-02]"),
+    ("Board & Governance Audit Trail", "Special resolutions indexed and filed - Form CR8 returns bear CIPO stamp confirmations for all Special Resolutions passed during the year, each lodged within one month of being passed (Sec 175 & 178)? [SEC-FIN-07]"),
+    ("Board & Governance Audit Trail", "Board action tracker closed out - a final summary of all action items compiled, completed tasks noted and unresolved matters rolled into the next period's planning cycle?"),
+    ("UBO & Capital Reconciliation", "UBO register and declarations reconciled - the Register of Beneficial Owners (Sec 72) reconciled and Form CR16 (Beneficial Ownership Declaration) confirmed submitted, with updates within seven days of any material change, for any natural person holding more than 20% voting rights, direct/indirect interest, or control? [SEC-FIN-06]"),
+    ("UBO & Capital Reconciliation", "Register of Members and capital structure reconciled - share certificates issued or transferred (Sec 151 & 159) reconciled against authorised nominal share capital changes filed via Form CR10 (Registration of any increase in shares, within one month, Sec 141) or Form CR9 (Conversion/Buy-Back of Shares, Sec 140)?"),
+    ("UBO & Capital Reconciliation", "Register of Mortgages and Debentures reconciled - all charges, mortgages, or satisfactions created or discharged during the year (Sec 154-155) matched against the entries in the register, and Form CR12 (notice of the place where the register is kept, or of a change to it, within one month - Sec 155(3)) lodged if the register is not at the registered office?"),
+    ("Final Deliverable Reporting Pack", "Annual Corporate Governance & Compliance Report issued (COBE statutory returns completed; governance meeting attendance matrix; solvency and liquidity compliance checks performed under Sec 102; high-risk governance or non-compliance gaps identified)? [SEC-FIN-08]"),
+    ("Final Deliverable Reporting Pack", "Secretarial Management Letter issued, documenting administrative weaknesses and corrective action recommendations?"),
+    ("Final Deliverable Reporting Pack", "Annual Governance Calendar draft provided to management for the upcoming financial year?"),
+    ("Billing & Archiving", "Document archiving and custody handover completed - original documents returned under formal receipt and electronic files securely archived per the firm's record retention guidelines?"),
+    ("Billing & Archiving", "WIP and billing closed out - time recordings finalised, disbursements (CIPO registry fees, stamp duties, statutory filing fees) passed, and the final fee note issued?"),
+    ("Billing & Archiving", "Quality Assurance & Engagement Sign-Off - the Engagement Quality Control Review checklist completed, with final sign-off by the Engagement Partner/Lead Corporate Secretary? [SEC-FIN-09]"),
+]
+
+
+class FinalisationChecklist(db.Model):
+    """One per engagement - the "what's left to close this engagement"
+    checklist shown on the Finalisation tab. Seeded from DEFAULT_
+    FINALISATION_CHECKLIST_ITEMS or FORENSIC_FINALISATION_CHECKLIST_ITEMS
+    above depending on engagement type, then ticked through item by item
+    (see FinalisationChecklistItem below) - same tick + comment + advisory
+    summary pattern as ClientAcceptance/EntityUnderstanding's checklists,
+    plus its own overall Preparer/Reviewer/Partner sign-off."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("finalisation_checklist", uselist=False, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def is_complete(self):
+        items = list(self.checklist_items)
+        return bool(items) and all(i.response for i in items)
+
+    @property
+    def checklist_assessment(self):
+        """Advisory-only read of the checklist, same pattern as
+        ClientAcceptance.checklist_assessment / EntityUnderstanding.
+        checklist_assessment above - never gates anything by itself, just a
+        plain-language pointer to what still needs attention before the
+        file can be archived."""
+        items = list(self.checklist_items)
+        total = len(items)
+        if total == 0:
+            return {"label": "No checklist items added yet.", "level": "muted", "flagged": 0, "outstanding": 0, "total": 0}
+        flagged = sum(1 for i in items if i.response == "No")
+        outstanding = sum(1 for i in items if not i.response)
+        if flagged:
+            label = f"{flagged} of {total} item{'s' if total != 1 else ''} flagged - not ready to close."
+            level = "danger"
+        elif outstanding:
+            label = f"{outstanding} of {total} item{'s' if total != 1 else ''} not yet assessed."
+            level = "warning"
+        else:
+            label = f"All {total} item{'s' if total != 1 else ''} confirmed - ready to close."
+            level = "success"
+        return {"label": label, "level": level, "flagged": flagged, "outstanding": outstanding, "total": total}
+
+    def __repr__(self):
+        return f"<FinalisationChecklist engagement={self.engagement_id}>"
+
+
+class FinalisationChecklistItem(db.Model):
+    """A single tick + comment line within a FinalisationChecklist - see
+    DEFAULT_FINALISATION_CHECKLIST_ITEMS / FORENSIC_FINALISATION_CHECKLIST_
+    ITEMS above."""
+    id = db.Column(db.Integer, primary_key=True)
+    finalisation_checklist_id = db.Column(db.Integer, db.ForeignKey("finalisation_checklist.id"), nullable=False)
+    section = db.Column(db.String(150))
+    item_text = db.Column(db.Text, nullable=False)
+    response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
+    comment = db.Column(db.Text)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    finalisation_checklist = db.relationship(
+        "FinalisationChecklist",
+        backref=db.backref("checklist_items", lazy=True, cascade="all, delete-orphan", order_by="FinalisationChecklistItem.order"),
+    )
+    created_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<FinalisationChecklistItem {self.item_text!r} response={self.response!r}>"
+
+
+# The narrative workpapers that get a persistent, editable copy in-app
+# (rather than being generated fresh, throwaway, on every download) - see
+# WorkpaperNarrative below. Each is a (kind, label, workpaper section key)
+# tuple; the section key looks up its lettered reference in
+# WORKPAPER_SECTIONS above.
+WORKPAPER_NARRATIVE_KINDS = [
+    ("rep_letter", "Management Representation Letter", "rep_letter"),
+    ("report_to_management", "Report to Management", "report_to_management"),
+    ("forensic_executive_summary", "Forensic Investigation Report - Executive Summary", "forensic_report"),
+    ("it_audit_report_summary", "IT & Cyber Assurance Report - Executive Summary of Findings & Recommendations", "it_audit_report"),
+]
+
+# The Tax Opinion's 14 parts and the Tax Health Check Report's 15 parts
+# (Tax module, Module 10 - Finalisation & Deliverables) are each just more
+# WorkpaperNarrative kinds - every part gets its own persistent, editable
+# body of text with its own independent Preparer/Reviewer/Partner sign-off,
+# exactly like rep_letter/report_to_management/forensic_executive_summary
+# above, with zero new model or route code needed (see
+# engagements._get_or_seed_workpaper_narrative / save_workpaper_narrative /
+# review_workpaper_narrative / etc., and workpapers.build_tax_opinion_docx /
+# build_tax_health_check_docx for the combined Word exports). Both are only
+# ever seeded/shown when Engagement.has_tax_module is True - see tax.py.
+TAX_OPINION_PARTS = [
+    ("tax_opinion_01_scope", "Engagement Scope & Instructions"),
+    ("tax_opinion_02_exec_summary", "Executive Summary"),
+    ("tax_opinion_03_background", "Background & Facts"),
+    ("tax_opinion_04_legislation", "Applicable Legislation & Authorities"),
+    ("tax_opinion_05_issues", "Issue(s) for Opinion"),
+    ("tax_opinion_06_analysis", "Technical Analysis"),
+    ("tax_opinion_07_alternatives", "Alternative Interpretations Considered"),
+    ("tax_opinion_08_authority_position", "Tax Authority Position (if known)"),
+    ("tax_opinion_09_risk", "Risk Assessment of the Position"),
+    ("tax_opinion_10_conclusion", "Conclusion & Recommended Position"),
+    ("tax_opinion_11_reporting", "Reporting & Disclosure Implications"),
+    ("tax_opinion_12_implementation", "Implementation Steps"),
+    ("tax_opinion_13_limitations", "Limitations & Reliance"),
+    ("tax_opinion_14_signoff", "Sign-off & Distribution"),
+]
+TAX_HEALTH_CHECK_PARTS = [
+    ("tax_health_check_01_exec_summary", "Executive Summary"),
+    ("tax_health_check_02_scope", "Scope & Methodology"),
+    ("tax_health_check_03_entity_status", "Entity & Registration Status Review"),
+    ("tax_health_check_04_cit", "Corporate Income Tax (CIT) Review"),
+    ("tax_health_check_05_vat", "Value Added Tax (VAT) Review"),
+    ("tax_health_check_06_paye", "PAYE Review"),
+    ("tax_health_check_07_wht", "Withholding Taxes Review"),
+    ("tax_health_check_08_cgt", "Capital Gains Tax Review"),
+    ("tax_health_check_09_customs", "Customs & Excise Review (if applicable)"),
+    ("tax_health_check_10_transfer_pricing", "Transfer Pricing / Related Party Review"),
+    ("tax_health_check_11_penalties", "Penalties, Interest & Historical Exposure"),
+    ("tax_health_check_12_findings", "Key Findings & Risk Ratings"),
+    ("tax_health_check_13_recommendations", "Recommendations & Remediation Plan"),
+    ("tax_health_check_14_exposure_summary", "Quantified Exposure Summary"),
+    ("tax_health_check_15_conclusion", "Conclusion & Next Steps"),
+]
+for _key, _label in TAX_OPINION_PARTS:
+    WORKPAPER_NARRATIVE_KINDS.append((_key, f"Tax Opinion - {_label}", "tax_opinion"))
+for _key, _label in TAX_HEALTH_CHECK_PARTS:
+    WORKPAPER_NARRATIVE_KINDS.append((_key, f"Tax Health Check - {_label}", "tax_health_check"))
+
+# The Management Accounts Report's 10 parts (Accounting module) are, same as
+# the Tax Opinion/Health Check above, just more WorkpaperNarrative kinds -
+# zero new model or route code needed. Only ever seeded/shown when
+# Engagement.has_accounting_module is True - see accounting.py.
+MANAGEMENT_ACCOUNTS_REPORT_PARTS = [
+    ("mgmt_report_01_exec_summary", "Executive Summary"),
+    ("mgmt_report_02_basis", "Basis of Preparation & Scope"),
+    ("mgmt_report_03_performance", "Financial Performance Review"),
+    ("mgmt_report_04_position", "Financial Position Review"),
+    ("mgmt_report_05_budget_variance", "Budget vs Actual Analysis"),
+    ("mgmt_report_06_cost_variance", "Cost & Variance Analysis"),
+    ("mgmt_report_07_cash_flow", "Cash Flow & Working Capital Commentary"),
+    ("mgmt_report_08_kpi", "KPI Dashboard Commentary"),
+    ("mgmt_report_09_risks", "Risks, Issues & Recommendations"),
+    ("mgmt_report_10_conclusion", "Conclusion & Next Steps"),
+]
+for _key, _label in MANAGEMENT_ACCOUNTS_REPORT_PARTS:
+    WORKPAPER_NARRATIVE_KINDS.append((_key, f"Management Accounts Report - {_label}", "management_accounts_report"))
+
+WORKPAPER_NARRATIVE_KIND_KEYS = {kind for kind, _, _ in WORKPAPER_NARRATIVE_KINDS}
+WORKPAPER_NARRATIVE_KIND_LABELS = {kind: label for kind, label, _ in WORKPAPER_NARRATIVE_KINDS}
+TAX_OPINION_KIND_KEYS = [k for k, _ in TAX_OPINION_PARTS]
+TAX_HEALTH_CHECK_KIND_KEYS = [k for k, _ in TAX_HEALTH_CHECK_PARTS]
+MANAGEMENT_ACCOUNTS_REPORT_KIND_KEYS = [k for k, _ in MANAGEMENT_ACCOUNTS_REPORT_PARTS]
+
+# Starting wording for each narrative workpaper the first time it's opened on
+# an engagement - editable from there on (see WorkpaperNarrative above). Kept
+# as plain text with one representation/point per line, rendered as a
+# bulleted list in the generated Word document.
+DEFAULT_WORKPAPER_NARRATIVE_BODIES = {
+    "rep_letter": "\n".join([
+        "We have fulfilled our responsibilities for the preparation of the financial statements in accordance with the applicable financial reporting framework, and they are fairly presented.",
+        "The significant assumptions used by us in making accounting estimates, including those measured at fair value, are reasonable.",
+        "Related party relationships and transactions have been appropriately accounted for and disclosed.",
+        "All events subsequent to the date of the financial statements and for which the applicable financial reporting framework requires adjustment or disclosure have been adjusted or disclosed.",
+        "The effects of uncorrected misstatements are immaterial, both individually and in the aggregate, to the financial statements as a whole. A list of the uncorrected misstatements is attached (if any).",
+        "We have disclosed to you the results of our assessment of the risk that the financial statements may be materially misstated as a result of fraud.",
+        "We have disclosed to you all known instances of non-compliance or suspected non-compliance with laws and regulations whose effects should be considered when preparing financial statements.",
+        "We have disclosed to you the identity of the entity's related parties and all the related party relationships and transactions of which we are aware.",
+        "We have provided you with access to all information of which we are aware that is relevant to the preparation of the financial statements, and access to all records, documentation and other matters requested.",
+        "There have been no irregularities involving management or employees who have a significant role in internal control that could have a material effect on the financial statements.",
+    ]),
+    "report_to_management": "\n".join([
+        "During the course of our engagement, we identified the following matters relating to internal control and other operational matters which we bring to the attention of management.",
+        "[Add each observation as its own line - e.g. \"Observation: ... / Implication: ... / Recommendation: ...\"]",
+        "This report is provided for the sole use of management and is not a comprehensive statement of all weaknesses that may exist, since it is based on matters that came to our attention during the course of our normal engagement procedures rather than a review specifically designed to identify all such matters.",
+    ]),
+    "forensic_executive_summary": "\n".join([
+        "[Summarise, in a few sentences, the mandate, the key findings, and the overall conclusion of this investigation - the detail behind each point is set out in the numbered sections that follow.]",
+    ]),
+    "it_audit_report_summary": "\n".join([
+        "[Summarise, in a few sentences, the scope (Cyber Security, Information Security, IT/ICT, AML/CFT), the overall control environment observed, the key findings and their significance, and the overall conclusion - the detail behind each point is set out in the sections that follow.]",
+    ]),
+    # The Business Intelligence and IT Engagements variant of "rep_letter"
+    # above - see default_workpaper_narrative_body below for why this
+    # engagement type needs its own set of management representations
+    # rather than the financial-statements-worded default (which refers to
+    # "the financial statements", "fair value", "uncorrected misstatements",
+    # none of which apply to an IT & Cyber Assurance engagement).
+    "rep_letter_business_it": "\n".join([
+        "We have fulfilled our responsibilities for establishing and maintaining an effective system of IT governance, cyber security and information security controls relevant to the scope of this engagement.",
+        "We have disclosed to you all known cyber security incidents, data breaches, and material control weaknesses identified during the period, whether or not previously reported to a regulator.",
+        "We have provided you with full and unrestricted access to system and security logs, source code repositories, system configuration documentation, database schemas, and all other records and information relevant to your procedures.",
+        "We have disclosed to you all known instances of non-compliance or suspected non-compliance with applicable AML/CFT laws and regulations, and with other laws and regulations whose effects should be considered in the scope of this engagement.",
+        "The access controls, change and release management, and data protection policies and procedures described to you are the same as those actually in operation during the period.",
+        "Related party access privileges and any use of privileged/administrative access outside the normal course of business have been appropriately disclosed.",
+        "We have disclosed to you the identity of all known regulatory findings, notices or correspondence (POTRAZ, RBZ, FIU or equivalent) relevant to the scope of this engagement.",
+        "There have been no irregularities involving management or employees who have a significant role in IT, security or AML/CFT controls that could have a material effect on the control environment reported on.",
+    ]),
+    # The Accounting & Bookkeeping variant of "rep_letter" above - this
+    # engagement type is a compilation/write-up engagement, not an audit or
+    # review (see financials.DEFAULT_DIRECTORS_STATEMENT_TEXT_ACCOUNTING for
+    # the same idea applied to the Directors' Statement), so the ISA 700
+    # audit-worded default ("financial statements", "fair value",
+    # "uncorrected misstatements") doesn't fit here either. Covers the four
+    # work areas an Accounting & Bookkeeping engagement can involve -
+    # Financial Accounting, Management Accounting, Cost Accounting and Tax
+    # (see models.ACCOUNTING_SERVICES/has_tax_module).
+    "rep_letter_accounting": "\n".join([
+        "We have provided you with all accounting records, source documents, bank statements, invoices and other information relevant to the preparation of the financial, management and cost accounting records and reports covered by this engagement.",
+        "The financial information provided is complete and accurately reflects all transactions of the entity for the period, to the best of our knowledge and belief.",
+        "We acknowledge that this is a compilation/bookkeeping engagement and that Neverlank Chartered Accountants has not performed an audit or review, and accordingly no assurance is expressed on the financial or management information prepared.",
+        "We are responsible for the proper maintenance of accounting records, for Financial Accounting, Management Accounting, Cost Accounting and Tax compliance matters, and for the safeguarding of the entity's assets.",
+        "We have disclosed to you all known instances of non-compliance or suspected non-compliance with tax laws and other regulations relevant to the entity's accounting and tax obligations.",
+        "Related party transactions and balances have been identified and disclosed to you.",
+        "All known liabilities, whether billed or unbilled, and commitments have been disclosed to you for inclusion in the accounting records.",
+        "There have been no irregularities involving management or employees with a significant role in the accounting or financial reporting process.",
+    ]),
+}
+# Short "[to be completed: ...]" placeholder wording for each of the Tax
+# Opinion's 14 parts and the Tax Health Check Report's 15 parts (see
+# TAX_OPINION_PARTS/TAX_HEALTH_CHECK_PARTS above) - deliberately just a
+# prompt rather than boilerplate legal/technical wording, since (unlike the
+# ISA 700 rep-letter/RTM wording above) there is no safe firm-wide default
+# position to pre-fill for a specific client's tax facts and conclusion.
+for _key, _label in TAX_OPINION_PARTS:
+    DEFAULT_WORKPAPER_NARRATIVE_BODIES[_key] = f"[To be completed: {_label}.]"
+for _key, _label in TAX_HEALTH_CHECK_PARTS:
+    DEFAULT_WORKPAPER_NARRATIVE_BODIES[_key] = f"[To be completed: {_label}.]"
+# Same "[to be completed: ...]" placeholder approach for the Management
+# Accounts Report's 10 parts - no safe firm-wide default position to
+# pre-fill for a specific client's figures/commentary either.
+for _key, _label in MANAGEMENT_ACCOUNTS_REPORT_PARTS:
+    DEFAULT_WORKPAPER_NARRATIVE_BODIES[_key] = f"[To be completed: {_label}.]"
+
+
+def default_workpaper_narrative_body(kind, engagement=None):
+    """Picks the default starting wording for a narrative workpaper - same
+    as looking it up in DEFAULT_WORKPAPER_NARRATIVE_BODIES directly, except
+    for "rep_letter" on a Business Intelligence and IT Engagements or an
+    Accounting & Bookkeeping engagement, each of which gets its own
+    tailored wording above instead of the financial-statements/audit-worded
+    default (see financials.default_directors_statement_text for the same
+    idea applied to the Directors' Statement)."""
+    if kind == "rep_letter" and engagement and engagement.type == "Business Intelligence and IT Engagements":
+        return DEFAULT_WORKPAPER_NARRATIVE_BODIES.get("rep_letter_business_it", "")
+    if kind == "rep_letter" and engagement and engagement.type == "Accounting & Bookkeeping":
+        return DEFAULT_WORKPAPER_NARRATIVE_BODIES.get("rep_letter_accounting", "")
+    return DEFAULT_WORKPAPER_NARRATIVE_BODIES.get(kind, "")
+
+
+class WorkpaperNarrative(db.Model):
+    """A persistent, editable body of free text for one of the "narrative"
+    workpapers (see WORKPAPER_NARRATIVE_KINDS) - generated once with sensible
+    default wording, then edited and updated in-app like any other
+    workpaper, rather than being recomputed from scratch every time it's
+    downloaded. One row per (engagement, kind); carries its own Preparer/
+    Reviewer/Partner sign-off, same pattern as every other workpaper.
+    Editing the body after review resets reviewed_by/partner_signed_by, same
+    as elsewhere - a changed write-up needs a fresh review."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    kind = db.Column(db.String(50), nullable=False)
+    body = db.Column(db.Text)
+
+    completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    completed_at = db.Column(db.DateTime)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+    partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    partner_signed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("workpaper_narratives", lazy=True, cascade="all, delete-orphan"))
+    completed_by = db.relationship("User", foreign_keys=[completed_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+    partner_signed_by = db.relationship("User", foreign_keys=[partner_signed_by_id])
+
+    __table_args__ = (db.UniqueConstraint("engagement_id", "kind", name="uq_workpaper_narrative_engagement_kind"),)
+
+    @property
+    def is_reviewed(self):
+        return self.reviewed_by_id is not None
+
+    @property
+    def is_partner_signed(self):
+        return self.partner_signed_by_id is not None
+
+    @property
+    def label(self):
+        return WORKPAPER_NARRATIVE_KIND_LABELS.get(self.kind, self.kind)
+
+    def __repr__(self):
+        return f"<WorkpaperNarrative engagement={self.engagement_id} kind={self.kind!r}>"
+
+
+# ---------- Native Invoicing ----------
+
+INVOICE_STATUSES = ["Draft", "Sent", "Paid", "Cancelled"]
+INVOICE_CURRENCIES = ["USD", "ZWG"]
+
+
+class Invoice(db.Model):
+    """A client invoice. Line items are manual (see InvoiceLineItem) rather
+    than generated from logged time in this first version. Always billed to
+    a Client; the link to a specific Engagement is optional (a firm may
+    invoice a client for something not tied to one particular engagement,
+    e.g. a combined fee note)."""
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+
+    currency = db.Column(db.String(10), default="USD", nullable=False)
+    # Percentage, e.g. 15.0 - 0 is a valid, explicit choice (zero-rated /
+    # exempt supply), distinct from VAT simply not having been set.
+    vat_pct = db.Column(db.Float, default=15.0, nullable=False)
+    status = db.Column(db.String(20), default="Draft", nullable=False)
+
+    issue_date = db.Column(db.Date, default=date.today)
+    due_date = db.Column(db.Date)
+    bill_to = db.Column(db.Text)  # snapshot of the billing name/address at issue time
+    notes = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    paid_at = db.Column(db.DateTime)
+
+    # Set when this invoice was generated by a RecurringInvoice schedule;
+    # recurrence_index is which occurrence of the schedule it is (0 = the
+    # first). The pair is unique, so a schedule can never bill the same
+    # period twice even if two server instances check at the same moment.
+    recurring_invoice_id = db.Column(db.Integer, db.ForeignKey("recurring_invoice.id"))
+    recurrence_index = db.Column(db.Integer)
+
+    # Unguessable token behind the invoice's public PDF link (used in WhatsApp
+    # messages); created the first time the invoice is shared.
+    share_token = db.Column(db.String(64), unique=True)
+    # Overdue-payment reminders switched off for this invoice (e.g. a payment
+    # arrangement has been agreed).
+    reminders_paused = db.Column(db.Boolean, default=False, nullable=False)
+
+    __table_args__ = (db.UniqueConstraint("recurring_invoice_id", "recurrence_index", name="uq_invoice_recurrence"),)
+
+    # client_id is required (NOT NULL), so deleting a Client must cascade to
+    # its invoices too (same convention as Client.engagements below) -
+    # there's no valid "orphaned" invoice with no client. engagement_id is
+    # optional, so deleting an Engagement instead just detaches its
+    # invoices (no cascade) - the invoice, a financial record, survives
+    # with engagement_id set back to NULL.
+    client = db.relationship("Client", backref=db.backref("invoices", lazy=True, cascade="all, delete-orphan", order_by="Invoice.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("invoices", lazy=True, order_by="Invoice.id.desc()"))
+    created_by = db.relationship("User")
+    lines = db.relationship(
+        "InvoiceLineItem", backref="invoice", lazy=True,
+        cascade="all, delete-orphan", order_by="InvoiceLineItem.id",
+    )
+
+    @property
+    def subtotal(self):
+        return sum((l.quantity or 0) * (l.unit_price or 0) for l in self.lines)
+
+    @property
+    def vat_amount(self):
+        return self.subtotal * (self.vat_pct or 0) / 100.0
+
+    @property
+    def total(self):
+        return self.subtotal + self.vat_amount
+
+    @property
+    def is_overdue(self):
+        return bool(self.due_date and self.due_date < date.today() and self.status not in ("Paid", "Cancelled")
+                    and self.balance > 0.005)
+
+    # ---- payments / receipts (see Receipt below) ----
+    @property
+    def active_receipts(self):
+        return [r for r in self.receipts if not r.is_void]
+
+    @property
+    def amount_paid(self):
+        """Money received against this invoice, from its (non-voided) receipts."""
+        return round(sum(r.amount or 0 for r in self.active_receipts), 2)
+
+    @property
+    def legacy_paid(self):
+        """Marked Paid before receipting existed: no receipt of any kind was
+        ever issued, so the invoice is simply treated as settled in full."""
+        return self.status == "Paid" and not self.receipts
+
+    # ---- credit notes (see CreditNote below) ----
+    @property
+    def active_credit_notes(self):
+        return [c for c in self.credit_notes if not c.is_void]
+
+    @property
+    def credited_total(self):
+        """Total (incl. VAT) credited back to the client by non-voided credit notes."""
+        return round(sum(c.total for c in self.active_credit_notes), 2)
+
+    @property
+    def net_total(self):
+        """What the client is actually liable for: invoice total less credit notes."""
+        return max(round((self.total or 0) - self.credited_total, 2), 0.0)
+
+    @property
+    def creditable_balance(self):
+        """How much (incl. VAT) may still be credited against this invoice."""
+        return max(round((self.total or 0) - self.credited_total, 2), 0.0)
+
+    @property
+    def is_fully_credited(self):
+        return bool(self.active_credit_notes) and self.net_total <= 0.005
+
+    @property
+    def refund_due(self):
+        """Money the client has paid in excess of what they now owe (a credit
+        note issued after payment). Zero unless the firm owes the client."""
+        paid = (self.total or 0) if self.legacy_paid else self.amount_paid
+        return max(round(paid - self.net_total, 2), 0.0)
+
+    @property
+    def receiptable_balance(self):
+        """What a new receipt may still be issued for (net of credit notes, less receipts)."""
+        return max(round(self.net_total - self.amount_paid, 2), 0.0)
+
+    @property
+    def balance(self):
+        """Still owed by the client. Zero for an invoice settled before receipts existed."""
+        if self.legacy_paid:
+            return 0.0
+        return self.receiptable_balance
+
+    @property
+    def payment_state(self):
+        """'Paid', 'Part-paid' or '' (nothing received)."""
+        if self.status == "Paid":
+            return "Paid"
+        if self.amount_paid > 0.005:
+            return "Part-paid"
+        if self.is_fully_credited:
+            return "Credited"
+        return ""
+
+    def __repr__(self):
+        return f"<Invoice {self.invoice_number}>"
+
+
+class InvoiceLineItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    description = db.Column(db.String(300), nullable=False)
+    quantity = db.Column(db.Float, default=1.0)
+    unit_price = db.Column(db.Float, default=0.0)
+
+    # The completed engagement tasks this line bills for (see
+    # EngagementTask.invoice_line_id). Deleting the line - or its invoice -
+    # sets them back to "not billed" rather than deleting them.
+    tasks = db.relationship("EngagementTask", backref="invoice_line", lazy=True)
+
+    @property
+    def line_total(self):
+        return (self.quantity or 0) * (self.unit_price or 0)
+
+    def __repr__(self):
+        return f"<InvoiceLineItem {self.description!r}>"
+
+
+# ---------- Receipts (a payment received against an Invoice) ----------
+
+PAYMENT_METHODS = ["Cash", "Bank transfer", "EcoCash", "Card", "Cheque", "Other"]
+
+
+class InvoiceSend(db.Model):
+    """One time an invoice (or an overdue reminder for it) was sent to the
+    client from the app - by email, or via a WhatsApp click-to-chat link.
+    `kind` is 'invoice' or 'reminder'. For WhatsApp, status 'opened' means the
+    sender was taken to WhatsApp with the message ready (the app cannot see
+    whether they then pressed Send)."""
+    id = db.Column(db.Integer, primary_key=True)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    kind = db.Column(db.String(12), default="invoice", nullable=False)
+    channel = db.Column(db.String(12), nullable=False)  # email | whatsapp | manual
+    recipient = db.Column(db.String(200))
+    subject = db.Column(db.String(300))
+    status = db.Column(db.String(12), default="sent", nullable=False)  # sent | failed | opened
+    error = db.Column(db.Text)
+    sent_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    invoice = db.relationship("Invoice", backref=db.backref("sends", lazy=True, cascade="all, delete-orphan", order_by="InvoiceSend.id.desc()"))
+    sent_by = db.relationship("User")
+
+
+class Receipt(db.Model):
+    """Proof that a client paid (all or part of) an invoice: one receipt per
+    payment, numbered RCT-YYYY-NNNN. An invoice can have several (instalments);
+    it becomes Paid once its receipts add up to the invoice total. A receipt is
+    never deleted - if one was issued in error it is voided (kept on file,
+    with who/when/why, and ignored in every total), so the numbering has no
+    gaps and there is an audit trail."""
+    id = db.Column(db.Integer, primary_key=True)
+    receipt_number = db.Column(db.String(30), unique=True, nullable=False)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    currency = db.Column(db.String(10), nullable=False, default="USD")  # always the invoice's currency
+    paid_on = db.Column(db.Date, nullable=False, default=date.today)  # the day the money was received
+    method = db.Column(db.String(30), default="Bank transfer")
+
+    issued_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    issued_at = db.Column(db.DateTime, default=datetime.utcnow)
+    voided_at = db.Column(db.DateTime)
+    voided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    void_reason = db.Column(db.Text)
+
+    invoice = db.relationship("Invoice", backref=db.backref(
+        "receipts", lazy=True, cascade="all, delete-orphan", order_by="Receipt.paid_on, Receipt.id"))
+    issued_by = db.relationship("User", foreign_keys=[issued_by_id])
+    voided_by = db.relationship("User", foreign_keys=[voided_by_id])
+
+    # Set when this receipt was created by applying a customer advance to the
+    # invoice (see ClientAdvanceApplication). The cash came in when the advance
+    # was received, so such a receipt is NOT new money.
+    advance_application_id = db.Column(db.Integer, db.ForeignKey("client_advance_application.id"))
+    advance_application = db.relationship("ClientAdvanceApplication", foreign_keys=[advance_application_id],
+                                          backref=db.backref("receipt", uselist=False))
+
+    @property
+    def is_void(self):
+        return self.voided_at is not None
+
+    @property
+    def from_advance(self):
+        return self.advance_application_id is not None
+
+    @property
+    def client(self):
+        return self.invoice.client
+
+    @property
+    def bill_to(self):
+        return self.invoice.bill_to
+
+    @property
+    def paid_to_date(self):
+        """Received on this invoice up to and including this receipt (earlier
+        receipts, and same-day ones issued before it)."""
+        return round(sum(
+            r.amount or 0 for r in self.invoice.active_receipts
+            if (r.paid_on, r.id) <= (self.paid_on, self.id)), 2)
+
+    @property
+    def balance_after(self):
+        return max(round(self.invoice.net_total - self.paid_to_date, 2), 0.0)
+
+    def __repr__(self):
+        return f"<Receipt {self.receipt_number} {self.amount}>"
+
+
+# ---------- Credit notes (a reduction of an Invoice) ----------
+
+class CreditNote(db.Model):
+    """A credit note reduces what a client owes on an invoice - in full or in
+    part (a billing error, a discount agreed afterwards, a service not
+    delivered). Numbered CN-YYYY-NNNN. Like a receipt it is never deleted: one
+    issued in error is voided (kept on file with who/when/why, number not
+    reused, ignored in every total). It carries the invoice's currency and VAT
+    rate, and the invoice's balance, status, statements and analytics all
+    follow it. If the client had already paid, the invoice then shows a
+    refund due."""
+    id = db.Column(db.Integer, primary_key=True)
+    credit_note_number = db.Column(db.String(30), unique=True, nullable=False)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    issue_date = db.Column(db.Date, nullable=False, default=date.today)
+    currency = db.Column(db.String(10), nullable=False, default="USD")  # always the invoice's currency
+    vat_pct = db.Column(db.Float, nullable=False, default=15.0)  # the invoice's VAT rate, at issue time
+    reason = db.Column(db.Text, nullable=False)
+    notes = db.Column(db.Text)
+
+    issued_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    issued_at = db.Column(db.DateTime, default=datetime.utcnow)
+    voided_at = db.Column(db.DateTime)
+    voided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    void_reason = db.Column(db.Text)
+
+    invoice = db.relationship("Invoice", backref=db.backref(
+        "credit_notes", lazy=True, cascade="all, delete-orphan", order_by="CreditNote.issue_date, CreditNote.id"))
+    issued_by = db.relationship("User", foreign_keys=[issued_by_id])
+    voided_by = db.relationship("User", foreign_keys=[voided_by_id])
+    lines = db.relationship("CreditNoteLine", backref="credit_note", lazy=True,
+                            cascade="all, delete-orphan", order_by="CreditNoteLine.id")
+
+    @property
+    def is_void(self):
+        return self.voided_at is not None
+
+    @property
+    def client(self):
+        return self.invoice.client
+
+    @property
+    def bill_to(self):
+        return self.invoice.bill_to
+
+    # Not rounded, so a credit note for every line of an invoice adds up to
+    # exactly the invoice's own (unrounded) total.
+    @property
+    def subtotal(self):
+        return sum((l.quantity or 0) * (l.unit_price or 0) for l in self.lines)
+
+    @property
+    def vat_amount(self):
+        return self.subtotal * (self.vat_pct or 0) / 100.0
+
+    @property
+    def total(self):
+        return self.subtotal + self.vat_amount
+
+    def __repr__(self):
+        return f"<CreditNote {self.credit_note_number}>"
+
+
+class CreditNoteLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    credit_note_id = db.Column(db.Integer, db.ForeignKey("credit_note.id"), nullable=False)
+    description = db.Column(db.String(300), nullable=False)
+    quantity = db.Column(db.Float, default=1.0)
+    unit_price = db.Column(db.Float, default=0.0)
+
+    @property
+    def line_total(self):
+        return (self.quantity or 0) * (self.unit_price or 0)
+
+
+# ---------- Customer advances (money received BEFORE it is invoiced) ----------
+
+class ClientAdvance(db.Model):
+    """Money a client has paid in advance - a deposit or payment on account -
+    before any invoice exists for it. Numbered ADV-YYYY-NNNN and receipted at
+    once. Until it is applied to an invoice it is a LIABILITY of the firm (the
+    client's credit), not income, and it shows on the client's statement as a
+    credit. It is later applied - in full or in part, to one or several
+    invoices of the same currency - or refunded. Like receipts it is never
+    deleted: one recorded in error is voided (only while nothing has been
+    applied or refunded), kept on file with who/when/why."""
+    id = db.Column(db.Integer, primary_key=True)
+    advance_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))  # optional: what it was paid for
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    amount = db.Column(db.Float, nullable=False)  # as received, VAT-inclusive
+    received_on = db.Column(db.Date, nullable=False, default=date.today)
+    method = db.Column(db.String(30), default="Bank transfer")
+    reference = db.Column(db.String(120))  # bank / EcoCash / cheque reference
+    purpose = db.Column(db.String(300))
+    notes = db.Column(db.Text)
+
+    issued_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    issued_at = db.Column(db.DateTime, default=datetime.utcnow)
+    voided_at = db.Column(db.DateTime)
+    voided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    void_reason = db.Column(db.Text)
+
+    client = db.relationship("Client", backref=db.backref(
+        "advances", lazy=True, cascade="all, delete-orphan", order_by="ClientAdvance.received_on.desc(), ClientAdvance.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("advances", lazy=True))
+    issued_by = db.relationship("User", foreign_keys=[issued_by_id])
+    voided_by = db.relationship("User", foreign_keys=[voided_by_id])
+    applications = db.relationship("ClientAdvanceApplication", backref="advance", lazy=True,
+                                   cascade="all, delete-orphan", order_by="ClientAdvanceApplication.id")
+    refunds = db.relationship("ClientAdvanceRefund", backref="advance", lazy=True,
+                              cascade="all, delete-orphan", order_by="ClientAdvanceRefund.id")
+
+    @property
+    def is_void(self):
+        return self.voided_at is not None
+
+    @property
+    def bill_to(self):
+        c = self.client
+        return c.name + (f"\n{c.address}" if getattr(c, "address", None) else "")
+
+    @property
+    def active_applications(self):
+        return [a for a in self.applications if a.is_active]
+
+    @property
+    def active_refunds(self):
+        return [r for r in self.refunds if not r.is_void]
+
+    @property
+    def applied_total(self):
+        return round(sum(a.amount or 0 for a in self.active_applications), 2)
+
+    @property
+    def refunded_total(self):
+        return round(sum(r.amount or 0 for r in self.active_refunds), 2)
+
+    @property
+    def balance(self):
+        """Still held on the client's behalf (received less applied less refunded). Zero once void."""
+        if self.is_void:
+            return 0.0
+        return max(round((self.amount or 0) - self.applied_total - self.refunded_total, 2), 0.0)
+
+    @property
+    def state(self):
+        if self.is_void:
+            return "Void"
+        if self.balance <= 0.005:
+            return "Refunded" if self.refunded_total > 0.005 and self.applied_total <= 0.005 else "Fully applied"
+        if self.applied_total > 0.005 or self.refunded_total > 0.005:
+            return "Part applied"
+        return "Unapplied"
+
+    def __repr__(self):
+        return f"<ClientAdvance {self.advance_number} {self.amount}>"
+
+
+class ClientAdvanceApplication(db.Model):
+    """An advance set against an invoice. Creating one also creates a Receipt on
+    the invoice (Receipt.advance_application_id), so the invoice's balance,
+    status and ageing follow the normal receipt logic. It is reversed by
+    voiding that receipt (which returns the money to the advance's balance)."""
+    id = db.Column(db.Integer, primary_key=True)
+    advance_id = db.Column(db.Integer, db.ForeignKey("client_advance.id"), nullable=False)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    applied_on = db.Column(db.Date, nullable=False, default=date.today)
+    applied_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    applied_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    invoice = db.relationship("Invoice", backref=db.backref(
+        "advance_applications", lazy=True, cascade="all, delete-orphan"))
+    applied_by = db.relationship("User", foreign_keys=[applied_by_id])
+
+    @property
+    def is_active(self):
+        r = self.receipt
+        return r is not None and not r.is_void
+
+
+class ClientAdvanceRefund(db.Model):
+    """Part or all of an unapplied advance paid back to the client."""
+    id = db.Column(db.Integer, primary_key=True)
+    advance_id = db.Column(db.Integer, db.ForeignKey("client_advance.id"), nullable=False)
+    amount = db.Column(db.Float, nullable=False)
+    refunded_on = db.Column(db.Date, nullable=False, default=date.today)
+    method = db.Column(db.String(30), default="Bank transfer")
+    reference = db.Column(db.String(120))
+    notes = db.Column(db.Text)
+
+    refunded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    refunded_at = db.Column(db.DateTime, default=datetime.utcnow)
+    voided_at = db.Column(db.DateTime)
+    voided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    void_reason = db.Column(db.Text)
+
+    refunded_by = db.relationship("User", foreign_keys=[refunded_by_id])
+    voided_by = db.relationship("User", foreign_keys=[voided_by_id])
+
+    @property
+    def is_void(self):
+        return self.voided_at is not None
+
+
+# ---------- Quotations (convert to Invoices) ----------
+
+# Draft > Sent > Accepted / Declined / Expired > Invoiced. "Expired" is also
+# shown automatically for a Sent quote whose valid-until date has passed
+# (see Quotation.display_status); "Invoiced" is only ever set by converting
+# the quotation into an Invoice, never by hand.
+QUOTATION_STATUSES = ["Draft", "Sent", "Accepted", "Declined", "Expired", "Invoiced"]
+QUOTATION_MANUAL_STATUSES = ["Draft", "Sent", "Accepted", "Declined", "Expired"]
+QUOTATION_DEFAULT_VALIDITY_DAYS = 30
+QUOTATION_DEFAULT_TERMS = (
+    "1. This quotation is valid until the date shown above; fees may be revised after that date.\n"
+    "2. Fees are quoted exclusive of VAT, which is added at the prevailing rate unless stated otherwise.\n"
+    "3. The quotation covers only the services described. Any additional work will be agreed with you "
+    "and billed separately.\n"
+    "4. Our engagement is subject to our client acceptance procedures and a signed engagement letter.\n"
+    "5. Invoices are payable within the period stated on the invoice, in the currency of this quotation."
+)
+
+
+class Quotation(db.Model):
+    """A fee quotation for a client, which becomes an Invoice with one click
+    once accepted (tax.py-style two-way link: Quotation.invoice_id points at
+    the invoice it produced and Invoice.quotation points back). Same shape
+    as Invoice - client, optional engagement, currency, VAT % and manual
+    line items - so conversion is a straight copy. ZWG and USD quotes are
+    separate documents; a quotation is in exactly one currency."""
+    id = db.Column(db.Integer, primary_key=True)
+    quote_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+
+    subject = db.Column(db.String(300))  # what the quote is for, e.g. "Statutory audit - FY2026"
+    currency = db.Column(db.String(10), default="USD", nullable=False)
+    vat_pct = db.Column(db.Float, default=15.0, nullable=False)
+    status = db.Column(db.String(20), default="Draft", nullable=False)
+
+    issue_date = db.Column(db.Date, default=date.today)
+    valid_until = db.Column(db.Date)
+    bill_to = db.Column(db.Text)
+    notes = db.Column(db.Text)  # scope / introduction shown above the line items
+    terms = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    accepted_at = db.Column(db.DateTime)
+    invoice_id = db.Column(db.Integer, db.ForeignKey("invoice.id"))
+
+    client = db.relationship("Client", backref=db.backref("quotations", lazy=True, cascade="all, delete-orphan", order_by="Quotation.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("quotations", lazy=True, order_by="Quotation.id.desc()"))
+    created_by = db.relationship("User")
+    invoice = db.relationship("Invoice", backref=db.backref("quotation", uselist=False))
+    lines = db.relationship(
+        "QuotationLineItem", backref="quotation", lazy=True,
+        cascade="all, delete-orphan", order_by="QuotationLineItem.id",
+    )
+
+    @property
+    def subtotal(self):
+        return sum((l.quantity or 0) * (l.unit_price or 0) for l in self.lines)
+
+    @property
+    def vat_amount(self):
+        return self.subtotal * (self.vat_pct or 0) / 100.0
+
+    @property
+    def total(self):
+        return self.subtotal + self.vat_amount
+
+    @property
+    def is_expired(self):
+        """Past its valid-until date and still waiting on the client."""
+        return bool(self.valid_until and self.valid_until < date.today() and self.status in ("Draft", "Sent"))
+
+    @property
+    def display_status(self):
+        return "Expired" if self.is_expired else self.status
+
+    def __repr__(self):
+        return f"<Quotation {self.quote_number}>"
+
+
+class QuotationLineItem(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    quotation_id = db.Column(db.Integer, db.ForeignKey("quotation.id"), nullable=False)
+    description = db.Column(db.String(300), nullable=False)
+    quantity = db.Column(db.Float, default=1.0)
+    unit_price = db.Column(db.Float, default=0.0)
+
+    @property
+    def line_total(self):
+        return (self.quantity or 0) * (self.unit_price or 0)
+
+    def __repr__(self):
+        return f"<QuotationLineItem {self.description!r}>"
+
+
+# ---------- Recurring invoices ----------
+
+# frequency -> months between invoices
+RECURRING_FREQUENCIES = {"Monthly": 1, "Quarterly": 3, "Half-yearly": 6, "Yearly": 12}
+RECURRING_STATUSES = ["Active", "Paused", "Completed"]
+
+
+class RecurringInvoice(db.Model):
+    """A schedule that raises the same invoice again and again - e.g. a
+    monthly accounting retainer, half-yearly secretarial fee or yearly
+    annual-return fee. The schedule holds the invoice "template" (client,
+    optional engagement, currency, VAT %, lines); each time an occurrence
+    falls due the app creates a *Draft* Invoice from it for a person to
+    review and send (see recurring.generate_due_invoices).
+
+    Occurrence k is dated start_date + k * step months, always counted from
+    start_date (not from the previous invoice), so a schedule that starts on
+    the 31st bills on the last day of shorter months and returns to the 31st
+    afterwards. next_index is the occurrence due next and generated_count is
+    how many invoices it has raised - they differ only when occurrences were
+    deliberately skipped (resuming after a pause, or a start date in the
+    past without back-billing). The schedule ends after max_count invoices or
+    once the next occurrence would fall after end_date, whichever is first."""
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(200), nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+
+    frequency = db.Column(db.String(20), default="Monthly", nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date)
+    max_count = db.Column(db.Integer)
+    next_index = db.Column(db.Integer, default=0, nullable=False)
+    generated_count = db.Column(db.Integer, default=0, nullable=False)
+    status = db.Column(db.String(20), default="Active", nullable=False)
+
+    currency = db.Column(db.String(10), default="USD", nullable=False)
+    vat_pct = db.Column(db.Float, default=15.0, nullable=False)
+    payment_terms_days = db.Column(db.Integer, default=30, nullable=False)
+    bill_to = db.Column(db.Text)
+    notes = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_generated_at = db.Column(db.DateTime)
+
+    client = db.relationship("Client", backref=db.backref("recurring_invoices", lazy=True, cascade="all, delete-orphan"))
+    engagement = db.relationship("Engagement", backref=db.backref("recurring_invoices", lazy=True))
+    created_by = db.relationship("User")
+    lines = db.relationship(
+        "RecurringInvoiceLine", backref="schedule", lazy=True,
+        cascade="all, delete-orphan", order_by="RecurringInvoiceLine.id",
+    )
+    # Deleting a schedule keeps the invoices it already raised (their
+    # recurring_invoice_id just becomes NULL) - they are financial records.
+    invoices = db.relationship("Invoice", backref="recurring_invoice", lazy=True, order_by="Invoice.id.desc()")
+
+    @property
+    def step_months(self):
+        return RECURRING_FREQUENCIES.get(self.frequency, 1)
+
+    @property
+    def subtotal(self):
+        return sum((l.quantity or 0) * (l.unit_price or 0) for l in self.lines)
+
+    @property
+    def vat_amount(self):
+        return self.subtotal * (self.vat_pct or 0) / 100.0
+
+    @property
+    def total(self):
+        return self.subtotal + self.vat_amount
+
+    def __repr__(self):
+        return f"<RecurringInvoice {self.name!r} {self.frequency}>"
+
+
+class RecurringInvoiceLine(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    recurring_invoice_id = db.Column(db.Integer, db.ForeignKey("recurring_invoice.id"), nullable=False)
+    description = db.Column(db.String(300), nullable=False)
+    quantity = db.Column(db.Float, default=1.0)
+    unit_price = db.Column(db.Float, default=0.0)
+
+    @property
+    def line_total(self):
+        return (self.quantity or 0) * (self.unit_price or 0)
+
+
+# ---------------------------------------------------------------------------
+# Firm expenses (the firm's OWN running costs - rent, salaries, software,
+# etc. - as opposed to GLAccount/JournalEntry, which hold a CLIENT's books).
+# Feeds the Revenue & Expenses Analytics page (analytics.py). Kept simple on
+# purpose: one row per bill/payment, in one currency. Enter the cost to the
+# firm EXCLUDING any VAT the firm can claim back, so that profit compares
+# like with like against invoice revenue (which is also measured excl. VAT).
+# ---------------------------------------------------------------------------
+
+EXPENSE_CATEGORIES = [
+    "Salaries & wages", "Rent & premises", "Utilities", "Telecoms & internet",
+    "Software & subscriptions", "Professional fees", "Insurance",
+    "Travel & transport", "Marketing", "Training & CPD",
+    "Professional bodies & licences", "Office & stationery", "Repairs & maintenance",
+    "Bank charges", "Taxes & levies", "Other",
+]
+EXPENSE_STATUSES = ["Unpaid", "Paid"]
+EXPENSE_FALLBACK_CATEGORY = "Other"   # always present; cannot be renamed, switched off or deleted
+
+
+class ExpenseCategory(db.Model):
+    """A category the firm files its own expenses under. Seeded from EXPENSE_CATEGORIES the first time it is needed,
+    then managed from Finance > Expenses > Categories. Expense.category stores the NAME, so renaming a category renames
+    it on its expenses too, and a category that has expenses is switched off rather than deleted."""
+    __tablename__ = "expense_category"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(60), nullable=False, unique=True)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.relationship("User")
+
+
+class Expense(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    expense_date = db.Column(db.Date, nullable=False, default=date.today)  # bill / cost date
+    supplier = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.String(300))
+    category = db.Column(db.String(60), nullable=False, default="Other")
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    status = db.Column(db.String(10), nullable=False, default="Paid")
+    due_date = db.Column(db.Date)   # when an unpaid bill must be settled
+    paid_date = db.Column(db.Date)
+    reference = db.Column(db.String(100))
+    # optional: a cost incurred for one client / engagement (e.g. a filing
+    # fee), so per-engagement profitability can be added later
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"))
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("expenses", lazy=True))
+    engagement = db.relationship("Engagement", backref=db.backref("expenses", lazy=True))
+    created_by = db.relationship("User")
+
+
+# ---------------------------------------------------------------------------
+# Payroll Management
+#
+# Covers BOTH sides the firm asked for: Neverlank's own staff payroll, and a
+# payroll SERVICE offered to clients (a client's own employees, processed by
+# this firm). One shared set of models/engine drives both - a PayrollEmployee
+# or PayrollPeriod's `scope` ("internal" vs "client") plus an optional
+# client_id is the only thing that distinguishes them; the tax calculation,
+# payslip layout and download formats are identical either way.
+#
+# Zimbabwean PAYE bands could NOT be reliably confirmed from public sources
+# at the time this was built - independent tax-calculator sites returned
+# mutually inconsistent figures for the current bands/credits. Rather than
+# hard-code a number that might be wrong, EVERY rate here lives in the
+# editable PayrollTaxSettings/PayrollTaxBand records below (per the firm's
+# own choice: "auto-calculated but editable"). The PAYE bands are pre-loaded
+# (see seed.seed_payroll_tax_bands) from the ZIMRA "PAYE Foreign Currency Tax
+# Tables for January to December 2024" document the firm supplied directly -
+# one Monthly/Fortnightly/Weekly table each, matching PAYROLL_PAY_FREQUENCIES.
+# AIDS levy defaults to 3% of PAYE payable (the one figure that was
+# consistently corroborated across sources when this module was built).
+#
+# NSSA employee/employer contribution rate and Insurable Earnings ceiling ARE
+# now confirmed, per the firm's own research citing the NSSA Act [Chapter
+# 17:04] and Statutory Instrument 393 of 1993: 4.5% employee + 4.5% employer
+# (9% total) of Insurable Earnings, capped at USD 700.00/month (or the local
+# currency equivalent) - see seed.seed_payroll_nssa_defaults and
+# PayrollTaxSettings below. Insurable Earnings = basic salary + regular cash
+# allowances/earnings (housing, transport, performance bonuses, etc.) + the
+# cash value of any taxable benefit in kind, EXCLUDING the employer's own
+# share of a benefit such as medical aid (a non-cash fringe benefit to the
+# employer, not part of the employee's earnings); if the employee's own
+# share of such a benefit is instead deducted from their pay, Insurable
+# Earnings are still based on gross pay BEFORE that deduction, not after -
+# see payroll_calc.calculate_payslip, where NSSA is computed from gross pay
+# and Deduction line items never reduce it. The Payroll > Tax Settings
+# screen and every payslip still carry a caveat to reconfirm all of this
+# against ZIMRA/NSSA directly (in particular: the PAYE bands are dated to
+# 2024 and should be checked against ZIMRA's current-year table before
+# relying on the auto-calculation for a later tax year, and the NSSA ceiling
+# should be reconfirmed if it is later revised or paid in local currency).
+PAYROLL_SCOPES = ["internal", "client"]
+PAYROLL_PAY_FREQUENCIES = ["Monthly", "Fortnightly", "Weekly"]
+PAYROLL_PERIOD_STATUSES = ["Draft", "Finalized"]
+PAYSLIP_ITEM_CATEGORIES = ["Allowance", "Deduction", "Exempt Income", "Tax Credit"]
+PAYROLL_TAX_CAVEAT = (
+    "The PAYE bands below are pre-loaded from ZIMRA's 2024 USD tax tables (as "
+    "supplied to the firm) - please reconfirm them against ZIMRA's CURRENT "
+    "table before relying on any auto-calculated payslip, especially in a "
+    "later tax year. NSSA's employee/employer contribution rate (4.5% each, "
+    "9% total) and Insurable Earnings ceiling (USD 700.00/month) are "
+    "pre-loaded per the NSSA Act [Chapter 17:04] and Statutory Instrument "
+    "393 of 1993, as confirmed by the firm - reconfirm if paid in local "
+    "currency equivalent or if the ceiling is later revised. Insurable "
+    "Earnings (the amount NSSA is calculated on) = basic salary + regular "
+    "cash allowances/earnings (e.g. housing, transport, performance "
+    "bonuses) + the cash value of any taxable benefit in kind - excluding "
+    "an employer's own share of a benefit like medical aid (untick "
+    "\"Counts toward NSSA?\" on that Allowance/Exempt Income line if the "
+    "firm records it on the payslip); if the employee's own share is "
+    "instead deducted from their pay, Insurable Earnings are still based "
+    "on gross pay before that deduction. The "
+    "employee's own NSSA contribution is deducted from taxable income "
+    "before PAYE is calculated (ZIMRA's own published method treats it as "
+    "an allowable deduction, like a pension contribution). A payslip can "
+    "also carry its own \"Exempt Income\" line items (e.g. a bonus "
+    "exemption - reduces taxable income but still counts toward gross/net "
+    "pay AND toward Insurable Earnings) and \"Tax Credit\" line items (e.g. "
+    "elderly/blind/disabled person's or medical expense credits - reduce "
+    "PAYE payable directly, after the tax tables, before AIDS Levy) - the "
+    "current statutory exempt/credit AMOUNTS couldn't be reliably confirmed "
+    "either, so nothing is pre-filled: enter them per employee once "
+    "confirmed against ZIMRA. The Accident Prevention and Workers' "
+    "Compensation Scheme (APWCS) is pre-loaded at 1.25% of Basic Salary, as "
+    "confirmed by the firm - it is payable to NSSA alongside the NSSA "
+    "employee/employer contributions, but is a SEPARATE scheme/rate, is "
+    "calculated on Basic Salary only (not full Insurable Earnings, and not "
+    "capped by the Insurable Earnings ceiling), and never affects the "
+    "employee's own payslip - like the employer's own NSSA contribution, "
+    "it's an employer cost shown for the firm's own remittance records "
+    "only."
+)
+
+
+class PayrollTaxSettings(db.Model):
+    """A single editable settings record (id=1, created on first use) holding
+    every rate the payroll tax engine needs, other than the PAYE bands
+    themselves (see PayrollTaxBand). NSSA's employee/employer % and
+    Insurable Earnings ceiling default to the firm-confirmed figures (4.5% /
+    4.5% / USD 700.00) per NSSA Act [Chapter 17:04] and SI 393 of 1993 - see
+    the caveat above and seed.seed_payroll_nssa_defaults (which backfills an
+    existing install that still has the old unconfirmed 0%/0%/no-ceiling
+    defaults, without touching a firm-customised value)."""
+    id = db.Column(db.Integer, primary_key=True)
+    currency = db.Column(db.String(10), default="USD", nullable=False)
+    # Of PAYE payable - the one figure consistently corroborated across the
+    # sources checked, so this is the only rate given a non-zero default.
+    aids_levy_pct = db.Column(db.Float, default=3.0)
+    # 4.5% employee + 4.5% employer (9% total) of Insurable Earnings, and a
+    # USD 700.00/month Insurable Earnings ceiling - confirmed per NSSA Act
+    # [Chapter 17:04] and SI 393 of 1993 (see PAYROLL_TAX_CAVEAT above).
+    # These defaults only apply to a settings row created fresh from here on;
+    # seed.seed_payroll_nssa_defaults backfills an existing row still left at
+    # the old 0%/0%/no-ceiling defaults.
+    nssa_employee_pct = db.Column(db.Float, default=4.5)
+    nssa_employer_pct = db.Column(db.Float, default=4.5)
+    nssa_insurable_ceiling = db.Column(db.Float, default=700.0)  # None = no ceiling applied
+    # Accident Prevention and Workers' Compensation Scheme (APWCS) - a
+    # SEPARATE NSSA-administered scheme from the ordinary NSSA employee/
+    # employer contributions above, calculated on Basic Salary only (not
+    # Insurable Earnings, and never capped by nssa_insurable_ceiling), paid
+    # entirely by the employer and never deducted from or shown on the
+    # employee's own payslip - see PAYROLL_TAX_CAVEAT above and
+    # payroll_calc.calculate_payslip for exactly where it's computed.
+    apwcs_pct = db.Column(db.Float, default=1.25)
+    source_notes = db.Column(db.Text)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    updated_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<PayrollTaxSettings {self.currency}>"
+
+
+class PayrollTaxBand(db.Model):
+    """One PAYE bracket, firm-editable: taxable income from `lower` up to
+    (not including) `upper` is taxed at `rate_pct`. `upper` left blank means
+    this is the open-ended top band. Progressive calculation - see
+    payroll_calc.calculate_paye - so bands should be entered as the
+    marginal-rate table exactly as ZIMRA publishes it (as boundaries that
+    run edge-to-edge, e.g. 0-100, 100-300, 300-1000..., NOT the "100.00 /
+    100.01" style pairs ZIMRA prints for human readability - the marginal
+    formula already treats each band as taxing only the slice from `lower`
+    up to (not including) `upper`, so an edge-to-edge boundary is what
+    reproduces ZIMRA's own published worked examples exactly; a one-cent
+    gap between bands would silently under-tax by a cent or two).
+
+    `frequency` is one of PAYROLL_PAY_FREQUENCIES ("Monthly", "Fortnightly",
+    "Weekly") - ZIMRA publishes a genuinely different band table per pay
+    frequency (not simply the Monthly one divided by 2 or 4), so each
+    frequency keeps its own independent set of bands here, and
+    payroll_calc.calculate_paye is always called with only the bands
+    matching the employee's own pay_frequency (see payroll.py)."""
+    id = db.Column(db.Integer, primary_key=True)
+    frequency = db.Column(db.String(20), nullable=False, default="Monthly")
+    lower = db.Column(db.Float, nullable=False, default=0.0)
+    upper = db.Column(db.Float)
+    rate_pct = db.Column(db.Float, nullable=False, default=0.0)
+    order = db.Column(db.Integer, default=0)
+
+    def __repr__(self):
+        return f"<PayrollTaxBand {self.frequency} {self.lower}-{self.upper} @ {self.rate_pct}%>"
+
+
+class PayrollEmployee(db.Model):
+    """A person on a payroll - either one of Neverlank's own staff (scope
+    'internal', optionally linked to their User login) or an employee of a
+    client the firm processes payroll for (scope 'client', tied to
+    client_id). full_name/job_title/etc. are always stored directly here
+    (rather than only read off the linked User) so a payslip stays a stable
+    historical record even if the underlying User record is later edited."""
+    id = db.Column(db.Integer, primary_key=True)
+    scope = db.Column(db.String(20), nullable=False, default="internal")
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"))
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    full_name = db.Column(db.String(200), nullable=False)
+    employee_number = db.Column(db.String(50))
+    national_id = db.Column(db.String(50))
+    job_title = db.Column(db.String(150))
+    nssa_number = db.Column(db.String(50))
+    bank_name = db.Column(db.String(120))
+    bank_account_number = db.Column(db.String(50))
+    pay_frequency = db.Column(db.String(20), default="Monthly")
+    basic_salary = db.Column(db.Float, default=0.0)
+    date_joined = db.Column(db.Date)
+    date_left = db.Column(db.Date)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    notes = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("payroll_employees", lazy=True, cascade="all, delete-orphan"))
+    user = db.relationship("User", foreign_keys=[user_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    def __repr__(self):
+        return f"<PayrollEmployee {self.full_name!r} ({self.scope})>"
+
+
+class PayrollPeriod(db.Model):
+    """One payroll run - e.g. "September 2026" - scoped the same way as
+    PayrollEmployee. currency is snapshotted from PayrollTaxSettings at
+    creation time so a period's figures stay meaningful even if the firm's
+    default currency setting changes later."""
+    id = db.Column(db.Integer, primary_key=True)
+    scope = db.Column(db.String(20), nullable=False, default="internal")
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"))
+    name = db.Column(db.String(120), nullable=False)
+    period_start = db.Column(db.Date)
+    period_end = db.Column(db.Date)
+    pay_date = db.Column(db.Date)
+    currency = db.Column(db.String(10), default="USD")
+    status = db.Column(db.String(20), default="Draft", nullable=False)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("payroll_periods", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+    payslips = db.relationship("Payslip", backref="period", lazy=True, cascade="all, delete-orphan", order_by="Payslip.id")
+
+    @property
+    def total_net_pay(self):
+        return sum(p.net_pay or 0.0 for p in self.payslips)
+
+    @property
+    def total_gross_pay(self):
+        return sum(p.gross_pay or 0.0 for p in self.payslips)
+
+    # ---- Statutory payments summary (Finalisation) - one figure per
+    # authority the firm actually remits to, totalled across every payslip
+    # in the period. PAYE and AIDS Levy go to ZIMRA; NSSA Employee, NSSA
+    # Employer and APWCS all go to NSSA (as three separate line items - see
+    # Payslip.apwcs/PayrollTaxSettings.apwcs_pct - APWCS is a different
+    # scheme/rate from the ordinary NSSA contributions, not a sub-total of
+    # them). None of this changes any employee's own net pay; it's purely a
+    # remittance-planning summary for the firm.
+    @property
+    def total_paye(self):
+        return sum(p.paye_tax or 0.0 for p in self.payslips)
+
+    @property
+    def total_aids_levy(self):
+        return sum(p.aids_levy or 0.0 for p in self.payslips)
+
+    @property
+    def total_nssa_employee(self):
+        return sum(p.nssa_employee or 0.0 for p in self.payslips)
+
+    @property
+    def total_nssa_employer(self):
+        return sum(p.nssa_employer or 0.0 for p in self.payslips)
+
+    @property
+    def total_apwcs(self):
+        return sum(p.apwcs or 0.0 for p in self.payslips)
+
+    @property
+    def payslips_missing_apwcs(self):
+        """Payslips with a Basic Salary but no APWCS figure - typically ones
+        generated before APWCS existed in the app (the column defaulted to 0
+        and nothing recalculated them). See payroll.backfill_apwcs."""
+        return [p for p in self.payslips if (p.basic_salary or 0.0) > 0 and not (p.apwcs or 0.0)]
+
+    @property
+    def total_zimra_remittance(self):
+        """PAYE + AIDS Levy - what the firm pays ZIMRA for this period."""
+        return self.total_paye + self.total_aids_levy
+
+    @property
+    def total_nssa_remittance(self):
+        """NSSA Employee + NSSA Employer + APWCS - what the firm pays NSSA
+        for this period (three separate line items on NSSA's own return,
+        summed here only for a single "total due to NSSA" figure)."""
+        return self.total_nssa_employee + self.total_nssa_employer + self.total_apwcs
+
+    def __repr__(self):
+        return f"<PayrollPeriod {self.name!r} ({self.scope})>"
+
+
+class Payslip(db.Model):
+    """One employee's payslip for one period. Every figure is stored
+    (never recomputed on the fly for display) so a payslip a Partner has
+    already looked at - or downloaded - never silently changes; a
+    "Recalculate" action explicitly re-derives these from the employee's
+    current basic salary, this payslip's line items and the current
+    PayrollTaxSettings/PayrollTaxBand rows, matching the firm's own choice
+    of "auto-calculated but editable"."""
+    id = db.Column(db.Integer, primary_key=True)
+    period_id = db.Column(db.Integer, db.ForeignKey("payroll_period.id"), nullable=False)
+    employee_id = db.Column(db.Integer, db.ForeignKey("payroll_employee.id"), nullable=False)
+
+    basic_salary = db.Column(db.Float, default=0.0)
+    allowances_total = db.Column(db.Float, default=0.0)
+    # Exempt Income line items (see PAYSLIP_ITEM_CATEGORIES/PayslipItem) -
+    # counted toward gross/net pay like an allowance, but never toward
+    # taxable_income - ZIMRA's own PAYE method has a dedicated "deduct
+    # exempt income" step (e.g. a bonus exemption) before allowable
+    # deductions/PAYE, kept separate here from allowances_total so it's
+    # shown as its own line for that reason.
+    exempt_income_total = db.Column(db.Float, default=0.0)
+    taxable_income = db.Column(db.Float, default=0.0)
+    gross_pay = db.Column(db.Float, default=0.0)
+
+    # PAYE computed on taxable_income, before Tax Credit line items are
+    # applied - kept alongside paye_tax (the figure AFTER credits, which is
+    # what's actually charged) purely so the payslip can show its workings;
+    # see payroll_calc.calculate_payslip.
+    paye_before_credits = db.Column(db.Float, default=0.0)
+    tax_credits_total = db.Column(db.Float, default=0.0)
+    paye_tax = db.Column(db.Float, default=0.0)
+    aids_levy = db.Column(db.Float, default=0.0)
+    nssa_employee = db.Column(db.Float, default=0.0)
+    nssa_employer = db.Column(db.Float, default=0.0)  # employer cost, informational - not deducted from the employee
+    # Accident Prevention and Workers' Compensation Scheme (APWCS) - 1.25% of
+    # Basic Salary (PayrollTaxSettings.apwcs_pct), payable to NSSA by the
+    # employer alongside (but separately from) nssa_employer above;
+    # informational only, like nssa_employer - never deducted from or shown
+    # on the employee's own payslip.
+    apwcs = db.Column(db.Float, default=0.0)
+    other_deductions_total = db.Column(db.Float, default=0.0)
+
+    net_pay = db.Column(db.Float, default=0.0)
+    # False once anyone has edited a figure by hand since it was last
+    # (re)calculated - so the payslip clearly shows it's no longer a fresh,
+    # untouched auto-calculation.
+    is_auto_calculated = db.Column(db.Boolean, default=True)
+    notes = db.Column(db.Text)
+
+    generated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    generated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    employee = db.relationship("PayrollEmployee", backref=db.backref("payslips", lazy=True, cascade="all, delete-orphan"))
+    generated_by = db.relationship("User")
+    items = db.relationship("PayslipItem", backref="payslip", lazy=True, cascade="all, delete-orphan", order_by="PayslipItem.id")
+
+    @property
+    def total_deductions(self):
+        return (self.paye_tax or 0.0) + (self.aids_levy or 0.0) + (self.nssa_employee or 0.0) + (self.other_deductions_total or 0.0)
+
+    def __repr__(self):
+        return f"<Payslip employee={self.employee_id} period={self.period_id}>"
+
+
+class PayslipItem(db.Model):
+    """An ad-hoc line on one payslip, beyond basic salary and the statutory
+    PAYE/AIDS levy/NSSA lines - see PAYSLIP_ITEM_CATEGORIES:
+      - Allowance: added to gross AND (if `taxable`) taxable income - e.g. a
+        housing allowance. `taxable` only matters for this category.
+      - Deduction: subtracted from net pay only (never touches taxable
+        income, PAYE or NSSA Insurable Earnings) - e.g. an advance recovery,
+        a union subscription, or the EMPLOYEE's own medical aid contribution
+        if it's taken straight off their pay (NSSA is still calculated on
+        gross pay before this deduction, per the NSSA Act/SI 393 of 1993 -
+        see payroll_calc.py).
+      - Exempt Income: added to gross/net pay like an Allowance, but NEVER
+        added to taxable income, whatever `taxable` says - e.g. a bonus
+        exemption (ZIMRA's own PAYE method has a dedicated "deduct exempt
+        income" step for this, separate from ordinary allowable
+        deductions).
+      - Tax Credit: subtracted directly from PAYE payable (after the tax
+        tables, before AIDS Levy) - never touches gross pay, taxable income
+        or NSSA - e.g. an elderly/blind/disabled person's or medical
+        expenses credit.
+
+    `nssa_applicable` (Allowance/Exempt Income only - a Deduction/Tax Credit
+    never enters NSSA Insurable Earnings regardless) controls whether THIS
+    item's amount counts toward NSSA Insurable Earnings, separately from
+    whether it counts toward gross/net pay or PAYE taxable income (`taxable`
+    above). Defaults to True (unchanged behaviour) because most Allowance/
+    Exempt Income items genuinely are "regular cash earnings" that DO count
+    toward Insurable Earnings. The one case this exists for: the EMPLOYER's
+    own medical aid (or similar benefit) contribution, entered here so it
+    shows on the payslip and/or counts toward gross pay for PAYE purposes,
+    but is a non-cash fringe benefit to the employer that must be EXCLUDED
+    from NSSA Insurable Earnings (NSSA Act [Chapter 17:04] / SI 393 of 1993)
+    - untick "Counts toward NSSA?" for that specific line. See
+    payroll_calc.calculate_payslip for exactly where this is applied."""
+    id = db.Column(db.Integer, primary_key=True)
+    payslip_id = db.Column(db.Integer, db.ForeignKey("payslip.id"), nullable=False)
+    category = db.Column(db.String(20), nullable=False, default="Allowance")
+    label = db.Column(db.String(150), nullable=False)
+    amount = db.Column(db.Float, default=0.0)
+    taxable = db.Column(db.Boolean, default=True)
+    nssa_applicable = db.Column(db.Boolean, default=True)
+
+    def __repr__(self):
+        return f"<PayslipItem {self.label!r} {self.category} {self.amount}>"
+
+
+
+# ======================================================================
+# Neverlank Anonymous Whistle-blower Services
+# ======================================================================
+# One WhistleblowerService per client engagement of type "Neverlank
+# Anonymous Whistle-blower Services" (the subscription: channels, contacts,
+# fee, and the secret link to the client's public anonymous reporting
+# page), and any number of WhistleblowerCase rows under it (one per report
+# received). Reporter identity is NEVER stored: a portal report records no
+# name, IP address or browser details - the reporter just gets a reference
+# code plus a one-time follow-up key (only a hash of which is kept) to check
+# progress and reply anonymously.
+
+WB_CHANNELS = ["Web portal", "Email", "Phone / hotline", "WhatsApp / SMS", "In person", "Postal", "Other"]
+WB_CATEGORIES = [
+    ("fraud", "Fraud / financial misconduct"),
+    ("corruption", "Corruption / bribery"),
+    ("theft", "Theft / misappropriation of assets"),
+    ("procurement", "Procurement irregularities"),
+    ("reporting", "Financial reporting / accounting irregularities"),
+    ("conflict", "Conflict of interest"),
+    ("harassment", "Harassment / discrimination"),
+    ("safety", "Health, safety & environment"),
+    ("abuse_of_authority", "Abuse of authority / policy breach"),
+    ("data", "Data privacy / cybersecurity breach"),
+    ("other", "Other"),
+]
+WB_CATEGORY_LABELS = dict(WB_CATEGORIES)
+WB_SEVERITIES = ["Low", "Medium", "High", "Critical"]
+WB_STATUSES = [
+    "New", "Under review", "Investigating", "Referred to client",
+    "Closed - substantiated", "Closed - unsubstantiated", "Closed - insufficient information",
+]
+WB_REPORTING_FREQUENCIES = ["Quarterly", "Half-yearly", "Annual"]
+
+
+class WhistleblowerService(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    service_start = db.Column(db.Date)
+    service_end = db.Column(db.Date)
+    annual_fee = db.Column(db.Float)
+    currency = db.Column(db.String(10), default="USD")
+    # Secret URL segment of the client's public anonymous reporting page
+    # (/speak-up/<public_token>); regenerating it kills the old link.
+    public_token = db.Column(db.String(64), unique=True)
+    portal_enabled = db.Column(db.Boolean, default=False)
+    portal_welcome_text = db.Column(db.Text)  # shown on the public page, e.g. what to include in a report
+    hotline_phone = db.Column(db.String(60))
+    hotline_email = db.Column(db.String(120))
+    hotline_whatsapp = db.Column(db.String(60))
+    other_channels = db.Column(db.Text)
+    client_contact_name = db.Column(db.String(120))  # who at the client receives reports (e.g. audit committee chair)
+    client_contact_role = db.Column(db.String(120))
+    client_contact_email = db.Column(db.String(120))
+    reporting_frequency = db.Column(db.String(20), default="Quarterly")
+    notes = db.Column(db.Text)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("whistleblower_service", uselist=False))
+    updated_by = db.relationship("User")
+
+    def __repr__(self):
+        return f"<WhistleblowerService engagement={self.engagement_id}>"
+
+
+class WhistleblowerCase(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, index=True)
+    reference = db.Column(db.String(30), nullable=False, unique=True)  # anonymous, e.g. WB-3F9A21C4
+    followup_key_hash = db.Column(db.String(255))  # hash of the one-time key the reporter uses to check back
+    received_at = db.Column(db.DateTime, default=datetime.utcnow)
+    channel = db.Column(db.String(40), default="Web portal")
+    category = db.Column(db.String(30), default="other")  # WB_CATEGORIES key
+    severity = db.Column(db.String(20), default="Medium")
+    subject = db.Column(db.String(200))
+    description = db.Column(db.Text)
+    status = db.Column(db.String(40), default="New")
+    assigned_to_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    outcome = db.Column(db.Text)
+    closed_at = db.Column(db.DateTime)
+    source = db.Column(db.String(10), default="portal")  # "portal" (reporter) or "staff" (logged by Neverlank staff)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    engagement = db.relationship("Engagement", backref=db.backref("whistleblower_cases", lazy="dynamic"))
+    assigned_to = db.relationship("User", foreign_keys=[assigned_to_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    notes = db.relationship("WhistleblowerCaseNote", backref="case", cascade="all, delete-orphan",
+                            order_by="WhistleblowerCaseNote.created_at")
+
+    @property
+    def is_closed(self):
+        return bool(self.status) and self.status.startswith("Closed")
+
+    @property
+    def category_label(self):
+        return WB_CATEGORY_LABELS.get(self.category, self.category or "Other")
+
+    @property
+    def days_to_close(self):
+        if self.closed_at and self.received_at:
+            return max(0, (self.closed_at - self.received_at).days)
+        return None
+
+    @property
+    def has_unread_reporter_message(self):
+        """True when the newest note is a follow-up from the reporter that
+        staff haven't answered yet."""
+        return bool(self.notes) and self.notes[-1].kind == "from_reporter"
+
+    def __repr__(self):
+        return f"<WhistleblowerCase {self.reference}>"
+
+
+class WhistleblowerCaseNote(db.Model):
+    """One entry in a case's log. kind: "internal" (staff-only working note),
+    "to_reporter" (visible to the reporter on the anonymous status page) or
+    "from_reporter" (anonymous follow-up the reporter sent)."""
+    id = db.Column(db.Integer, primary_key=True)
+    case_id = db.Column(db.Integer, db.ForeignKey("whistleblower_case.id"), nullable=False, index=True)
+    kind = db.Column(db.String(20), default="internal")
+    body = db.Column(db.Text, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # NULL for reporter messages
+
+    created_by = db.relationship("User")
+
+
+# ======================================================================
+# Neverlank Training Services
+# ======================================================================
+
+TRAINING_MODES = ["In person", "Online", "Hybrid"]
+TRAINING_STATUSES = ["Planned", "Open for registration", "Completed", "Cancelled"]
+TRAINING_ATTENDANCE = ["Registered", "Attended", "Absent", "Cancelled"]
+
+
+class TrainingSession(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, index=True)
+    title = db.Column(db.String(200), nullable=False)
+    description = db.Column(db.Text)
+    trainer_user_id = db.Column(db.Integer, db.ForeignKey("user.id"))  # internal trainer, optional
+    trainer_name = db.Column(db.String(200))  # external trainer(s), or a display override
+    start_date = db.Column(db.Date)
+    end_date = db.Column(db.Date)
+    start_time = db.Column(db.String(10))
+    end_time = db.Column(db.String(10))
+    mode = db.Column(db.String(20), default="In person")
+    venue = db.Column(db.String(300))  # venue, or the online meeting link
+    fee_per_participant = db.Column(db.Float)
+    currency = db.Column(db.String(10), default="USD")
+    seats = db.Column(db.Integer)
+    cpd_hours = db.Column(db.Float)  # CPD hours a participant earns by attending
+    status = db.Column(db.String(30), default="Planned")
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("training_sessions", lazy="dynamic"))
+    trainer_user = db.relationship("User", foreign_keys=[trainer_user_id])
+    attendees = db.relationship("TrainingAttendee", backref="session", cascade="all, delete-orphan",
+                                order_by="TrainingAttendee.full_name")
+    materials = db.relationship("TrainingMaterial", backref="session", cascade="all, delete-orphan",
+                                order_by="TrainingMaterial.uploaded_at")
+
+    @property
+    def trainer_display(self):
+        parts = []
+        if self.trainer_user:
+            parts.append(self.trainer_user.name)
+        if self.trainer_name:
+            parts.append(self.trainer_name)
+        return ", ".join(parts) or None
+
+    @property
+    def active_attendees(self):
+        return [a for a in self.attendees if a.status != "Cancelled"]
+
+    @property
+    def seats_left(self):
+        if not self.seats:
+            return None
+        return max(0, self.seats - len(self.active_attendees))
+
+    @property
+    def attended_count(self):
+        return sum(1 for a in self.attendees if a.status == "Attended")
+
+    @property
+    def certificates_issued(self):
+        return sum(1 for a in self.attendees if a.certificate_number)
+
+    @property
+    def total_cpd_hours_awarded(self):
+        return round(sum(a.cpd_hours_awarded or 0.0 for a in self.attendees), 2)
+
+    @property
+    def expected_revenue(self):
+        if self.fee_per_participant is None:
+            return None
+        return round(self.fee_per_participant * len(self.active_attendees), 2)
+
+    @property
+    def fees_collected(self):
+        return round(sum(a.fee_paid or 0.0 for a in self.attendees), 2)
+
+    def average_rating(self, field):
+        values = [getattr(a, field) for a in self.attendees if getattr(a, field)]
+        return round(sum(values) / len(values), 2) if values else None
+
+    @property
+    def feedback_count(self):
+        return sum(1 for a in self.attendees if a.rating_overall)
+
+    def __repr__(self):
+        return f"<TrainingSession {self.title}>"
+
+
+class TrainingAttendee(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey("training_session.id"), nullable=False, index=True)
+    full_name = db.Column(db.String(200), nullable=False)
+    email = db.Column(db.String(200))
+    phone = db.Column(db.String(60))
+    organisation = db.Column(db.String(200))
+    designation = db.Column(db.String(200))
+    status = db.Column(db.String(20), default="Registered")  # TRAINING_ATTENDANCE
+    fee_paid = db.Column(db.Float)
+    certificate_number = db.Column(db.String(60))
+    certificate_issued_at = db.Column(db.Date)
+    cpd_hours_awarded = db.Column(db.Float)
+    # Participant evaluation, 1 (poor) - 5 (excellent)
+    rating_overall = db.Column(db.Integer)
+    rating_trainer = db.Column(db.Integer)
+    rating_content = db.Column(db.Integer)
+    rating_materials = db.Column(db.Integer)
+    feedback_comments = db.Column(db.Text)
+    feedback_at = db.Column(db.DateTime)
+    registered_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class TrainingMaterial(db.Model):
+    """A file (slides, handout, exercise) attached to one training session -
+    stored as an ordinary engagement Document (category "Training Materials")
+    so it also appears under the engagement's Documents tab."""
+    id = db.Column(db.Integer, primary_key=True)
+    session_id = db.Column(db.Integer, db.ForeignKey("training_session.id"), nullable=False, index=True)
+    document_id = db.Column(db.Integer, db.ForeignKey("document.id"), nullable=False)
+    title = db.Column(db.String(200))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    document = db.relationship("Document")
+
+
+# ===========================================================================
+# Corporate Finance & Business Advisory
+#
+# Forecast models (three statements), their scenarios and valuations, and
+# capital-budgeting projects. All the numbers live in JSON columns that the
+# pure-Python engines (cf_engine.py / cf_tools.py) read and write; the tables
+# only hold who/what/when, ownership and status. Access follows the client
+# (and the engagement, when one is linked - same confidentiality rule as
+# invoices and quotations).
+# ===========================================================================
+
+CF_STATUSES = ["Draft", "Final"]
+
+
+def _json_load(text, default):
+    try:
+        value = json.loads(text) if text else default
+    except (TypeError, ValueError):
+        return default
+    return value if isinstance(value, type(default)) else default
+
+
+class CFModel(db.Model):
+    """A driver-based financial forecast (income statement, balance sheet, cash flow) for a client."""
+    __tablename__ = "cf_model"
+    id = db.Column(db.Integer, primary_key=True)
+    model_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    name = db.Column(db.String(200), nullable=False)
+    purpose = db.Column(db.Text)  # what the model is for / basis of preparation
+    status = db.Column(db.String(20), nullable=False, default="Draft")
+    assumptions_json = db.Column(db.Text)
+    historical_json = db.Column(db.Text)
+    actuals_json = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    finalised_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    finalised_at = db.Column(db.DateTime)
+
+    client = db.relationship("Client", backref=db.backref("cf_models", lazy=True, cascade="all, delete-orphan", order_by="CFModel.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("cf_models", lazy=True, order_by="CFModel.id.desc()"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    finalised_by = db.relationship("User", foreign_keys=[finalised_by_id])
+    scenarios = db.relationship("CFScenario", backref="model", lazy=True, cascade="all, delete-orphan",
+                                order_by="CFScenario.sort_order, CFScenario.id")
+    valuations = db.relationship("CFValuation", backref="model", lazy=True, cascade="all, delete-orphan",
+                                 order_by="CFValuation.id")
+
+    @property
+    def is_final(self):
+        return self.status == "Final"
+
+    @property
+    def assumptions(self):
+        return _json_load(self.assumptions_json, {})
+
+    @property
+    def historical(self):
+        return _json_load(self.historical_json, {})
+
+    @property
+    def actuals(self):
+        return _json_load(self.actuals_json, {})
+
+    def set_json(self, field, value):
+        setattr(self, field + "_json", json.dumps(value))
+
+    @property
+    def currency(self):
+        return (self.assumptions or {}).get("currency") or "USD"
+
+
+class CFScenario(db.Model):
+    """A what-if on a model: a set of adjustments ("shocks") applied to the base assumptions.
+    Every model has a Base scenario with no adjustments."""
+    __tablename__ = "cf_scenario"
+    id = db.Column(db.Integer, primary_key=True)
+    model_id = db.Column(db.Integer, db.ForeignKey("cf_model.id"), nullable=False)
+    name = db.Column(db.String(100), nullable=False)
+    is_base = db.Column(db.Boolean, default=False, nullable=False)
+    sort_order = db.Column(db.Integer, default=0)
+    shocks_json = db.Column(db.Text)
+    notes = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def shocks(self):
+        return _json_load(self.shocks_json, {})
+
+
+class CFValuation(db.Model):
+    """A saved valuation (WACC, terminal value, bridge, comparables) of a model's forecast, optionally under a scenario."""
+    __tablename__ = "cf_valuation"
+    id = db.Column(db.Integer, primary_key=True)
+    model_id = db.Column(db.Integer, db.ForeignKey("cf_model.id"), nullable=False)
+    scenario_id = db.Column(db.Integer, db.ForeignKey("cf_scenario.id"))
+    name = db.Column(db.String(200), nullable=False)
+    valuation_date = db.Column(db.Date)
+    inputs_json = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    scenario = db.relationship("CFScenario")
+    created_by = db.relationship("User")
+
+    @property
+    def inputs(self):
+        return _json_load(self.inputs_json, {})
+
+
+class CFProject(db.Model):
+    """A capital-budgeting / feasibility study: investment, cash flows, NPV / IRR / payback, plus the written feasibility notes."""
+    __tablename__ = "cf_project"
+    id = db.Column(db.Integer, primary_key=True)
+    project_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    name = db.Column(db.String(200), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default="Draft")
+    inputs_json = db.Column(db.Text)
+    narrative_json = db.Column(db.Text)
+    source_model_id = db.Column(db.Integer, db.ForeignKey("cf_model.id"))
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("cf_projects", lazy=True, cascade="all, delete-orphan", order_by="CFProject.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("cf_projects", lazy=True, order_by="CFProject.id.desc()"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    source_model = db.relationship("CFModel")
+
+    @property
+    def inputs(self):
+        return _json_load(self.inputs_json, {})
+
+    @property
+    def narrative(self):
+        return _json_load(self.narrative_json, {})
+
+
+class CFMgmtPack(db.Model):
+    """A monthly management accounts reporting pack for a client: actuals (trial balance upload, manual capture or modelled from
+    the prior year's accounts), budget (from a forecast model or typed in) and prior-year comparatives, all held in one JSON
+    document (see cf_ma.py for its shape). The arithmetic is in cf_ma.py; this row only holds who/what/when and the data."""
+    __tablename__ = "cf_mgmt_pack"
+    id = db.Column(db.Integer, primary_key=True)
+    pack_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    name = db.Column(db.String(200), nullable=False)
+    currency = db.Column(db.String(6), nullable=False, default="USD")
+    status = db.Column(db.String(20), nullable=False, default="Draft")
+    data_json = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    finalised_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    finalised_at = db.Column(db.DateTime)
+
+    client = db.relationship("Client", backref=db.backref("cf_packs", lazy=True, cascade="all, delete-orphan", order_by="CFMgmtPack.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("cf_packs", lazy=True, order_by="CFMgmtPack.id.desc()"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    finalised_by = db.relationship("User", foreign_keys=[finalised_by_id])
+
+    @property
+    def is_final(self):
+        return self.status == "Final"
+
+    @property
+    def data(self):
+        return _json_load(self.data_json, {})
+
+    def set_data(self, value):
+        self.data_json = json.dumps(value)
+
+
+
+# ---------- Section 16(1) prohibited deductions engine (prohibited_deductions.py) ----------
+
+TAX_DEDUCTIBILITY_STATUSES = ["ALLOWABLE", "PROHIBITED_SECTION_16", "PARTIALLY_PROHIBITED", "REVIEW_REQUIRED"]
+
+
+class ProhibitedDeductionRule(db.Model):
+    """One expense type and how the Income Tax Act's section 16(1) treats it. The clause reference and the treatment
+    are DATA, not code: the Act is amended by almost every Finance Act and published summaries disagree on lettering,
+    so a Partner can correct a clause label or switch a treatment here, and must mark a rule verified against the
+    current Act. Until then every schedule line that relies on the rule is flagged as unverified."""
+    __tablename__ = "prohibited_deduction_rule"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(60), nullable=False, unique=True)
+    name = db.Column(db.String(200), nullable=False)
+    group = db.Column(db.String(60))
+    clause_label = db.Column(db.String(60))      # e.g. "16(1)(m)" - editable
+    treatment = db.Column(db.String(30), nullable=False, default="full")  # see prohibited_deductions.TREATMENTS
+    note = db.Column(db.Text)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    verified_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    verified_at = db.Column(db.DateTime)
+    verified_note = db.Column(db.String(300))     # e.g. "Checked to Income Tax Act as amended by Finance Act 2026"
+    verified_by = db.relationship("User", foreign_keys=[verified_by_id])
+
+    @property
+    def is_verified(self):
+        return self.verified_at is not None
+
+
+class ProhibitedDeductionSetup(db.Model):
+    """Engagement-level inputs the rules need: the passenger-motor-vehicle cap, the thin-capitalisation figures, whether
+    the entity is a local mining operation of a foreign parent, and the other lines of the tax computation."""
+    __tablename__ = "prohibited_deduction_setup"
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
+    pmv_cap = db.Column(db.Float)                 # leave blank until entered; the Act's figure is amended from time to time
+    mining_foreign_parent = db.Column(db.Boolean, default=False)   # older reading of 16(1)(r); no longer used
+    assoc_fee_a = db.Column(db.Float)        # 16(1)(r): A = total expenditure qualifying for deduction under section 15
+    assoc_fee_b = db.Column(db.Float)        # B = fees, administration and management paid outside Zimbabwe
+    assoc_fee_c = db.Column(db.Float)        # C = expenditure qualifying under section 15(2)(f)(i)
+    assoc_fee_pretrade = db.Column(db.Boolean, default=False)   # 0.75% instead of 1% before trade starts / in a period of non-production
+    thin_cap_ratio = db.Column(db.Float)          # debt : equity limit (3 under the rule as published) - entered, not assumed
+    related_debt = db.Column(db.Float, default=0.0)        # debt advanced or guaranteed by an associate or foreign parent
+    qualifying_equity = db.Column(db.Float, default=0.0)
+    related_interest = db.Column(db.Float, default=0.0)    # interest charged to profit or loss on that debt
+    net_profit_override = db.Column(db.Float)     # used only when there is no trial balance to take profit before tax from
+    notes = db.Column(db.Text)
+    engagement = db.relationship("Engagement", backref=db.backref("prohibited_setup", uselist=False, cascade="all, delete-orphan"))
+
+
+class ProhibitedDeductionItem(db.Model):
+    """One expense (a ledger line or a manual entry) tested against section 16(1). status/clause/addback are stored
+    each time the item, the rule or the setup changes, so every expense carries its own tax_deductibility_status."""
+    __tablename__ = "prohibited_deduction_item"
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    entry_date = db.Column(db.Date)
+    voucher_ref = db.Column(db.String(100))
+    description = db.Column(db.String(250), nullable=False)
+    gl_account_id = db.Column(db.Integer, db.ForeignKey("gl_account.id"))
+    journal_line_id = db.Column(db.Integer, db.ForeignKey("journal_entry_line.id"))
+    expense_type = db.Column(db.String(60), nullable=False, default="ordinary_business_expense")
+    amount = db.Column(db.Float, default=0.0)               # as charged to profit or loss
+    charged_to_pl = db.Column(db.Boolean, default=True, nullable=False)
+    is_insured = db.Column(db.Boolean, default=False)
+    reimbursed_amount = db.Column(db.Float, default=0.0)
+    business_necessity = db.Column(db.Boolean, default=False)     # travel between two trades
+    linked_to_exempt = db.Column(db.Boolean, default=False)
+    prohibited_percent = db.Column(db.Float)                      # apportionment, where the rule allows part
+    vehicle_cost = db.Column(db.Float)
+    source = db.Column(db.String(20), default="Manual")           # Manual | Ledger | Import
+    status = db.Column(db.String(30), default="ALLOWABLE")
+    clause_label = db.Column(db.String(60))
+    addback_amount = db.Column(db.Float, default=0.0)
+    disallowed_amount = db.Column(db.Float, default=0.0)
+    eval_note = db.Column(db.String(400))
+    rule_verified = db.Column(db.Boolean, default=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    engagement = db.relationship("Engagement", backref=db.backref("prohibited_items", lazy=True, cascade="all, delete-orphan", order_by="ProhibitedDeductionItem.id"))
+    gl_account = db.relationship("GLAccount")
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - the firm's own Asset Register and Financial Statements
+#
+# The firm's statements (income statement, balance sheet, cash flow, equity
+# and notes) are built by firm_statements.py from three sources:
+#   * what the app already knows (invoices, credit notes, receipts, advances,
+#     the Expense register) - revenue, expenses, receivables, payables,
+#     customer advances - on an ACCRUAL basis;
+#   * the firm's own Asset Register below (cost, depreciation, disposals);
+#   * the balances a Partner/Admin enters for each year-end (FirmYearEnd +
+#     FirmBalanceLine): bank and cash, loans, share capital, VAT, tax payable,
+#     dividends, opening retained earnings, and anything else the app cannot
+#     know.
+# All figures are in USD; a ZWG item is translated at the rate entered on the
+# year-end (ZWG per 1 USD) and that rate is disclosed in the notes.
+# ---------------------------------------------------------------------------
+FIRM_ASSET_METHODS = ["Straight-line", "Reducing balance", "Not depreciated"]
+FIRM_FRAMEWORKS = [("ifrs_for_smes", "IFRS for SMEs"), ("full_ifrs", "Full IFRS")]
+
+# The categories a year-end balance line can be filed under (financials.FS_CATEGORIES codes). Revenue, receivables from
+# invoices, supplier bills, customer advances, PPE and depreciation come from the app and the Asset Register instead.
+FIRM_ENTRY_CATEGORIES = [
+    ("cash", "Cash and cash equivalents (bank, cash on hand, mobile money)"),
+    ("trade_receivables", "Other receivables and prepayments"),
+    ("inventories", "Inventories (stationery, consumables)"),
+    ("other_current_assets", "Other current assets"),
+    ("intangible_assets", "Intangible assets (software, licences)"),
+    ("investment_property", "Investment property"),
+    ("long_term_investments", "Long-term investments"),
+    ("deferred_tax_asset", "Deferred tax asset"),
+    ("other_noncurrent_assets", "Other non-current assets"),
+    ("trade_payables", "Accruals and other payables"),
+    ("other_current_liabilities", "Other current liabilities (VAT payable, PAYE, deposits)"),
+    ("current_tax_payable", "Income tax payable at year-end"),
+    ("short_term_borrowings", "Short-term borrowings / bank overdraft"),
+    ("short_term_provisions", "Short-term provisions"),
+    ("long_term_borrowings", "Long-term borrowings"),
+    ("deferred_tax_liability", "Deferred tax liability"),
+    ("long_term_provisions", "Long-term provisions"),
+    ("other_noncurrent_liabilities", "Other non-current liabilities"),
+    ("share_capital", "Share capital"),
+    ("share_premium", "Share premium"),
+    ("other_reserves", "Other reserves"),
+    ("retained_earnings", "Retained earnings brought forward (opening)"),
+    ("dividends_paid", "Dividends declared / paid in the year"),
+    ("other_income", "Other income (interest received, sundry)"),
+    ("admin_expenses", "Other administrative expenses (not in the Expense register)"),
+    ("other_expenses", "Other expenses"),
+    ("finance_costs", "Finance costs (interest on loans)"),
+    ("income_tax_expense", "Income tax expense for the year"),
+    ("oci_items", "Other comprehensive income, net of tax"),
+]
+FIRM_ENTRY_CATEGORY_CODES = [c[0] for c in FIRM_ENTRY_CATEGORIES]
+
+
+class FirmAssetClass(db.Model):
+    """A class of the firm's own fixed assets with its depreciation policy (e.g. Computer equipment, straight-line, 33.33%)."""
+    __tablename__ = "firm_asset_class"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    depreciation_method = db.Column(db.String(30), nullable=False, default="Straight-line")
+    rate_percent = db.Column(db.Float)            # per annum; if empty the useful life is used
+    useful_life_years = db.Column(db.Float)
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class FirmAsset(db.Model):
+    """One item in the firm's Asset Register. Depreciation is calculated by the app (whole months, from the month of
+    acquisition up to but not including the month of disposal) unless an accumulated depreciation figure brought forward
+    from the old books is entered with the date it is stated at."""
+    __tablename__ = "firm_asset"
+    id = db.Column(db.Integer, primary_key=True)
+    asset_code = db.Column(db.String(40), unique=True)
+    description = db.Column(db.String(250), nullable=False)
+    asset_class_id = db.Column(db.Integer, db.ForeignKey("firm_asset_class.id"))
+    date_acquired = db.Column(db.Date, nullable=False, default=date.today)
+    cost = db.Column(db.Float, nullable=False, default=0.0)         # USD
+    residual_value = db.Column(db.Float, default=0.0)
+    supplier = db.Column(db.String(150))
+    location = db.Column(db.String(120))
+    serial_number = db.Column(db.String(120))
+    notes = db.Column(db.Text)
+    acc_dep_bf = db.Column(db.Float)                # accumulated depreciation brought forward from the old books
+    acc_dep_bf_date = db.Column(db.Date)            # ... stated at the end of the month containing this date
+    disposed_on = db.Column(db.Date)
+    disposal_proceeds = db.Column(db.Float, default=0.0)
+    disposal_note = db.Column(db.String(250))
+    # how it was paid for (the correcting leg of the purchase): "" = not stated (left in the clearing account), "bank" = paid from a
+    # Cash Book account (the app keeps one Cash Book payment for it, acq_cash_entry_id), "credit" = owed to a supplier,
+    # "shareholder" = provided by a shareholder / director, "other" = any other ledger account
+    acq_method = db.Column(db.String(12))
+    acq_account_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"))      # ledger account for credit / shareholder / other
+    acq_cash_account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"))
+    acq_cash_entry_id = db.Column(db.Integer)                                     # the Cash Book payment the app made for it
+    # the same for the sale proceeds: "", "bank", "credit" (owed by the buyer), "other"
+    disp_method = db.Column(db.String(12))
+    disp_account_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"))
+    disp_cash_account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"))
+    disp_cash_entry_id = db.Column(db.Integer)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    asset_class = db.relationship("FirmAssetClass", backref=db.backref("assets", lazy=True))
+    created_by = db.relationship("User")
+
+
+class FirmYearEnd(db.Model):
+    """A reporting date for the firm's financial statements, with the figures that are entered rather than derived."""
+    __tablename__ = "firm_year_end"
+    id = db.Column(db.Integer, primary_key=True)
+    period_end = db.Column(db.Date, nullable=False, unique=True)
+    zwg_rate = db.Column(db.Float)                  # ZWG per 1 USD, used for every ZWG item in this period
+    tax_rate_percent = db.Column(db.Float, default=24.72)   # only used for the indicative-tax hint on the entry page
+    reporting_framework = db.Column(db.String(20), default="ifrs_for_smes")
+    opening_nil = db.Column(db.Boolean, default=False, nullable=False)   # first period: the opening position is nil
+    cash_manual = db.Column(db.Boolean, default=False, nullable=False)  # True = cash entered by hand; False = taken from the Cash Book
+    tax_manual = db.Column(db.Boolean, default=False, nullable=False)   # True = tax figures entered by hand; False = from the Tax pages
+    tax_loss_bf = db.Column(db.Float)               # assessed loss brought forward; empty = the previous year-end's loss carried forward
+    extra_note = db.Column(db.Text)                 # printed as an additional note
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    created_by = db.relationship("User")
+    lines = db.relationship("FirmBalanceLine", backref="year_end", cascade="all, delete-orphan",
+                            order_by="FirmBalanceLine.id")
+
+
+class FirmBalanceLine(db.Model):
+    """One entered figure for a year-end, filed under an IAS 1 category. `amount` is the natural balance (an asset,
+    liability, income or expense is entered as a positive number) in `currency`."""
+    __tablename__ = "firm_balance_line"
+    id = db.Column(db.Integer, primary_key=True)
+    year_end_id = db.Column(db.Integer, db.ForeignKey("firm_year_end.id"), nullable=False)
+    fs_category = db.Column(db.String(40), nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - Cash Book
+#
+# The firm's cash and bank accounts. Money already recorded elsewhere is brought in AUTOMATICALLY (client receipts,
+# client advances and refunds, paid expenses, invoices marked paid before receipting existed) and is never stored a
+# second time: cashbook.py reads it when needed. Only what the app cannot know is entered here (CashEntry: owner
+# contributions, loans, bank charges, transfers between accounts ...). Which account an automatic transaction lands in
+# follows the payment method set on each account, then the account's "default" flags; CashAssign records a manual
+# move to another account, and CashClear records that a line has appeared on the bank statement (reconciliation).
+# ---------------------------------------------------------------------------
+CASH_ACCOUNT_KINDS = ["Bank", "Cash", "Mobile money"]
+CASH_ENTRY_CATEGORIES = [
+    "Owner / shareholder contribution", "Loan received", "Loan repayment", "Dividend paid", "Interest received",
+    "Bank charges", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Salaries paid",
+    "Other receipt", "Other payment", "QPD (provisional tax) paid",
+]
+CASH_TRANSFER_CATEGORY = "Transfer between accounts"
+
+
+class CashAccount(db.Model):
+    __tablename__ = "cash_account"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(80), nullable=False, unique=True)
+    kind = db.Column(db.String(20), nullable=False, default="Bank")
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    opening_balance = db.Column(db.Float, nullable=False, default=0.0)   # the balance at the START of opening_date
+    opening_date = db.Column(db.Date, nullable=False, default=date.today)  # earlier transactions are not counted
+    methods = db.Column(db.String(200))        # payment methods that land here, comma separated (e.g. "Bank transfer,Card")
+    default_in = db.Column(db.Boolean, default=False, nullable=False)    # money in with no matching method lands here
+    default_out = db.Column(db.Boolean, default=False, nullable=False)   # money out (paid expenses, refunds) lands here
+    reference = db.Column(db.String(120))      # bank and account number
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def method_list(self):
+        return [m.strip() for m in (self.methods or "").split(",") if m.strip()]
+
+
+class CashEntry(db.Model):
+    """A cash book entry typed in by hand (what the app has no other record of). A transfer between two accounts is
+    two entries sharing a transfer_id (out of one account, into the other)."""
+    __tablename__ = "cash_entry"
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"), nullable=False)
+    entry_date = db.Column(db.Date, nullable=False, default=date.today)
+    direction = db.Column(db.String(3), nullable=False, default="in")   # "in" or "out"
+    amount = db.Column(db.Float, nullable=False, default=0.0)           # always positive
+    category = db.Column(db.String(60), nullable=False, default="Other receipt")
+    description = db.Column(db.String(250))
+    reference = db.Column(db.String(120))
+    transfer_id = db.Column(db.String(36))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    account = db.relationship("CashAccount", backref=db.backref("entries", lazy=True))
+    created_by = db.relationship("User")
+
+
+class CashAssign(db.Model):
+    """An automatic transaction moved by hand to a different account than the rules would choose."""
+    __tablename__ = "cash_assign"
+    id = db.Column(db.Integer, primary_key=True)
+    source_key = db.Column(db.String(60), nullable=False, unique=True)   # e.g. "receipt:12"
+    account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"), nullable=False)
+    account = db.relationship("CashAccount")
+
+
+class CashClear(db.Model):
+    """A line that has appeared on the bank statement (reconciled), and the statement date it cleared on."""
+    __tablename__ = "cash_clear"
+    id = db.Column(db.Integer, primary_key=True)
+    account_id = db.Column(db.Integer, db.ForeignKey("cash_account.id"), nullable=False)
+    source_key = db.Column(db.String(60), nullable=False)
+    cleared_on = db.Column(db.Date, nullable=False)
+    __table_args__ = (db.UniqueConstraint("account_id", "source_key", name="uq_cash_clear"),)
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - Tax (capital allowances, income tax computation, QPD, deferred tax)
+#
+# Every rate here is DATA the Partner can edit (the published sources disagree and the Acts change); a rule starts
+# "not verified" and the Partner marks it verified against the current Act. Nothing here is a hard-coded ZIMRA figure.
+# ---------------------------------------------------------------------------
+FIRM_TAX_METHODS = [
+    ("SIA", "Special initial allowance (a % of cost a year)"),
+    ("WT_SL", "Wear and tear, straight-line on cost"),
+    ("WT_RB", "Wear and tear, reducing balance"),
+    ("NONE", "No capital allowance"),
+]
+FIRM_TAX_LINE_TYPES = [
+    ("addback", "Add back (expense not deductible, income taxable)"),
+    ("deduction", "Deduction"),
+    ("exempt", "Exempt or non-taxable income"),
+]
+
+
+class FirmTaxAssetRule(db.Model):
+    """The capital allowance treatment of one asset class."""
+    __tablename__ = "firm_tax_asset_rule"
+    id = db.Column(db.Integer, primary_key=True)
+    asset_class_id = db.Column(db.Integer, db.ForeignKey("firm_asset_class.id"), nullable=False, unique=True)
+    method = db.Column(db.String(10), nullable=False, default="WT_SL")
+    wt_rate_percent = db.Column(db.Float, default=0.0)       # wear and tear, per annum
+    sia_percent = db.Column(db.Float, default=25.0)          # special initial allowance, per annum
+    sia_years = db.Column(db.Integer, default=4)
+    sia_first_percent = db.Column(db.Float)                  # optional: the first year's SIA rate when it differs (Fourth Schedule para 9: 50% then 25% twice)
+    cost_cap = db.Column(db.Float)                           # allowances are worked on no more than this cost (e.g. passenger vehicles)
+    prorata_first_year = db.Column(db.Boolean, default=False, nullable=False)  # wear and tear in the year of purchase by months owned
+    verified = db.Column(db.Boolean, default=False, nullable=False)
+    note = db.Column(db.String(250))
+    asset_class = db.relationship("FirmAssetClass")
+
+
+class FirmTaxCategoryRule(db.Model):
+    """The share of an Expense-register category the Income Tax Act does not allow (0 = fully deductible)."""
+    __tablename__ = "firm_tax_category_rule"
+    id = db.Column(db.Integer, primary_key=True)
+    category = db.Column(db.String(60), nullable=False, unique=True)
+    disallowed_percent = db.Column(db.Float, nullable=False, default=0.0)
+    note = db.Column(db.String(250))
+
+
+class FirmTaxLine(db.Model):
+    """A hand-entered line of one year-end's income tax computation."""
+    __tablename__ = "firm_tax_line"
+    id = db.Column(db.Integer, primary_key=True)
+    year_end_id = db.Column(db.Integer, db.ForeignKey("firm_year_end.id"), nullable=False)
+    item_type = db.Column(db.String(12), nullable=False, default="addback")
+    description = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    year_end = db.relationship("FirmYearEnd", backref=db.backref("tax_lines", cascade="all, delete-orphan", lazy=True))
+
+
+class FirmDeferredItem(db.Model):
+    """A temporary difference other than property, plant and equipment (a provision, prepaid income ...)."""
+    __tablename__ = "firm_deferred_item"
+    id = db.Column(db.Integer, primary_key=True)
+    year_end_id = db.Column(db.Integer, db.ForeignKey("firm_year_end.id"), nullable=False)
+    description = db.Column(db.String(200), nullable=False)
+    accounting_amount = db.Column(db.Float, nullable=False, default=0.0)   # carrying amount in the statements
+    tax_base_amount = db.Column(db.Float, nullable=False, default=0.0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    year_end = db.relationship("FirmYearEnd", backref=db.backref("deferred_items", cascade="all, delete-orphan", lazy=True))
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - Ledger (double entry and journals)
+#
+# The firm's chart of accounts (FirmAccount) and manual journals (FirmJournal / FirmJournalLine). Everything the app
+# already records - invoices, credit notes, receipts, advances, expenses, cash book entries, depreciation, disposals and
+# tax - is turned into balanced debit/credit postings by firm_ledger.py when a page is opened; those derived postings are
+# never stored, so nothing is keyed twice. Only the manual journals are stored. A posted journal is never edited or
+# deleted: it is reversed by a new journal. FirmPeriodLock closes the books to new or changed journals up to a date.
+# ---------------------------------------------------------------------------
+FIRM_ACCOUNT_TYPES = ["Asset", "Liability", "Equity", "Income", "Expense"]
+FIRM_JOURNAL_STATUSES = ["draft", "posted"]
+
+
+class FirmAccount(db.Model):
+    __tablename__ = "firm_account"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(12), nullable=False, unique=True)
+    name = db.Column(db.String(120), nullable=False)
+    account_type = db.Column(db.String(12), nullable=False, default="Asset")
+    fs_category = db.Column(db.String(40))          # statement line it feeds; None / "excluded" = not in the statements
+    system_key = db.Column(db.String(80), unique=True)   # set on accounts the posting engine writes to (e.g. "CASH:3", "EXP:Fuel")
+    parent_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"))   # a sub-account (e.g. one asset class under Property, plant and equipment)
+    description = db.Column(db.String(250))
+    is_active = db.Column(db.Boolean, default=True, nullable=False)
+    order = db.Column(db.Integer, default=0)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def is_system(self):
+        return bool(self.system_key)
+
+    @property
+    def label(self):
+        return f"{self.code} {self.name}"
+
+
+class FirmJournal(db.Model):
+    __tablename__ = "firm_journal"
+    id = db.Column(db.Integer, primary_key=True)
+    number = db.Column(db.String(20), nullable=False, unique=True)     # JE-2026-0001
+    journal_date = db.Column(db.Date, nullable=False, default=date.today)
+    description = db.Column(db.String(250), nullable=False)
+    reference = db.Column(db.String(120))
+    status = db.Column(db.String(10), nullable=False, default="draft")
+    reverses_id = db.Column(db.Integer, db.ForeignKey("firm_journal.id"))
+    alloc_key = db.Column(db.String(120))      # set on journals made by the clearing-account auto-allocation (see firm_ledger)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    posted_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    posted_at = db.Column(db.DateTime)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    posted_by = db.relationship("User", foreign_keys=[posted_by_id])
+    reverses = db.relationship("FirmJournal", remote_side=[id], backref=db.backref("reversals", lazy=True))
+    lines = db.relationship("FirmJournalLine", backref="journal", cascade="all, delete-orphan",
+                            order_by="FirmJournalLine.order, FirmJournalLine.id")
+
+    @property
+    def total_debit(self):
+        return round(sum(l.debit or 0.0 for l in self.lines), 2)
+
+    @property
+    def total_credit(self):
+        return round(sum(l.credit or 0.0 for l in self.lines), 2)
+
+    @property
+    def is_balanced(self):
+        return abs(self.total_debit - self.total_credit) < 0.005 and self.total_debit > 0
+
+    @property
+    def reversed_by(self):
+        return next((r for r in self.reversals if r.status == "posted"), None)
+
+
+class FirmJournalLine(db.Model):
+    __tablename__ = "firm_journal_line"
+    id = db.Column(db.Integer, primary_key=True)
+    journal_id = db.Column(db.Integer, db.ForeignKey("firm_journal.id"), nullable=False)
+    account_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"), nullable=False)
+    debit = db.Column(db.Float, nullable=False, default=0.0)
+    credit = db.Column(db.Float, nullable=False, default=0.0)
+    narration = db.Column(db.String(250))
+    order = db.Column(db.Integer, default=0)
+    account = db.relationship("FirmAccount")
+
+
+class FirmPeriodLock(db.Model):
+    """The books are closed to journals dated on or before `locked_through`. The latest row is the one in force;
+    older rows are the history (who closed or reopened the books, and when)."""
+    __tablename__ = "firm_period_lock"
+    id = db.Column(db.Integer, primary_key=True)
+    locked_through = db.Column(db.Date)             # None = nothing locked (the books were reopened)
+    note = db.Column(db.String(250))
+    set_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    set_at = db.Column(db.DateTime, default=datetime.utcnow)
+    set_by = db.relationship("User")
+
+
+# ---------------------------------------------------------------------------
+# Firm Finance - Exchange rates register
+#
+# Dated rates (units of a foreign currency per 1 USD) with their source. A year-end's closing rate is the latest rate dated
+# on or before the year-end; the year-end keeps its own stored rate (FirmYearEnd.zwg_rate), which can be filled from the
+# register or typed over it.
+# ---------------------------------------------------------------------------
+class FirmExchangeRate(db.Model):
+    __tablename__ = "firm_exchange_rate"
+    id = db.Column(db.Integer, primary_key=True)
+    currency = db.Column(db.String(10), nullable=False, default="ZWG")
+    rate_date = db.Column(db.Date, nullable=False)
+    rate = db.Column(db.Float, nullable=False)                 # units of `currency` per 1 USD
+    source = db.Column(db.String(120))                         # e.g. "RBZ interbank rate"
+    note = db.Column(db.String(250))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint("currency", "rate_date", name="uq_firm_fx_rate"),)
+    created_by = db.relationship("User")
+
+
+class FirmFxConfig(db.Model):
+    """One row of settings for fetching exchange rates from the Reserve Bank of Zimbabwe website."""
+    __tablename__ = "firm_fx_config"
+    id = db.Column(db.Integer, primary_key=True)
+    rbz_basis = db.Column(db.String(10), default="mid")        # which RBZ interbank figure is stored: mid | bid | ask
+    auto_fetch = db.Column(db.Boolean, default=True)           # fetch the latest published rate when the rates page is opened
+    last_attempt = db.Column(db.DateTime)
+    last_message = db.Column(db.String(300))
+    prefer = db.Column(db.String(10))                          # when RBZ and ZIMRA share a date for reporting: "zimra" puts ZIMRA first (default RBZ)
+
+
+class FirmFxMiss(db.Model):
+    """A working day the RBZ has no usable rate file for (public holiday, a copy of another day's file ...). Remembered so the
+    automatic catch-up does not ask for it again and again; recent days are re-checked, old ones are settled."""
+    __tablename__ = "firm_fx_miss"
+    id = db.Column(db.Integer, primary_key=True)
+    currency = db.Column(db.String(10), nullable=False, default="ZWG")
+    rate_date = db.Column(db.Date, nullable=False)
+    reason = db.Column(db.String(250))
+    checked_at = db.Column(db.DateTime, default=datetime.utcnow)
+    __table_args__ = (db.UniqueConstraint("currency", "rate_date", name="uq_firm_fx_miss"),)
+
+
+class FirmRbzReading(db.Model):
+    """What the RBZ published for one day (ZWG per 1 USD: bid, ask, mid), kept whatever rate the register ended up using for that
+    date. It is the evidence the Tax-rates (ZIMRA) comparison is made against."""
+    __tablename__ = "firm_rbz_reading"
+    id = db.Column(db.Integer, primary_key=True)
+    rate_date = db.Column(db.Date, nullable=False, unique=True)
+    bid = db.Column(db.Float, nullable=False)
+    ask = db.Column(db.Float, nullable=False)
+    mid = db.Column(db.Float, nullable=False)
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
