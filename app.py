@@ -234,8 +234,7 @@ def _add_missing_columns():
         # indicator.
         "user": [("last_seen_at", "DATETIME")],
         "income_tax_computation": [("profit_before_tax_manual", "FLOAT")],
-        **{t: [("mp_signed_by_id", "INTEGER"), ("mp_signed_at", "DATETIME"), ("mp_signed_key", "VARCHAR(64)")]
-           for t in ("quotation", "invoice", "credit_note", "receipt", "client_advance", "zimra_reply", "workpaper_narrative")},
+
         "ppe_asset": [("tax_disposed_on", "DATE"), ("tax_disposal_proceeds", "FLOAT")],
         "message_recipient": [("recalled_at", "DATETIME"), ("deleted_at", "DATETIME")],
         "engagement": [
@@ -575,6 +574,10 @@ def _add_missing_columns():
         "invoice": [("recurring_invoice_id", "INTEGER"), ("recurrence_index", "INTEGER"), ("share_token", "VARCHAR(64)"),
                     ("reminders_paused", "BOOLEAN DEFAULT 0")],
     }
+    # The Managing Partner's e-signature columns (models.MPSignedMixin) - MERGED into each table's list, because some of these tables
+    # (receipt, zimra_reply, invoice) already have their own entry above and a repeated key in the literal would replace it.
+    for _t in ("quotation", "invoice", "credit_note", "receipt", "client_advance", "zimra_reply", "workpaper_narrative"):
+        additions[_t] = list(additions.get(_t, [])) + [("mp_signed_by_id", "INTEGER"), ("mp_signed_at", "DATETIME"), ("mp_signed_key", "VARCHAR(64)")]
     with db.engine.connect() as conn:
         for table, columns in additions.items():
             existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
