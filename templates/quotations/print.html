@@ -23,7 +23,7 @@
 {% block extras %}
   {% if quotation.terms %}<div class="block"><h4>Terms &amp; conditions</h4><div class="txt">{{ quotation.terms }}</div></div>{% endif %}
   <div class="accept">
-    <div><div class="sig">Accepted for and on behalf of {{ quotation.client.name }} (name, signature &amp; date)</div></div>
+    <div><div class="mp-imgbox"></div><div class="sig">Accepted for and on behalf of {{ quotation.client.name }} (name, signature &amp; date)</div></div>
     <div>{% with show_unsigned=true %}{% include "invoicing/_firm_signature.html" %}{% endwith %}</div>
   </div>
 {% endblock %}

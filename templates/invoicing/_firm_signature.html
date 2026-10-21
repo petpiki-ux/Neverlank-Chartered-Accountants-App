@@ -3,7 +3,7 @@
 {% set _sig = mp_signature_for(doc) %}
 {% if _sig %}
 <div class="mp-sign">
-  <img src="{{ _sig }}" alt="Signature of {{ mp_full_name() }}">
+  <div class="mp-imgbox"><img src="{{ _sig }}" alt="Signature of {{ mp_full_name() }}"></div>
   <div class="mp-rule"></div>
   <div class="mp-name">{{ mp_full_name() }}</div>
   <div class="mp-role">{{ mp_title }} &middot; For {{ firm.name }}</div>
@@ -12,7 +12,7 @@
 </div>
 {% elif show_unsigned %}
 <div class="mp-sign">
-  <div class="mp-gap"></div>
+  <div class="mp-imgbox"></div>
   <div class="mp-rule"></div>
   <div class="mp-role">{% if issued_by %}{{ issued_label or 'Issued by' }}: {{ issued_by }}<br>{% endif %}For {{ firm.name }}</div>
 </div>
