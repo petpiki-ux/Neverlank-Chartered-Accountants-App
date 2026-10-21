@@ -809,9 +809,12 @@ def build_report_to_management_docx(engagement, narrative=None):
 
     doc.add_paragraph()
     doc.add_paragraph("Yours faithfully,")
-    doc.add_paragraph()
-    doc.add_paragraph("_______________________________")
-    doc.add_paragraph(FIRM_NAME)
+    if narrative is not None and brand.signature_valid(narrative):
+        brand.add_signature_block(doc, firm_name=FIRM_NAME, signed_on=narrative.mp_signed_at)
+    else:
+        doc.add_paragraph()
+        doc.add_paragraph("_______________________________")
+        doc.add_paragraph(FIRM_NAME)
 
     if narrative and narrative.completed_by:
         doc.add_paragraph()

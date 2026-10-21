@@ -11,7 +11,7 @@ from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 NAVY = colors.HexColor("#0f2942")
 NAVY_DARK = colors.HexColor("#0a1c2e")
@@ -160,6 +160,10 @@ def build_invoice_pdf(invoice, firm):
     if firm.get("bank_details"):
         story += [Spacer(1, 5 * mm), Paragraph("<font size='7.5' color='#b8934a'><b>PAYMENT DETAILS</b></font>", _base),
                   _p(firm["bank_details"], _small)]
+    import brand_docs
+    sig = brand_docs.pdf_signature_flowables(firm_name=firm.get("name"), align="RIGHT", signed_on=invoice.mp_signed_at) if brand_docs.signature_valid(invoice) else []
+    if sig:
+        story += [Spacer(1, 6 * mm), KeepTogether(sig)]
     story += [Spacer(1, 8 * mm), Paragraph(f"<font color='#6b7684' size='8'>Thank you for choosing {escape(firm.get('name', ''))}. "
               f"Please quote {escape(invoice.invoice_number)} with your payment.</font>", _base)]
 

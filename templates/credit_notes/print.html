@@ -1,4 +1,5 @@
 {% extends "invoicing/print_base.html" %}
+{% set sign_kind = "credit_note" %}
 {% set doc_number = note.credit_note_number %}
 {% block doc_title %}Credit note{% endblock %}
 {% block back_link %}<a class="secondary" href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}">Back to invoice</a>
@@ -50,7 +51,7 @@
   {% if note.is_void %}
   <div class="block"><h4>This credit note has been voided</h4><div class="txt">Voided {{ (note.voided_at|cat).strftime('%d %b %Y') }}{% if note.voided_by %} by {{ note.voided_by.name }}{% endif %}.{% if note.void_reason %} Reason: {{ note.void_reason }}{% endif %} It no longer reduces the invoice.</div></div>
   {% endif %}
-  <div class="accept"><div class="sig">Issued by{% if note.issued_by %}: {{ note.issued_by.name }}{% endif %}<br>For {{ firm.name }}</div><div></div></div>
 {% endblock %}
+{% block signoff %}<div class="signoff">{% with show_unsigned=true, issued_by=(note.issued_by.name if note.issued_by else ''), issued_label='Issued by' %}{% include "invoicing/_firm_signature.html" %}{% endwith %}</div>{% endblock %}
 {% block bank_block %}{% endblock %}
 {% block thanks %}This credit note reduces the amount due on invoice {{ invoice.invoice_number }}.{% endblock %}

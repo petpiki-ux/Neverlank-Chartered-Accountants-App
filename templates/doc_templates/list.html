@@ -11,6 +11,11 @@
     <form method="post" action="{{ url_for('doc_templates.apply_design_all') }}" style="display:inline;" onsubmit="return confirm('Restyle every template that is not yet in the Neverlank design? Wording is kept; the previous copy of each file is kept on the server.');">
       <button type="submit" class="btn secondary">Apply Neverlank design to all</button>
     </form>
+    {% if current_user.role == 'admin' %}
+    <form method="post" action="{{ url_for('doc_templates.add_signature_all') }}" style="display:inline;" onsubmit="return confirm('Add the Managing Partner\'s e-signature to the Neverlank signature row of every Word template that has one (engagement letters, outcome letters, etc.)? Anyone who downloads those templates will get the signature. The previous copy of each file is kept on the server.');">
+      <button type="submit" class="btn secondary">Add Managing Partner signature to letters</button>
+    </form>
+    {% endif %}
     <a href="{{ url_for('doc_templates.new_template') }}" class="btn gold">+ New Template</a>
   </div>
   {% endif %}

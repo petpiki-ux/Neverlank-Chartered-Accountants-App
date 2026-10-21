@@ -1745,6 +1745,15 @@ engagement_team = db.Table(
 )
 
 
+class MPSignedMixin:
+    """The Managing Partner's e-signature on a document: who applied it, when, and a key of the content that was signed. The
+    signature is only shown while the content still matches (see brand_docs.content_key / signature_valid), so changing a
+    signed document removes the signature from it until it is signed again."""
+    mp_signed_by_id = db.Column(db.Integer, nullable=True)  # a user id (no foreign key, so it cannot upset the models' own user relationships)
+    mp_signed_at = db.Column(db.DateTime, nullable=True)
+    mp_signed_key = db.Column(db.String(64), nullable=True)
+
+
 class User(UserMixin, db.Model):
     # How recently a user must have been seen (see last_seen_at/_update_last_
     # seen in app.py) to count as "online now" for the Messages "who's in the
@@ -6441,7 +6450,7 @@ ZIMRA_REPLY_STATUSES = ["Draft", "Awaiting approval", "Approved", "Sent"]
 ZIMRA_SEND_METHODS = ["Hand delivery", "Email", "ZIMRA online portal", "Courier / post", "Other"]
 
 
-class ZimraReply(db.Model):
+class ZimraReply(MPSignedMixin, db.Model):
     """A letter to ZIMRA drafted in the app: usually the reply to a letter logged on the case. It is written from a
     template, submitted for a Partner's approval, downloaded on the firm letterhead and, once it has gone, marked as
     sent - which logs it as an outgoing letter on the case and clears the deadline of the letter it answers."""
@@ -9438,7 +9447,7 @@ def default_workpaper_narrative_body(kind, engagement=None):
     return DEFAULT_WORKPAPER_NARRATIVE_BODIES.get(kind, "")
 
 
-class WorkpaperNarrative(db.Model):
+class WorkpaperNarrative(MPSignedMixin, db.Model):
     """A persistent, editable body of free text for one of the "narrative"
     workpapers (see WORKPAPER_NARRATIVE_KINDS) - generated once with sensible
     default wording, then edited and updated in-app like any other
@@ -9488,7 +9497,7 @@ INVOICE_STATUSES = ["Draft", "Sent", "Paid", "Cancelled"]
 INVOICE_CURRENCIES = ["USD", "ZWG"]
 
 
-class Invoice(db.Model):
+class Invoice(MPSignedMixin, db.Model):
     """A client invoice. Line items are manual (see InvoiceLineItem) rather
     than generated from logged time in this first version. Always billed to
     a Client; the link to a specific Engagement is optional (a firm may
@@ -9681,7 +9690,7 @@ class InvoiceSend(db.Model):
     sent_by = db.relationship("User")
 
 
-class Receipt(db.Model):
+class Receipt(MPSignedMixin, db.Model):
     """Proof that a client paid (all or part of) an invoice: one receipt per
     payment, numbered RCT-YYYY-NNNN. An invoice can have several (instalments);
     it becomes Paid once its receipts add up to the invoice total. A receipt is
@@ -9748,7 +9757,7 @@ class Receipt(db.Model):
 
 # ---------- Credit notes (a reduction of an Invoice) ----------
 
-class CreditNote(db.Model):
+class CreditNote(MPSignedMixin, db.Model):
     """A credit note reduces what a client owes on an invoice - in full or in
     part (a billing error, a discount agreed afterwards, a service not
     delivered). Numbered CN-YYYY-NNNN. Like a receipt it is never deleted: one
@@ -9823,7 +9832,7 @@ class CreditNoteLine(db.Model):
 
 # ---------- Customer advances (money received BEFORE it is invoiced) ----------
 
-class ClientAdvance(db.Model):
+class ClientAdvance(MPSignedMixin, db.Model):
     """Money a client has paid in advance - a deposit or payment on account -
     before any invoice exists for it. Numbered ADV-YYYY-NNNN and receipted at
     once. Until it is applied to an invoice it is a LIABILITY of the firm (the
@@ -9972,7 +9981,7 @@ QUOTATION_DEFAULT_TERMS = (
 )
 
 
-class Quotation(db.Model):
+class Quotation(MPSignedMixin, db.Model):
     """A fee quotation for a client, which becomes an Invoice with one click
     once accepted (tax.py-style two-way link: Quotation.invoice_id points at
     the invoice it produced and Invoice.quotation points back). Same shape

@@ -1,0 +1,12 @@
+{# "Sign as Managing Partner" for one document. Needs sign_doc and sign_kind. Shown to everyone as a status; the buttons only to an Admin. #}
+{% if mp_signed(sign_doc) %}
+  <span class="badge status-Completed" title="The signature shows on the printed page, the PDF and anything sent from here.">Signed by the Managing Partner {{ (sign_doc.mp_signed_at|cat).strftime('%d %b %Y') }}</span>
+  {% if mp_is_signer(current_user) %}
+  <form method="post" action="{{ url_for('mpsign.unsign', kind=sign_kind, doc_id=sign_doc.id) }}" style="display:inline;" onsubmit="return confirm('Remove your signature from this document?');"><button type="submit" class="btn small secondary">Remove signature</button></form>
+  {% endif %}
+{% elif mp_is_signer(current_user) and sign_doc.id %}
+  {% set _ok = mp_can_sign(sign_doc) %}
+  {% if _ok[0] %}
+  <form method="post" action="{{ url_for('mpsign.sign', kind=sign_kind, doc_id=sign_doc.id) }}" style="display:inline;" onsubmit="return confirm('Apply your signature as Managing Partner to this document? It will show on the printed page, the PDF and anything sent from here. If the amount or wording changes afterwards, the signature is dropped until you sign again.');"><button type="submit" class="btn small gold">Sign as Managing Partner</button></form>
+  {% else %}<span class="muted" style="font-size:11.5px;">{{ _ok[1] }}</span>{% endif %}
+{% endif %}

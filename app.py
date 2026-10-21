@@ -234,6 +234,8 @@ def _add_missing_columns():
         # indicator.
         "user": [("last_seen_at", "DATETIME")],
         "income_tax_computation": [("profit_before_tax_manual", "FLOAT")],
+        **{t: [("mp_signed_by_id", "INTEGER"), ("mp_signed_at", "DATETIME"), ("mp_signed_key", "VARCHAR(64)")]
+           for t in ("quotation", "invoice", "credit_note", "receipt", "client_advance", "zimra_reply", "workpaper_narrative")},
         "ppe_asset": [("tax_disposed_on", "DATE"), ("tax_disposal_proceeds", "FLOAT")],
         "message_recipient": [("recalled_at", "DATETIME"), ("deleted_at", "DATETIME")],
         "engagement": [
@@ -746,6 +748,7 @@ def create_app():
     from acceptance import acceptance_bp
     from invoicing import invoicing_bp
     from quotations import quotations_bp
+    from mpsign import mpsign_bp
     from recurring import recurring_bp
     from receipts import receipts_bp
     from advances import advances_bp
@@ -785,6 +788,7 @@ def create_app():
     app.register_blueprint(acceptance_bp)
     app.register_blueprint(invoicing_bp)
     app.register_blueprint(quotations_bp)
+    app.register_blueprint(mpsign_bp)
     app.register_blueprint(recurring_bp)
     app.register_blueprint(receipts_bp)
     app.register_blueprint(advances_bp)
@@ -907,6 +911,17 @@ def create_app():
         import cashbook
         return cashbook.current_choice(key)
     app.jinja_env.globals["cash_current"] = _cash_current
+
+    # The Managing Partner's e-signature for the printed documents (a data: URI, empty when the image is missing).
+    import brand_docs as _brand
+    import mpsign as _mpsign
+    app.jinja_env.globals["mp_signature_for"] = _brand.signature_uri_for
+    app.jinja_env.globals["mp_signed"] = _brand.signature_valid
+    app.jinja_env.globals["mp_is_managing_partner"] = _brand.is_managing_partner
+    app.jinja_env.globals["mp_can_sign"] = _mpsign.can_sign
+    app.jinja_env.globals["mp_is_signer"] = _mpsign.is_signer
+    app.jinja_env.globals["mp_full_name"] = _brand.mp_full_name
+    app.jinja_env.globals["mp_title"] = _brand.MP_TITLE
 
     @app.context_processor
     def inject_globals():

@@ -9,6 +9,7 @@
       {% if template %}&middot; {{ template.label }}{% endif %}</div>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% with sign_doc=reply, sign_kind='zimra_reply' %}{% include "_mp_sign_control.html" %}{% endwith %}
     <a href="{{ url_for('zimra.download_reply', reply_id=reply.id, fmt='docx') }}" class="btn secondary">Word</a>
     <a href="{{ url_for('zimra.download_reply', reply_id=reply.id, fmt='pdf') }}" class="btn secondary">PDF</a>
     <a href="{{ url_for('zimra.view_case', case_id=case.id) }}" class="btn secondary">Back to case</a>
@@ -37,7 +38,8 @@
         {% else %}<p>{{ text }}</p>{% endif %}
       {% endfor %}
       <p style="margin-top:18px;">Yours faithfully</p>
-      <p style="margin-top:34px;margin-bottom:0;"><strong>{{ reply.signatory or '' }}</strong><br>{{ reply.signatory_title or '' }}</p>
+      {% if mp_signed(reply) and mp_is_managing_partner(reply.signatory) %}<img src="{{ mp_signature_for(reply) }}" alt="Signature" style="display:block;height:56px;margin-top:8px;">{% endif %}
+      <p style="margin-top:{{ '4px' if mp_signed(reply) and mp_is_managing_partner(reply.signatory) else '34px' }};margin-bottom:0;"><strong>{{ reply.signatory or '' }}</strong><br>{{ reply.signatory_title or '' }}</p>
     </div>
   </div>
 

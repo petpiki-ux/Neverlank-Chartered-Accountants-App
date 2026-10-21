@@ -353,7 +353,13 @@ def build_docx(reply, firm=None):
             para(text, after=8 if last_of_run else 3, indent=0.3, hanging=0.3)
         else:
             para(text, after=8)
-    para("Yours faithfully", after=30)
+    if brand.is_managing_partner(reply.signatory) and brand.signature_valid(reply):
+        para("Yours faithfully", after=2)
+        sig_p = doc.add_paragraph()
+        brand._tight(sig_p, before=2, after=2)
+        brand.add_signature_picture(sig_p, width_in=1.5)
+    else:
+        para("Yours faithfully", after=30)
     if reply.signatory:
         para(reply.signatory, bold=True, after=0)
     if reply.signatory_title:
@@ -371,7 +377,7 @@ def build_pdf(reply, firm=None):
     from reportlab.lib.pagesizes import A4
     from reportlab.lib.styles import ParagraphStyle
     from reportlab.lib.units import mm
-    from reportlab.platypus import ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
+    from reportlab.platypus import Image, ListFlowable, ListItem, Paragraph, SimpleDocTemplate, Spacer
     import brand_docs as brand
 
     firm = firm or brand.firm_info()
@@ -425,7 +431,14 @@ def build_pdf(reply, firm=None):
         else:
             story.append(Paragraph(fmt(text), base))
     flush()
-    story += [Spacer(1, 4 * mm), Paragraph("Yours faithfully", base), Spacer(1, 14 * mm)]
+    story += [Spacer(1, 4 * mm), Paragraph("Yours faithfully", base)]
+    sig_flow = []
+    if brand.is_managing_partner(reply.signatory) and brand.signature_valid(reply):
+        import io as _io
+        sig_img = Image(_io.BytesIO(brand.signature_bytes()), width=38 * mm, height=38 * mm * 178 / 294)
+        sig_img.hAlign = "LEFT"
+        sig_flow = [Spacer(1, 2 * mm), sig_img, Spacer(1, 1 * mm)]
+    story += sig_flow or [Spacer(1, 14 * mm)]
     if reply.signatory:
         story.append(Paragraph(f"<b>{escape(reply.signatory)}</b>", tight))
     if reply.signatory_title:

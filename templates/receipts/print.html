@@ -1,4 +1,5 @@
 {% extends "invoicing/print_base.html" %}
+{% set sign_kind = "receipt" %}
 {% set doc_number = receipt.receipt_number %}
 {% block doc_title %}Receipt{% endblock %}
 {% block back_link %}<a class="secondary" href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}">Back to invoice</a>
@@ -41,7 +42,7 @@
   {% if receipt.is_void %}
   <div class="block"><h4>This receipt has been voided</h4><div class="txt">Voided {{ (receipt.voided_at|cat).strftime('%d %b %Y') }}{% if receipt.voided_by %} by {{ receipt.voided_by.name }}{% endif %}.{% if receipt.void_reason %} Reason: {{ receipt.void_reason }}{% endif %} It is not valid as proof of payment.</div></div>
   {% endif %}
-  <div class="accept"><div class="sig">Received by{% if receipt.issued_by %}: {{ receipt.issued_by.name }}{% endif %}<br>For {{ firm.name }}</div><div></div></div>
 {% endblock %}
+{% block signoff %}<div class="signoff">{% with show_unsigned=true, issued_by=(receipt.issued_by.name if receipt.issued_by else ''), issued_label='Received by' %}{% include "invoicing/_firm_signature.html" %}{% endwith %}</div>{% endblock %}
 {% block bank_block %}{% endblock %}
 {% block thanks %}Thank you for your payment.{% endblock %}

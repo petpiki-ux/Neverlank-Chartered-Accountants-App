@@ -10,7 +10,7 @@ from reportlab.lib.enums import TA_RIGHT
 from reportlab.lib.pagesizes import A4
 from reportlab.lib.styles import ParagraphStyle
 from reportlab.lib.units import mm
-from reportlab.platypus import Image, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+from reportlab.platypus import Image, KeepTogether, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
 from invoice_pdf import (
     NAVY, NAVY_DARK, GOLD, LINE, TINT, LOGO, _base, _small, _right, _p, money,
@@ -135,6 +135,10 @@ def build_credit_note_pdf(note, firm):
         story += [Spacer(1, 5 * mm), Paragraph("<font size='7.5' color='#b8934a'><b>NOTES</b></font>", _base), _p(note.notes, _small)]
     if note.is_void:
         story += [Spacer(1, 5 * mm), Paragraph("<font color='#c0392b' size='11'><b>VOID - this credit note has been cancelled and no longer reduces the invoice.</b></font>", _base)]
+    import brand_docs
+    sig = brand_docs.pdf_signature_flowables(firm_name=firm.get("name"), align="RIGHT", signed_on=note.mp_signed_at) if brand_docs.signature_valid(note) else []
+    if sig:
+        story += [Spacer(1, 6 * mm), KeepTogether(sig)]
     story += [Spacer(1, 8 * mm), Paragraph(
         f"<font color='#6b7684' size='8'>This credit note reduces the amount due on invoice {escape(invoice.invoice_number)}.</font>", _base)]
 

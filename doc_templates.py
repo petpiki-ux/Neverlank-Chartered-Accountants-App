@@ -216,6 +216,62 @@ def _apply_design_to_file(tpl):
     return "done" if changed else "already"
 
 
+def _sign_template_file(tpl):
+    """Put the Managing Partner's e-signature in the 'Neverlank' signature row(s) of one Word template. The first untouched copy
+    is kept beside it as '<file>.before-signature'. Returns 'done', 'already', 'none' (no Neverlank signature row), 'skip'
+    (not a Word file) or an 'error: ...' string."""
+    if tpl.file_ext != "docx":
+        return "skip"
+    path = os.path.join(_template_dir(tpl.type), tpl.filename)
+    if not os.path.exists(path):
+        return "error: the file is missing from the server"
+    import brand_docs
+    from docx import Document
+    if not brand_docs.signature_bytes():
+        return "error: the signature image is missing from the server"
+    try:
+        doc = Document(path)
+        has_row = any("signature" in [c.text.strip().lower() for c in t.rows[0].cells]
+                      and any("neverlank" in r.cells[0].text.lower() for r in t.rows[1:]) for t in doc.tables if t.rows)
+        if not has_row:
+            return "none"
+        backup = path + ".before-signature"
+        if not os.path.exists(backup):
+            shutil.copy2(path, backup)
+        signed = brand_docs.sign_template_rows(doc)
+        if not signed:
+            return "already"
+        doc.save(path)
+    except Exception as exc:  # leave the firm's file exactly as it was
+        return f"error: {exc}"
+    return "done"
+
+
+@doc_templates_bp.route("/add-signature-all", methods=["POST"])
+@login_required
+@editor_required
+def add_signature_all():
+    if current_user.role != "admin":  # the Managing Partner signs in as an Admin
+        abort(403)
+    done, already, failed = 0, 0, []
+    for tpl in DocumentTemplate.query.order_by(DocumentTemplate.id).all():
+        result = _sign_template_file(tpl)
+        if result == "done":
+            tpl.updated_by_id = current_user.id
+            done += 1
+        elif result == "already":
+            already += 1
+        elif result.startswith("error"):
+            failed.append(f"{tpl.title} ({result[7:]})")
+    db.session.commit()
+    msg = f"The Managing Partner's signature was added to {done} template(s); {already} already had it."
+    if failed:
+        flash(msg + " Could not update: " + "; ".join(failed) + " (left as they were).", "warning")
+    else:
+        flash(msg, "success")
+    return redirect(url_for("doc_templates.list_templates"))
+
+
 @doc_templates_bp.route("/<int:template_id>/apply-design", methods=["POST"])
 @login_required
 @editor_required

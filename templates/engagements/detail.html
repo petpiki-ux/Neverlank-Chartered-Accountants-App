@@ -4515,6 +4515,18 @@
 
     <h4 style="margin-bottom:4px;margin-top:16px;">Report to management (Word, Ref. {{ filing_reference('report_to_management') }})</h4>
     <form method="post" action="{{ url_for('engagements.generate_report_to_management_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {% set rtm = workpaper_narratives.get('report_to_management') %}
+    <div style="margin:6px 0;font-size:12.5px;">
+      {% if rtm and rtm.id and mp_signed(rtm) %}
+        <span class="badge status-Completed">Signed by the Managing Partner</span> {{ (rtm.mp_signed_at|cat).strftime('%d %b %Y') }}.
+        {% if mp_is_signer(current_user) %}<form method="post" action="{{ url_for('mpsign.unsign', kind='report_to_management', doc_id=rtm.id) }}" class="inline" onsubmit="return confirm('Remove your signature from the Report to Management letter?');"><button type="submit" class="btn small secondary">Remove signature</button></form>{% endif %}
+      {% elif mp_is_signer(current_user) %}
+        <form method="post" action="{{ url_for('mpsign.sign_report_to_management', engagement_id=engagement.id) }}" class="inline" onsubmit="return confirm('Apply your signature as Managing Partner to the Report to Management letter? Generate it again afterwards to file a signed copy.');"><button type="submit" class="btn small gold">Sign as Managing Partner</button></form>
+        <span class="muted">The letter is generated unsigned until you do.</span>
+      {% else %}
+        <span class="muted">Unsigned - only the Managing Partner (Admin) can sign this letter.</span>
+      {% endif %}
+    </div>
     {{ filed_workpapers('report_to_management') }}
 
     {% if engagement.type == 'Investigative Engagement' %}

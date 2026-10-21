@@ -41,6 +41,168 @@ def firm_info():
     return FIRM_LETTERHEAD
 
 
+# ------------------------------------------------------------------ the Managing Partner's e-signature
+# The image lives in brand_assets/ (NOT under static/, so it is never served as a public file). Every place that
+# signs for the firm goes through these helpers, so replacing brand_assets/managing_partner_signature.png changes
+# every document at once.
+
+SIGNATURE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brand_assets", "managing_partner_signature.png")
+MP_NAME = "Petros Piki"
+MP_CREDENTIALS = "CA(Z), MSc, RPA, RTA"
+MP_TITLE = "Managing Partner"
+_sig_cache = {"mtime": None, "bytes": None, "uri": None}
+
+
+def signature_bytes():
+    """The signature image as PNG bytes, or None when the file is missing (documents then simply carry no signature)."""
+    import base64
+    try:
+        mtime = os.path.getmtime(SIGNATURE_PATH)
+    except OSError:
+        return None
+    if _sig_cache["mtime"] != mtime:
+        with open(SIGNATURE_PATH, "rb") as fh:
+            data = fh.read()
+        _sig_cache.update(mtime=mtime, bytes=data, uri="data:image/png;base64," + base64.b64encode(data).decode("ascii"))
+    return _sig_cache["bytes"]
+
+
+def signature_data_uri():
+    """The signature as a data: URI for the printed HTML documents (an empty string when there is none)."""
+    return _sig_cache["uri"] if signature_bytes() else ""
+
+
+def content_key(doc):
+    """A short fingerprint of what the Managing Partner signs: the document number and amount (invoices, quotations, credit notes,
+    receipts, advance receipts), or the subject, wording and signatory of a letter. If it changes after signing, the signature
+    stops showing until the document is signed again."""
+    import hashlib
+    if doc is None:
+        return ""
+    cls = type(doc).__name__
+    if cls == "ZimraReply":
+        parts = [doc.subject, doc.body, doc.signatory, doc.addressee, doc.letter_date]
+    elif cls == "WorkpaperNarrative":
+        parts = [doc.kind, doc.body]
+    else:
+        number = next((getattr(doc, a) for a in ("invoice_number", "quote_number", "credit_note_number", "receipt_number", "advance_number", "number")
+                       if getattr(doc, a, None)), "")
+        amount = getattr(doc, "total", None)
+        if amount is None:
+            amount = getattr(doc, "amount", None)
+        parts = [number, f"{amount:.2f}" if amount is not None else ""]
+    return hashlib.sha1("|".join(str(x or "") for x in parts).encode("utf-8")).hexdigest()
+
+
+def signature_valid(doc):
+    """True when the Managing Partner has signed this document and its content is still what he signed."""
+    return bool(doc is not None and getattr(doc, "mp_signed_at", None) and getattr(doc, "mp_signed_key", None)
+                and doc.mp_signed_key == content_key(doc) and signature_bytes())
+
+
+def signature_uri_for(doc):
+    """The signature as a data: URI for a printed page - only when the document is signed (empty string otherwise)."""
+    return signature_data_uri() if signature_valid(doc) else ""
+
+
+def mp_full_name():
+    return f"{MP_NAME} {MP_CREDENTIALS}"
+
+
+def is_managing_partner(name):
+    """True when a 'signed by' name is the Managing Partner (credentials and title are ignored), so a letter signed by
+    another partner never carries his signature."""
+    return bool(name) and MP_NAME.lower() in " ".join(str(name).lower().replace(",", " ").split())
+
+
+def add_signature_picture(paragraph, width_in=1.45):
+    """Put the signature image in a paragraph of a Word document. Returns False when there is no image."""
+    import io
+    data = signature_bytes()
+    if not data:
+        return False
+    paragraph.add_run().add_picture(io.BytesIO(data), width=Inches(width_in))
+    return True
+
+
+def add_signature_block(doc, firm_name=None, width_in=1.45, signed_on=None):
+    """The signature, a rule, the Managing Partner's name and title and 'For <firm>', as a run of paragraphs."""
+    firm_name = firm_name or firm_info().get("name", "")
+    p = doc.add_paragraph()
+    _tight(p, before=4, after=0)
+    has_image = add_signature_picture(p, width_in)
+    line = doc.add_paragraph()
+    _tight(line, before=0, after=0)
+    if not has_image:
+        _run(line, "_______________________________")
+    else:
+        para_border(line, edge="top", colour=NAVY, size=6, space=1)
+    _run(line, mp_full_name(), size=10, bold=True)
+    for txt in (MP_TITLE, f"For {firm_name}" if firm_name else "", f"Signed {signed_on.strftime('%d %b %Y')}" if signed_on else ""):
+        if txt:
+            q = doc.add_paragraph()
+            _tight(q, before=0, after=0)
+            _run(q, txt, size=9.5, colour=MUTED)
+
+
+def pdf_signature_flowables(width=None, firm_name=None, align="LEFT", signed_on=None):
+    """The signature block for the reportlab PDFs: image, name, title, 'For <firm>'. Empty list when there is no image."""
+    import io
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import mm as _mm
+    from reportlab.platypus import Image as RLImage, Paragraph, Spacer
+    from xml.sax.saxutils import escape
+    data = signature_bytes()
+    if not data:
+        return []
+    firm_name = firm_name or firm_info().get("name", "")
+    base = ParagraphStyle("mpsig", fontName="Helvetica", fontSize=9, leading=12, textColor=rgb_tuple(INK))
+    img = RLImage(io.BytesIO(data), width=36 * _mm, height=36 * _mm * 178 / 294)
+    img.hAlign = align
+    out = [Spacer(1, 2 * _mm), img,
+           Paragraph(f"<b>{escape(mp_full_name())}</b>", base),
+           Paragraph(escape(MP_TITLE), ParagraphStyle("mpsig2", parent=base, textColor=rgb_tuple(MUTED)))]
+    if firm_name:
+        out.append(Paragraph(f"For {escape(firm_name)}", ParagraphStyle("mpsig3", parent=base, textColor=rgb_tuple(MUTED))))
+    if signed_on:
+        out.append(Paragraph(f"Signed {signed_on.strftime('%d %b %Y')}", ParagraphStyle("mpsig4", parent=base, textColor=rgb_tuple(MUTED))))
+    return out
+
+
+def rgb_tuple(hex_colour):
+    from reportlab.lib import colors
+    return colors.HexColor("#" + hex_colour)
+
+
+def _cell_has_picture(cell):
+    return bool(cell._tc.findall(".//" + qn("w:drawing")))
+
+
+def sign_template_rows(doc, width_in=1.2):
+    """In a library template, put the signature in the Signature cell of every row where Neverlank signs (the row's first
+    cell mentions Neverlank). Returns how many were signed; rows already carrying a picture are left alone."""
+    import io
+    data = signature_bytes()
+    if not data:
+        return 0
+    signed = 0
+    for table in doc.tables:
+        header = [c.text.strip().lower() for c in table.rows[0].cells]
+        if "signature" not in header:
+            continue
+        col = header.index("signature")
+        for row in table.rows[1:]:
+            if "neverlank" not in row.cells[0].text.lower():
+                continue
+            cell = row.cells[col]
+            if _cell_has_picture(cell):
+                continue
+            para = cell.paragraphs[0] if cell.paragraphs else cell.add_paragraph()
+            para.add_run().add_picture(io.BytesIO(data), width=Inches(width_in))
+            signed += 1
+    return signed
+
+
 # ------------------------------------------------------------------ low-level XML helpers
 
 def shade(cell, hex_colour):

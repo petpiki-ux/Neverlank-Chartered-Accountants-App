@@ -1,4 +1,5 @@
 {% extends "invoicing/print_base.html" %}
+{% set sign_kind = "invoice" %}
 {% set doc_number = invoice.invoice_number %}
 {% block doc_title %}Invoice{% endblock %}
 {% block back_link %}<a class="secondary" href="{{ url_for('invoicing.view_invoice', invoice_id=invoice.id) }}">Back</a>{% endblock %}

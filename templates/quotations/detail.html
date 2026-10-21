@@ -13,6 +13,7 @@
     </div>
   </div>
   <div>
+    {% with sign_doc=quotation, sign_kind='quotation' %}{% include "_mp_sign_control.html" %}{% endwith %}
     <a href="{{ url_for('quotations.print_quotation', quotation_id=quotation.id) }}" class="btn secondary" target="_blank">Print / Save as PDF</a>
     {% if not locked %}<a href="{{ url_for('quotations.edit_quotation', quotation_id=quotation.id) }}" class="btn secondary">Edit details</a>{% endif %}
     <form method="post" action="{{ url_for('quotations.duplicate_quotation', quotation_id=quotation.id) }}" class="inline"><button type="submit" class="btn secondary">Duplicate</button></form>

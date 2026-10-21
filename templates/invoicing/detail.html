@@ -15,6 +15,7 @@
   </div>
   <div>
     {% if send_allowed %}<a href="#send" class="btn gold">Send to client</a>{% endif %}
+    {% with sign_doc=invoice, sign_kind='invoice' %}{% include "_mp_sign_control.html" %}{% endwith %}
     <a href="{{ url_for('invoice_send.invoice_pdf', invoice_id=invoice.id) }}" class="btn secondary" target="_blank">PDF</a>
     <a href="{{ url_for('invoicing.print_invoice', invoice_id=invoice.id) }}" class="btn secondary" target="_blank">Print</a>
     <a href="{{ url_for('statements.client_statement', client_id=invoice.client_id) }}" class="btn secondary">Client statement</a>

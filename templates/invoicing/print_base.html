@@ -70,6 +70,13 @@
     .words { margin: 0 0 16px; padding: 12px 16px; border: 1px dashed var(--gold); border-radius: 8px; background: #fffdf8; }
     .words .k { font-size: 9.5px; text-transform: uppercase; letter-spacing: .14em; color: var(--gold); font-weight: 800; }
     .words .v { margin-top: 3px; font-size: 14px; color: var(--navy); font-weight: 600; }
+    .mp-sign { width: 250px; }
+    .mp-sign img { display: block; height: 60px; width: auto; max-width: 100%; margin: 6px 0 0 4px; }
+    .mp-sign .mp-gap { height: 46px; }
+    .mp-sign .mp-rule { border-top: 1.5px solid var(--navy); margin-top: 2px; }
+    .mp-sign .mp-name { font-size: 12px; font-weight: 700; color: var(--navy); margin-top: 5px; }
+    .mp-sign .mp-role { font-size: 11px; color: var(--muted); }
+    .signoff { margin-top: 26px; display: flex; justify-content: flex-end; page-break-inside: avoid; }
     .accept .sig { border-top: 1.5px solid var(--navy); padding-top: 6px; font-size: 11px; color: var(--muted); margin-top: 38px; }
 
     /* ---- stamp ---- */
@@ -93,6 +100,13 @@
 <body>
   <div class="toolbar">
     {% block back_link %}{% endblock %}
+    {% if sign_kind and mp_is_signer(current_user) and doc.id %}
+      {% if mp_signed(doc) %}
+      <form method="post" action="{{ url_for('mpsign.unsign', kind=sign_kind, doc_id=doc.id) }}" style="display:inline;" onsubmit="return confirm('Remove your signature from this document?');"><button type="submit" class="secondary-btn" style="background:#fff;color:#0f2942;border:1px solid #c9d2dc;">Remove signature</button></form>
+      {% elif mp_can_sign(doc)[0] %}
+      <form method="post" action="{{ url_for('mpsign.sign', kind=sign_kind, doc_id=doc.id) }}" style="display:inline;" onsubmit="return confirm('Apply your signature as Managing Partner to this document? It will show on the printed page, the PDF and anything sent from here.');"><button type="submit" style="background:#b8934a;">Sign as Managing Partner</button></form>
+      {% endif %}
+    {% endif %}
     <button onclick="window.print()">Print / Save as PDF</button>
   </div>
 
@@ -164,6 +178,7 @@
       {% block bank_block %}{% if firm.bank_details %}
       <div class="block"><h4>Payment details</h4><div class="txt">{{ firm.bank_details }}</div></div>
       {% endif %}{% endblock %}
+      {% block signoff %}{% if mp_signed(doc) %}<div class="signoff">{% include "invoicing/_firm_signature.html" %}</div>{% endif %}{% endblock %}
     </div>
 
     <div class="foot">
