@@ -1,0 +1,19 @@
+{# What the app already knows about one person on one day. Needs: facts. Optional: show_name. #}
+<div style="display:flex;flex-wrap:wrap;gap:8px;margin:6px 0;">
+  <span class="badge {% if facts.overdue %}overdue{% else %}status-Completed{% endif %}">{{ facts.overdue|length }} overdue</span>
+  <span class="badge {% if facts.due_soon %}status-Submitted{% else %}status-Completed{% endif %}">{{ facts.due_soon|length }} due in {{ due_soon_days or 3 }} days</span>
+  <span class="badge status-Planning">{{ facts.open_count }} open task{{ '' if facts.open_count == 1 else 's' }}</span>
+  <span class="badge {% if facts.over_booked %}overdue{% elif facts.under_booked %}status-Submitted{% else %}status-Planning{% endif %}">{% if facts.capacity %}Booked {{ facts.capacity }}% this week{% else %}No bookings this week{% endif %}</span>
+  <span class="badge status-Planning">{{ '%g'|format(facts.hours) }} h logged</span>
+</div>
+{% if facts.overdue or facts.due_soon %}
+<table style="font-size:12px;margin:4px 0 8px;">
+  <thead><tr><th>Task</th><th>Where</th><th>Due</th><th>Priority</th></tr></thead>
+  <tbody>
+  {% for t in facts.overdue %}<tr><td>{{ t.title }}</td><td>{{ t.client or '' }}{% if t.engagement %} &middot; {{ t.engagement }}{% endif %}</td><td><span class="badge overdue">{{ t.due.strftime('%d %b') }}</span></td><td>{{ t.priority }}</td></tr>{% endfor %}
+  {% for t in facts.due_soon %}<tr><td>{{ t.title }}</td><td>{{ t.client or '' }}{% if t.engagement %} &middot; {{ t.engagement }}{% endif %}</td><td>{{ t.due.strftime('%d %b') }}</td><td>{{ t.priority }}</td></tr>{% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% if facts.hidden_count %}<div class="muted" style="font-size:11.5px;">{{ facts.hidden_count }} more task(s) on engagements you are not on are counted but not shown.</div>{% endif %}
+{% if facts.engagements %}<div class="muted" style="font-size:12px;">Engagements: {{ facts.engagements|join(' · ') }}</div>{% endif %}

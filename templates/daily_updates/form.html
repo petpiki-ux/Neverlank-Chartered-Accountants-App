@@ -1,0 +1,76 @@
+{% extends "base.html" %}
+{% block title %}Daily Update - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Projects Daily Update</h1>
+    <div class="subtitle">{{ day.strftime('%A, %d %B %Y') }} &middot; {{ current_user.name }}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a href="{{ url_for('daily_updates.my_update', date=prev_day.isoformat()) }}" class="btn secondary">&larr; Previous day</a>
+    {% if next_day %}<a href="{{ url_for('daily_updates.my_update', date=next_day.isoformat()) }}" class="btn secondary">Next day &rarr;</a>{% endif %}
+    {% if can_team %}<a href="{{ url_for('daily_updates.team_rollup', date=day.isoformat()) }}" class="btn gold">Team roll-up</a>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">What the app already knows about your day</h3>
+  {% include "daily_updates/_facts.html" %}
+  <p class="muted" style="font-size:11.5px;margin:0;">From your tasks, your bookings on the Planner and your timesheet. Use the boxes below for what the app cannot know.</p>
+</div>
+
+{% if not editable %}
+<div class="flash warning">This day is more than 14 days ago and can no longer be changed.</div>
+{% endif %}
+<form method="post" action="{{ url_for('daily_updates.save_update') }}">
+  <input type="hidden" name="update_date" value="{{ day.isoformat() }}">
+  <div class="card">
+    <h3 class="mt-0">Your update</h3>
+    <label for="working_on">What I am working on</label>
+    <textarea id="working_on" name="working_on" rows="4" {% if not editable %}disabled{% endif %} placeholder="Projects and clients, and where each one stands">{{ update.working_on if update and update.working_on else '' }}</textarea>
+    <label for="roadblocks">Problems and roadblocks (where I am stuck)</label>
+    <textarea id="roadblocks" name="roadblocks" rows="3" {% if not editable %}disabled{% endif %} placeholder="What is blocking me, and since when">{{ update.roadblocks if update and update.roadblocks else '' }}</textarea>
+    <label for="assistance_needed">Assistance I need</label>
+    <textarea id="assistance_needed" name="assistance_needed" rows="3" {% if not editable %}disabled{% endif %} placeholder="Who or what would unblock me">{{ update.assistance_needed if update and update.assistance_needed else '' }}</textarea>
+    <label for="problems_solved">Problems I solved</label>
+    <textarea id="problems_solved" name="problems_solved" rows="3" {% if not editable %}disabled{% endif %} placeholder="What got fixed or cleared, and how - others may face the same one">{{ update.problems_solved if update and update.problems_solved else '' }}</textarea>
+    <label for="suggestions">Suggestions for improvement</label>
+    <textarea id="suggestions" name="suggestions" rows="3" {% if not editable %}disabled{% endif %} placeholder="A way to make the work, the app or the firm better">{{ update.suggestions if update and update.suggestions else '' }}</textarea>
+  </div>
+
+  <div class="card" style="border-left:4px solid #c0392b;">
+    <h3 class="mt-0">Client or advisory fire</h3>
+    <p class="muted" style="font-size:12px;">Urgent client inquiries, cash-flow panics or emergencies that need immediate cross-team support. Leave empty if there is none.</p>
+    <div class="form-row">
+      <div style="grid-column: span 2;"><label for="client_fires">What is happening</label>
+        <textarea id="client_fires" name="client_fires" rows="3" {% if not editable %}disabled{% endif %}>{{ update.client_fires if update and update.client_fires else '' }}</textarea></div>
+      <div>
+        <label for="fire_client_id">Client</label>
+        <select id="fire_client_id" name="fire_client_id" {% if not editable %}disabled{% endif %}>
+          <option value="">- none / general -</option>
+          {% for c in clients %}<option value="{{ c.id }}" {% if update and update.fire_client_id == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+        </select>
+        <label style="display:flex;gap:6px;align-items:center;margin-top:10px;"><input type="checkbox" name="fire_urgent" value="1" style="width:auto;" {% if update and update.fire_urgent %}checked{% endif %} {% if not editable %}disabled{% endif %}> Needs immediate cross-team support</label>
+      </div>
+    </div>
+  </div>
+  {% if editable %}<button type="submit" class="btn gold">{% if update %}Update my daily update{% else %}Submit my daily update{% endif %}</button>{% endif %}
+  {% if update %}<span class="muted" style="font-size:12px;margin-left:10px;">Last saved {{ (update.updated_at|cat).strftime('%d %b %Y %H:%M') }}</span>{% endif %}
+</form>
+
+{% if recent %}
+<div class="card" style="margin-top:16px;">
+  <h3 class="mt-0">My recent updates</h3>
+  <table style="font-size:12.5px;">
+    <thead><tr><th>Date</th><th>Working on</th><th>Flags</th></tr></thead>
+    <tbody>
+    {% for u in recent %}
+      <tr><td><a href="{{ url_for('daily_updates.my_update', date=u.update_date.isoformat()) }}">{{ u.update_date.strftime('%a %d %b') }}</a></td>
+          <td>{{ (u.working_on or '')[:110] }}{% if u.working_on and u.working_on|length > 110 %}...{% endif %}</td>
+          <td>{% if u.has_fire %}<span class="badge overdue">Fire</span>{% endif %}{% if u.has_roadblock %} <span class="badge status-Submitted">Stuck</span>{% endif %}{% if u.needs_help %} <span class="badge status-Planning">Help</span>{% endif %}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}

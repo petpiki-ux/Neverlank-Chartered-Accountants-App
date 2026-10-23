@@ -30,6 +30,7 @@
       <a href="{{ url_for('learning.index') }}"{% if request.blueprint == 'learning' %} class="active"{% endif %}>Firm Learning{% if learning_pending_count %} <span class="badge" style="background:#b8934a;color:#fff;" title="Lessons waiting for your decision">{{ learning_pending_count }}</span>{% endif %}</a>
       <a href="{{ url_for('qpd_dashboard.dashboard') }}">QPD</a>
       <a href="{{ url_for('hr.project_board') }}">Tasks{% if my_open_task_count %} <span class="badge overdue">{{ my_open_task_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('daily_updates.my_update') }}"{% if request.blueprint == 'daily_updates' %} class="active"{% endif %}>Daily Update{% if daily_fire_count %} <span class="badge overdue" title="Urgent fires reported today">{{ daily_fire_count }}</span>{% endif %}</a>
       <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
       <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
       {% set finance_blueprints = ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'advances', 'credit_notes', 'statements', 'analytics', 'expenses', 'firmfs'] %}

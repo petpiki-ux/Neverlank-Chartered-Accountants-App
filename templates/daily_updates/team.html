@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Team Daily Update - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Team Daily Update</h1>
+    <div class="subtitle">{{ day.strftime('%A, %d %B %Y') }} &middot; {{ roll.submitted }} of {{ roll.total }} team members have submitted</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a href="{{ url_for('daily_updates.team_rollup', date=prev_day.isoformat()) }}" class="btn secondary">&larr; Previous day</a>
+    {% if next_day %}<a href="{{ url_for('daily_updates.team_rollup', date=next_day.isoformat()) }}" class="btn secondary">Next day &rarr;</a>{% endif %}
+    <a href="{{ url_for('daily_updates.my_update') }}" class="btn secondary">My update</a>
+  </div>
+</div>
+
+{# ---- Client or advisory fires ---- #}
+<div class="card" style="border-left:4px solid {% if roll.fires %}#c0392b{% else %}#2e7d32{% endif %};">
+  <h3 class="mt-0">Client or advisory fires</h3>
+  {% if roll.fires %}
+  {% for c in roll.fires %}
+  <div style="padding:8px 0;border-top:1px solid #eee;">
+    <strong>{{ c.user.name }}</strong>
+    {% if c.entry.fire_urgent %}<span class="badge overdue">Needs immediate cross-team support</span>{% endif %}
+    {% if c.entry.fire_client %}<span class="badge status-Planning">{{ c.entry.fire_client.name }}</span>{% endif %}
+    <div style="white-space:pre-line;font-size:13px;margin-top:4px;">{{ c.entry.client_fires or 'Flagged as urgent, no details given.' }}</div>
+  </div>
+  {% endfor %}
+  {% else %}<div class="muted">No fires reported for this day.</div>{% endif %}
+</div>
+
+{# ---- Deadline & capacity alerts ---- #}
+<div class="card">
+  <h3 class="mt-0">Deadline &amp; capacity alerts</h3>
+  {% if roll.alerts %}
+  <table style="font-size:12.5px;">
+    <thead><tr><th>Type</th><th>Who</th><th>Alert</th></tr></thead>
+    <tbody>
+    {% for a in roll.alerts %}
+      <tr><td><span class="badge {% if a.level == 'danger' %}overdue{% elif a.level == 'warning' %}status-Submitted{% else %}status-Planning{% endif %}">{{ a.kind }}</span></td><td>{{ a.who }}</td><td>{{ a.text }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<div class="muted">No deadline or capacity alerts.</div>{% endif %}
+  <p class="muted" style="font-size:11.5px;margin:8px 0 0;">Overdue and due-soon come from tasks assigned to each person; capacity from the Planner bookings for the week (over 100% is over-booked, under 50% has room).</p>
+</div>
+
+{# ---- Across the team ---- #}
+<div class="form-row" style="align-items:stretch;">
+  {% for key, title in (('assistance_needed', 'Assistance required'), ('problems_solved', 'Problems solved'), ('suggestions', 'Suggestions for improvement')) %}
+  <div class="card">
+    <h3 class="mt-0">{{ title }}</h3>
+    {% if roll.lists[key] %}
+      {% for person, text in roll.lists[key] %}
+      <div style="padding:6px 0;border-top:1px solid #eee;"><strong>{{ person.name }}</strong><div style="white-space:pre-line;font-size:12.5px;">{{ text }}</div></div>
+      {% endfor %}
+    {% else %}<div class="muted">Nothing reported.</div>{% endif %}
+  </div>
+  {% endfor %}
+</div>
+
+{# ---- One card per team member ---- #}
+<h2 style="margin:18px 0 8px;font-size:17px;">By team member</h2>
+{% for c in roll.cards %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+    <h3 class="mt-0" style="margin-bottom:2px;">{{ c.user.name }} <span class="muted" style="font-size:12px;font-weight:400;">{{ c.user.role|capitalize }}</span></h3>
+    <div>
+      {% if not c.entry %}<span class="badge status-Submitted">No update yet</span>{% else %}
+        {% if c.entry.has_fire %}<span class="badge overdue">Fire</span>{% endif %}
+        {% if c.entry.has_roadblock %}<span class="badge status-Submitted">Stuck</span>{% endif %}
+        {% if c.entry.needs_help %}<span class="badge status-Planning">Needs help</span>{% endif %}
+        <span class="badge status-Completed">Submitted</span>
+      {% endif %}
+    </div>
+  </div>
+  {% with facts=c.facts, due_soon_days=due_soon_days %}{% include "daily_updates/_facts.html" %}{% endwith %}
+  {% if c.entry %}
+  <table style="font-size:12.5px;margin-top:6px;">
+    <tbody>
+    {% for label, field in (('Working on', 'working_on'), ('Roadblocks', 'roadblocks'), ('Assistance needed', 'assistance_needed'), ('Problems solved', 'problems_solved'), ('Suggestions', 'suggestions')) %}
+      {% set text = c.entry[field] %}
+      {% if text %}<tr><td style="width:150px;vertical-align:top;font-weight:600;">{{ label }}</td><td style="white-space:pre-line;">{{ text }}</td></tr>{% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+</div>
+{% endfor %}
+
+{% if roll.missing %}
+<div class="card">
+  <h3 class="mt-0">Not yet submitted</h3>
+  <div>{% for u in roll.missing %}{{ u.name }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+</div>
+{% endif %}
+{% endblock %}

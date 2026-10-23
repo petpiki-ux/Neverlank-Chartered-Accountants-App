@@ -752,6 +752,7 @@ def create_app():
     from invoicing import invoicing_bp
     from quotations import quotations_bp
     from mpsign import mpsign_bp
+    from daily_updates import daily_updates_bp
     from recurring import recurring_bp
     from receipts import receipts_bp
     from advances import advances_bp
@@ -792,6 +793,7 @@ def create_app():
     app.register_blueprint(invoicing_bp)
     app.register_blueprint(quotations_bp)
     app.register_blueprint(mpsign_bp)
+    app.register_blueprint(daily_updates_bp)
     app.register_blueprint(recurring_bp)
     app.register_blueprint(receipts_bp)
     app.register_blueprint(advances_bp)
@@ -941,10 +943,15 @@ def create_app():
         zimra_approval_count = 0
         learning_pending_count = 0
         invoice_reminder_count = 0
+        daily_fire_count = 0
         if current_user.is_authenticated:
             from models import Invoice
             from invoice_send import due_reminder_count
             invoice_reminder_count = due_reminder_count()
+            if current_user.role in ("admin", "partner"):
+                from models import DailyUpdate
+                from datetime import date as _date
+                daily_fire_count = DailyUpdate.query.filter(DailyUpdate.update_date == _date.today(), DailyUpdate.fire_urgent.is_(True)).count()
             from zimra import overdue_response_count, awaiting_approval_count
             zimra_overdue_count = overdue_response_count()
             zimra_approval_count = awaiting_approval_count()
@@ -968,6 +975,7 @@ def create_app():
             "my_open_task_count": open_tasks,
             "open_check_in": open_check_in,
             "recurring_review_count": recurring_review_count,
+            "daily_fire_count": daily_fire_count,
             "zimra_overdue_count": zimra_overdue_count,
             "zimra_approval_count": zimra_approval_count,
             "learning_pending_count": learning_pending_count,

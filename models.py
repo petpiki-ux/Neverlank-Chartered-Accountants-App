@@ -11562,3 +11562,41 @@ class FirmRbzReading(db.Model):
     ask = db.Column(db.Float, nullable=False)
     mid = db.Column(db.Float, nullable=False)
     fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+class DailyUpdate(db.Model):
+    """One team member's Projects Daily Update for one day: what they are working on, roadblocks, help needed, problems solved, suggestions,
+    and any client or advisory fire. Written by the person; the facts the app already knows (open tasks, deadlines, capacity, hours) are added
+    next to it when it is shown (daily_updates.member_facts). One row per person per day."""
+    __tablename__ = "daily_update"
+    __table_args__ = (db.UniqueConstraint("user_id", "update_date", name="uq_daily_update_user_day"),)
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), nullable=False)
+    update_date = db.Column(db.Date, nullable=False)
+    working_on = db.Column(db.Text)
+    roadblocks = db.Column(db.Text)
+    assistance_needed = db.Column(db.Text)
+    problems_solved = db.Column(db.Text)
+    suggestions = db.Column(db.Text)
+    client_fires = db.Column(db.Text)
+    fire_urgent = db.Column(db.Boolean, default=False, nullable=False, server_default="0")  # needs immediate cross-team support
+    fire_client_id = db.Column(db.Integer, db.ForeignKey("client.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship("User", foreign_keys=[user_id])
+    fire_client = db.relationship("Client", foreign_keys=[fire_client_id])
+
+    TEXT_FIELDS = ("working_on", "roadblocks", "assistance_needed", "problems_solved", "suggestions", "client_fires")
+
+    @property
+    def has_roadblock(self):
+        return bool((self.roadblocks or "").strip())
+
+    @property
+    def needs_help(self):
+        return bool((self.assistance_needed or "").strip())
+
+    @property
+    def has_fire(self):
+        return bool(self.fire_urgent or (self.client_fires or "").strip())
