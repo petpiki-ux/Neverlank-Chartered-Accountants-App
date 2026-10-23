@@ -10298,6 +10298,7 @@ class Expense(db.Model):
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"))
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
     supplier_id = db.Column(db.Integer, db.ForeignKey("supplier.id"))   # the Supplier master record, when linked
+    source_key = db.Column(db.String(80))   # set when the app created the bill itself (e.g. payroll medical aid), so it is never posted twice
     notes = db.Column(db.Text)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -10423,6 +10424,7 @@ class PayrollTaxSettings(db.Model):
     # employee's own payslip - see PAYROLL_TAX_CAVEAT above and
     # payroll_calc.calculate_payslip for exactly where it's computed.
     apwcs_pct = db.Column(db.Float, default=1.25)
+    medical_aid_supplier_id = db.Column(db.Integer)   # the medical aid society (a Supplier) the payroll medical aid bills are posted to
     source_notes = db.Column(db.Text)
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -10686,6 +10688,9 @@ class PayslipItem(db.Model):
     amount = db.Column(db.Float, default=0.0)
     taxable = db.Column(db.Boolean, default=True)
     nssa_applicable = db.Column(db.Boolean, default=True)
+    # "employee" = the employee's own share, taken off their pay and owed to the medical aid society;
+    # "employer" = the employer's share, also owed to the society. Read by payroll_medical.py when posting the bill.
+    medical_aid = db.Column(db.String(10))
 
     def __repr__(self):
         return f"<PayslipItem {self.label!r} {self.category} {self.amount}>"

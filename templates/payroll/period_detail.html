@@ -90,6 +90,51 @@
 </div>
 {% endif %}
 
+{% if med %}
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px;">Medical aid due to the society</h2>
+  <p class="muted" style="font-size:12px;">From the payslip lines marked as medical aid. Posting creates unpaid bill(s) in Firm Finance &gt; Suppliers, so the amount owed appears in Trade payables and the supplier's account, and is paid from there. Mark the lines on each payslip ("Medical aid owed to the society?").</p>
+  {% if med.tot.rows %}
+  <table>
+    <thead><tr><th>Employee</th><th class="text-right">Employee's share (taken off pay)</th><th class="text-right">Employer's share</th><th class="text-right">Total</th></tr></thead>
+    <tbody>
+      {% for r in med.tot.rows %}<tr><td><a href="{{ url_for('payroll.view_payslip', payslip_id=r.payslip_id) }}">{{ r.employee }}</a></td>
+        <td class="text-right">{{ '%.2f'|format(r.employee_share) }}</td><td class="text-right">{{ '%.2f'|format(r.employer_share) }}</td><td class="text-right">{{ '%.2f'|format(r.employee_share + r.employer_share) }}</td></tr>{% endfor %}
+      <tr><td><strong>Total due to the society</strong></td><td class="text-right"><strong>{{ period.currency }} {{ '%.2f'|format(med.tot.employee_total) }}</strong></td>
+        <td class="text-right"><strong>{{ period.currency }} {{ '%.2f'|format(med.tot.employer_total) }}</strong></td><td class="text-right"><strong>{{ period.currency }} {{ '%.2f'|format(med.tot.employee_total + med.tot.employer_total) }}</strong></td></tr>
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No payslip line is marked as medical aid yet.</p>{% endif %}
+  {% if med.tot.unmarked %}
+  <div class="flash danger" style="margin-top:8px;"><strong>Not counted:</strong> {{ med.tot.unmarked|length }} line(s) mention medical aid but are not marked, so they are left out of the totals above:
+    {% for u in med.tot.unmarked %}{{ u.employee }} - {{ u.label }} ({{ u.category }} {{ '%.2f'|format(u.amount) }}){% if not loop.last %}; {% endif %}{% endfor %}.</div>
+  {% endif %}
+
+  {% if med.posted %}
+  <div class="flash info" style="margin-top:8px;">Posted to Suppliers:
+    {% for part, e in med.posted.items() %}{{ 'Employer\'s share' if part == 'employer' else 'Employees\' share' }} {{ e.currency }} {{ '%.2f'|format(e.amount) }} ({{ e.status }}){% if not loop.last %}; {% endif %}{% endfor %}
+    {% if med.supplier %} &middot; <a href="{{ url_for('suppliers.detail', supplier_id=med.supplier.id) }}">{{ med.supplier.name }}</a>{% endif %}.</div>
+  {% if med.stale %}<div class="flash danger">The payslips now say a different amount from the posted bill ({{ med.stale|join(', ') }}). Remove the bill(s) and post again.</div>{% endif %}
+  {% if med.can_post %}<form method="post" action="{{ url_for('payroll.remove_medical_aid', period_id=period.id) }}" onsubmit="return confirm('Remove the posted medical aid bill(s) from Suppliers?');"><button type="submit" class="btn small danger">Remove the posted bill(s)</button></form>{% endif %}
+  {% elif med.tot.rows %}
+    {% if not med.can_post %}<p class="muted">Posting to the firm's books needs access to Firm Finance.</p>
+    {% elif period.status != 'Finalized' %}<p class="muted">Finalize the period first, so the figures cannot change after the bill is posted.</p>
+    {% else %}
+  <form method="post" action="{{ url_for('payroll.post_medical_aid', period_id=period.id) }}" class="form-row" style="align-items:flex-end;">
+    <div><label for="med_supplier">Medical aid society (supplier)</label>
+      <select id="med_supplier" name="supplier_id" required><option value="">- choose -</option>{% for s in med.suppliers %}<option value="{{ s.id }}" {% if med.supplier and med.supplier.id == s.id %}selected{% endif %}>{{ s.code }} · {{ s.name }}</option>{% endfor %}</select>
+      <div style="font-size:12px;"><a href="{{ url_for('suppliers.new_supplier') }}">+ Add the society as a supplier</a></div></div>
+    <div><label for="med_due">Due date</label><input type="date" id="med_due" name="due_date" value="{{ (period.pay_date or period.period_end or '')|string }}"></div>
+    <div><label style="font-weight:400;"><input type="checkbox" name="part" value="employer" style="width:auto;" {% if med.tot.employer_total %}checked{% endif %}> Employer's share ({{ '%.2f'|format(med.tot.employer_total) }})</label>
+      <label style="font-weight:400;"><input type="checkbox" name="part" value="employee" style="width:auto;" {% if med.tot.employee_total %}checked{% endif %}> Employees' share ({{ '%.2f'|format(med.tot.employee_total) }})</label></div>
+    <div><button type="submit" class="btn gold">Post to Suppliers</button></div>
+  </form>
+  <p class="muted" style="font-size:11.5px;margin-bottom:0;">Both parts are posted as expenses (Dr expense / Cr Trade payables). If your salaries expense already includes the amount deducted from employees' pay (salaries recorded at gross), leave "Employees' share" unticked so it is not counted twice. That is your accountant's decision; the app does not make it for you.</p>
+    {% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
 {% if period.status != 'Finalized' and pending_employees %}
 <div class="card">
   <h2 style="margin-top:0;font-size:16px;">Generate payslips</h2>

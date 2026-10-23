@@ -85,7 +85,7 @@
     though it may still belong on the payslip; leave it "Yes" for an ordinary cash allowance.
   </p>
   <table>
-    <thead><tr><th>Category</th><th>Label</th><th class="text-right">Amount</th><th>Taxable</th><th>Counts toward NSSA</th><th></th></tr></thead>
+    <thead><tr><th>Category</th><th>Label</th><th class="text-right">Amount</th><th>Taxable</th><th>Counts toward NSSA</th><th>Medical aid</th><th></th></tr></thead>
     <tbody>
       {% for item in payslip.items %}
       <tr>
@@ -94,6 +94,7 @@
         <td class="text-right">{{ '%.2f'|format(item.amount or 0) }}</td>
         <td>{% if item.category == 'Allowance' %}{{ 'Yes' if item.taxable else 'No' }}{% else %}—{% endif %}</td>
         <td>{% if item.category in ('Allowance', 'Exempt Income') %}{{ 'Yes' if item.nssa_applicable else 'No' }}{% else %}—{% endif %}</td>
+        <td>{% if item.medical_aid == 'employee' %}<span class="badge">Employee's share</span>{% elif item.medical_aid == 'employer' %}<span class="badge">Employer's share</span>{% else %}—{% endif %}</td>
         <td class="text-right">
           {% if not locked %}
           <form method="post" action="{{ url_for('payroll.delete_payslip_item', item_id=item.id) }}" class="inline">
@@ -104,7 +105,7 @@
       </tr>
       {% endfor %}
       {% if not payslip.items %}
-      <tr><td colspan="6" class="empty-state">No allowances/deductions added - only basic salary and statutory deductions apply.</td></tr>
+      <tr><td colspan="7" class="empty-state">No allowances/deductions added - only basic salary and statutory deductions apply.</td></tr>
       {% endif %}
     </tbody>
   </table>
@@ -139,8 +140,17 @@
         <option value="">No - e.g. employer's medical aid contribution</option>
       </select>
     </div>
+    <div>
+      <label for="medical_aid">Medical aid owed to the society?</label>
+      <select id="medical_aid" name="medical_aid">
+        <option value="">No</option>
+        <option value="employee">Yes - employee's share (taken off pay)</option>
+        <option value="employer">Yes - employer's share</option>
+      </select>
+    </div>
     <div><button type="submit" class="btn secondary">+ Add</button></div>
   </form>
+  <p class="muted" style="font-size:10.5px;margin-top:4px;">Marking a line as medical aid does not change this payslip's figures. It lets the period page post the total owed to the medical aid society to Firm Finance &gt; Suppliers as a bill. Note that the app adds an Allowance to gross and net pay, so an employer's share entered as an Allowance raises net pay unless you also enter an equal Deduction (not marked as medical aid).</p>
   <p class="muted" style="font-size:10.5px;margin-top:4px;">"Taxable?" only applies to an Allowance - it's ignored for Deduction, Exempt Income and Tax Credit lines. "Counts toward NSSA?" only applies to an Allowance or Exempt Income line - it's ignored for Deduction and Tax Credit lines (which never enter NSSA Insurable Earnings regardless).</p>
   <form method="post" action="{{ url_for('payroll.recalculate_payslip', payslip_id=payslip.id) }}" style="margin-top:10px;">
     <button type="submit" class="btn gold">Recalculate from salary, items &amp; tax settings</button>

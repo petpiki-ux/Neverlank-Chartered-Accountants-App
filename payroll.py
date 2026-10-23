@@ -445,7 +445,57 @@ def view_period(period_id):
     if period.scope == "client":
         eligible_query = eligible_query.filter_by(client_id=period.client_id)
     pending_employees = [e for e in eligible_query.all() if e.id not in covered_employee_ids]
-    return render_template("payroll/period_detail.html", period=period, pending_employees=pending_employees)
+    med = None
+    if period.scope == "internal" and period.payslips:
+        import payroll_medical as pm
+        from models import Supplier
+        sup_default = pm.default_supplier()
+        med = {"tot": pm.medical_lines(period), "posted": pm.posted_bills(period), "stale": pm.out_of_date(period), "supplier": sup_default,
+               "suppliers": Supplier.query.order_by(Supplier.name).all(), "can_post": user_has_permission(current_user, "view_firm_finances")}
+    return render_template("payroll/period_detail.html", period=period, pending_employees=pending_employees, med=med)
+
+
+@payroll_bp.route("/periods/<int:period_id>/medical-aid/post", methods=["POST"])
+@login_required
+def post_medical_aid(period_id):
+    """Create the supplier bill(s) for the medical aid due to the society from this period's payslips (see payroll_medical.py)."""
+    _ensure_payroll_access()
+    period = PayrollPeriod.query.get_or_404(period_id)
+    _ensure_period_access(period)
+    if not user_has_permission(current_user, "view_firm_finances"):
+        abort(403)
+    import payroll_medical as pm
+    from models import Supplier
+    supplier = Supplier.query.get(request.form.get("supplier_id", type=int)) if request.form.get("supplier_id") else None
+    made, err = pm.post_period(period, supplier, _parse_date(request.form.get("due_date")), request.form.getlist("part"), current_user)
+    if err:
+        db.session.rollback()
+        flash(err, "danger")
+        return redirect(url_for("payroll.view_period", period_id=period.id))
+    settings = _get_tax_settings()
+    settings.medical_aid_supplier_id = supplier.id
+    db.session.commit()
+    flash("Posted to Suppliers: " + "; ".join(f"{e.currency} {e.amount:,.2f} ({e.category})" for e in made) + f", owed to {supplier.name}. Pay it from the supplier's page.", "success")
+    return redirect(url_for("payroll.view_period", period_id=period.id))
+
+
+@payroll_bp.route("/periods/<int:period_id>/medical-aid/remove", methods=["POST"])
+@login_required
+def remove_medical_aid(period_id):
+    _ensure_payroll_access()
+    period = PayrollPeriod.query.get_or_404(period_id)
+    _ensure_period_access(period)
+    if not user_has_permission(current_user, "view_firm_finances"):
+        abort(403)
+    import payroll_medical as pm
+    err = pm.remove_posted(period)
+    if err:
+        db.session.rollback()
+        flash(err, "danger")
+    else:
+        db.session.commit()
+        flash("The medical aid bill(s) were removed from Suppliers. You can post again.", "info")
+    return redirect(url_for("payroll.view_period", period_id=period.id))
 
 
 @payroll_bp.route("/periods/<int:period_id>/generate", methods=["POST"])
@@ -662,6 +712,7 @@ def add_payslip_item(payslip_id):
         amount=_parse_float(request.form.get("amount"), 0.0),
         taxable=bool(request.form.get("taxable")) if category == "Allowance" else False,
         nssa_applicable=bool(request.form.get("nssa_applicable", "1")) if category in ("Allowance", "Exempt Income") else True,
+        medical_aid=(request.form.get("medical_aid") if request.form.get("medical_aid") in ("employee", "employer") and category != "Tax Credit" else None),
     )
     db.session.add(item)
     db.session.commit()

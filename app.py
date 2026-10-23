@@ -288,7 +288,7 @@ def _add_missing_columns():
         # tax computation lines posted from that schedule so a re-post replaces only them (prohibited_deductions.py)
         "gl_account": [("tax_expense_type", "VARCHAR(60)")],
         "firm_journal": [("alloc_key", "VARCHAR(120)")],
-        "expense": [("supplier_id", "INTEGER")],
+        "expense": [("supplier_id", "INTEGER"), ("source_key", "VARCHAR(80)")],
         "supplier_payment": [("advance_id", "INTEGER")],
         "firm_fx_config": [("prefer", "VARCHAR(10)")],
         "firm_account": [("parent_id", "INTEGER")],
@@ -507,7 +507,7 @@ def _add_missing_columns():
         # existing rows, not just new ones) - so an existing install picks
         # up the firm-confirmed 1.25% rate automatically, exactly like a fresh
         # install's column default would.
-        "payroll_tax_settings": [("apwcs_pct", "FLOAT DEFAULT 1.25")],
+        "payroll_tax_settings": [("apwcs_pct", "FLOAT DEFAULT 1.25"), ("medical_aid_supplier_id", "INTEGER")],
         # nssa_applicable - see PayslipItem's docstring in models.py: lets an
         # Allowance/Exempt Income item (e.g. the EMPLOYER's own medical aid
         # contribution) be excluded from NSSA Insurable Earnings specifically,
@@ -515,7 +515,7 @@ def _add_missing_columns():
         # income. Existing items default to True (1) - unchanged NSSA
         # behaviour for every item already on a payslip - until a firm
         # explicitly unticks it for a specific line like Medical Aid.
-        "payslip_item": [("nssa_applicable", "BOOLEAN DEFAULT 1")],
+        "payslip_item": [("nssa_applicable", "BOOLEAN DEFAULT 1"), ("medical_aid", "VARCHAR(10)")],
         # leave_type_id/leave_days - see models.LeaveType/LeaveBalance: a
         # Time Sheet entry can now record leave taken (Annual/Sick/Special/
         # Maternity, etc.) instead of hours worked. Existing entries default
