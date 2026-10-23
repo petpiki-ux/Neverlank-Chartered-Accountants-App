@@ -207,7 +207,7 @@ def derive_period(period_start, period_end, zwg_rate):
         exp = analytics._expense_rows(cur)
         revenue = analytics._sum(inv, "net", period_start, period_end, "issue")
         owed_rows = analytics.outstanding_at(inv, period_end)
-        unpaid = [e for e in exp if e["date"] <= period_end and (e["paid"] is None or e["paid"] > period_end)]
+        unpaid = [dict(e, amount=analytics.exp_owed_on(e, period_end)) for e in exp if analytics.exp_owed_on(e, period_end) > 0]
         spend = [e for e in exp if period_start <= e["date"] <= period_end]
         advances = analytics.advances_held(cur, period_end)
         activity = any(abs(x) > 0.004 for x in (

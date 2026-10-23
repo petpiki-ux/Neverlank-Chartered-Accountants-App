@@ -1,0 +1,6 @@
+<div class="ff-subnav" style="margin-top:0;">
+  <a href="{{ url_for('suppliers.index') }}" class="{{ 'on' if active == 'suppliers' }}">Suppliers</a>
+  <a href="{{ url_for('suppliers.ageing') }}" class="{{ 'on' if active == 'suppliers-ageing' }}">Creditors ageing</a>
+  <a href="{{ url_for('suppliers.payments') }}" class="{{ 'on' if active == 'suppliers-payments' }}">Payments made</a>
+  <a href="{{ url_for('expenses.list_expenses') }}">Bills (expense register)</a>
+</div>

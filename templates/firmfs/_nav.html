@@ -3,6 +3,7 @@
   <a href="{{ url_for('firmfs.assets') }}" class="{{ 'on' if active == 'assets' }}">Asset register</a>
   <a href="{{ url_for('firmfs.cash_book') }}" class="{{ 'on' if active == 'cash' }}">Cash book</a>
   <a href="{{ url_for('expenses.list_expenses') }}">Expenses</a>
+  <a href="{{ url_for('suppliers.index') }}" class="{{ 'on' if active and active.startswith('suppliers') }}">Suppliers</a>
   <a href="{{ url_for('firmfs.exchange_rates') }}" class="{{ 'on' if active == 'fx' }}">Exchange rates</a>
   <a href="{{ url_for('firmfs.tax_computation', ye=ye.id if ye else None) }}" class="{{ 'on' if active and active.startswith('tax') }}">Tax</a>
   <a href="{{ url_for('firmfs.ledger_index', ye=ye.id if ye else None) }}" class="{{ 'on' if active and active.startswith('ledger') }}">Ledger</a>

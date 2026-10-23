@@ -1,0 +1,24 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>{{ s.name }} - supplier statement</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;font-size:12px;color:#222;margin:0;}
+.page{padding:26px 34px;}
+h1{font-size:17px;margin:0 0 2px;} h2{font-size:14px;margin:0 0 4px;}
+.muted{color:#666;} .hd{border-bottom:2px solid #b8934a;padding-bottom:8px;margin-bottom:14px;}
+table{border-collapse:collapse;width:100%;} td,th{padding:4px 6px;border-bottom:1px solid #eee;text-align:left;} th{background:#f4f1e8;}
+td.n,th.n{text-align:right;white-space:nowrap;} tr.tot td{font-weight:bold;border-top:2px solid #333;}
+.noprint{padding:10px 34px;background:#f4f1e8;} @media print{.noprint{display:none}.page{padding:0;}} @page{margin:16mm;}
+</style></head><body>
+<div class="noprint"><button onclick="window.print()">Print</button></div>
+<div class="page">
+  <div class="hd"><h1>{{ firm_title }}</h1><h2>Supplier account statement</h2>
+    <div class="muted">{{ s.name }} ({{ s.code }}){% if s.tin %} &middot; TIN {{ s.tin }}{% endif %} &middot; {{ currency }} &middot; {{ start.strftime('%d %b %Y') }} to {{ end.strftime('%d %b %Y') }}</div></div>
+  <table>
+    <thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th class="n">Bills</th><th class="n">Payments</th><th class="n">Balance</th></tr></thead><tbody>
+    <tr><td>{{ start.strftime('%d %b %Y') }}</td><td></td><td></td><td><em>Balance brought forward</em></td><td></td><td></td><td class="n">{{ '{:,.2f}'.format(st.opening) }}</td></tr>
+    {% for ln in st.lines %}<tr><td>{{ ln.date.strftime('%d %b %Y') }}</td><td>{{ ln.kind }}</td><td>{{ ln.ref }}</td><td>{{ ln.description }}</td>
+      <td class="n">{{ '{:,.2f}'.format(ln.bill) if ln.bill else '' }}</td><td class="n">{{ '{:,.2f}'.format(ln.payment) if ln.payment else '' }}</td><td class="n">{{ '{:,.2f}'.format(ln.balance) }}</td></tr>{% endfor %}
+    <tr class="tot"><td>{{ end.strftime('%d %b %Y') }}</td><td></td><td></td><td>Balance owed to {{ s.name }}</td><td class="n">{{ '{:,.2f}'.format(st.billed) }}</td><td class="n">{{ '{:,.2f}'.format(st.paid) }}</td><td class="n">{{ '{:,.2f}'.format(st.closing) }}</td></tr>
+  </tbody></table>
+  <p class="muted" style="margin-top:24px;">Prepared on {{ today.strftime('%d %B %Y') }} from the firm's records. Please tell us of any difference with your own statement.</p>
+</div></body></html>

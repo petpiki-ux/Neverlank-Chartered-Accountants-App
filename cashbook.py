@@ -31,7 +31,7 @@ from collections import defaultdict
 from datetime import date
 
 from models import (
-    CashAccount, CashEntry, CashAssign, CashClear, ClientAdvance, Expense, Invoice, Receipt,
+    CashAccount, CashEntry, CashAssign, CashClear, ClientAdvance, Expense, Invoice, Receipt, SupplierPayment,
     CASH_TRANSFER_CATEGORY, INVOICE_CURRENCIES, PAYMENT_METHODS,
 )
 from timeutil import to_cat
@@ -78,7 +78,22 @@ def collect_transactions():
                 "method": rf.method, "ref": rf.reference or a.advance_number,
                 "description": f"{a.client.name if a.client else 'Client'} - advance refunded", "link": None, "entry_id": None,
             })
+    # bills paid in parts (or in full through the Suppliers screens) leave one cash line per payment; a bill with no payment
+    # rows that was marked Paid the old way leaves one line for the whole amount
+    part_paid = set()
+    for sp in SupplierPayment.query.all():
+        part_paid.add(sp.expense_id)
+        exp = sp.expense
+        label = exp.supplier if exp is not None else (sp.supplier.name if sp.supplier else "Supplier")
+        out.append({
+            "key": f"supplierpay:{sp.id}", "source": "Expense", "date": sp.payment_date, "amount": -r2(sp.amount),
+            "currency": sp.currency, "method": sp.method, "ref": sp.reference or sp.batch_ref or "",
+            "description": f"{label} - {exp.category if exp is not None else 'payment'}",
+            "link": ("suppliers.detail", {"supplier_id": sp.supplier_id}), "entry_id": None,
+        })
     for e in Expense.query.filter(Expense.status == "Paid").all():
+        if e.id in part_paid:
+            continue
         out.append({
             "key": f"expense:{e.id}", "source": "Expense", "date": e.paid_date or e.expense_date, "amount": -r2(e.amount),
             "currency": e.currency, "method": None, "ref": e.reference or "",

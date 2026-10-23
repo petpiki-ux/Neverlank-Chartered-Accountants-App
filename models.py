@@ -10181,6 +10181,71 @@ class ExpenseCategory(db.Model):
     created_by = db.relationship("User")
 
 
+SUPPLIER_STATUSES = ["Active", "On hold", "Blocked"]
+SUPPLIER_STATUS_HELP = {
+    "Active": "Bills and payments allowed.",
+    "On hold": "New bills can still be captured, but payments are refused until the hold is lifted.",
+    "Blocked": "Neither new bills nor payments are allowed.",
+}
+
+
+class Supplier(db.Model):
+    """A supplier the firm buys from (Firm Finance > Suppliers). The master record behind the Expense register's
+    "Paid to" text: a bill is an Expense linked to a supplier (Expense.supplier_id), a payment is a SupplierPayment
+    allocated to a bill. Nothing here posts to the ledger by itself - bills and payments already do, through the
+    Expense register and the cash book, so the supplier ledger and Trade payables always agree."""
+    __tablename__ = "supplier"
+    id = db.Column(db.Integer, primary_key=True)
+    code = db.Column(db.String(20), nullable=False, unique=True)
+    name = db.Column(db.String(200), nullable=False)
+    trading_name = db.Column(db.String(200))
+    contact_person = db.Column(db.String(120))
+    phone = db.Column(db.String(60))
+    email = db.Column(db.String(160))
+    address = db.Column(db.Text)
+    country = db.Column(db.String(60))
+    tin = db.Column(db.String(40))
+    vat_number = db.Column(db.String(40))
+    is_vat_registered = db.Column(db.Boolean, default=False, nullable=False)
+    payment_terms_days = db.Column(db.Integer, default=30, nullable=False)
+    currency = db.Column(db.String(10), default="USD", nullable=False)          # the currency it usually bills in
+    default_category = db.Column(db.String(60))                                  # Expense category suggested on its bills
+    bank_name = db.Column(db.String(120))
+    bank_branch = db.Column(db.String(120))
+    bank_account_name = db.Column(db.String(160))
+    bank_account_number = db.Column(db.String(60))
+    status = db.Column(db.String(10), default="Active", nullable=False)
+    status_note = db.Column(db.String(300))                                      # why it is on hold / blocked
+    tax_clearance_expiry = db.Column(db.Date)                                    # expiry date of its tax clearance, if the firm tracks it
+    wht_applicable = db.Column(db.Boolean, default=False, nullable=False)        # reference only - nothing is withheld or posted
+    wht_rate = db.Column(db.Float)                                               # typed by the firm; not verified by the app
+    notes = db.Column(db.Text)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_by = db.relationship("User")
+
+
+class SupplierPayment(db.Model):
+    """Money paid to a supplier against ONE bill (Expense). A payment run over several bills is several rows sharing a
+    batch_ref. The cash book reads these (source "Expense"), so each one posts Dr Trade payables / Cr Bank."""
+    __tablename__ = "supplier_payment"
+    id = db.Column(db.Integer, primary_key=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey("supplier.id"), nullable=False)
+    expense_id = db.Column(db.Integer, db.ForeignKey("expense.id"), nullable=False)
+    payment_date = db.Column(db.Date, nullable=False, default=date.today)
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    method = db.Column(db.String(30))
+    reference = db.Column(db.String(100))
+    batch_ref = db.Column(db.String(30))
+    notes = db.Column(db.String(300))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    supplier = db.relationship("Supplier", backref=db.backref("payments", lazy=True))
+    expense = db.relationship("Expense", backref=db.backref("supplier_payments", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User")
+
+
 class Expense(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     expense_date = db.Column(db.Date, nullable=False, default=date.today)  # bill / cost date
@@ -10197,6 +10262,7 @@ class Expense(db.Model):
     # fee), so per-engagement profitability can be added later
     client_id = db.Column(db.Integer, db.ForeignKey("client.id"))
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    supplier_id = db.Column(db.Integer, db.ForeignKey("supplier.id"))   # the Supplier master record, when linked
     notes = db.Column(db.Text)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -10204,6 +10270,7 @@ class Expense(db.Model):
     client = db.relationship("Client", backref=db.backref("expenses", lazy=True))
     engagement = db.relationship("Engagement", backref=db.backref("expenses", lazy=True))
     created_by = db.relationship("User")
+    supplier_rec = db.relationship("Supplier", backref=db.backref("bills", lazy=True))
 
 
 # ---------------------------------------------------------------------------

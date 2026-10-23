@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Pay {{ s.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Pay {{ s.name }}</h1>
+  <div class="subtitle">Pay one bill, part of a bill, or several bills in one payment. Each payment reaches the cash book and the ledger (Dr Trade payables, Cr Bank).</div></div>
+  <div><a class="btn secondary" href="{{ url_for('suppliers.detail', supplier_id=s.id) }}">Back to {{ s.code }}</a></div></div>
+{% include "firmfs/_nav.html" %}
+{% if problem %}<div class="card" style="border-left:4px solid var(--danger);">{{ problem }}</div>{% endif %}
+{% if s.bank_account_number %}<div class="card muted" style="font-size:12.5px;">Bank details on file: {{ s.bank_name or '' }} {{ s.bank_account_name or '' }} {{ s.bank_account_number }}</div>{% endif %}
+<div class="card">
+  <form method="get" class="an-filters" style="margin-bottom:0;">
+    <div><label>Currency of the bills</label><select name="currency" onchange="this.form.submit()">{% for c in currencies %}<option {% if currency == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+  </form>
+</div>
+{% if open_bills %}
+<form method="post">
+<input type="hidden" name="currency" value="{{ currency }}">
+<div class="card">
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Bill date</th><th>Reference</th><th>Details</th><th>Due</th><th class="num">Owed</th><th class="num">Pay now</th></tr></thead><tbody>
+    {% for b in open_bills %}{% set e = b.e %}
+    <tr><td>{{ e.expense_date.strftime('%d %b %Y') }}</td><td>{{ e.reference or ('EXP-' ~ e.id) }}</td><td>{{ e.category }}{% if e.description %} - {{ e.description }}{% endif %}</td>
+      <td {% if b.due < today %}style="color:var(--danger);"{% endif %}>{{ b.due.strftime('%d %b %Y') }}</td>
+      <td class="num">{{ '{:,.2f}'.format(b.left) }}</td>
+      <td class="num"><input type="number" step="0.01" min="0" max="{{ b.left }}" class="payamt" data-left="{{ '%.2f'|format(b.left) }}" name="amt_{{ e.id }}" style="width:130px;text-align:right;" value="{{ form.get('amt_' ~ e.id, '') if form else ('%.2f'|format(b.left) if pre_id == e.id else '') }}">
+        <a href="#" class="payfull" style="font-size:11px;">full</a></td></tr>
+    {% endfor %}
+    <tr><td colspan="5" style="text-align:right;"><strong>Total this payment</strong></td><td class="num"><strong id="paytotal">0.00</strong></td></tr>
+    </tbody></table></div>
+</div>
+<div class="card">
+  <div class="form-row">
+    <div class="form-group"><label for="payment_date">Payment date</label><input type="date" id="payment_date" name="payment_date" required value="{{ form.get('payment_date') or today.isoformat() }}"></div>
+    <div class="form-group"><label for="method">Paid by</label><select id="method" name="method"><option value="">-</option>{% for m in methods %}<option {% if form.get('method') == m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+    <div class="form-group">{% with ca_currency=currency, ca_method_id='method', ca_dir='out', ca_current=form.get('cash_account_id') if form else none %}{% include "_cash_account_field.html" %}{% endwith %}</div>
+    <div class="form-group"><label for="reference">Reference (cheque / transfer no.)</label><input type="text" id="reference" name="reference" maxlength="100" value="{{ form.get('reference', '') }}"></div>
+  </div>
+  <div class="form-group"><label for="notes">Notes</label><input type="text" id="notes" name="notes" maxlength="300" value="{{ form.get('notes', '') }}"></div>
+  <button class="btn gold" type="submit" {% if problem %}disabled{% endif %}>Record payment</button>
+</div>
+</form>
+<script>
+(function(){
+  var inputs=[].slice.call(document.querySelectorAll('.payamt')), tot=document.getElementById('paytotal');
+  function sum(){ var t=0; inputs.forEach(function(i){ var v=parseFloat(i.value); if(v>0) t+=v; }); tot.textContent=t.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2}); }
+  inputs.forEach(function(i){ i.addEventListener('input',sum); });
+  [].slice.call(document.querySelectorAll('.payfull')).forEach(function(a){ a.addEventListener('click',function(ev){ ev.preventDefault(); var i=a.parentNode.querySelector('.payamt'); i.value=i.getAttribute('data-left'); sum(); }); });
+  sum();
+})();
+</script>
+{% else %}<div class="card"><p class="muted">Nothing is owed to {{ s.name }} in {{ currency }}.</p></div>{% endif %}
+{% endblock %}

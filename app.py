@@ -288,6 +288,7 @@ def _add_missing_columns():
         # tax computation lines posted from that schedule so a re-post replaces only them (prohibited_deductions.py)
         "gl_account": [("tax_expense_type", "VARCHAR(60)")],
         "firm_journal": [("alloc_key", "VARCHAR(120)")],
+        "expense": [("supplier_id", "INTEGER")],
         "firm_fx_config": [("prefer", "VARCHAR(10)")],
         "firm_account": [("parent_id", "INTEGER")],
         "firm_asset": [("acq_method", "VARCHAR(12)"), ("acq_account_id", "INTEGER"), ("acq_cash_account_id", "INTEGER"),
@@ -767,6 +768,7 @@ def create_app():
     from invoice_send import invoice_send_bp, public_invoice_bp
     from zimra import zimra_bp
     from finance import analytics_bp, expenses_bp
+    from supplier_views import suppliers_bp
     from regulatory_notices import regulatory_notices_bp
     from company_documents import company_documents_bp
     from payroll import payroll_bp
@@ -810,6 +812,7 @@ def create_app():
     app.register_blueprint(zimra_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(expenses_bp)
+    app.register_blueprint(suppliers_bp)
     app.register_blueprint(regulatory_notices_bp)
     app.register_blueprint(company_documents_bp)
     app.register_blueprint(payroll_bp)

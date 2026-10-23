@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Statement - {{ s.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Statement: {{ s.name }}</h1>
+  <div class="subtitle">{{ s.code }} &middot; {{ currency }} &middot; {{ start.strftime('%d %b %Y') }} to {{ end.strftime('%d %b %Y') }}</div></div>
+  <div><a class="btn secondary" href="{{ url_for('suppliers.statement', supplier_id=s.id, **{'currency': currency, 'from': start.isoformat(), 'to': end.isoformat(), 'print': 1}) }}" target="_blank">Print</a>
+    <a class="btn secondary" href="{{ url_for('suppliers.statement', supplier_id=s.id, **{'currency': currency, 'from': start.isoformat(), 'to': end.isoformat(), 'csv': 1}) }}">CSV</a>
+    <a class="btn secondary" href="{{ url_for('suppliers.detail', supplier_id=s.id) }}">Back to {{ s.code }}</a></div></div>
+{% include "firmfs/_nav.html" %}
+<div class="card">
+  <form method="get" class="an-filters" style="margin-bottom:0;">
+    <div><label>Currency</label><select name="currency">{% for c in currencies %}<option {% if currency == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div><label>From</label><input type="date" name="from" value="{{ start.isoformat() }}"></div>
+    <div><label>To</label><input type="date" name="to" value="{{ end.isoformat() }}"></div>
+    <div><label>Their statement says we owe</label><input type="number" step="0.01" name="their_balance" value="{{ '' if theirs is none else '%.2f'|format(theirs) }}" placeholder="optional" style="width:150px;"></div>
+    <div><button class="btn small" type="submit">Show</button></div>
+  </form>
+</div>
+{% if diff is not none %}
+<div class="card" style="border-left:4px solid {{ 'var(--success, #2e7d32)' if diff|abs < 0.005 else 'var(--danger)' }};">
+  {% if diff|abs < 0.005 %}<strong>Agrees.</strong> The supplier's balance of {{ currency }} {{ '{:,.2f}'.format(theirs) }} matches ours at {{ end.strftime('%d %b %Y') }}.
+  {% else %}<strong>Difference of {{ currency }} {{ '{:,.2f}'.format(diff|abs) }}.</strong> The supplier says {{ currency }} {{ '{:,.2f}'.format(theirs) }}; our records show {{ currency }} {{ '{:,.2f}'.format(st.closing) }}.
+    {% if diff > 0 %}They show more owing than we do: look for a bill they have that we have not recorded, or a payment of ours they have not credited.{% else %}We show more owing than they do: look for a payment they have credited that we have not recorded, or a bill we recorded twice.{% endif %}{% endif %}
+</div>
+{% endif %}
+<div class="card">
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Date</th><th>Type</th><th>Reference</th><th>Description</th><th class="num">Bills</th><th class="num">Payments</th><th class="num">Balance</th></tr></thead><tbody>
+    <tr><td>{{ start.strftime('%d %b %Y') }}</td><td></td><td></td><td><em>Balance brought forward</em></td><td></td><td></td><td class="num"><strong>{{ '{:,.2f}'.format(st.opening) }}</strong></td></tr>
+    {% for ln in st.lines %}<tr><td>{{ ln.date.strftime('%d %b %Y') }}</td><td>{{ ln.kind }}</td><td>{{ ln.ref }}</td><td>{{ ln.description }}</td>
+      <td class="num">{{ '{:,.2f}'.format(ln.bill) if ln.bill else '' }}</td><td class="num">{{ '{:,.2f}'.format(ln.payment) if ln.payment else '' }}</td><td class="num">{{ '{:,.2f}'.format(ln.balance) }}</td></tr>{% endfor %}
+    <tr style="border-top:2px solid #999;"><td>{{ end.strftime('%d %b %Y') }}</td><td></td><td></td><td><strong>Balance carried forward (owed to {{ s.name }})</strong></td>
+      <td class="num"><strong>{{ '{:,.2f}'.format(st.billed) }}</strong></td><td class="num"><strong>{{ '{:,.2f}'.format(st.paid) }}</strong></td><td class="num"><strong>{{ '{:,.2f}'.format(st.closing) }}</strong></td></tr>
+  </tbody></table></div>
+</div>
+{% endblock %}

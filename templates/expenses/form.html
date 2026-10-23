@@ -12,7 +12,14 @@
     <div class="form-row">
       <div class="form-group"><label for="expense_date">Bill / cost date</label>
         <input type="date" id="expense_date" name="expense_date" required value="{{ form.get('expense_date') or (expense.expense_date.isoformat() if expense else today) }}"></div>
-      <div class="form-group"><label for="supplier">Paid to (supplier)</label>
+      <div class="form-group"><label for="supplier_id">Supplier on file</label>
+        {% set sid = (form.get('supplier_id') if form and form.get('supplier_id') is not none else (expense.supplier_id|string if expense and expense.supplier_id else '')) %}
+        <select id="supplier_id" name="supplier_id">
+          <option value="">- not on file (type the name below) -</option>
+          {% for s in supplier_list %}<option value="{{ s.id }}" data-name="{{ s.name }}" data-cur="{{ s.currency }}" data-cat="{{ s.default_category or '' }}" data-terms="{{ s.payment_terms_days }}" {% if sid == s.id|string %}selected{% endif %}>{{ s.code }} &middot; {{ s.name }}{% if s.status != 'Active' %} ({{ s.status }}){% endif %}</option>{% endfor %}
+        </select>
+        <div style="font-size:12px;margin-top:4px;"><a href="{{ url_for('suppliers.new_supplier') }}">+ New supplier</a> &middot; <a href="{{ url_for('suppliers.index') }}">Suppliers</a></div></div>
+      <div class="form-group"><label for="supplier">Paid to (supplier name)</label>
         <input type="text" id="supplier" name="supplier" required maxlength="200" value="{{ val('supplier') }}" placeholder="e.g. Michael House Landlord"></div>
       <div class="form-group"><label for="category">Category</label>
         <select id="category" name="category">{% set cat = form.get('category') or (expense.category if expense else '') %}{% for c in categories %}<option {% if cat==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
@@ -45,8 +52,22 @@
         <select id="client_id" name="client_id"><option value="">-</option>{% set cid = (form.get('client_id') or (expense.client_id|string if expense and expense.client_id else '')) %}{% for c in clients %}<option value="{{ c.id }}" {% if cid==c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
     </div>
     <div class="form-group"><label for="notes">Notes</label><textarea id="notes" name="notes" rows="2">{{ val('notes') }}</textarea></div>
+    {% if expense and expense.supplier_payments %}<p class="muted" style="font-size:12px;">Payments have been recorded against this bill (see its supplier page), so its Paid / Unpaid status follows those payments.</p>{% endif %}
     <button class="btn gold" type="submit">Save expense</button>
     {% if not expense %}<button class="btn secondary" type="submit" name="add_another" value="1">Save &amp; add another</button>{% endif %}
   </form>
 </div>
+<script>
+(function(){
+  var sel=document.getElementById('supplier_id'); if(!sel) return;
+  sel.addEventListener('change',function(){
+    var o=sel.options[sel.selectedIndex]; if(!o||!o.value) return;
+    document.getElementById('supplier').value=o.getAttribute('data-name');
+    var cur=document.getElementById('currency'); if(cur&&o.getAttribute('data-cur')) cur.value=o.getAttribute('data-cur');
+    var cat=o.getAttribute('data-cat'), cs=document.getElementById('category');
+    if(cat&&cs){ for(var i=0;i<cs.options.length;i++){ if(cs.options[i].value===cat){ cs.value=cat; break; } } }
+    cur&&cur.dispatchEvent(new Event('change'));
+  });
+})();
+</script>
 {% endblock %}

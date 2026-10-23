@@ -1,0 +1,21 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Remittance advice {{ batch }}</title>
+<style>
+body{font-family:Arial,Helvetica,sans-serif;font-size:12.5px;color:#222;margin:0;}
+.page{padding:26px 34px;max-width:780px;}
+h1{font-size:18px;margin:0 0 2px;} h2{font-size:14px;margin:0 0 4px;}
+.muted{color:#666;} .hd{border-bottom:2px solid #b8934a;padding-bottom:8px;margin-bottom:14px;}
+table{border-collapse:collapse;width:100%;} td,th{padding:5px 6px;border-bottom:1px solid #eee;text-align:left;} th{background:#f4f1e8;}
+td.n,th.n{text-align:right;white-space:nowrap;} tr.tot td{font-weight:bold;border-top:2px solid #333;}
+.noprint{padding:10px 34px;background:#f4f1e8;} @media print{.noprint{display:none}.page{padding:0;}} @page{margin:16mm;}
+</style></head><body>
+<div class="noprint"><button onclick="window.print()">Print</button> <a href="{{ url_for('suppliers.detail', supplier_id=s.id) }}">Back to {{ s.name }}</a></div>
+<div class="page">
+  <div class="hd"><h1>{{ firm_title }}</h1><h2>Remittance advice</h2><div class="muted">{{ batch }} &middot; {{ on.strftime('%d %B %Y') }}</div></div>
+  <p><strong>To:</strong> {{ s.name }}{% if s.address %}<br><span style="white-space:pre-line;">{{ s.address }}</span>{% endif %}</p>
+  <p>We have paid the following to you{% if method %} by {{ method|lower }}{% endif %}{% if reference %} (reference {{ reference }}){% endif %}.</p>
+  <table><thead><tr><th>Your reference</th><th>Bill date</th><th>Details</th><th class="n">Amount paid</th></tr></thead><tbody>
+    {% for p in rows %}<tr><td>{{ p.expense.reference or ('EXP-' ~ p.expense_id) }}</td><td>{{ p.expense.expense_date.strftime('%d %b %Y') }}</td><td>{{ p.expense.description or p.expense.category }}</td><td class="n">{{ '{:,.2f}'.format(p.amount) }}</td></tr>{% endfor %}
+    <tr class="tot"><td colspan="3">Total paid ({{ currency }})</td><td class="n">{{ '{:,.2f}'.format(total) }}</td></tr>
+  </tbody></table>
+</div></body></html>

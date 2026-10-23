@@ -2,7 +2,7 @@
 register. The maths lives in analytics.py. Both are gated by the
 "view_firm_finances" permission (Partner/Admin by default) because they show
 the firm's overall income and costs."""
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from functools import wraps
 
 from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
@@ -11,7 +11,7 @@ from flask_login import login_required, current_user
 from extensions import db
 from models import visible_clients
 from models import (
-    Client, Engagement, Expense, ExpenseCategory, EXPENSE_CATEGORIES, EXPENSE_FALLBACK_CATEGORY, EXPENSE_STATUSES, INVOICE_CURRENCIES,
+    Client, Engagement, Expense, ExpenseCategory, Supplier, EXPENSE_CATEGORIES, EXPENSE_FALLBACK_CATEGORY, EXPENSE_STATUSES, INVOICE_CURRENCIES,
     user_has_permission, user_can_access_engagement,
 )
 import analytics
@@ -149,13 +149,24 @@ def _form_context(expense=None):
     return dict(
         categories=category_names(also=expense.category if expense is not None else None), statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
         clients=visible_clients(current_user), today=date.today().isoformat(),
+        supplier_list=Supplier.query.order_by(Supplier.name).all(),
     )
 
 
 def _apply_form(expense):
     """Copy the posted form onto `expense`; returns an error message or None."""
     f = request.form
+    import suppliers
     supplier = f.get("supplier", "").strip()
+    sup = None
+    try:
+        sup = Supplier.query.get(int(f.get("supplier_id"))) if f.get("supplier_id") else None
+    except ValueError:
+        sup = None
+    if sup is None and supplier:
+        sup = suppliers.find_by_name(supplier)      # typed name matches a supplier on file: link it
+    if sup is not None:
+        supplier = sup.name
     amount = _parse_float(f.get("amount"))
     when = _parse_date(f.get("expense_date"))
     if not supplier or amount is None or amount < 0 or not when:
@@ -168,6 +179,17 @@ def _apply_form(expense):
             return err
     currency = f.get("currency", "USD")
     status = f.get("status", "Paid")
+    if sup is not None and (expense.id is None or expense.supplier_id != sup.id):
+        problem = suppliers.status_problem(sup, "bill")
+        if problem:
+            return problem
+    if expense.id is not None and expense.supplier_payments:
+        paid_so_far = suppliers.paid_on(expense)
+        if amount < paid_so_far - 0.005:
+            return f"{expense.currency} {paid_so_far:,.2f} has already been paid on this bill, so it cannot be reduced below that. Delete or change the payments first."
+        if currency != expense.currency:
+            return "Payments have been recorded in " + expense.currency + ", so the currency cannot be changed."
+    expense.supplier_id = sup.id if sup is not None else None
     expense.supplier = supplier
     expense.description = f.get("description", "").strip() or None
     expense.expense_date = when
@@ -177,7 +199,11 @@ def _apply_form(expense):
     expense.currency = currency if currency in INVOICE_CURRENCIES else "USD"
     expense.status = status if status in EXPENSE_STATUSES else "Paid"
     expense.due_date = _parse_date(f.get("due_date"))
+    if sup is not None and expense.status == "Unpaid" and not expense.due_date and sup.payment_terms_days:
+        expense.due_date = when + timedelta(days=int(sup.payment_terms_days))   # the supplier's payment terms
     expense.paid_date = (_parse_date(f.get("paid_date")) or when) if expense.status == "Paid" else None
+    if expense.id is not None and expense.supplier_payments:
+        suppliers.sync_expense(expense)       # the bill's status follows its payments
     expense.reference = f.get("reference", "").strip() or None
     expense.notes = f.get("notes", "").strip() or None
     import cashbook
@@ -251,7 +277,16 @@ def new_expense():
         if request.form.get("add_another"):
             return redirect(url_for("expenses.new_expense"))
         return redirect(url_for("expenses.list_expenses"))
-    return render_template("expenses/form.html", expense=None, form={}, **_form_context())
+    preset = {}
+    try:
+        sup = Supplier.query.get(int(request.args.get("supplier_id"))) if request.args.get("supplier_id") else None
+    except ValueError:
+        sup = None
+    if sup is not None:
+        preset = {"supplier_id": str(sup.id), "supplier": sup.name, "currency": sup.currency, "status": "Unpaid"}
+        if sup.default_category:
+            preset["category"] = sup.default_category
+    return render_template("expenses/form.html", expense=None, form=preset, **_form_context())
 
 
 @expenses_bp.route("/<int:expense_id>/edit", methods=["GET", "POST"])
@@ -275,8 +310,19 @@ def edit_expense(expense_id):
 @finance_required
 def mark_paid(expense_id):
     expense = Expense.query.get_or_404(expense_id)
+    when = _parse_date(request.form.get("paid_date")) or date.today()
+    if expense.supplier_payments:
+        import suppliers
+        err = suppliers.settle_remaining(expense, when, current_user)    # part-paid: record the rest as a payment
+        if err:
+            db.session.rollback()
+            flash(err, "danger")
+            return redirect(request.referrer or url_for("expenses.list_expenses"))
+        db.session.commit()
+        flash(f"{expense.supplier} marked as paid.", "success")
+        return redirect(request.referrer or url_for("expenses.list_expenses"))
     expense.status = "Paid"
-    expense.paid_date = _parse_date(request.form.get("paid_date")) or date.today()
+    expense.paid_date = when
     db.session.commit()
     flash(f"{expense.supplier} marked as paid.", "success")
     return redirect(request.referrer or url_for("expenses.list_expenses"))
@@ -288,6 +334,8 @@ def delete_expense(expense_id):
     expense = Expense.query.get_or_404(expense_id)
     import cashbook
     cashbook.forget(f"expense:{expense.id}")
+    for p in list(expense.supplier_payments):
+        cashbook.forget(f"supplierpay:{p.id}")
     db.session.delete(expense)
     db.session.commit()
     flash("Expense deleted.", "info")

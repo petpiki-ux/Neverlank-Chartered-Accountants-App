@@ -137,17 +137,38 @@ def _invoice_rows(currency):
 
 
 def _expense_rows(currency):
+    """The firm's bills. `paid` is the date a bill was fully settled (None while anything is owed); `settle` lists every
+    settlement as (date, amount) - the payment rows of a bill paid in parts, else the single paid date."""
+    from models import SupplierPayment
+    pays = defaultdict(list)
+    for p in SupplierPayment.query.filter(SupplierPayment.currency == currency).all():
+        pays[p.expense_id].append((p.payment_date, p.amount or 0.0))
     rows = []
     for e in Expense.query.filter(Expense.currency == currency).all():
         paid = None
-        if e.status == "Paid":
-            paid = e.paid_date or e.expense_date
+        if e.id in pays:
+            settle = sorted(pays[e.id])
+            if e.status == "Paid":
+                paid = e.paid_date or settle[-1][0]
+        else:
+            settle = []
+            if e.status == "Paid":
+                paid = e.paid_date or e.expense_date
+                settle = [(paid, e.amount or 0.0)]
         rows.append({
             "id": e.id, "date": e.expense_date, "supplier": e.supplier, "category": e.category or "Other",
             "amount": e.amount or 0.0, "paid": paid, "due": e.due_date or e.expense_date,
-            "description": e.description or "",
+            "description": e.description or "", "settle": settle,
         })
     return rows
+
+
+def exp_owed_on(row, day):
+    """What the firm still owed on this bill at the end of `day` (0 before the bill's date)."""
+    if row["date"] > day:
+        return 0.0
+    left = row["amount"] - sum(a for d, a in row.get("settle", ()) if d <= day)
+    return left if left > 0.005 else 0.0
 
 
 # ------------------------------------------------------------------ measures
@@ -199,7 +220,7 @@ def dso_at(rows, day, window=DSO_WINDOW_DAYS):
 
 
 def creditor_days_at(exp_rows, day, window=DSO_WINDOW_DAYS):
-    owed = sum(e["amount"] for e in exp_rows if e["date"] <= day and (e["paid"] is None or e["paid"] > day))
+    owed = sum(exp_owed_on(e, day) for e in exp_rows)
     spend = sum(e["amount"] for e in exp_rows if day - timedelta(days=window) < e["date"] <= day)
     if spend <= 0:
         return None
@@ -301,8 +322,8 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
     collection_rate = (sum(r["gross"] - _credited_to(r, end_for_balances) - _owed_on(r, end_for_balances)
                            for r in issued_in_period) / billed_after_credits * 100) if billed_after_credits else None
 
-    unpaid_exp = [e for e in exp if e["date"] <= end_for_balances and (e["paid"] is None or e["paid"] > end_for_balances)]
-    creditors_total = sum(e["amount"] for e in unpaid_exp)
+    unpaid_exp = [e for e in exp if exp_owed_on(e, end_for_balances) > 0]
+    creditors_total = sum(exp_owed_on(e, end_for_balances) for e in exp)
     creditor_days = creditor_days_at(exp, end_for_balances)
 
     # ---- monthly series
@@ -369,7 +390,7 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
 
     unpaid_list = sorted(
         ({"id": e["id"], "supplier": e["supplier"], "category": e["category"], "date": e["date"], "due": e["due"],
-          "days_overdue": (end_for_balances - e["due"]).days, "amount": e["amount"]} for e in unpaid_exp),
+          "days_overdue": (end_for_balances - e["due"]).days, "amount": exp_owed_on(e, end_for_balances)} for e in unpaid_exp),
         key=lambda e: -e["days_overdue"])
 
     return {

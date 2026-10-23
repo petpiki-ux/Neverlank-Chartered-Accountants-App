@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit' if supplier else 'Add' }} supplier - {{ firm_name }}{% endblock %}
+{% block content %}
+{% macro val(name, default='') %}{{ form.get(name) if form and form.get(name) is not none else (supplier[name] if supplier and supplier[name] is not none else default) }}{% endmacro %}
+{% macro chk(name) %}{% if form %}{{ 'checked' if form.get(name) else '' }}{% elif supplier and supplier[name] %}checked{% endif %}{% endmacro %}
+<div class="page-header"><div><h1>{{ 'Edit ' ~ supplier.name if supplier else 'Add a supplier' }}</h1>
+  <div class="subtitle">{% if supplier %}{{ supplier.code }}{% else %}A code is given when you save.{% endif %}</div></div>
+  <div><a class="btn secondary" href="{{ url_for('suppliers.detail', supplier_id=supplier.id) if supplier else url_for('suppliers.index') }}">Cancel</a></div></div>
+{% include "firmfs/_nav.html" %}
+<form method="post">
+<div class="card">
+  <h3 style="margin-top:0;">Who they are</h3>
+  <div class="form-row">
+    <div class="form-group"><label for="name">Name</label><input type="text" id="name" name="name" required maxlength="200" value="{{ val('name') }}"></div>
+    <div class="form-group"><label for="trading_name">Trading name</label><input type="text" id="trading_name" name="trading_name" maxlength="200" value="{{ val('trading_name') }}"></div>
+    <div class="form-group"><label for="contact_person">Contact person</label><input type="text" id="contact_person" name="contact_person" maxlength="120" value="{{ val('contact_person') }}"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label for="phone">Phone</label><input type="text" id="phone" name="phone" maxlength="60" value="{{ val('phone') }}"></div>
+    <div class="form-group"><label for="email">Email</label><input type="email" id="email" name="email" maxlength="160" value="{{ val('email') }}"></div>
+    <div class="form-group"><label for="country">Country</label><input type="text" id="country" name="country" maxlength="60" value="{{ val('country') }}"></div>
+  </div>
+  <div class="form-group"><label for="address">Address</label><textarea id="address" name="address" rows="2">{{ val('address') }}</textarea></div>
+</div>
+<div class="card">
+  <h3 style="margin-top:0;">Tax and terms</h3>
+  <div class="form-row">
+    <div class="form-group"><label for="tin">TIN</label><input type="text" id="tin" name="tin" maxlength="40" value="{{ val('tin') }}"></div>
+    <div class="form-group"><label for="vat_number">VAT number</label><input type="text" id="vat_number" name="vat_number" maxlength="40" value="{{ val('vat_number') }}"></div>
+    <div class="form-group"><label for="tax_clearance_expiry">Tax clearance expires</label><input type="date" id="tax_clearance_expiry" name="tax_clearance_expiry" value="{{ val('tax_clearance_expiry') }}"></div>
+  </div>
+  <div class="form-row">
+    <div class="form-group"><label for="payment_terms_days">Payment terms (days)</label><input type="number" min="0" max="365" id="payment_terms_days" name="payment_terms_days" value="{{ val('payment_terms_days', 30) }}"></div>
+    <div class="form-group"><label for="currency">Usually bills in</label><select id="currency" name="currency">{% set cu = val('currency', 'USD')|trim %}{% for c in currencies %}<option {% if cu == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div class="form-group"><label for="default_category">Usual expense category</label><select id="default_category" name="default_category"><option value="">-</option>{% set dc = val('default_category')|trim %}{% for c in categories %}<option {% if dc == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+  </div>
+  <div style="display:flex;gap:22px;flex-wrap:wrap;align-items:center;margin-bottom:6px;">
+    <label style="font-weight:400;"><input type="checkbox" name="is_vat_registered" value="1" style="width:auto;" {{ chk('is_vat_registered') }}> Registered for VAT</label>
+    <label style="font-weight:400;"><input type="checkbox" name="wht_applicable" value="1" style="width:auto;" {{ chk('wht_applicable') }}> Treated as subject to withholding tax</label>
+    <span><label for="wht_rate" style="display:inline;font-weight:400;">Rate %</label> <input type="number" step="any" min="0" max="100" id="wht_rate" name="wht_rate" style="width:90px;" value="{{ val('wht_rate') }}"></span>
+  </div>
+  <p class="muted" style="font-size:12px;margin:0;">Withholding is recorded for reference only: the rate is the one you type and has not been verified by the app, and nothing is withheld or posted automatically. VAT on bills is not posted either - bills are entered excluding recoverable VAT, as in the Expense register.</p>
+</div>
+<div class="card">
+  <h3 style="margin-top:0;">Bank details for payments</h3>
+  <div class="form-row">
+    <div class="form-group"><label for="bank_name">Bank</label><input type="text" id="bank_name" name="bank_name" maxlength="120" value="{{ val('bank_name') }}"></div>
+    <div class="form-group"><label for="bank_branch">Branch</label><input type="text" id="bank_branch" name="bank_branch" maxlength="120" value="{{ val('bank_branch') }}"></div>
+    <div class="form-group"><label for="bank_account_name">Account name</label><input type="text" id="bank_account_name" name="bank_account_name" maxlength="160" value="{{ val('bank_account_name') }}"></div>
+    <div class="form-group"><label for="bank_account_number">Account number</label><input type="text" id="bank_account_number" name="bank_account_number" maxlength="60" value="{{ val('bank_account_number') }}"></div>
+  </div>
+  <div class="form-group"><label for="notes">Notes</label><textarea id="notes" name="notes" rows="2">{{ val('notes') }}</textarea></div>
+  <button class="btn gold" type="submit">{{ 'Save changes' if supplier else 'Add supplier' }}</button>
+</div>
+</form>
+{% endblock %}

@@ -1,0 +1,65 @@
+{% extends "base.html" %}
+{% block title %}Suppliers - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Suppliers</h1>
+  <div class="subtitle">Who the firm buys from, what it owes each supplier, and what is overdue. Bills are recorded in the Expense register and payments here, and both flow through the cash book to the ledger and the financial statements.</div></div>
+  <div><a class="btn gold" href="{{ url_for('suppliers.new_supplier') }}">+ Add supplier</a>
+    <a class="btn secondary" href="{{ url_for('expenses.new_expense') }}">+ Add a bill</a></div></div>
+{% include "firmfs/_nav.html" %}
+{% include "suppliers/_tabs.html" %}
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-label">Owed to suppliers</div>
+    {% for c, v in ov.owed.items() %}<div style="font-size:20px;font-weight:700;">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">Nothing</div>{% endfor %}</div>
+  <div class="kpi"><div class="kpi-label">Overdue</div>
+    {% for c, v in ov.overdue.items() %}<div style="font-size:20px;font-weight:700;color:var(--danger);">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">Nothing</div>{% endfor %}</div>
+  <div class="kpi"><div class="kpi-label">Falling due in 7 days</div>
+    {% for c, v in ov.due_week.items() %}<div style="font-size:20px;font-weight:700;">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">Nothing</div>{% endfor %}</div>
+  <div class="kpi"><div class="kpi-label">Tax clearances</div>
+    <div style="font-size:20px;font-weight:700;">{{ ov.clearance.expired }} expired &middot; {{ ov.clearance.soon }} soon</div></div>
+</div>
+
+{% if unlinked_bills %}
+<div class="card" style="border-left:4px solid var(--warning);">
+  <strong>{{ unlinked_bills }} bill(s) in the Expense register are not linked to a supplier</strong> ({{ unlinked_names }} different name(s) typed).
+  Create a supplier for each name and link the bills in one step - nothing changes in the ledger.
+  <form method="post" action="{{ url_for('suppliers.import_register') }}" style="display:inline;margin-left:10px;" onsubmit="return confirm('Create suppliers from the names in the Expense register and link their bills?');"><button class="btn small gold" type="submit">Create suppliers from the register</button></form>
+</div>
+{% endif %}
+
+<div class="card">
+  <form method="get" class="an-filters" style="margin-bottom:0;">
+    <div><label>Search</label><input type="text" name="q" value="{{ q }}" placeholder="Name, code, contact, TIN, VAT no."></div>
+    <div><label>Status</label><select name="status"><option value="">All</option>{% for s in statuses %}<option {% if f_status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+    <div><button class="btn small" type="submit">Filter</button> <a class="btn small secondary" href="{{ url_for('suppliers.index') }}">Clear</a></div>
+  </form>
+</div>
+
+<div class="card">
+  {% if rows %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Supplier</th><th>Terms</th><th>Status</th><th>Tax clearance</th><th class="num">Billed this year</th><th class="num">Owed</th><th class="num">Overdue</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}{% set s = r.s %}
+      <tr>
+        <td><a href="{{ url_for('suppliers.detail', supplier_id=s.id) }}"><strong>{{ s.name }}</strong></a>
+          <div class="muted" style="font-size:11.5px;">{{ s.code }}{% if s.contact_person %} &middot; {{ s.contact_person }}{% endif %}{% if s.phone %} &middot; {{ s.phone }}{% endif %}</div></td>
+        <td>{{ s.payment_terms_days }} days</td>
+        <td><span class="badge {{ 'overdue' if s.status == 'Blocked' else ('status-Sent' if s.status == 'On hold' else 'status-Paid') }}">{{ s.status }}</span></td>
+        <td>{% if r.clearance == 'none' %}<span class="muted">-</span>
+            {% elif r.clearance == 'expired' %}<span class="badge overdue">Expired {{ s.tax_clearance_expiry.strftime('%d %b %Y') }}</span>
+            {% elif r.clearance == 'soon' %}<span class="badge status-Sent">Expires in {{ r.clearance_days }} day(s)</span>
+            {% else %}{{ s.tax_clearance_expiry.strftime('%d %b %Y') }}{% endif %}</td>
+        <td class="num">{% for c, v in r.spend.items() %}<div>{{ money(v, c, 2) }}</div>{% else %}-{% endfor %}</td>
+        <td class="num">{% for c, v in r.owed.items() %}<div>{{ money(v, c, 2) }}</div>{% else %}-{% endfor %}</td>
+        <td class="num">{% for c, v in r.overdue.items() %}<div style="color:var(--danger);">{{ money(v, c, 2) }}</div>{% else %}-{% endfor %}</td>
+        <td style="white-space:nowrap;"><a class="btn small" href="{{ url_for('suppliers.pay', supplier_id=s.id) }}">Pay</a>
+          <a class="btn small secondary" href="{{ url_for('suppliers.statement', supplier_id=s.id) }}">Statement</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% elif total %}<p class="muted">No supplier matches.</p>
+  {% else %}<p class="muted">No suppliers yet. <a href="{{ url_for('suppliers.new_supplier') }}">Add the first one</a>{% if unlinked_bills %}, or create them from the names already in the Expense register using the button above{% endif %}.</p>{% endif %}
+</div>
+{% endblock %}

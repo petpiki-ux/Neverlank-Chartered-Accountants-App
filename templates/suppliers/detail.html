@@ -1,0 +1,73 @@
+{% extends "base.html" %}
+{% block title %}{{ s.name }} - Suppliers - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>{{ s.name }}</h1>
+  <div class="subtitle">{{ s.code }}{% if s.trading_name %} &middot; trading as {{ s.trading_name }}{% endif %} &middot; <span class="badge {{ 'overdue' if s.status == 'Blocked' else ('status-Sent' if s.status == 'On hold' else 'status-Paid') }}">{{ s.status }}</span>{% if s.status_note %} <span class="muted">{{ s.status_note }}</span>{% endif %}</div></div>
+  <div>
+    {% if can_bill %}<a class="btn secondary" href="{{ url_for('expenses.new_expense', supplier_id=s.id) }}">+ Add a bill</a>{% endif %}
+    {% if can_pay %}<a class="btn gold" href="{{ url_for('suppliers.pay', supplier_id=s.id) }}">Pay supplier</a>{% endif %}
+    <a class="btn secondary" href="{{ url_for('suppliers.statement', supplier_id=s.id) }}">Statement</a>
+    <a class="btn secondary" href="{{ url_for('suppliers.edit_supplier', supplier_id=s.id) }}">Edit</a>
+  </div></div>
+{% include "firmfs/_nav.html" %}
+{% include "suppliers/_tabs.html" %}
+
+{% if clearance == 'expired' %}<div class="card" style="border-left:4px solid var(--danger);">Tax clearance <strong>expired on {{ s.tax_clearance_expiry.strftime('%d %b %Y') }}</strong>. Ask for a current one before paying.</div>
+{% elif clearance == 'soon' %}<div class="card" style="border-left:4px solid var(--warning);">Tax clearance expires in <strong>{{ clearance_days }} day(s)</strong> ({{ s.tax_clearance_expiry.strftime('%d %b %Y') }}).</div>{% endif %}
+{% if not can_pay and s.status != 'Blocked' %}<div class="card" style="border-left:4px solid var(--warning);">This supplier is on hold, so payments are refused until it is made Active again.</div>{% endif %}
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-label">Owed now</div>{% for c, v in owed.items() %}<div style="font-size:20px;font-weight:700;">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">Nothing</div>{% endfor %}</div>
+  <div class="kpi"><div class="kpi-label">Billed this year</div>{% for c, v in spend.items() %}<div style="font-size:20px;font-weight:700;">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">-</div>{% endfor %}</div>
+  <div class="kpi"><div class="kpi-label">Payment terms</div><div style="font-size:20px;font-weight:700;">{{ s.payment_terms_days }} days</div></div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Bills</h3>
+  {% if bills %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Date</th><th>Reference</th><th>Details</th><th>Due</th><th>Status</th><th class="num">Amount</th><th class="num">Paid</th><th class="num">Owed</th><th></th></tr></thead><tbody>
+    {% for b in bills %}{% set e = b.e %}
+    <tr><td>{{ e.expense_date.strftime('%d %b %Y') }}</td><td>{{ e.reference or ('EXP-' ~ e.id) }}</td><td>{{ e.category }}{% if e.description %} - {{ e.description }}{% endif %}</td>
+      <td>{{ b.due.strftime('%d %b %Y') }}</td>
+      <td><span class="badge {{ 'status-Paid' if b.state == 'Paid' else ('overdue' if b.state == 'Overdue' else 'status-Sent') }}">{{ b.state }}</span></td>
+      <td class="num">{{ e.currency }} {{ '{:,.2f}'.format(e.amount) }}</td><td class="num">{{ '{:,.2f}'.format(b.paid) if b.paid else '-' }}</td><td class="num">{{ '{:,.2f}'.format(b.left) if b.left else '-' }}</td>
+      <td style="white-space:nowrap;">{% if b.left and can_pay %}<a class="btn small" href="{{ url_for('suppliers.pay', supplier_id=s.id, bill=e.id) }}">Pay</a> {% endif %}<a class="btn small secondary" href="{{ url_for('expenses.edit_expense', expense_id=e.id) }}">Edit</a></td></tr>
+    {% endfor %}</tbody></table></div>
+  {% else %}<p class="muted">No bills yet.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Payments made</h3>
+  {% if pays %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Date</th><th>Batch</th><th>Method</th><th>Reference</th><th>Bill</th><th class="num">Amount</th><th></th></tr></thead><tbody>
+    {% for p in pays %}<tr><td>{{ p.payment_date.strftime('%d %b %Y') }}</td><td><a href="{{ url_for('suppliers.remittance', batch=p.batch_ref) }}">{{ p.batch_ref }}</a></td><td>{{ p.method or '-' }}</td><td>{{ p.reference or '-' }}</td>
+      <td>{{ p.expense.reference or ('EXP-' ~ p.expense_id) }}</td><td class="num">{{ p.currency }} {{ '{:,.2f}'.format(p.amount) }}</td>
+      <td><form method="post" action="{{ url_for('suppliers.delete_payment', payment_id=p.id) }}" style="display:inline;" onsubmit="return confirm('Delete this payment? The bill will show the amount as owed again.');"><button class="btn small danger" type="submit">Delete</button></form></td></tr>{% endfor %}
+    </tbody></table></div>
+  {% else %}<p class="muted">No payments recorded here yet. Bills marked Paid in the Expense register before this page existed are counted as settled on their paid date.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Details</h3>
+  <div class="form-row" style="gap:28px;align-items:flex-start;">
+    <div><div class="muted" style="font-size:12px;">Contact</div>{{ s.contact_person or '-' }}<br>{{ s.phone or '' }}<br>{{ s.email or '' }}<br><span style="white-space:pre-line;">{{ s.address or '' }}</span>{% if s.country %}<br>{{ s.country }}{% endif %}</div>
+    <div><div class="muted" style="font-size:12px;">Tax</div>TIN: {{ s.tin or '-' }}<br>VAT no.: {{ s.vat_number or '-' }}{% if s.is_vat_registered %} (registered){% endif %}<br>Clearance expires: {{ s.tax_clearance_expiry.strftime('%d %b %Y') if s.tax_clearance_expiry else '-' }}<br>
+      Withholding: {% if s.wht_applicable %}treated as applicable{% if s.wht_rate is not none %} at {{ s.wht_rate }}% (your rate, not verified){% endif %}{% else %}not applicable{% endif %}</div>
+    <div><div class="muted" style="font-size:12px;">Bank</div>{{ s.bank_name or '-' }}{% if s.bank_branch %}, {{ s.bank_branch }}{% endif %}<br>{{ s.bank_account_name or '' }}<br>{{ s.bank_account_number or '' }}</div>
+  </div>
+  {% if s.notes %}<p class="muted" style="margin-bottom:0;white-space:pre-line;">{{ s.notes }}</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Status</h3>
+  <form method="post" action="{{ url_for('suppliers.set_status', supplier_id=s.id) }}" class="form-row" style="align-items:flex-end;">
+    <div><label for="status">Status</label><select id="status" name="status">{% for st in statuses %}<option {% if s.status == st %}selected{% endif %}>{{ st }}</option>{% endfor %}</select></div>
+    <div style="flex:1;min-width:240px;"><label for="status_note">Reason (for hold or block)</label><input type="text" id="status_note" name="status_note" maxlength="300" value="{{ s.status_note or '' }}"></div>
+    <div><button class="btn" type="submit">Update</button></div>
+  </form>
+  <p class="muted" style="font-size:12px;">{% for k, v in status_help.items() %}<strong>{{ k }}</strong>: {{ v }} {% endfor %}</p>
+  {% if not bills and not pays %}<form method="post" action="{{ url_for('suppliers.delete_supplier', supplier_id=s.id) }}" onsubmit="return confirm('Delete this supplier?');"><button class="btn small danger" type="submit">Delete supplier</button></form>{% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Creditors ageing - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Creditors ageing</h1>
+  <div class="subtitle">What is owed to suppliers at {{ as_of.strftime('%d %B %Y') }}, aged by due date (the bill's due date, else bill date plus the supplier's payment terms). {{ currency }} only - USD and ZWG are never added together.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('suppliers.ageing', currency=currency, as_of=as_of.isoformat(), csv=1) }}">Download CSV</a></div></div>
+{% include "firmfs/_nav.html" %}
+{% include "suppliers/_tabs.html" %}
+<div class="card">
+  <form method="get" class="an-filters" style="margin-bottom:0;">
+    <div><label>Currency</label><select name="currency">{% for c in currencies %}<option {% if currency == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div><label>As at</label><input type="date" name="as_of" value="{{ as_of.isoformat() }}"></div>
+    <div><button class="btn small" type="submit">Show</button></div>
+  </form>
+</div>
+<div class="card">
+  {% if data.rows %}<div class="tbl-scroll"><table>
+    <thead><tr><th>Supplier</th>{% for l in data.labels %}<th class="num">{{ l }}</th>{% endfor %}<th class="num">Total</th></tr></thead><tbody>
+    {% for g in data.rows %}<tr>
+      <td>{% if g.supplier %}<a href="{{ url_for('suppliers.detail', supplier_id=g.supplier.id) }}">{{ g.name }}</a>{% else %}{{ g.name }} <span class="badge status-Sent" title="Typed in the Expense register, not on the supplier list">not on file</span>{% endif %}</td>
+      {% for x in g.buckets %}<td class="num" {% if loop.index0 >= 3 and x %}style="color:var(--danger);"{% endif %}>{{ '{:,.2f}'.format(x) if x else '-' }}</td>{% endfor %}
+      <td class="num"><strong>{{ '{:,.2f}'.format(g.total) }}</strong></td></tr>{% endfor %}
+    <tr style="border-top:2px solid #999;"><td><strong>Total</strong></td>{% for x in data.totals %}<td class="num"><strong>{{ '{:,.2f}'.format(x) }}</strong></td>{% endfor %}<td class="num"><strong>{{ '{:,.2f}'.format(data.grand) }}</strong></td></tr>
+  </tbody></table></div>
+  <p class="muted" style="font-size:12px;">This total is the Trade payables owed on recorded supplier bills. Journals you post straight to the Trade payables account are not supplier bills, so they are not in this list.</p>
+  {% else %}<p class="muted">Nothing is owed to suppliers in {{ currency }} at that date.</p>{% endif %}
+</div>
+{% endblock %}
