@@ -9,7 +9,7 @@ import suppliers as sp
 from extensions import db
 from finance import _parse_date, _parse_float, category_names, finance_required, fmt_money
 from models import (
-    Expense, Supplier, SupplierPayment, INVOICE_CURRENCIES, PAYMENT_METHODS, SUPPLIER_STATUSES, SUPPLIER_STATUS_HELP,
+    Expense, Supplier, SupplierAdvance, SupplierAdvanceRefund, SupplierPayment, INVOICE_CURRENCIES, PAYMENT_METHODS, SUPPLIER_STATUSES, SUPPLIER_STATUS_HELP,
 )
 
 suppliers_bp = Blueprint("suppliers", __name__, url_prefix="/firm-finance/suppliers")
@@ -57,7 +57,7 @@ def index():
         if q and q not in hay:
             continue
         clr, left_days = sp.clearance_state(s, today)
-        rows.append({"s": s, "owed": {c: sp.r2(v) for c, v in owed.get(s.id, {}).items()},
+        rows.append({"s": s, "advance": sp.unapplied_by_currency(s), "owed": {c: sp.r2(v) for c, v in owed.get(s.id, {}).items()},
                      "overdue": {c: sp.r2(v) for c, v in overdue.get(s.id, {}).items()},
                      "spend": sp.year_spend(s, today), "clearance": clr, "clearance_days": left_days})
     unlinked = (db.session.query(Expense.supplier, db.func.count(Expense.id))
@@ -189,10 +189,12 @@ def detail(supplier_id):
     view = []
     for e in bills:
         view.append({"e": e, "paid": sp.paid_on(e), "left": sp.outstanding(e), "due": sp.due_date(e), "state": sp.bill_state(e, today)})
-    pays = sorted(s.payments, key=lambda p: (p.payment_date, p.id), reverse=True)
+    pays = sorted([p for p in s.payments if not p.advance_id], key=lambda p: (p.payment_date, p.id), reverse=True)
+    advances = sorted(s.advances, key=lambda a: (a.advance_date, a.id), reverse=True)
     clr, left_days = sp.clearance_state(s, today)
     return render_template("suppliers/detail.html", **_ctx(
-        s=s, bills=view, pays=pays, owed=sp.balances_by_currency(s), spend=sp.year_spend(s, today), clearance=clr, clearance_days=left_days,
+        s=s, bills=view, pays=pays, advances=[{"a": a, "left": sp.advance_unapplied(a)} for a in advances], held=sp.unapplied_by_currency(s),
+        net=sp.net_by_currency(s), owed=sp.balances_by_currency(s), spend=sp.year_spend(s, today), clearance=clr, clearance_days=left_days,
         statuses=SUPPLIER_STATUSES, status_help=SUPPLIER_STATUS_HELP, can_pay=sp.can_be_paid(s), can_bill=sp.can_receive_bills(s)))
 
 
@@ -232,6 +234,7 @@ def pay(supplier_id):
             return redirect(url_for("suppliers.remittance", batch=batch))
     problem = sp.status_problem(s, "pay")
     return render_template("suppliers/pay.html", **_ctx(
+        advance_available=sp.unapplied_total(s, None, currency),
         s=s, currency=currency, currencies=INVOICE_CURRENCIES, open_bills=[{"e": e, "left": sp.outstanding(e), "due": sp.due_date(e)} for e in open_bills],
         methods=PAYMENT_METHODS, pre_id=pre.id if pre is not None and pre.supplier_id == s.id else None, problem=problem,
         form=request.form if request.method == "POST" else {}))
@@ -240,7 +243,7 @@ def pay(supplier_id):
 @suppliers_bp.route("/payments")
 @finance_required
 def payments():
-    q = SupplierPayment.query
+    q = SupplierPayment.query.filter(SupplierPayment.advance_id.is_(None))
     sid = request.args.get("supplier", type=int)
     if sid:
         q = q.filter(SupplierPayment.supplier_id == sid)
@@ -289,7 +292,7 @@ def statement(supplier_id):
     s = Supplier.query.get_or_404(supplier_id)
     today = date.today()
     owed = sp.balances_by_currency(s)
-    billed_in = {e.currency for e in s.bills}
+    billed_in = {e.currency for e in s.bills} | {a.currency for a in s.advances}
     default_cur = s.currency if s.currency in billed_in or not billed_in else sorted(billed_in)[0]
     currency = _currency_arg(default_cur)
     end = _parse_date(request.args.get("to")) or today
@@ -319,3 +322,128 @@ def ageing():
         return Response(sp.ageing_csv(as_of, currency, data), mimetype="text/csv",
                         headers={"Content-Disposition": f"attachment; filename=creditors-ageing-{as_of.isoformat()}-{currency}.csv"})
     return render_template("suppliers/ageing.html", **_ctx(data=data, currency=currency, currencies=INVOICE_CURRENCIES, as_of=as_of))
+
+
+# ------------------------------------------------------------------ advances paid to suppliers
+
+@suppliers_bp.route("/<int:supplier_id>/advance/new", methods=["GET", "POST"])
+@finance_required
+def new_advance(supplier_id):
+    s = Supplier.query.get_or_404(supplier_id)
+    problem = sp.status_problem(s, "pay")
+    if request.method == "POST":
+        adv, err = sp.record_advance(
+            s, _parse_float(request.form.get("amount"), 0.0), request.form.get("currency"), _parse_date(request.form.get("advance_date")),
+            request.form.get("method"), request.form.get("reference"), request.form.get("purpose"), current_user, request.form.get("cash_account_id"))
+        if err:
+            db.session.rollback()
+            flash(err, "danger")
+        else:
+            db.session.commit()
+            flash(f"Advance of {adv.currency} {adv.amount:,.2f} to {s.name} recorded. It stays an asset until it is applied to a bill or refunded.", "success")
+            return redirect(url_for("suppliers.advance", advance_id=adv.id))
+    return render_template("suppliers/advance_form.html", **_ctx(
+        s=s, form=request.form if request.method == "POST" else {}, currencies=INVOICE_CURRENCIES, methods=PAYMENT_METHODS, problem=problem))
+
+
+@suppliers_bp.route("/advances")
+@finance_required
+def advances():
+    rows = []
+    totals = {}
+    for a in SupplierAdvance.query.order_by(SupplierAdvance.advance_date.desc(), SupplierAdvance.id.desc()).all():
+        left = sp.advance_unapplied(a)
+        rows.append({"a": a, "left": left})
+        if left:
+            totals[a.currency] = totals.get(a.currency, 0.0) + left
+    return render_template("suppliers/advances.html", **_ctx(rows=rows, totals=totals, active="suppliers-advances"))
+
+
+@suppliers_bp.route("/advances/<int:advance_id>")
+@finance_required
+def advance(advance_id):
+    a = SupplierAdvance.query.get_or_404(advance_id)
+    s = a.supplier
+    open_bills = [{"e": e, "left": sp.outstanding(e), "due": sp.due_date(e)}
+                  for e in sorted(s.bills, key=lambda e: (sp.due_date(e), e.expense_date, e.id)) if e.currency == a.currency and sp.outstanding(e) > 0]
+    apps = sorted(a.applications, key=lambda p: (p.payment_date, p.id))
+    return render_template("suppliers/advance.html", **_ctx(
+        a=a, s=s, left=sp.advance_unapplied(a), apps=apps, refunds=sorted(a.refunds, key=lambda r: (r.refunded_on, r.id)), open_bills=open_bills,
+        methods=PAYMENT_METHODS, form={}))
+
+
+@suppliers_bp.route("/advances/<int:advance_id>/apply", methods=["POST"])
+@finance_required
+def apply_advance(advance_id):
+    a = SupplierAdvance.query.get_or_404(advance_id)
+    allocations = []
+    for e in a.supplier.bills:
+        amt = _parse_float(request.form.get(f"amt_{e.id}"))
+        if amt is not None and amt > 0:
+            allocations.append((e, amt))
+    _b, made, err = sp.apply_advance(a, allocations, _parse_date(request.form.get("applied_on")), current_user)
+    if err:
+        db.session.rollback()
+        flash(err, "danger")
+    else:
+        db.session.commit()
+        flash(f"{a.currency} {sum(p.amount for p in made):,.2f} of the advance applied to {len(made)} bill(s).", "success")
+    return redirect(url_for("suppliers.advance", advance_id=a.id))
+
+
+@suppliers_bp.route("/<int:supplier_id>/advances/auto-apply", methods=["POST"])
+@finance_required
+def auto_apply(supplier_id):
+    s = Supplier.query.get_or_404(supplier_id)
+    currency = request.form.get("currency") if request.form.get("currency") in INVOICE_CURRENCIES else "USD"
+    done, err = sp.auto_apply(s, currency, _parse_date(request.form.get("applied_on")) or date.today(), current_user)
+    if err:
+        db.session.rollback()
+        flash(err, "danger")
+    elif done <= 0:
+        flash("Nothing to apply: no unused advance, or no open bill dated on or after the advance.", "info")
+    else:
+        db.session.commit()
+        flash(f"{currency} {done:,.2f} of advances applied to the oldest open bills.", "success")
+    return redirect(url_for("suppliers.detail", supplier_id=s.id))
+
+
+@suppliers_bp.route("/advances/<int:advance_id>/refund", methods=["POST"])
+@finance_required
+def refund_advance(advance_id):
+    a = SupplierAdvance.query.get_or_404(advance_id)
+    rf, err = sp.record_refund(a, _parse_float(request.form.get("amount"), 0.0), _parse_date(request.form.get("refunded_on")),
+                               request.form.get("method"), request.form.get("reference"), current_user, request.form.get("cash_account_id"))
+    if err:
+        db.session.rollback()
+        flash(err, "danger")
+    else:
+        db.session.commit()
+        flash(f"Refund of {a.currency} {rf.amount:,.2f} from {a.supplier.name} recorded.", "success")
+    return redirect(url_for("suppliers.advance", advance_id=a.id))
+
+
+@suppliers_bp.route("/advances/refunds/<int:refund_id>/delete", methods=["POST"])
+@finance_required
+def delete_refund(refund_id):
+    rf = SupplierAdvanceRefund.query.get_or_404(refund_id)
+    aid = rf.advance_id
+    sp.delete_refund(rf)
+    db.session.commit()
+    flash("Refund deleted.", "info")
+    return redirect(url_for("suppliers.advance", advance_id=aid))
+
+
+@suppliers_bp.route("/advances/<int:advance_id>/delete", methods=["POST"])
+@finance_required
+def delete_advance(advance_id):
+    a = SupplierAdvance.query.get_or_404(advance_id)
+    sid = a.supplier_id
+    err = sp.delete_advance(a)
+    if err:
+        db.session.rollback()
+        flash(err, "danger")
+        return redirect(url_for("suppliers.advance", advance_id=advance_id))
+    db.session.commit()
+    flash("Advance deleted.", "info")
+    return redirect(url_for("suppliers.detail", supplier_id=sid))

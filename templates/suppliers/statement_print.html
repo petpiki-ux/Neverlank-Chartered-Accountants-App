@@ -18,7 +18,7 @@ td.n,th.n{text-align:right;white-space:nowrap;} tr.tot td{font-weight:bold;borde
     <tr><td>{{ start.strftime('%d %b %Y') }}</td><td></td><td></td><td><em>Balance brought forward</em></td><td></td><td></td><td class="n">{{ '{:,.2f}'.format(st.opening) }}</td></tr>
     {% for ln in st.lines %}<tr><td>{{ ln.date.strftime('%d %b %Y') }}</td><td>{{ ln.kind }}</td><td>{{ ln.ref }}</td><td>{{ ln.description }}</td>
       <td class="n">{{ '{:,.2f}'.format(ln.bill) if ln.bill else '' }}</td><td class="n">{{ '{:,.2f}'.format(ln.payment) if ln.payment else '' }}</td><td class="n">{{ '{:,.2f}'.format(ln.balance) }}</td></tr>{% endfor %}
-    <tr class="tot"><td>{{ end.strftime('%d %b %Y') }}</td><td></td><td></td><td>Balance owed to {{ s.name }}</td><td class="n">{{ '{:,.2f}'.format(st.billed) }}</td><td class="n">{{ '{:,.2f}'.format(st.paid) }}</td><td class="n">{{ '{:,.2f}'.format(st.closing) }}</td></tr>
+    <tr class="tot"><td>{{ end.strftime('%d %b %Y') }}</td><td></td><td></td><td>{{ 'Balance owed to ' ~ s.name if st.closing >= 0 else 'Credit balance: advance held by ' ~ s.name }}</td><td class="n">{{ '{:,.2f}'.format(st.billed) }}</td><td class="n">{{ '{:,.2f}'.format(st.paid) }}</td><td class="n">{{ '{:,.2f}'.format(st.closing) }}</td></tr>
   </tbody></table>
   <p class="muted" style="margin-top:24px;">Prepared on {{ today.strftime('%d %B %Y') }} from the firm's records. Please tell us of any difference with your own statement.</p>
 </div></body></html>

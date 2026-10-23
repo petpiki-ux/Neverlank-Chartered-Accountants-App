@@ -289,6 +289,7 @@ def _add_missing_columns():
         "gl_account": [("tax_expense_type", "VARCHAR(60)")],
         "firm_journal": [("alloc_key", "VARCHAR(120)")],
         "expense": [("supplier_id", "INTEGER")],
+        "supplier_payment": [("advance_id", "INTEGER")],
         "firm_fx_config": [("prefer", "VARCHAR(10)")],
         "firm_account": [("parent_id", "INTEGER")],
         "firm_asset": [("acq_method", "VARCHAR(12)"), ("acq_account_id", "INTEGER"), ("acq_cash_account_id", "INTEGER"),

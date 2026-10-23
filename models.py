@@ -10225,6 +10225,39 @@ class Supplier(db.Model):
     created_by = db.relationship("User")
 
 
+class SupplierAdvance(db.Model):
+    """Money paid to a supplier BEFORE its bill (a prepayment / deposit). It is an asset - Dr Advances to suppliers /
+    Cr Bank, through the cash book - until it is applied to the supplier's bills (a SupplierPayment with advance_id set,
+    which settles the bill without any cash: Dr Trade payables / Cr Advances to suppliers) or refunded by the supplier."""
+    __tablename__ = "supplier_advance"
+    id = db.Column(db.Integer, primary_key=True)
+    supplier_id = db.Column(db.Integer, db.ForeignKey("supplier.id"), nullable=False)
+    advance_date = db.Column(db.Date, nullable=False, default=date.today)
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    currency = db.Column(db.String(10), nullable=False, default="USD")
+    method = db.Column(db.String(30))
+    reference = db.Column(db.String(100))
+    purpose = db.Column(db.String(300))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    supplier = db.relationship("Supplier", backref=db.backref("advances", lazy=True))
+    created_by = db.relationship("User")
+
+
+class SupplierAdvanceRefund(db.Model):
+    """Money a supplier paid back out of an advance (cash in: Dr Bank / Cr Advances to suppliers)."""
+    __tablename__ = "supplier_advance_refund"
+    id = db.Column(db.Integer, primary_key=True)
+    advance_id = db.Column(db.Integer, db.ForeignKey("supplier_advance.id"), nullable=False)
+    refunded_on = db.Column(db.Date, nullable=False, default=date.today)
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    method = db.Column(db.String(30))
+    reference = db.Column(db.String(100))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    advance = db.relationship("SupplierAdvance", backref=db.backref("refunds", lazy=True, cascade="all, delete-orphan"))
+
+
 class SupplierPayment(db.Model):
     """Money paid to a supplier against ONE bill (Expense). A payment run over several bills is several rows sharing a
     batch_ref. The cash book reads these (source "Expense"), so each one posts Dr Trade payables / Cr Bank."""
@@ -10239,8 +10272,10 @@ class SupplierPayment(db.Model):
     reference = db.Column(db.String(100))
     batch_ref = db.Column(db.String(30))
     notes = db.Column(db.String(300))
+    advance_id = db.Column(db.Integer, db.ForeignKey("supplier_advance.id"))   # set when the bill was settled from an advance, not with cash
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    advance = db.relationship("SupplierAdvance", backref=db.backref("applications", lazy=True))
     supplier = db.relationship("Supplier", backref=db.backref("payments", lazy=True))
     expense = db.relationship("Expense", backref=db.backref("supplier_payments", lazy=True, cascade="all, delete-orphan"))
     created_by = db.relationship("User")

@@ -15,6 +15,8 @@
     {% for c, v in ov.overdue.items() %}<div style="font-size:20px;font-weight:700;color:var(--danger);">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">Nothing</div>{% endfor %}</div>
   <div class="kpi"><div class="kpi-label">Falling due in 7 days</div>
     {% for c, v in ov.due_week.items() %}<div style="font-size:20px;font-weight:700;">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">Nothing</div>{% endfor %}</div>
+  <div class="kpi"><div class="kpi-label">Paid in advance, not yet used</div>
+    {% for c, v in ov.advances.items() %}<div style="font-size:20px;font-weight:700;">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">Nothing</div>{% endfor %}</div>
   <div class="kpi"><div class="kpi-label">Tax clearances</div>
     <div style="font-size:20px;font-weight:700;">{{ ov.clearance.expired }} expired &middot; {{ ov.clearance.soon }} soon</div></div>
 </div>
@@ -38,7 +40,7 @@
 <div class="card">
   {% if rows %}
   <div class="tbl-scroll"><table>
-    <thead><tr><th>Supplier</th><th>Terms</th><th>Status</th><th>Tax clearance</th><th class="num">Billed this year</th><th class="num">Owed</th><th class="num">Overdue</th><th></th></tr></thead>
+    <thead><tr><th>Supplier</th><th>Terms</th><th>Status</th><th>Tax clearance</th><th class="num">Billed this year</th><th class="num">Owed</th><th class="num">Overdue</th><th class="num">Advance held</th><th></th></tr></thead>
     <tbody>
     {% for r in rows %}{% set s = r.s %}
       <tr>
@@ -53,6 +55,7 @@
         <td class="num">{% for c, v in r.spend.items() %}<div>{{ money(v, c, 2) }}</div>{% else %}-{% endfor %}</td>
         <td class="num">{% for c, v in r.owed.items() %}<div>{{ money(v, c, 2) }}</div>{% else %}-{% endfor %}</td>
         <td class="num">{% for c, v in r.overdue.items() %}<div style="color:var(--danger);">{{ money(v, c, 2) }}</div>{% else %}-{% endfor %}</td>
+        <td class="num">{% for c, v in r.advance.items() %}<div>{{ money(v, c, 2) }}</div>{% else %}-{% endfor %}</td>
         <td style="white-space:nowrap;"><a class="btn small" href="{{ url_for('suppliers.pay', supplier_id=s.id) }}">Pay</a>
           <a class="btn small secondary" href="{{ url_for('suppliers.statement', supplier_id=s.id) }}">Statement</a></td>
       </tr>

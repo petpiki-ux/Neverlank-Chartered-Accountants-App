@@ -273,6 +273,19 @@ def advances_held(currency, as_at):
     return round(total, 2)
 
 
+def supplier_advances_held(currency, as_at):
+    """Money paid to suppliers in advance and neither applied to their bills nor refunded by the end of `as_at`."""
+    from models import SupplierAdvance
+    total = 0.0
+    for a in SupplierAdvance.query.filter_by(currency=currency).all():
+        if a.advance_date > as_at:
+            continue
+        applied = sum(x.amount or 0 for x in a.applications if x.payment_date <= as_at)
+        refunded = sum(x.amount or 0 for x in a.refunds if x.refunded_on <= as_at)
+        total += max((a.amount or 0) - applied - refunded, 0.0)
+    return round(total, 2)
+
+
 def _pct_change(now, before):
     if before in (None, 0) or now is None:
         return None

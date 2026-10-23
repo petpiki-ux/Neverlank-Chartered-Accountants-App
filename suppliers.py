@@ -30,7 +30,7 @@ from datetime import date, timedelta
 
 from extensions import db
 from models import (
-    Expense, Supplier, SupplierPayment, INVOICE_CURRENCIES, PAYMENT_METHODS, SUPPLIER_STATUSES,
+    Expense, Supplier, SupplierAdvance, SupplierAdvanceRefund, SupplierPayment, INVOICE_CURRENCIES, PAYMENT_METHODS, SUPPLIER_STATUSES,
 )
 
 CENT = 0.005
@@ -104,7 +104,7 @@ def settlements(expense):
     """[(date, amount, label, SupplierPayment or None)] - how this bill has been settled, oldest first."""
     rows = sorted(expense.supplier_payments, key=lambda p: (p.payment_date, p.id))
     if rows:
-        return [(p.payment_date, r2(p.amount), p.reference or "Payment", p) for p in rows]
+        return [(p.payment_date, r2(p.amount), "Advance applied" if p.advance_id else (p.reference or "Payment"), p) for p in rows]
     if expense.status == "Paid":
         return [(expense.paid_date or expense.expense_date, r2(expense.amount), "Marked paid", None)]
     return []
@@ -238,6 +238,172 @@ def settle_remaining(expense, on, user):
     return err
 
 
+# ------------------------------------------------------------------ advances paid to suppliers
+
+def advance_unapplied(adv, as_of=None):
+    """What is left of an advance at the end of `as_of` (today's position when None): paid less applied to bills less refunded."""
+    if as_of is not None and adv.advance_date > as_of:
+        return 0.0
+    used = sum(x.amount or 0.0 for x in adv.applications if as_of is None or x.payment_date <= as_of)
+    back = sum(x.amount or 0.0 for x in adv.refunds if as_of is None or x.refunded_on <= as_of)
+    left = r2((adv.amount or 0.0) - used - back)
+    return left if left > CENT else 0.0
+
+
+def unapplied_total(supplier, as_of=None, currency=None):
+    return r2(sum(advance_unapplied(a, as_of) for a in supplier.advances if currency is None or a.currency == currency))
+
+
+def unapplied_by_currency(supplier, as_of=None):
+    out = defaultdict(float)
+    for a in supplier.advances:
+        out[a.currency] += advance_unapplied(a, as_of)
+    return {c: r2(v) for c, v in out.items() if v > CENT}
+
+
+def net_by_currency(supplier, as_of=None):
+    """Owed on bills less advances not yet used, per currency. Negative = the supplier holds our money."""
+    owed = balances_by_currency(supplier, as_of)
+    adv = unapplied_by_currency(supplier, as_of)
+    out = {}
+    for c in set(owed) | set(adv):
+        v = r2(owed.get(c, 0.0) - adv.get(c, 0.0))
+        if abs(v) > CENT:
+            out[c] = v
+    return out
+
+
+def advance_label(adv):
+    return f"{adv.reference or 'ADV-' + str(adv.id)} ({adv.advance_date.strftime('%d %b %Y')})"
+
+
+def record_advance(supplier, amount, currency, on, method, reference, purpose, user, cash_account_id=None):
+    """Pay `supplier` in advance. Returns (SupplierAdvance, error). The caller commits."""
+    import cashbook
+    problem = status_problem(supplier, "pay")
+    if problem:
+        return None, problem
+    amount = r2(amount)
+    if amount <= 0:
+        return None, "Enter the amount paid in advance."
+    if on is None:
+        return None, "Enter the date paid."
+    if currency not in INVOICE_CURRENCIES:
+        return None, "Choose the currency."
+    if method and method not in PAYMENT_METHODS:
+        method = "Other"
+    acct_id, bad = cashbook.parse_choice(cash_account_id, currency)
+    if bad:
+        return None, bad
+    adv = SupplierAdvance(supplier=supplier, advance_date=on, amount=amount, currency=currency, method=method or None,
+                          reference=(reference or "").strip() or None, purpose=(purpose or "").strip()[:300] or None,
+                          created_by_id=getattr(user, "id", None))
+    db.session.add(adv)
+    db.session.flush()
+    if cashbook.can_choose_account():
+        cashbook.set_account(f"supplieradv:{adv.id}", acct_id)
+    return adv, None
+
+
+def apply_advance(adv, allocations, on, user):
+    """Settle bills from an advance (no cash moves). allocations = [(Expense, amount)]. Returns (batch_ref, [rows], error)."""
+    supplier = adv.supplier
+    if supplier.status == "Blocked":
+        return None, [], status_problem(supplier, "bill").replace("no new bills can be recorded against it", "advances cannot be applied")
+    allocations = [(e, r2(a)) for e, a in allocations if a is not None and r2(a) > 0]
+    if not allocations:
+        return None, [], "Enter an amount against at least one bill."
+    if on is None:
+        return None, [], "Enter the date the advance is applied."
+    if on < adv.advance_date:
+        return None, [], "An advance cannot be applied before the date it was paid."
+    total = r2(sum(a for _e, a in allocations))
+    left = advance_unapplied(adv)
+    if total > left + CENT:
+        return None, [], f"{adv.currency} {total:,.2f} is more than the {adv.currency} {left:,.2f} left on this advance."
+    for e, amt in allocations:
+        if e.supplier_id != supplier.id:
+            return None, [], "A bill chosen does not belong to this supplier."
+        if e.currency != adv.currency:
+            return None, [], f"The advance is in {adv.currency} but a bill is in {e.currency}."
+        if on < e.expense_date:
+            return None, [], f"The advance is applied before the bill of {e.expense_date.strftime('%d %b %Y')} ({e.reference or e.description or 'bill'})."
+        owed = outstanding(e)
+        if amt > owed + CENT:
+            return None, [], f"{e.currency} {amt:,.2f} is more than the {e.currency} {owed:,.2f} still owed on {e.reference or e.description or 'that bill'}."
+    batch = _batch_ref(on).replace("PAY-", "APP-", 1)
+    made = []
+    for e, amt in allocations:
+        p = SupplierPayment(supplier=supplier, expense=e, advance=adv, payment_date=on, amount=amt, currency=adv.currency,
+                            method="Advance applied", reference=adv.reference, batch_ref=batch, created_by_id=getattr(user, "id", None))
+        db.session.add(p)
+        db.session.flush()
+        made.append(p)
+    for e, _a in allocations:
+        sync_expense(e)
+    return batch, made, None
+
+
+def auto_apply(supplier, currency, on, user):
+    """Use the supplier's unapplied advances (oldest first) on its open bills (earliest due first). Returns (amount applied, error)."""
+    applied = 0.0
+    bills = sorted([e for e in supplier.bills if e.currency == currency and outstanding(e) > 0], key=lambda e: (due_date(e), e.expense_date, e.id))
+    for adv in sorted([a for a in supplier.advances if a.currency == currency], key=lambda a: (a.advance_date, a.id)):
+        for e in bills:
+            room, owed = advance_unapplied(adv), outstanding(e)
+            if room <= CENT:
+                break
+            use = min(room, owed)
+            if use <= CENT or on < adv.advance_date or on < e.expense_date:
+                continue
+            _b, _m, err = apply_advance(adv, [(e, use)], on, user)
+            if err:
+                return applied, err
+            applied += use
+    return r2(applied), None
+
+
+def record_refund(adv, amount, on, method, reference, user, cash_account_id=None):
+    """The supplier pays back part of an advance. Returns (SupplierAdvanceRefund, error). The caller commits."""
+    import cashbook
+    amount = r2(amount)
+    left = advance_unapplied(adv)
+    if amount <= 0:
+        return None, "Enter the amount refunded."
+    if on is None or on < adv.advance_date:
+        return None, "Enter a refund date on or after the advance."
+    if amount > left + CENT:
+        return None, f"{adv.currency} {amount:,.2f} is more than the {adv.currency} {left:,.2f} left on this advance."
+    if method and method not in PAYMENT_METHODS:
+        method = "Other"
+    acct_id, bad = cashbook.parse_choice(cash_account_id, adv.currency)
+    if bad:
+        return None, bad
+    rf = SupplierAdvanceRefund(advance=adv, refunded_on=on, amount=amount, method=method or None,
+                               reference=(reference or "").strip() or None, created_by_id=getattr(user, "id", None))
+    db.session.add(rf)
+    db.session.flush()
+    if cashbook.can_choose_account():
+        cashbook.set_account(f"supplierref:{rf.id}", acct_id)
+    return rf, None
+
+
+def delete_refund(rf):
+    import cashbook
+    cashbook.forget(f"supplierref:{rf.id}")
+    db.session.delete(rf)
+
+
+def delete_advance(adv):
+    """Only an advance nothing has been taken from. Returns an error message or None. Does not commit."""
+    import cashbook
+    if adv.applications or adv.refunds:
+        return "Part of this advance has been applied or refunded. Delete those first."
+    cashbook.forget(f"supplieradv:{adv.id}")
+    db.session.delete(adv)
+    return None
+
+
 # ------------------------------------------------------------------ links to the Expense register
 
 def link_expense(expense, supplier):
@@ -308,8 +474,19 @@ def statement(supplier, start, end, currency):
         events.append((e.expense_date, 0, e.id, "Bill", e.reference or f"EXP-{e.id}",
                        " - ".join(x for x in (e.category, e.description) if x), r2(e.amount), 0.0, e.id))
         for d, a, label, p in settlements(e):
+            if p is not None and p.advance_id:
+                events.append((d, 1, p.id, "Memo", p.reference or p.batch_ref or "", f"Advance applied to bill {e.reference or 'EXP-' + str(e.id)} (already counted when paid)", 0.0, 0.0, e.id))
+                continue
             events.append((d, 1, p.id if p else 0, "Payment", (p.reference or p.batch_ref) if p else (e.reference or f"EXP-{e.id}"),
                            f"{label} - bill {e.reference or 'EXP-' + str(e.id)}", 0.0, a, e.id))
+    # money paid to the supplier in advance reduces what we owe (the account can go negative: they hold our money);
+    # applying it to a bill moves nothing again, so those lines are memo lines and a refund puts the money back
+    for a in supplier.advances:
+        if a.currency != currency:
+            continue
+        events.append((a.advance_date, 2, a.id, "Advance", a.reference or f"ADV-{a.id}", "Advance paid" + (f" - {a.purpose}" if a.purpose else ""), 0.0, r2(a.amount), 0))
+        for rf in a.refunds:
+            events.append((rf.refunded_on, 3, rf.id, "Refund", rf.reference or "Refund", f"Advance refunded to us - {a.reference or 'ADV-' + str(a.id)}", r2(rf.amount), 0.0, 0))
     events.sort(key=lambda t: (t[0], t[1], t[2]))
     opening = r2(sum(b - p for d, _o, _i, _k, _r, _ds, b, p, _e in events if d < start))
     lines, running = [], opening
@@ -340,12 +517,21 @@ def ageing(as_of, currency):
         g["buckets"][idx] += left
         g["total"] += left
         g["bills"].append({"expense": e, "left": left, "due": due_date(e), "days_over": max(days, 0), "bucket": idx})
+    for sup in Supplier.query.all():            # money already paid to the supplier in advance, not yet used
+        held = unapplied_total(sup, as_of, currency)
+        if held > 0:
+            g = groups.setdefault(("s", sup.id), {"supplier": sup, "name": sup.name, "buckets": [0.0] * 5, "total": 0.0, "bills": []})
+            g["advance"] = held
     rows = sorted(groups.values(), key=lambda g: (-g["total"], g["name"].lower()))
     totals = [r2(sum(g["buckets"][i] for g in rows)) for i in range(5)]
     for g in rows:
         g["buckets"] = [r2(x) for x in g["buckets"]]
         g["total"] = r2(g["total"])
-    return {"rows": rows, "totals": totals, "grand": r2(sum(totals)), "labels": AGEING_LABELS}
+        g["advance"] = r2(g.get("advance", 0.0))
+        g["net"] = r2(g["total"] - g["advance"])
+    adv_total = r2(sum(g["advance"] for g in rows))
+    return {"rows": rows, "totals": totals, "grand": r2(sum(totals)), "labels": AGEING_LABELS, "advance_total": adv_total,
+            "net_total": r2(sum(totals) - adv_total)}
 
 
 def overview(today=None):
@@ -369,8 +555,11 @@ def overview(today=None):
         st, _ = clearance_state(s, today)
         if st in cleared:
             cleared[st] += 1
+    held = defaultdict(float)
+    for a in SupplierAdvance.query.all():
+        held[a.currency] += advance_unapplied(a)
     fix = lambda d: {c: r2(v) for c, v in d.items() if v > CENT}
-    return {"owed": fix(owed), "overdue": fix(overdue), "due_week": fix(due_week), "clearance": cleared}
+    return {"owed": fix(owed), "overdue": fix(overdue), "due_week": fix(due_week), "clearance": cleared, "advances": fix(held)}
 
 
 def year_spend(supplier, today=None):
@@ -402,8 +591,8 @@ def ageing_csv(as_of, currency, data):
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([f"Creditors ageing at {as_of.isoformat()}", currency])
-    w.writerow(["Supplier"] + AGEING_LABELS + ["Total"])
+    w.writerow(["Supplier"] + AGEING_LABELS + ["Total owed on bills", "Advances paid, not yet used", "Net"])
     for g in data["rows"]:
-        w.writerow([g["name"]] + [f"{x:.2f}" for x in g["buckets"]] + [f"{g['total']:.2f}"])
-    w.writerow(["Total"] + [f"{x:.2f}" for x in data["totals"]] + [f"{data['grand']:.2f}"])
+        w.writerow([g["name"]] + [f"{x:.2f}" for x in g["buckets"]] + [f"{g['total']:.2f}", f"{g['advance']:.2f}", f"{g['net']:.2f}"])
+    w.writerow(["Total"] + [f"{x:.2f}" for x in data["totals"]] + [f"{data['grand']:.2f}", f"{data['advance_total']:.2f}", f"{data['net_total']:.2f}"])
     return buf.getvalue()

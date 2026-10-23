@@ -5,7 +5,8 @@
   <div class="subtitle">{{ s.code }}{% if s.trading_name %} &middot; trading as {{ s.trading_name }}{% endif %} &middot; <span class="badge {{ 'overdue' if s.status == 'Blocked' else ('status-Sent' if s.status == 'On hold' else 'status-Paid') }}">{{ s.status }}</span>{% if s.status_note %} <span class="muted">{{ s.status_note }}</span>{% endif %}</div></div>
   <div>
     {% if can_bill %}<a class="btn secondary" href="{{ url_for('expenses.new_expense', supplier_id=s.id) }}">+ Add a bill</a>{% endif %}
-    {% if can_pay %}<a class="btn gold" href="{{ url_for('suppliers.pay', supplier_id=s.id) }}">Pay supplier</a>{% endif %}
+    {% if can_pay %}<a class="btn gold" href="{{ url_for('suppliers.pay', supplier_id=s.id) }}">Pay supplier</a>
+    <a class="btn secondary" href="{{ url_for('suppliers.new_advance', supplier_id=s.id) }}">Pay in advance</a>{% endif %}
     <a class="btn secondary" href="{{ url_for('suppliers.statement', supplier_id=s.id) }}">Statement</a>
     <a class="btn secondary" href="{{ url_for('suppliers.edit_supplier', supplier_id=s.id) }}">Edit</a>
   </div></div>
@@ -18,6 +19,8 @@
 
 <div class="kpi-grid">
   <div class="kpi"><div class="kpi-label">Owed now</div>{% for c, v in owed.items() %}<div style="font-size:20px;font-weight:700;">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">Nothing</div>{% endfor %}</div>
+  {% if held %}<div class="kpi"><div class="kpi-label">Paid in advance, not yet used</div>{% for c, v in held.items() %}<div style="font-size:20px;font-weight:700;">{{ money(v, c, 2) }}</div>{% endfor %}
+    <div class="muted" style="font-size:11.5px;">Net position: {% for c, v in net.items() %}{{ money(v|abs, c, 2) }} {{ 'owed to them' if v > 0 else 'they hold of ours' }}{% if not loop.last %}; {% endif %}{% else %}nil{% endfor %}</div></div>{% endif %}
   <div class="kpi"><div class="kpi-label">Billed this year</div>{% for c, v in spend.items() %}<div style="font-size:20px;font-weight:700;">{{ money(v, c, 2) }}</div>{% else %}<div style="font-size:20px;font-weight:700;">-</div>{% endfor %}</div>
   <div class="kpi"><div class="kpi-label">Payment terms</div><div style="font-size:20px;font-weight:700;">{{ s.payment_terms_days }} days</div></div>
 </div>
@@ -35,6 +38,19 @@
       <td style="white-space:nowrap;">{% if b.left and can_pay %}<a class="btn small" href="{{ url_for('suppliers.pay', supplier_id=s.id, bill=e.id) }}">Pay</a> {% endif %}<a class="btn small secondary" href="{{ url_for('expenses.edit_expense', expense_id=e.id) }}">Edit</a></td></tr>
     {% endfor %}</tbody></table></div>
   {% else %}<p class="muted">No bills yet.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Advances paid</h3>
+  {% if advances %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Date</th><th>Reference</th><th>Purpose</th><th class="num">Paid</th><th class="num">Not yet used</th><th></th></tr></thead><tbody>
+    {% for x in advances %}{% set a = x.a %}<tr><td>{{ a.advance_date.strftime('%d %b %Y') }}</td><td>{{ a.reference or ('ADV-' ~ a.id) }}</td><td>{{ a.purpose or '-' }}</td>
+      <td class="num">{{ a.currency }} {{ '{:,.2f}'.format(a.amount) }}</td><td class="num">{{ '{:,.2f}'.format(x.left) if x.left else '-' }}</td>
+      <td><a class="btn small secondary" href="{{ url_for('suppliers.advance', advance_id=a.id) }}">Open</a></td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if held and can_bill %}{% for c in held %}<form method="post" action="{{ url_for('suppliers.auto_apply', supplier_id=s.id) }}" style="display:inline-block;margin-top:8px;margin-right:8px;" onsubmit="return confirm('Apply the unused {{ c }} advances to the oldest open {{ c }} bills?');"><input type="hidden" name="currency" value="{{ c }}"><input type="hidden" name="applied_on" value="{{ today.isoformat() }}"><button class="btn small gold" type="submit">Apply {{ c }} advances to the oldest open bills</button></form>{% endfor %}{% endif %}
+  {% else %}<p class="muted">No advances. Use "Pay in advance" for a deposit or prepayment made before the supplier's bill arrives; it is shown as an asset until it is applied to a bill.</p>{% endif %}
 </div>
 
 <div class="card">

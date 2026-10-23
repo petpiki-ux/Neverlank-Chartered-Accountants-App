@@ -29,7 +29,7 @@
     <tr><td>{{ start.strftime('%d %b %Y') }}</td><td></td><td></td><td><em>Balance brought forward</em></td><td></td><td></td><td class="num"><strong>{{ '{:,.2f}'.format(st.opening) }}</strong></td></tr>
     {% for ln in st.lines %}<tr><td>{{ ln.date.strftime('%d %b %Y') }}</td><td>{{ ln.kind }}</td><td>{{ ln.ref }}</td><td>{{ ln.description }}</td>
       <td class="num">{{ '{:,.2f}'.format(ln.bill) if ln.bill else '' }}</td><td class="num">{{ '{:,.2f}'.format(ln.payment) if ln.payment else '' }}</td><td class="num">{{ '{:,.2f}'.format(ln.balance) }}</td></tr>{% endfor %}
-    <tr style="border-top:2px solid #999;"><td>{{ end.strftime('%d %b %Y') }}</td><td></td><td></td><td><strong>Balance carried forward (owed to {{ s.name }})</strong></td>
+    <tr style="border-top:2px solid #999;"><td>{{ end.strftime('%d %b %Y') }}</td><td></td><td></td><td><strong>Balance carried forward ({{ 'owed to ' ~ s.name if st.closing >= 0 else s.name ~ ' holds our advance' }})</strong></td>
       <td class="num"><strong>{{ '{:,.2f}'.format(st.billed) }}</strong></td><td class="num"><strong>{{ '{:,.2f}'.format(st.paid) }}</strong></td><td class="num"><strong>{{ '{:,.2f}'.format(st.closing) }}</strong></td></tr>
   </tbody></table></div>
 </div>

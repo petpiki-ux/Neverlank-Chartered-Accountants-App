@@ -31,12 +31,12 @@ from collections import defaultdict
 from datetime import date
 
 from models import (
-    CashAccount, CashEntry, CashAssign, CashClear, ClientAdvance, Expense, Invoice, Receipt, SupplierPayment,
+    CashAccount, CashEntry, CashAssign, CashClear, ClientAdvance, Expense, Invoice, Receipt, SupplierAdvance, SupplierPayment,
     CASH_TRANSFER_CATEGORY, INVOICE_CURRENCIES, PAYMENT_METHODS,
 )
 from timeutil import to_cat
 
-SOURCE_ORDER = {"Opening": 0, "Receipt": 1, "Invoice": 2, "Advance": 3, "Refund": 4, "Expense": 5, "Entry": 6}
+SOURCE_ORDER = {"Opening": 0, "Receipt": 1, "Invoice": 2, "Advance": 3, "Refund": 4, "Expense": 5, "Supplier advance": 5, "Supplier refund": 5, "Entry": 6}
 
 
 def r2(v):
@@ -83,6 +83,8 @@ def collect_transactions():
     part_paid = set()
     for sp in SupplierPayment.query.all():
         part_paid.add(sp.expense_id)
+        if sp.advance_id:
+            continue     # settled from an advance paid earlier: no cash moves now
         exp = sp.expense
         label = exp.supplier if exp is not None else (sp.supplier.name if sp.supplier else "Supplier")
         out.append({
@@ -91,6 +93,20 @@ def collect_transactions():
             "description": f"{label} - {exp.category if exp is not None else 'payment'}",
             "link": ("suppliers.detail", {"supplier_id": sp.supplier_id}), "entry_id": None,
         })
+    for av in SupplierAdvance.query.all():
+        who = av.supplier.name if av.supplier else "Supplier"
+        out.append({
+            "key": f"supplieradv:{av.id}", "source": "Supplier advance", "date": av.advance_date, "amount": -r2(av.amount),
+            "currency": av.currency, "method": av.method, "ref": av.reference or "",
+            "description": f"{who} - advance paid" + (f" ({av.purpose})" if av.purpose else ""),
+            "link": ("suppliers.detail", {"supplier_id": av.supplier_id}), "entry_id": None,
+        })
+        for rf in av.refunds:
+            out.append({
+                "key": f"supplierref:{rf.id}", "source": "Supplier refund", "date": rf.refunded_on, "amount": r2(rf.amount),
+                "currency": av.currency, "method": rf.method, "ref": rf.reference or "",
+                "description": f"{who} - advance refunded to us", "link": ("suppliers.detail", {"supplier_id": av.supplier_id}), "entry_id": None,
+            })
     for e in Expense.query.filter(Expense.status == "Paid").all():
         if e.id in part_paid:
             continue

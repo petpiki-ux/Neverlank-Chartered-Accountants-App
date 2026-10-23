@@ -35,7 +35,7 @@ from datetime import date, datetime, timedelta
 
 from extensions import db
 from models import (
-    CashAccount, ClientAdvance, Expense, FirmAccount, FirmJournal, FirmJournalLine, FirmPeriodLock, FirmYearEnd, Invoice,
+    CashAccount, ClientAdvance, Expense, FirmAccount, FirmJournal, FirmJournalLine, FirmPeriodLock, FirmYearEnd, Invoice, SupplierPayment,
     Receipt, INVOICE_CURRENCIES, FIRM_ACCOUNT_TYPES,
 )
 import analytics
@@ -63,6 +63,7 @@ STARTER_CHART = [
     ("1130", "Staff loans and advances", "Asset", "other_current_assets", None, None),
     ("1140", "VAT input recoverable", "Asset", "other_current_assets", None, None),
     ("1150", "Deposits paid", "Asset", "other_current_assets", None, None),
+    ("1160", "Advances to suppliers", "Asset", "other_current_assets", "SUPP_ADV", "Money paid to suppliers before their bill. Posted by the app from the Suppliers pages."),
     ("1200", "Inventory - stationery and consumables", "Asset", "inventories", None, None),
     ("1500", "Property, plant and equipment - cost", "Asset", "ppe", "PPE_COST", "Posted by the app from the Asset register."),
     ("1510", "Property, plant and equipment - accumulated depreciation", "Asset", "ppe", "PPE_ACCDEP", "Posted by the app from the Asset register."),
@@ -118,7 +119,7 @@ STARTER_CHART = [
 ]
 SYSTEM_KEYS = {row[4] for row in STARTER_CHART if row[4]}
 # Accounts the statements derive themselves: a journal to one of these is a deliberate adjustment, so it carries a warning.
-CONTROL_KEYS = {"AR", "AP", "ADV", "PPE_COST", "PPE_ACCDEP", "DEPR", "VAT_CTRL"}
+CONTROL_KEYS = {"AR", "AP", "ADV", "SUPP_ADV", "PPE_COST", "PPE_ACCDEP", "DEPR", "VAT_CTRL"}
 # Accounts only the app may post to (their statement figure is calculated, or one account feeds two statement lines).
 JOURNAL_REFUSED_KEYS = {"TAX_PAY", "TAX_EXP_CUR", "TAX_EXP_DEF", "DTL", "DTA", "DISP_GL"}
 SUSPENSE_KEYS = ("SUSP_OPEN", "SUSP_CASH", "SUSP_ASSET", "CLR_TRANSFER", "VAT_CTRL")
@@ -595,6 +596,15 @@ def build_ledger(year_ends=None, include_journals=True):
                    [(key if L.account(key) else "EXP_OTHER", amt, 0, e["description"][:120]), ("AP", 0, amt, e["supplier"])],
                    link=("expenses.edit_expense", {"expense_id": e["id"]}))
 
+    # ---------------- bills settled from an advance paid earlier (no cash moves now)
+    for ap in SupplierPayment.query.filter(SupplierPayment.advance_id.isnot(None)).all():
+        amt = L.usd(ap.amount, ap.currency, ap.payment_date, "advances applied to supplier bills")
+        if amt is None or ap.expense is None:
+            continue
+        L.post(ap.payment_date, "Supplier advance applied", ap.batch_ref or f"EXP-{ap.expense_id}", f"{ap.expense.supplier} - advance applied to bill",
+               [("AP", amt, 0, ap.expense.supplier), ("SUPP_ADV", 0, amt, "advance used")],
+               link=("suppliers.detail", {"supplier_id": ap.supplier_id}))
+
     # ---------------- cash book
     accounts, txns, _clears = cashbook.load_all()
     cash_by_id = {a.id: a for a in accounts}
@@ -629,6 +639,8 @@ def build_ledger(year_ends=None, include_journals=True):
             contra = "ADV"
         elif src == "Expense":
             contra = "AP"
+        elif src in ("Supplier advance", "Supplier refund"):
+            contra = "SUPP_ADV"
         else:
             cat = t.get("category") or ""
             if cat == CASH_TRANSFER_CATEGORY:

@@ -199,7 +199,7 @@ def derive_period(period_start, period_end, zwg_rate):
     """Revenue, expenses, receivables, payables and advances for one period, in USD."""
     out = {
         "revenue": 0.0, "revenue_by_service": defaultdict(float), "expenses": defaultdict(float),
-        "receivables": 0.0, "payables": 0.0, "advances": 0.0, "vat_in_receivables": 0.0, "vat_charged": 0.0,
+        "receivables": 0.0, "payables": 0.0, "advances": 0.0, "supplier_advances": 0.0, "vat_in_receivables": 0.0, "vat_charged": 0.0,
         "ageing": [0.0] * len(analytics.AGEING_BUCKETS), "warnings": [], "zwg_rate": zwg_rate,
     }
     for cur in INVOICE_CURRENCIES:
@@ -210,8 +210,9 @@ def derive_period(period_start, period_end, zwg_rate):
         unpaid = [dict(e, amount=analytics.exp_owed_on(e, period_end)) for e in exp if analytics.exp_owed_on(e, period_end) > 0]
         spend = [e for e in exp if period_start <= e["date"] <= period_end]
         advances = analytics.advances_held(cur, period_end)
+        supp_adv = analytics.supplier_advances_held(cur, period_end)
         activity = any(abs(x) > 0.004 for x in (
-            revenue, advances, sum(r["owed"] for r in owed_rows), sum(e["amount"] for e in unpaid),
+            revenue, advances, supp_adv, sum(r["owed"] for r in owed_rows), sum(e["amount"] for e in unpaid),
             sum(e["amount"] for e in spend)))
         if cur == "USD":
             f = 1.0
@@ -238,6 +239,7 @@ def derive_period(period_start, period_end, zwg_rate):
             out["expenses"][e["category"]] += e["amount"] * f
         out["payables"] += sum(e["amount"] for e in unpaid) * f
         out["advances"] += advances * f
+        out["supplier_advances"] += supp_adv * f
         for i, b in enumerate(analytics.ageing(inv, period_end)):
             out["ageing"][i] += b["amount"] * f
     return out
@@ -318,6 +320,7 @@ def build_column(ye, prev_end, classes, assets, prev_col=None):
     add("trade_receivables", "Fees receivable from clients (unpaid invoices, including VAT)", d["receivables"])
     add("trade_payables", "Supplier bills not yet paid", d["payables"])
     add("other_current_liabilities", "Customer advances (received before invoicing)", d["advances"])
+    add("other_current_assets", "Advances paid to suppliers (before their bills)", d["supplier_advances"])
 
     # Cash and bank come from the Cash Book automatically once it has an account running at the year-end; only a year-end
     # that predates the Cash Book (or one switched to manual) uses the cash figures entered on the year-end page.

@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Pay {{ s.name }} in advance - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><div><h1>Pay {{ s.name }} in advance</h1>
+  <div class="subtitle">A deposit or prepayment made before the supplier's bill. It leaves the bank now but is not an expense: it is shown as "Advances to suppliers" (an asset) until you apply it to a bill or the supplier refunds it.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('suppliers.detail', supplier_id=s.id) }}">Back to {{ s.code }}</a></div></div>
+{% include "firmfs/_nav.html" %}
+{% if problem %}<div class="card" style="border-left:4px solid var(--danger);">{{ problem }}</div>{% endif %}
+<div class="card">
+  <form method="post">
+    <div class="form-row">
+      <div class="form-group"><label for="advance_date">Date paid</label><input type="date" id="advance_date" name="advance_date" required value="{{ form.get('advance_date') or today.isoformat() }}"></div>
+      <div class="form-group"><label for="amount">Amount</label><input type="number" step="0.01" min="0.01" id="amount" name="amount" required value="{{ form.get('amount', '') }}"></div>
+      <div class="form-group"><label for="currency">Currency</label><select id="currency" name="currency">{% set cu = form.get('currency') or s.currency %}{% for c in currencies %}<option {% if cu == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label for="method">Paid by</label><select id="method" name="method"><option value="">-</option>{% for m in methods %}<option {% if form.get('method') == m %}selected{% endif %}>{{ m }}</option>{% endfor %}</select></div>
+      <div class="form-group">{% with ca_currency_id='currency', ca_method_id='method', ca_dir='out', ca_current=form.get('cash_account_id') if form else none %}{% include "_cash_account_field.html" %}{% endwith %}</div>
+      <div class="form-group"><label for="reference">Reference (proforma / transfer no.)</label><input type="text" id="reference" name="reference" maxlength="100" value="{{ form.get('reference', '') }}"></div>
+    </div>
+    <div class="form-group"><label for="purpose">What is it for?</label><input type="text" id="purpose" name="purpose" maxlength="300" value="{{ form.get('purpose', '') }}" placeholder="e.g. 50% deposit on office furniture"></div>
+    <button class="btn gold" type="submit" {% if problem %}disabled{% endif %}>Record advance</button>
+  </form>
+</div>
+{% endblock %}
