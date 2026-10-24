@@ -122,7 +122,7 @@
     {% else %}
   <form method="post" action="{{ url_for('payroll.post_medical_aid', period_id=period.id) }}" class="form-row" style="align-items:flex-end;">
     <div><label for="med_supplier">Medical aid society (supplier)</label>
-      <select id="med_supplier" name="supplier_id" required><option value="">- choose -</option>{% for s in med.suppliers %}<option value="{{ s.id }}" {% if med.supplier and med.supplier.id == s.id %}selected{% endif %}>{{ s.code }} · {{ s.name }}</option>{% endfor %}</select>
+      <select id="med_supplier" name="supplier_id" required><option value="">- choose -</option>{% for s in med.suppliers %}<option value="{{ s.id }}" {% if med.supplier and med.supplier.id == s.id %}selected{% endif %}>{{ s.name }} · {{ s.code }}</option>{% endfor %}</select>
       <div style="font-size:12px;"><a href="{{ url_for('suppliers.new_supplier') }}">+ Add the society as a supplier</a></div></div>
     <div><label for="med_due">Due date</label><input type="date" id="med_due" name="due_date" value="{{ (period.pay_date or period.period_end or '')|string }}"></div>
     <div><label style="font-weight:400;"><input type="checkbox" name="part" value="employer" style="width:auto;" {% if med.tot.employer_total %}checked{% endif %}> Employer's share ({{ '%.2f'|format(med.tot.employer_total) }})</label>

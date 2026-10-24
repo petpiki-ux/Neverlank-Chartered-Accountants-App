@@ -16,7 +16,7 @@
         {% set sid = (form.get('supplier_id') if form and form.get('supplier_id') is not none else (expense.supplier_id|string if expense and expense.supplier_id else '')) %}
         <select id="supplier_id" name="supplier_id">
           <option value="">- not on file (type the name below) -</option>
-          {% for s in supplier_list %}<option value="{{ s.id }}" data-name="{{ s.name }}" data-cur="{{ s.currency }}" data-cat="{{ s.default_category or '' }}" data-terms="{{ s.payment_terms_days }}" {% if sid == s.id|string %}selected{% endif %}>{{ s.code }} &middot; {{ s.name }}{% if s.status != 'Active' %} ({{ s.status }}){% endif %}</option>{% endfor %}
+          {% for s in supplier_list %}<option value="{{ s.id }}" data-name="{{ s.name }}" data-cur="{{ s.currency }}" data-cat="{{ s.default_category or '' }}" data-terms="{{ s.payment_terms_days }}" {% if sid == s.id|string %}selected{% endif %}>{{ s.name }} &middot; {{ s.code }}{% if s.status != 'Active' %} ({{ s.status }}){% endif %}</option>{% endfor %}
         </select>
         <div style="font-size:12px;margin-top:4px;"><a href="{{ url_for('suppliers.new_supplier') }}">+ New supplier</a> &middot; <a href="{{ url_for('suppliers.index') }}">Suppliers</a></div></div>
       <div class="form-group"><label for="supplier">Paid to (supplier name)</label>
