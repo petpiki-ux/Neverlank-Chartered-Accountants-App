@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Import asset register - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Import asset register</h1>
+  <div class="subtitle">{{ engagement.client.name }} - {{ engagement.title }} - {{ filename }}{{ ext }}. Check what was picked up, then import.</div></div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">What was found</h3>
+  <p style="font-size:13px;">
+    {{ counts.opening }} opening balance(s){% if as_at %} as at {{ as_at.strftime('%d %b %Y') }}{% endif %}, {{ counts.addition }} addition(s){% if period_start %} ({{ period_start.strftime('%d %b %Y') }} to {{ period_end.strftime('%d %b %Y') }}){% endif %}, {{ counts.disposal }} of them sold in the year, and {{ counts.skip }} row(s) left out. The header was read from row {{ res.header_row + 1 }} of {{ total_rows }}.
+  </p>
+  {% for n in res.notes %}<div class="flash warning" style="margin:6px 0;">{{ n }}</div>{% endfor %}
+
+  <form method="post" action="{{ url_for('assetimp.preview', engagement_id=engagement.id, token=token) }}" id="remap">
+    <input type="hidden" name="ext" value="{{ ext }}"><input type="hidden" name="filename" value="{{ filename }}"><input type="hidden" name="remap" value="1">
+    <details {% if 'description' not in res.mapping or ('cost' not in res.mapping and 'cost_bf' not in res.mapping and 'additions' not in res.mapping) %}open{% endif %}>
+      <summary style="cursor:pointer;font-size:12.5px;">Columns picked up (change any that are wrong)</summary>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));gap:4px 14px;margin-top:8px;">
+        {% for key, label in fields %}
+        <div><label style="font-size:12px;">{{ label }}</label>
+          <select name="col_{{ key }}" style="margin-bottom:6px;">
+            <option value="">- not in the file -</option>
+            {% for h in res.header %}{% if h not in (none, '') %}<option value="{{ loop.index0 }}" {% if res.mapping.get(key) == loop.index0 %}selected{% endif %}>{{ h }}</option>{% endif %}{% endfor %}
+          </select></div>
+        {% endfor %}
+        <div><label style="font-size:12px;">Header row number</label><input type="number" name="header_row_no" min="1" value="{{ res.header_row + 1 }}" style="margin-bottom:6px;"></div>
+      </div>
+      <button type="submit" class="btn small secondary">Read the file again with these columns</button>
+    </details>
+    <div style="margin-top:8px;"><label style="font-size:12px;">Date to give an addition or a sale that has no date</label>
+      <input type="date" name="default_date" value="{{ default_date.strftime('%Y-%m-%d') if default_date else '' }}" style="width:170px;"></div>
+  </form>
+</div>
+
+<div class="card">
+  <form method="post" action="{{ url_for('assetimp.confirm', engagement_id=engagement.id, token=token) }}">
+    <input type="hidden" name="ext" value="{{ ext }}"><input type="hidden" name="filename" value="{{ filename }}">
+    <input type="hidden" name="header_row" value="{{ res.header_row }}"><input type="hidden" name="default_date" value="{{ default_date.strftime('%Y-%m-%d') if default_date else '' }}">
+    {% for key, label in fields %}{% if res.mapping.get(key) is not none %}<input type="hidden" name="col_{{ key }}" value="{{ res.mapping[key] }}">{% endif %}{% endfor %}
+    <div style="overflow-x:auto;">
+    <table style="font-size:12px;">
+      <thead><tr><th>Import</th><th>Row</th><th>As</th><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th class="text-right">Cost</th><th class="text-right">Acc. depreciation b/f</th><th class="text-right">Depreciation charge</th><th class="text-right">Tax value b/f</th><th>Sold</th><th>Notes</th></tr></thead>
+      <tbody>
+      {% for it in res['items'] %}
+        <tr {% if it.kind == 'skip' %}class="muted"{% endif %}>
+          <td>{% if it.kind != 'skip' %}<input type="checkbox" checked onchange="this.closest('tr').querySelector('.skipbox').disabled = this.checked" ><input type="hidden" class="skipbox" name="skip_row" value="{{ it.row }}" disabled>{% endif %}</td>
+          <td>{{ it.row }}</td>
+          <td>{% if it.kind == 'opening' %}<span class="badge status-Completed">Opening</span>{% elif it.kind == 'addition' %}<span class="badge status-Fieldwork">Addition</span>{% else %}<span class="badge">Left out</span>{% endif %}</td>
+          <td>{{ it.code }}</td><td>{{ it.description }}</td><td>{{ it.class_name or '' }}</td>
+          <td>{{ it.date.strftime('%d %b %Y') if it.date else '' }}</td>
+          <td class="text-right">{% if it.cost is defined and it.cost is not none %}{{ '%.2f'|format(it.cost) }}{% endif %}</td>
+          <td class="text-right">{% if it.acc_dep is defined %}{{ '%.2f'|format(it.acc_dep) }}{% endif %}</td>
+          <td class="text-right">{% if it.charge is defined %}{{ '%.2f'|format(it.charge) }}{% endif %}</td>
+          <td class="text-right">{% if it.tax_value is defined and it.tax_value is not none %}{{ '%.2f'|format(it.tax_value) }}{% endif %}</td>
+          <td>{% if it.disposal %}{{ it.disposal.date.strftime('%d %b %Y') }} for {{ '%.2f'|format(it.disposal.proceeds) }}{% endif %}</td>
+          <td style="font-size:11px;">{{ it.notes|join(' ') }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <p class="muted" style="font-size:11.5px;">Untick a row to leave it out. Assets already in the register (same code, or same description and cost) are left out automatically. Nothing is saved until you press Import.</p>
+    {% if counts.opening or counts.addition %}
+    <button type="submit" class="btn gold">Import {{ counts.opening + counts.addition }} asset(s)</button>
+    {% endif %}
+    <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='asset_register') }}#opening" class="btn secondary">Cancel</a>
+  </form>
+</div>
+{% endblock %}

@@ -7,6 +7,15 @@
     The closing position of the year before, asset by asset: what each asset cost, the depreciation built up to {{ as_at_label }}, and its <strong>tax value brought forward</strong> (the closing tax value on last year's capital allowance schedule). Enter it once; the year's movements below start from here. An asset with no tax value brought forward has its tax value rebuilt from its cost and date acquired.
   </p>
 
+  <div style="margin:10px 0 12px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:6px;">
+    <h4 class="mt-0" style="margin-bottom:4px;">Import the client's asset register</h4>
+    <p class="muted" style="font-size:12px;margin-top:0;">Upload the register as an Excel (.xlsx) or CSV file in whatever layout the client has it. The app finds the header row, matches the columns (code, description, class, date acquired, cost, accumulated depreciation, net book value, tax value, date sold, proceeds, ...), takes class headings and skips totals, and sorts each asset into an opening balance, an addition or a disposal. You see exactly what it picked up before anything is saved.</p>
+    <form method="post" action="{{ url_for('assetimp.upload', engagement_id=engagement.id) }}" enctype="multipart/form-data" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+      <div><input type="file" name="file" accept=".xlsx,.xlsm,.csv,.txt,.tsv" required style="margin-bottom:0;"></div>
+      <button type="submit" class="btn small gold">Read the file</button>
+    </form>
+  </div>
+
   {% if as_openings %}
   <table style="font-size:12px;">
     <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th class="text-right">Cost b/f</th><th class="text-right">Acc. depreciation b/f</th><th class="text-right">Net book value b/f</th><th class="text-right">Tax value b/f</th><th></th></tr></thead>
@@ -48,6 +57,32 @@
   {% endif %}
   {% else %}
   <div class="empty-state">No opening balances yet - add the assets below, or paste them from Excel.</div>
+  {% endif %}
+
+  {% if as_tb_import %}
+  <div style="margin:12px 0;padding:10px 12px;border:1px solid #e5e5e5;border-radius:6px;">
+    <h4 class="mt-0" style="margin-bottom:4px;">Import from the trial balance</h4>
+    <p class="muted" style="font-size:12px;margin-top:0;">The prior-year column of the trial balance (the closing balances of the year before) has these property, plant and equipment balances. Cost is taken from debit balances and accumulated depreciation from accounts named so (or any credit balance). The trial balance has no asset-by-asset detail, so each class comes in as one opening row; the tax value brought forward is not in the trial balance and is entered afterwards.</p>
+    <table style="font-size:12px;">
+      <thead><tr><th>Asset class</th><th>From these accounts</th><th class="text-right">Cost b/f</th><th class="text-right">Acc. depreciation b/f</th><th class="text-right">Net book value b/f</th><th></th></tr></thead>
+      <tbody>
+      {% for g in as_tb_import %}
+        <tr>
+          <td>{{ g.class_name }}</td>
+          <td class="muted" style="font-size:11px;">{% for a in g.accounts %}{{ a.name }} ({{ a.kind|lower }}){% if not loop.last %}; {% endif %}{% endfor %}</td>
+          <td class="text-right">{{ '%.2f'|format(g.cost) }}</td>
+          <td class="text-right">{{ '%.2f'|format(g.acc_dep) }}</td>
+          <td class="text-right">{{ '%.2f'|format(g.nbv) }}</td>
+          <td class="muted" style="font-size:11px;">{% if g.existing %}imported before - will be updated{% else %}new row{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if as_openings and not as_tb_import|selectattr('existing')|list %}
+    <p class="muted" style="font-size:11.5px;color:#b02a2a;">{{ as_openings|length }} opening balance(s) are already entered below. Importing adds the class rows on top of them, so delete or skip any that would be counted twice.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('assetsched.import_opening_from_tb', engagement_id=engagement.id) }}"><button type="submit" class="btn small gold">Import these opening balances</button></form>
+  </div>
   {% endif %}
 
   <form method="post" action="{{ url_for('assetsched.add_opening', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">

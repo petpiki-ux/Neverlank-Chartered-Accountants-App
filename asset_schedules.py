@@ -129,6 +129,90 @@ def disposal_view(a):
     }
 
 
+# ---------------------------------------------------------------------------------------------------- import from the trial balance
+
+_ACC_DEP = re.compile(r"(accum\w*\.?\s*(depreciation|amort\w*|depn?\b\.?)|acc\.?\s*(depreciation|depn?\b)|provision\s+for\s+depreciation|depreciation\s+(provision|reserve)|\b(depreciation|depn?)\.?\s+accum\w*)", re.I)
+_COST_WORDS = re.compile(r"\b(at\s+cost|cost|gross\s+carrying\s+amount|valuation)\b", re.I)
+
+
+def _class_key(name):
+    return re.sub(r"[^a-z0-9]+", " ", (name or "").lower()).strip()
+
+
+def _tb_class_name(account_name):
+    """The asset class an account belongs to: its name without 'accumulated depreciation' / 'cost' and the punctuation round them
+    ('Motor vehicles - cost' and 'Motor vehicles - accumulated depreciation' are both 'Motor vehicles')."""
+    n = _ACC_DEP.sub(" ", account_name or "")
+    n = _COST_WORDS.sub(" ", n)
+    n = re.sub(r"\(\s*\)", " ", n)
+    n = re.sub(r"[\-:/,;]+", " ", n)
+    n = " ".join(n.split())
+    return n or "Property, plant and equipment"
+
+
+def tb_opening_rows(engagement):
+    """What the trial balance's PRIOR-YEAR column (the closing balances of the year before) says about property, plant and equipment, by
+    asset class: the cost (debit balances) and the accumulated depreciation (accounts named so, or any credit balance). The trial
+    balance carries no asset-by-asset detail, so each class becomes one opening-balance row; it carries no tax values either."""
+    tb = TrialBalance.query.filter_by(engagement_id=engagement.id).first()
+    if not tb or not tb.lines:
+        return []
+    groups = {}
+    for l in tb.lines:
+        if l.fs_category != "ppe":
+            continue
+        bal = (l.prior_debit or 0.0) - (l.prior_credit or 0.0)
+        if abs(bal) < 0.005:
+            continue
+        is_acc = bool(_ACC_DEP.search(l.account_name or "")) or bal < 0
+        cname = _tb_class_name(l.account_name)
+        g = groups.setdefault(_class_key(cname), {"class_name": cname, "cost": 0.0, "acc_dep": 0.0, "accounts": []})
+        if is_acc:
+            g["acc_dep"] += -bal                      # a credit balance is positive accumulated depreciation
+        else:
+            g["cost"] += bal
+        g["accounts"].append({"name": l.account_name, "code": l.account_code, "amount": bal, "kind": "Accumulated depreciation" if is_acc else "Cost"})
+    existing = {a.asset_code: a for a in PPEAsset.query.filter_by(engagement_id=engagement.id).all() if (a.asset_code or "").startswith("TB:")}
+    classes = {_class_key(c.name): c for c in PPEAssetClass.query.filter_by(engagement_id=engagement.id).all()}
+    rows = []
+    for key, g in sorted(groups.items(), key=lambda kv: kv[1]["class_name"].lower()):
+        g["code"] = ("TB:" + key.replace(" ", "-"))[:40]
+        g["existing"] = existing.get(g["code"])
+        g["class"] = classes.get(key)
+        g["nbv"] = g["cost"] - g["acc_dep"]
+        rows.append(g)
+    return rows
+
+
+@assetsched_bp.route("/<int:engagement_id>/assets/opening/import-tb", methods=["POST"])
+@login_required
+def import_opening_from_tb(engagement_id):
+    engagement = _engagement(engagement_id)
+    rows = tb_opening_rows(engagement)
+    if not rows:
+        flash("The trial balance has no property, plant and equipment balances in its prior-year column to import.", "danger")
+        return _back(engagement, "opening")
+    added = updated = 0
+    for g in rows:
+        cls = _class_by_name(engagement.id, g["class_name"])
+        a = g["existing"]
+        if a is None:
+            db.session.add(PPEAsset(
+                engagement_id=engagement.id, asset_class_id=cls.id, asset_code=g["code"],
+                description=f"{g['class_name']} - opening balance per trial balance"[:200], cost=g["cost"],
+                opening_accumulated_depreciation=g["acc_dep"], order=PPEAsset.query.filter_by(engagement_id=engagement.id).count()))
+            db.session.flush()
+            added += 1
+        else:                                          # imported before: bring the cost and depreciation up to date, keep what was typed on it
+            a.cost, a.opening_accumulated_depreciation = g["cost"], g["acc_dep"]
+            if a.asset_class_id is None:
+                a.asset_class_id = cls.id
+            updated += 1
+    db.session.commit()
+    flash(f"Opening balances taken from the trial balance: {added} added, {updated} updated. The trial balance has no tax values or dates, so enter the tax value brought forward on each row.", "success")
+    return _back(engagement, "opening")
+
+
 # ---------------------------------------------------------------------------------------------------- the tab context
 
 def tab_context(engagement):
@@ -158,6 +242,7 @@ def tab_context(engagement):
         "as_tb_prior_ppe": tb_prior_ppe,
         "as_tb_diff": (open_nbv - tb_prior_ppe) if tb_prior_ppe is not None else None,
         "as_add_cost": sum(a.cost or 0.0 for a in additions),
+        "as_tb_import": tb_opening_rows(engagement),
     }
 
 

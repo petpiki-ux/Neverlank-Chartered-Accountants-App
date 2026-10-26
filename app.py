@@ -790,6 +790,7 @@ def create_app():
     from standard_coa import standard_coa_bp
     from tb_setup import tb_setup_bp
     from asset_schedules import assetsched_bp
+    from asset_import import assetimp_bp
     from whistleblower import wb_bp, wb_public_bp
     from training import training_bp
 
@@ -838,6 +839,7 @@ def create_app():
     app.register_blueprint(standard_coa_bp)
     app.register_blueprint(tb_setup_bp)
     app.register_blueprint(assetsched_bp)
+    app.register_blueprint(assetimp_bp)
     app.register_blueprint(wb_bp)
     app.register_blueprint(wb_public_bp)
 
