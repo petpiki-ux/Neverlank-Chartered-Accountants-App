@@ -7,6 +7,19 @@
   <div class="subtitle">Enter the cost to the firm <strong>excluding</strong> any VAT you can claim back, so profit compares like with like with invoice revenue.</div></div>
   <div><a href="{{ url_for('expenses.list_expenses') }}" class="btn secondary">Back to register</a></div>
 </div>
+{% if not expense %}
+<div class="card" id="invoice_reader">
+  <div style="display:flex; gap:12px; align-items:flex-end; flex-wrap:wrap;">
+    <div style="flex:1; min-width:240px;">
+      <label for="invoice_file" style="margin-bottom:4px;">Have a scanned or photographed invoice or receipt? Let the app read it</label>
+      <input type="file" id="invoice_file" accept=".pdf,.jpg,.jpeg,.png" style="margin-bottom:0;">
+    </div>
+    <button type="button" class="btn secondary" id="invoice_read_btn">Read it and fill the form</button>
+  </div>
+  <div id="invoice_result" class="muted" style="font-size:12.5px; margin-top:8px; display:none;"></div>
+  <div class="muted" style="font-size:12px; margin-top:6px;">The page is read by the Claude service; nothing is saved and the file is not kept. Check every field against the document before you save.</div>
+</div>
+{% endif %}
 <div class="card">
   <form method="post">
     <div class="form-row">
@@ -70,4 +83,37 @@
   });
 })();
 </script>
+{% if not expense %}
+<script>
+(function(){
+  var btn=document.getElementById('invoice_read_btn'), fileEl=document.getElementById('invoice_file'), out=document.getElementById('invoice_result');
+  if(!btn) return;
+  function setVal(id,v){ var el=document.getElementById(id); if(!el||v===''||v==null) return; el.value=v; el.dispatchEvent(new Event('change',{bubbles:true})); el.dispatchEvent(new Event('input',{bubbles:true})); }
+  function say(html,bad){ out.style.display='block'; out.style.color=bad?'#b3261e':''; out.innerHTML=html; }
+  function esc(t){ return String(t).replace(/[&<>"]/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c];}); }
+  btn.addEventListener('click',function(){
+    if(!fileEl.files.length){ say('Choose a file first.',true); return; }
+    var fd=new FormData(); fd.append('file',fileEl.files[0]);
+    btn.disabled=true; say('Reading the document... this can take up to half a minute.');
+    fetch('{{ url_for("expenses.read_invoice") }}',{method:'POST',body:fd,credentials:'same-origin'}).then(function(r){return r.json();}).then(function(d){
+      btn.disabled=false;
+      if(d.status!=='done'){ say(esc(d.message||'Could not read it.'),true); return; }
+      var f=d.fields||{}, sup=d.supplier, notes=[];
+      setVal('expense_date',f.document_date);
+      if(sup){ setVal('supplier_id',String(sup.id)); setVal('supplier',sup.name); if(!f.due_date&&f.document_date&&sup.terms){ var dt=new Date(f.document_date+'T00:00:00'); dt.setDate(dt.getDate()+Number(sup.terms)); setVal('due_date',dt.toISOString().slice(0,10)); } notes.push('Supplier matched to <b>'+esc(sup.name)+'</b> on file.'); }
+      else { setVal('supplier',f.supplier_name); if(f.supplier_name) notes.push('<b>'+esc(f.supplier_name)+'</b> is not on the supplier list: add it first if you want it in the supplier ledger.'); }
+      setVal('reference',f.document_number); setVal('description',f.description);
+      if(f.due_date){ setVal('due_date',f.due_date); setVal('status','Unpaid'); }
+      if(f.currency){ setVal('currency',f.currency); } else if(f.currency_printed){ notes.push('The document shows currency <b>'+esc(f.currency_printed)+'</b>, which is not USD or ZWG: choose the currency yourself.'); }
+      if(f.total_amount){ setVal('amount',f.total_amount.toFixed(2));
+        notes.push('Total on the document: <b>'+f.total_amount.toFixed(2)+'</b>'+(f.tax_amount?' including tax of <b>'+f.tax_amount.toFixed(2)+'</b>. This form wants the cost <u>excluding</u> VAT you can claim back, so change the amount if that applies (without the tax it is '+(f.total_amount-f.tax_amount).toFixed(2)+').':'.')); }
+      else notes.push('No total could be read: type the amount.');
+      if(f.legibility&&f.legibility!=='clear') notes.push('The scan was <b>'+esc(f.legibility)+'</b>: check every figure.');
+      if(f.document_type&&f.document_type!=='invoice'&&f.document_type!=='receipt') notes.push('This looks like a <b>'+esc(f.document_type)+'</b>, not an invoice or receipt.');
+      say('Filled in from the document. Nothing is saved yet. '+notes.join(' '));
+    }).catch(function(){ btn.disabled=false; say('The document could not be read just now. Fill the form in by hand.',true); });
+  });
+})();
+</script>
+{% endif %}
 {% endblock %}

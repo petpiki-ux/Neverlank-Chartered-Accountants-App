@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Policies and Procedures - {{ firm_name }}{% endblock %}
 {% block content %}
+{% from "scan/_macros.html" import scan_note with context %}
 <div class="page-header">
   <div>
     <h1>Policies and Procedures</h1>
@@ -60,6 +61,7 @@
     <p style="margin:0;">
       <strong>{{ policy.title }}</strong>
       <span class="badge">{{ policy.file_ext|upper }}</span>
+      {{ scan_note('policy_document', policy, can_edit) }}
     </p>
     <p class="muted" style="font-size:12.5px;margin:4px 0;">
       {{ policy.description }}

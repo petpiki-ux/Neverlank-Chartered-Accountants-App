@@ -35,7 +35,7 @@ import policy_search
 
 hr_bp = Blueprint("hr", __name__, url_prefix="/hr")
 
-ALLOWED_POLICY_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx"}
+ALLOWED_POLICY_EXTENSIONS = {"pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "jpg", "jpeg", "png"}
 ALLOWED_TIMESHEET_UPLOAD_EXTENSIONS = {"xlsx", "xls", "pdf"}
 
 
@@ -54,7 +54,18 @@ def research_required(f):
     return wrapped
 
 
-def _process_policy_file(policy, filepath, original_name):
+def _read_policy_scan(policy):
+    """A policy that is a scan (no text of its own) is read in the background so the Firm Library can search it."""
+    try:
+        import ocr_reader, scan_text
+        ext = (policy.filename or "").rsplit(".", 1)[-1].lower()
+        if ext in ocr_reader.SCANNABLE_EXTENSIONS and not (policy.extracted_text or "").strip() and ocr_reader.engine_to_use() is not None:
+            scan_text.start("policy_document", policy)
+    except Exception:
+        pass
+
+
+def _process_policy_file(policy, filepath, original_name, keep_scan_text=False):
     """Shared by new_policy/edit_policy: extracts text from the just-saved
     file (file_text_extraction.py - PDF/Word/Excel/PowerPoint), gets an AI
     summary (policy_summary.py) and chunks the extracted text for "Ask the
@@ -64,7 +75,12 @@ def _process_policy_file(policy, filepath, original_name):
     gracefully and is simply shown (or not) on the list page. Does not
     commit - the caller commits."""
     ext = original_name.rsplit(".", 1)[-1].lower() if "." in original_name else ""
-    text, extraction_status, page_count = file_text_extraction.extract_text_for_file(filepath, ext)
+    if keep_scan_text and policy.text_source and (policy.extracted_text or "").strip():
+        # same file, already read from its scan: keep that reading (a plain re-extraction would find no text and wipe it)
+        text, extraction_status, page_count = policy.extracted_text, "extracted", policy.page_count
+    else:
+        text, extraction_status, page_count = file_text_extraction.extract_text_for_file(filepath, ext)
+        policy.text_source = None
     policy.extracted_text = text or None
     policy.extraction_status = extraction_status
     policy.page_count = page_count
@@ -231,7 +247,7 @@ def reprocess_policy_document(policy_id):
         flash("The original file can no longer be found on disk - re-upload it.", "danger")
         return redirect(url_for("hr.list_policies"))
 
-    _process_policy_file(policy, filepath, policy.filename)
+    _process_policy_file(policy, filepath, policy.filename, keep_scan_text=True)
     db.session.commit()
     if policy.ai_status == "done":
         flash("Reprocessed - the AI summary below has been refreshed.", "success")
@@ -269,7 +285,7 @@ def new_policy():
             flash("Please choose a file to upload.", "danger")
             return render_template("hr/policy_form.html", policy=None, categories=POLICY_CATEGORIES)
         if not _allowed_policy_file(file.filename):
-            flash("Only PDF, Word, Excel and PowerPoint files are allowed.", "danger")
+            flash("Only PDF, Word, Excel, PowerPoint and scanned image (JPG, PNG) files are allowed.", "danger")
             return render_template("hr/policy_form.html", policy=None, categories=POLICY_CATEGORIES)
 
         policy = PolicyDocument(
@@ -291,6 +307,7 @@ def new_policy():
 
         _process_policy_file(policy, filepath, original_name)
         db.session.commit()
+        _read_policy_scan(policy)
 
         if policy.ai_status == "done":
             flash(f"'{policy.title}' added to the Policies library - AI summary generated below.", "success")
@@ -321,7 +338,7 @@ def edit_policy(policy_id):
         replaced_file = False
         if file and file.filename != "":
             if not _allowed_policy_file(file.filename):
-                flash("Only PDF, Word, Excel and PowerPoint files are allowed.", "danger")
+                flash("Only PDF, Word, Excel, PowerPoint and scanned image (JPG, PNG) files are allowed.", "danger")
                 return render_template("hr/policy_form.html", policy=policy, categories=POLICY_CATEGORIES)
             old_path = os.path.join(_policies_dir(), policy.filename)
             if os.path.exists(old_path):
@@ -346,6 +363,7 @@ def edit_policy(policy_id):
             # been swapped out.
             _process_policy_file(policy, new_path, original_name)
             db.session.commit()
+            _read_policy_scan(policy)
 
         flash(f"'{policy.title}' updated.", "success")
         return redirect(url_for("hr.list_policies"))

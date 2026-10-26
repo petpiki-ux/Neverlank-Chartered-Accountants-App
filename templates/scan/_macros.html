@@ -1,0 +1,14 @@
+{# "Reading..." / "Read from a scan" markers and the "Read this scan" button for library files that keep their text on their own row. #}
+{% macro scan_note(kind, row, can) %}
+  {% if row.extraction_status == 'reading' %}
+    <span class="badge" title="The scan is being read. Refresh in a minute.">Reading the scan...</span>
+  {% else %}
+    {% if row.text_source %}<span class="badge" title="The words were read from a picture of the page. A smudged letter or digit can be misread, so check names and figures against the original.">Read from a scan</span>{% endif %}
+    {% if can and not row.extracted_text and row.file_ext in ['pdf', 'jpg', 'jpeg', 'png'] %}
+    <form method="post" action="{{ url_for('scan.read_one', kind=kind, item_id=row.id) }}" class="inline">
+      <input type="hidden" name="next" value="{{ request.path }}">
+      <button type="submit" class="btn small secondary" title="Read the words off this scanned file so it can be searched">Read this scan</button>
+    </form>
+    {% endif %}
+  {% endif %}
+{% endmacro %}

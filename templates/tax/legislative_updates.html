@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Legislative Updates - {{ firm_name }}{% endblock %}
 {% block content %}
+{% from "scan/_macros.html" import scan_note with context %}
 <div class="page-header">
   <div>
     <h1>Legislative Update Control</h1>
@@ -127,6 +128,7 @@
       {% endif %}
       {% if u.has_file %}
       <a href="{{ url_for('tax.download_legislative_update', update_id=u.id) }}" class="btn small secondary">Download filed instrument</a>
+      {{ scan_note('legislative_update', u, can_edit) }}
       {% elif u.article_url %}
       <a href="{{ u.article_url }}" target="_blank" rel="noopener">Read original article &#8599;</a>
       {% endif %}

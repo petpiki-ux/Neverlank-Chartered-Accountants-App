@@ -143,6 +143,11 @@ def upload_permanent_file_document(client_id):
     )
     db.session.add(doc)
     db.session.commit()
+    try:
+        import scan_text
+        scan_text.start("permanent_file", doc)
+    except Exception:
+        pass
     flash(f"Filed '{original_name}' (v{version}) to the Permanent File{f' as {doc.reference_code}' if doc.reference_code else ''}.", "success")
     return redirect(url_for("clients.view_client", client_id=client_id))
 

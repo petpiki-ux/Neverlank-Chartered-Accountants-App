@@ -24,6 +24,7 @@
       <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a>
       <a href="{{ url_for('tickmarks.list_tickmarks') }}">Tickmarks</a>
       <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>
+      <a href="{{ url_for('scan.search_documents') }}">Search Documents</a>
       <a href="{{ url_for('regulatory_notices.list_notices') }}">Regulatory Notices</a>
       <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Updates</a>
       <a href="{{ url_for('zimra.list_cases') }}">ZIMRA Matters{% if zimra_overdue_count %} <span class="badge overdue" title="ZIMRA letters past their response deadline">{{ zimra_overdue_count }}</span>{% endif %}{% if zimra_approval_count %} <span class="badge" style="background:#b8923a;color:#fff;" title="Letters to ZIMRA waiting for your approval">{{ zimra_approval_count }}</span>{% endif %}</a>

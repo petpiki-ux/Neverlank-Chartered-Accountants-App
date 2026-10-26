@@ -55,13 +55,19 @@ def upload_filing_archive_document(client_id):
     stored_name = f"client{client_id}_filingarchive_{uuid.uuid4().hex[:10]}_{original_name}"
     file.save(os.path.join(current_app.config["UPLOAD_FOLDER"], stored_name))
 
-    db.session.add(TaxAccountingFilingDocument(
+    filed = TaxAccountingFilingDocument(
         client_id=client_id, section=section, tax_head=tax_head, title=title,
         period_label=period_label, reference=reference,
         original_filename=original_name, stored_filename=stored_name,
         notes=notes, uploaded_by_id=current_user.id,
-    ))
+    )
+    db.session.add(filed)
     db.session.commit()
+    try:
+        import scan_text
+        scan_text.start("filing_archive", filed)
+    except Exception:
+        pass
     flash(f"Filed '{original_name}' to {FILING_ARCHIVE_SECTION_LABELS[section]}.", "success")
     return redirect(url_for("clients.view_client", client_id=client_id))
 

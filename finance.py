@@ -5,7 +5,9 @@ the firm's overall income and costs."""
 from datetime import datetime, date, timedelta
 from functools import wraps
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, abort
+import os
+
+from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, jsonify
 from flask_login import login_required, current_user
 
 from extensions import db
@@ -258,6 +260,38 @@ def list_expenses():
         f_currency=currency, f_category=category, f_status=status, f_month=month, today=date.today(),
         categories=all_categories, statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
     )
+
+
+@expenses_bp.route("/read-invoice", methods=["POST"])
+@finance_required
+def read_invoice():
+    """Read a scanned (or photographed) supplier invoice / receipt and send back what is printed on it, to pre-fill the expense form.
+    Nothing is saved and the file is not kept: a person checks the fields and saves the expense as usual."""
+    import tempfile
+    import ocr_reader
+    from suppliers import find_by_name
+    f = request.files.get("file")
+    if not f or not f.filename:
+        return jsonify({"status": "error", "message": "Choose a file first."}), 400
+    ext = f.filename.rsplit(".", 1)[-1].lower() if "." in f.filename else ""
+    if ext not in ("pdf", "jpg", "jpeg", "png"):
+        return jsonify({"status": "error", "message": "Only PDF, JPG or PNG files can be read."}), 400
+    with tempfile.TemporaryDirectory() as td:
+        path = os.path.join(td, "invoice." + ext)
+        f.save(path)
+        fields, status, error = ocr_reader.read_invoice(path)
+    if status != "done":
+        return jsonify({"status": status, "message": error or "Could not read it."}), (200 if status == "not_configured" else 502)
+    sup = find_by_name(fields.get("supplier_name"))
+    if sup is None and fields.get("supplier_name"):
+        want = " ".join(fields["supplier_name"].lower().split())
+        hits = [x for x in Supplier.query.all() if len(x.name or "") >= 4 and (" ".join(x.name.lower().split()) in want or want in " ".join(x.name.lower().split()))]
+        sup = hits[0] if len(hits) == 1 else None
+    out = {"status": "done", "fields": fields, "supplier": None}
+    if sup is not None:
+        out["supplier"] = {"id": sup.id, "name": sup.name, "currency": sup.currency, "category": sup.default_category or "",
+                           "terms": sup.payment_terms_days or 0, "status": sup.status}
+    return jsonify(out)
 
 
 @expenses_bp.route("/new", methods=["GET", "POST"])

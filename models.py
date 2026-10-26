@@ -2950,6 +2950,7 @@ class PolicyDocument(db.Model):
     extracted_text = db.Column(db.Text)
     extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error", "unsupported_format" - see file_text_extraction.py
     page_count = db.Column(db.Integer)  # rough per-type analogue (sheet/slide count) - informational only
+    text_source = db.Column(db.String(20))  # "scan:tesseract" / "scan:claude" when the text was read from a scanned page (ocr_reader.py); blank = the file's own text
 
     ai_summary = db.Column(db.Text)
     ai_key_points_json = db.Column(db.Text)  # JSON-encoded list of short bullet strings
@@ -6671,6 +6672,7 @@ class LegislativeUpdate(db.Model):
     extracted_text = db.Column(db.Text)
     extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error"
     page_count = db.Column(db.Integer)
+    text_source = db.Column(db.String(20))  # "scan:tesseract" / "scan:claude" when read from a scanned page (ocr_reader.py)
 
     ai_summary = db.Column(db.Text)
     ai_key_changes_json = db.Column(db.Text)  # JSON-encoded list of short bullet strings (for a Case: its key holdings)
@@ -9050,6 +9052,7 @@ class RegulatoryNotice(db.Model):
     extracted_text = db.Column(db.Text)
     extraction_status = db.Column(db.String(20))  # "extracted", "no_text_found", "error"
     page_count = db.Column(db.Integer)
+    text_source = db.Column(db.String(20))  # "scan:tesseract" / "scan:claude" when read from a scanned page (ocr_reader.py)
     notes = db.Column(db.Text)
     uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -11718,3 +11721,34 @@ class DailyUpdate(db.Model):
     @property
     def has_fire(self):
         return bool(self.fire_urgent or (self.client_fires or "").strip())
+
+
+
+# ---------- Text read out of client files (scans included) ----------
+
+SCAN_KINDS = ("engagement_doc", "permanent_file", "filing_archive", "zimra_corr")
+
+
+class ScanText(db.Model):
+    """The text of one uploaded client file, read when it was uploaded so it can be searched ("Search inside documents").
+    A PDF with its own text is read directly; a scan (an image-only PDF, a JPG or PNG) is read by ocr_reader.py. One row per file
+    (kind + item_id); method says how it was read: 'text' (the file's own), 'tesseract' or 'claude' (read from a picture). Text read
+    from a picture can contain mistakes - the search page says so beside every such result."""
+    __tablename__ = "scan_text"
+    __table_args__ = (db.UniqueConstraint("kind", "item_id", name="uq_scan_text_item"),)
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(20), nullable=False)       # one of SCAN_KINDS
+    item_id = db.Column(db.Integer, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), index=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), index=True)
+    title = db.Column(db.String(300))
+    text = db.Column(db.Text)
+    status = db.Column(db.String(20))     # "reading", "extracted", "no_text_found", "not_configured", "error", "unsupported_format"
+    method = db.Column(db.String(12))     # "text", "tesseract", "claude"
+    pages = db.Column(db.Integer)
+    error = db.Column(db.Text)
+    read_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    @property
+    def from_picture(self):
+        return self.method in ("tesseract", "claude")

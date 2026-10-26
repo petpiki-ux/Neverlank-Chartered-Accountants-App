@@ -379,6 +379,12 @@ def add_correspondence(case_id):
         file.save(os.path.join(_files_dir(), stored_name))
         item.original_filename, item.stored_filename = original_name, stored_name
     db.session.commit()
+    if item.stored_filename:
+        try:
+            import scan_text
+            scan_text.start("zimra_corr", item)
+        except Exception:
+            pass
     flash("Correspondence logged." + (f" Reply due {response_due.strftime('%d %b %Y')}." if response_due else ""), "success")
     return _back_to_case(case_id)
 

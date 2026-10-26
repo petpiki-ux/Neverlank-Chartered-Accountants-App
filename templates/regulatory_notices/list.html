@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Regulatory Notices - {{ firm_name }}{% endblock %}
 {% block content %}
+{% from "scan/_macros.html" import scan_note with context %}
 <div class="page-header">
   <div>
     <h1>Regulatory Notices</h1>
@@ -15,8 +16,9 @@
     occasional PDF "Public Notices" and FIU Zimbabwe has no searchable list at all &mdash; so instead, upload
     the notices the firm receives or finds here once. The app extracts the text from each PDF automatically,
     and every "Auto-screen" run on an engagement's Client Acceptance tab searches that text for a name match,
-    in place of a live feed. A scanned/image-only PDF is still kept on file, but has no selectable text to
-    search &mdash; add a note listing the key names it covers instead.
+    in place of a live feed. A scanned or photographed notice (an image-only PDF, or a JPG/PNG) is read
+    with the scan reader, so it is searched too; a reading of a picture can contain mistakes, and it is marked "Read from a scan".
+    If no scan reader is set up, add a note listing the key names it covers instead.
   </p>
 </div>
 
@@ -33,7 +35,7 @@
       </div>
       <div><label for="notice_title">Title</label><input type="text" id="notice_title" name="title" placeholder="e.g. Exchange Control Adverse Notice - March 2026" required></div>
       <div><label for="notice_date">Notice date</label><input type="date" id="notice_date" name="notice_date"></div>
-      <div><label for="notice_file">PDF file</label><input type="file" id="notice_file" name="file" accept=".pdf" required></div>
+      <div><label for="notice_file">PDF or scan (PDF, JPG, PNG)</label><input type="file" id="notice_file" name="file" accept=".pdf,.jpg,.jpeg,.png" required></div>
     </div>
     <label for="notice_notes">Notes (optional)</label>
     <textarea id="notice_notes" name="notes" rows="2" placeholder="e.g. key names this notice covers, reference number"></textarea>
@@ -60,11 +62,14 @@
         <td>
           {% if notice.extraction_status == 'extracted' %}
           <span class="badge risk-Low">Searchable ({{ notice.page_count }} pg)</span>
+          {% elif notice.extraction_status == 'reading' %}
+          <span class="badge">Reading the scan...</span>
           {% elif notice.extraction_status == 'no_text_found' %}
           <span class="badge risk-Medium">No text found (scanned?)</span>
           {% else %}
           <span class="badge risk-High">Couldn't read PDF</span>
           {% endif %}
+          {{ scan_note('regulatory_notice', notice, can_edit) }}
         </td>
         <td class="text-right">
           <a href="{{ url_for('regulatory_notices.download_notice', notice_id=notice.id) }}" class="btn small secondary">Download</a>

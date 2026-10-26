@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Search documents - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Search inside documents</h1>
+  <div class="subtitle">Finds words inside the files uploaded to engagements, the Permanent File, the Filing Archive and ZIMRA correspondence, scanned pages included.</div></div>
+</div>
+<div class="card">
+  <form method="get" style="display:flex; gap:10px; flex-wrap:wrap; align-items:flex-end;">
+    <div style="flex:1; min-width:240px;"><label for="q">Words to find</label><input type="text" id="q" name="q" value="{{ q }}" placeholder="e.g. assessment 2024, a name, an invoice number" style="margin-bottom:0;" autofocus></div>
+    <div><label for="kind">In</label>
+      <select id="kind" name="kind" style="margin-bottom:0; width:auto;" data-nosearch>
+        <option value="">Everything</option>
+        {% for k, label in kind_labels.items() %}<option value="{{ k }}" {% if kind == k %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select></div>
+    <button class="btn gold" type="submit">Search</button>
+  </form>
+  <div class="muted" style="font-size:12px; margin-top:8px;">{{ indexed }} file(s) can be searched{% if reading %} &middot; {{ reading }} being read now{% endif %}{% if unreadable %} &middot; {{ unreadable }} could not be read{% endif %}.
+    Every word you type must appear in the file.</div>
+</div>
+
+{% if q %}
+<div class="card">
+  <h3 class="mt-0">{{ results|length }} result{{ '' if results|length == 1 else 's' }} for &ldquo;{{ q }}&rdquo;</h3>
+  {% if results %}
+  <table>
+    <thead><tr><th>File</th><th>Where</th><th>Found</th></tr></thead>
+    <tbody>
+    {% for r in results %}{% set s = r.st %}
+      <tr>
+        <td>
+          {% if s.kind == 'engagement_doc' %}<a href="{{ url_for('engagements.download_document', doc_id=s.item_id) }}">{{ s.title }}</a>
+          {% elif s.kind == 'permanent_file' %}<a href="{{ url_for('permanent_file.download_permanent_file_document', doc_id=s.item_id) }}">{{ s.title }}</a>
+          {% elif s.kind == 'filing_archive' %}<a href="{{ url_for('filing_archive.download_filing_archive_document', doc_id=s.item_id) }}">{{ s.title }}</a>
+          {% elif s.kind == 'zimra_corr' %}<a href="{{ url_for('zimra.download_correspondence', item_id=s.item_id) }}">{{ s.title }}</a>
+          {% else %}{{ s.title }}{% endif %}
+          {% if s.from_picture %}<div><span class="badge" title="The words were read from a picture of the page. A smudged letter or digit can be misread: check the original.">Read from a scan</span></div>{% endif %}
+        </td>
+        <td class="muted" style="font-size:12.5px;">{{ r.label }}{% if s.client_id %}<br><a href="{{ url_for('clients.view_client', client_id=s.client_id) }}">client page</a>{% endif %}{% if s.engagement_id %} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=s.engagement_id, tab='documents') }}">engagement</a>{% endif %}</td>
+        <td style="font-size:12.5px;">{{ r.snippet }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">Nothing found. Files uploaded before this feature appear here once they have been read (see below).</div>
+  {% endif %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Scan reading</h3>
+  <p class="muted" style="font-size:12.5px;">
+    {% if engine.will_use == 'claude' %}Scans are read with the Claude service (the page images are sent to it).
+    {% elif engine.will_use == 'tesseract' %}Scans are read on this server with Tesseract.
+    {% elif engine.setting == 'off' %}Scan reading is switched off on this server.
+    {% else %}<strong>No scan reader is set up</strong>: scanned pages and photos are filed but not read. Add <code>ANTHROPIC_API_KEY</code> in Render &gt; Environment to switch it on.{% endif %}
+    A reading of a picture can contain mistakes, so a person still checks names and figures against the original.
+  </p>
+  {% if pending %}
+  <p style="font-size:13px;">{{ pending }} earlier file(s) have not been read yet.</p>
+  {% if can_catch_up %}
+  <form method="post" action="{{ url_for('scan.read_all') }}"><button class="btn secondary" type="submit" {% if not engine.will_use %}disabled{% endif %}>Read the earlier files now</button></form>
+  {% else %}<p class="muted" style="font-size:12px;">A Partner or Admin can start reading them.</p>{% endif %}
+  {% endif %}
+</div>
+{% endblock %}

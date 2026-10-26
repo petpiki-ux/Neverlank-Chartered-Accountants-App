@@ -32,6 +32,8 @@ from extensions import db
 from models import RegulatoryNotice, REGULATORY_NOTICE_SOURCES, REGULATORY_NOTICE_SOURCE_LABELS, user_has_permission
 from config import Config
 import sanctions_data
+import ocr_reader
+import scan_text
 
 regulatory_notices_bp = Blueprint("regulatory_notices", __name__, url_prefix="/regulatory-notices")
 
@@ -90,8 +92,8 @@ def upload_notice():
     if not file or file.filename == "":
         flash("Please choose a PDF file to upload.", "danger")
         return redirect(url_for("regulatory_notices.list_notices"))
-    if not file.filename.lower().endswith(".pdf"):
-        flash("Only PDF files are accepted for regulatory notices.", "danger")
+    if not file.filename.lower().rsplit(".", 1)[-1] in ("pdf", "jpg", "jpeg", "png"):
+        flash("Only PDF files, or scans saved as JPG or PNG, are accepted for regulatory notices.", "danger")
         return redirect(url_for("regulatory_notices.list_notices"))
 
     notice_date = None
@@ -121,16 +123,23 @@ def upload_notice():
     notice.original_filename = original_name
     notice.stored_filename = stored_name
 
-    text, status, page_count = sanctions_data.extract_pdf_text(filepath)
+    if original_name.rsplit(".", 1)[-1].lower() in ("jpg", "jpeg", "png"):
+        text, status, page_count = "", "no_text_found", 1          # a picture has no text layer: it goes straight to the scan reader
+    else:
+        text, status, page_count = sanctions_data.extract_pdf_text(filepath)
     notice.extracted_text = text
     notice.extraction_status = status
     notice.page_count = page_count
     db.session.commit()
 
-    if status == "extracted":
+    if status == "no_text_found" and ocr_reader.engine_to_use() is not None:
+        scan_text.start("regulatory_notice", notice)
+        flash(f"'{notice.title}' uploaded. It is a scan, so it is being read now (this can take a minute): refresh the list to see when it is ready. "
+              "Once read it is checked automatically during screening; a reading of a picture can contain mistakes.", "info")
+    elif status == "extracted":
         flash(f"'{notice.title}' uploaded - text extracted from {page_count} page(s); it will be checked automatically during screening.", "success")
     elif status == "no_text_found":
-        flash(f"'{notice.title}' uploaded, but no selectable text was found (likely a scanned image) - it's on file but won't be matched automatically. Consider adding a note with the key names it covers.", "warning")
+        flash(f"'{notice.title}' uploaded, but it is a scan and no scan reader is set up (add ANTHROPIC_API_KEY on Render) - it's on file but won't be matched automatically. Consider adding a note with the key names it covers.", "warning")
     else:
         flash(f"'{notice.title}' uploaded, but the PDF's text couldn't be read - it's on file but won't be matched automatically.", "warning")
     return redirect(url_for("regulatory_notices.list_notices"))

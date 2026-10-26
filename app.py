@@ -228,6 +228,7 @@ def _add_missing_columns():
             ("is_current_version", "BOOLEAN DEFAULT 1"),
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
+        "regulatory_notice": [("text_source", "VARCHAR(20)")],
         "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("cover_primary", "VARCHAR(6)"), ("cover_accent", "VARCHAR(6)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER")],
         # last_seen_at - see models.User.is_online and this file's
         # _update_last_seen - drives the Messages "who's in the app" online
@@ -417,6 +418,7 @@ def _add_missing_columns():
         # practice-area tags, and client-relevance tags. See models.
         # LegislativeUpdate's docstring.
         "legislative_update": [
+            ("text_source", "VARCHAR(20)"),
             ("instrument_type", "VARCHAR(10)"),
             ("gazette_date", "DATE"),
             ("areas_json", "TEXT"),
@@ -454,6 +456,7 @@ def _add_missing_columns():
         # a filed Act/Notice/SI already is. See models.PolicyDocument's
         # docstring.
         "policy_document": [
+            ("text_source", "VARCHAR(20)"),
             ("extracted_text", "TEXT"),
             ("extraction_status", "VARCHAR(20)"),
             ("page_count", "INTEGER"),
@@ -777,6 +780,7 @@ def create_app():
     from filing_index import filing_index_bp
     from permanent_file import permanent_file_bp
     from filing_archive import filing_archive_bp
+    from scan_views import scan_bp
     from tax import tax_bp
     from accounting import accounting_bp
     from qpd import qpd_bp, qpd_dashboard_bp
@@ -821,6 +825,7 @@ def create_app():
     app.register_blueprint(filing_index_bp)
     app.register_blueprint(permanent_file_bp)
     app.register_blueprint(filing_archive_bp)
+    app.register_blueprint(scan_bp)
     app.register_blueprint(tax_bp)
     app.register_blueprint(accounting_bp)
     app.register_blueprint(qpd_bp)

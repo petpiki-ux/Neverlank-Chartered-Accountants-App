@@ -2263,6 +2263,15 @@ def _save_engagement_document(engagement_id, file, category, reference, notes, s
     return doc, version
 
 
+def _read_new_file(kind, row):
+    """Read the text of a file just uploaded (its own text, or read from a scan) so it can be searched. Never blocks or fails an upload."""
+    try:
+        import scan_text
+        scan_text.start(kind, row)
+    except Exception:
+        pass
+
+
 @engagements_bp.route("/<int:engagement_id>/documents/upload", methods=["POST"])
 @login_required
 def upload_document(engagement_id):
@@ -2286,6 +2295,7 @@ def upload_document(engagement_id):
         filing_index_id=filing_index_id,
     )
     db.session.commit()
+    _read_new_file("engagement_doc", doc)
     flash(f"Uploaded '{doc.original_filename}' (v{version}).", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="documents"))
 
@@ -2322,6 +2332,7 @@ def upload_substantive_area_document(engagement_id, area_name):
         substantive_area_id=area.id, filing_index_id=filing_index_id,
     )
     db.session.commit()
+    _read_new_file("engagement_doc", doc)
     flash(f"Filed '{doc.original_filename}' (v{version}) under {area_name}.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="substantive"))
 

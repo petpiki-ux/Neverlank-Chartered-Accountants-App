@@ -2484,6 +2484,12 @@ def add_legislative_update(engagement_id=None):
 
     db.session.commit()
 
+    # a scanned instrument has no text of its own: read it in the background so it becomes searchable ("Ask the library")
+    if update.stored_filename and not (update.extracted_text or "").strip():
+        import ocr_reader, scan_text
+        if ocr_reader.engine_to_use() is not None:
+            scan_text.start("legislative_update", update)
+
     if update.ai_status == "done" and instrument_type == "Case":
         flash(f"'{update.title}' filed - AI analysis generated below, including a suggested authority assessment. Confirm the authority status and practice areas, then tag any clients it affects.", "success")
     elif update.ai_status == "done":

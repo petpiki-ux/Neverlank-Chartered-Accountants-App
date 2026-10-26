@@ -19,8 +19,8 @@
     <label for="description">Description</label>
     <textarea id="description" name="description">{{ policy.description if policy else '' }}</textarea>
 
-    <label for="file">{% if policy %}Replace file (leave blank to keep the current one){% else %}File (PDF, Word, Excel or PowerPoint) *{% endif %}</label>
-    <input type="file" id="file" name="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx" {% if not policy %}required{% endif %}>
+    <label for="file">{% if policy %}Replace file (leave blank to keep the current one){% else %}File (PDF, Word, Excel, PowerPoint, or a scan as JPG/PNG) *{% endif %}</label>
+    <input type="file" id="file" name="file" accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.jpg,.jpeg,.png" {% if not policy %}required{% endif %}>
     {% if policy %}
     <p class="muted" style="font-size:12.5px;">Current file: {{ policy.filename }}</p>
     {% endif %}
