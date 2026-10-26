@@ -4498,6 +4498,7 @@
     {% if engagement.type != 'Business Intelligence and IT Engagements' %}
     <h4 class="mt-0" style="margin-bottom:4px;">Financial statements (Word, Ref. {{ filing_reference('financials') }})</h4>
     <form method="post" action="{{ url_for('engagements.generate_financial_statements_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    <a href="{{ url_for('clients.cover_preview', client_id=engagement.client_id) }}" target="_blank" class="muted" style="font-size:12px; margin-left:8px;">Preview the cover page</a>
     {{ filed_workpapers('financial_statements') }}
 
     <h4 style="margin-bottom:4px;margin-top:16px;">Trial balance &amp; adjustments (Excel, Ref. N1000)</h4>

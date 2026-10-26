@@ -228,7 +228,7 @@ def _add_missing_columns():
             ("is_current_version", "BOOLEAN DEFAULT 1"),
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
-        "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER")],
+        "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("cover_primary", "VARCHAR(6)"), ("cover_accent", "VARCHAR(6)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER")],
         # last_seen_at - see models.User.is_online and this file's
         # _update_last_seen - drives the Messages "who's in the app" online
         # indicator.

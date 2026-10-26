@@ -30,7 +30,7 @@
 
 <div class="card">
   <h3 class="mt-0">Client logo</h3>
-  <p class="muted" style="font-size:12px;">Shown on this client's Financial Statements cover page (not on any firm-branded letterhead, which always uses Neverlank's own logo).</p>
+  <p class="muted" style="font-size:12px;">Shown on this client's Financial Statements cover page, whose colours follow the logo (not on any firm-branded letterhead, which always uses Neverlank's own logo).</p>
   <div class="form-row" style="align-items:center;">
     <div>
       {% if client.logo_filename %}
@@ -50,6 +50,21 @@
       </form>
       {% endif %}
     </div>
+  </div>
+  <div style="display:flex; gap:22px; flex-wrap:wrap; margin-top:14px; align-items:flex-start;">
+    <div>
+      <div class="muted" style="font-size:12px; margin-bottom:4px;">Cover page preview ({{ 'colours typed below' if client.cover_primary else ('colours taken from the logo' if client.logo_filename else 'firm colours - no logo yet') }})</div>
+      <a href="{{ url_for('clients.cover_preview', client_id=client.id) }}" target="_blank"><img src="{{ url_for('clients.cover_preview', client_id=client.id) }}" alt="Financial Statements cover preview" style="width:190px; border:1px solid var(--border); border-radius:4px; box-shadow:0 2px 8px rgba(15,41,66,.15);"></a>
+    </div>
+    <form method="post" action="{{ url_for('clients.save_cover_colours', client_id=client.id) }}" style="flex:1; min-width:260px; max-width:420px;">
+      <p class="muted" style="font-size:12px; margin-top:0;">The cover's colours are taken from the logo automatically. If they come out wrong (a logo on a white box, a faded scan), type the right ones here; leave both blank to follow the logo.</p>
+      <div class="form-row">
+        <div><label for="cover_primary">Main colour (hex)</label><input type="text" id="cover_primary" name="cover_primary" maxlength="7" placeholder="e.g. 1F4E9C" value="{{ client.cover_primary or '' }}"></div>
+        <div><label for="cover_accent">Second colour (hex)</label><input type="text" id="cover_accent" name="cover_accent" maxlength="7" placeholder="e.g. F28C28" value="{{ client.cover_accent or '' }}"></div>
+      </div>
+      <button type="submit" class="btn small secondary">Save colours</button>
+      {% if client.cover_primary or client.cover_accent %}<button type="submit" name="reset" value="1" class="btn small">Use the logo's colours</button>{% endif %}
+    </form>
   </div>
 </div>
 

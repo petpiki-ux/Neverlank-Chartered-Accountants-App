@@ -347,6 +347,50 @@ def remove_client_logo(client_id):
     return redirect(url_for("clients.view_client", client_id=client_id))
 
 
+@clients_bp.route("/<int:client_id>/cover-colours", methods=["POST"])
+@login_required
+def save_cover_colours(client_id):
+    """Colours for the Financial Statements cover typed by a person, replacing the ones taken from the logo. Blank = back to the logo."""
+    import cover_art
+    client = Client.query.get_or_404(client_id)
+    if request.form.get("reset"):
+        client.cover_primary = client.cover_accent = None
+        db.session.commit()
+        flash("Cover colours reset - they will be taken from the logo again.", "success")
+        return redirect(url_for("clients.view_client", client_id=client_id))
+    main = (request.form.get("cover_primary") or "").strip().lstrip("#")
+    accent = (request.form.get("cover_accent") or "").strip().lstrip("#")
+    if (main and not cover_art.valid_hex(main)) or (accent and not cover_art.valid_hex(accent)):
+        flash("A cover colour must be a 6-digit hex code such as 1F4E9C.", "danger")
+        return redirect(url_for("clients.view_client", client_id=client_id))
+    client.cover_primary = main.upper() or None
+    client.cover_accent = accent.upper() or None
+    db.session.commit()
+    flash("Cover colours saved.", "success")
+    return redirect(url_for("clients.view_client", client_id=client_id))
+
+
+@clients_bp.route("/<int:client_id>/cover-preview.png")
+@login_required
+def cover_preview(client_id):
+    """A picture of what this client's Financial Statements cover will look like now (latest engagement's year end), A4."""
+    import cover_art
+    from flask import send_file
+    client = Client.query.get_or_404(client_id)
+    ends = sorted([e.period_end for e in client.engagements if e.period_end])
+    period_end = ends[-1] if ends else date(date.today().year, 12, 31)
+    framework = None
+    for e in sorted(client.engagements, key=lambda e: e.period_end or date.min, reverse=True):
+        framework = cover_art.FRAMEWORK_LABELS.get(e.reporting_framework)
+        break
+    pal = cover_art.palette_for_client(client)
+    png = cover_art.render_cover(client.name, period_end, pal, logo_path=cover_art.logo_path_for(client),
+                                 reg_no=client.company_number, framework=framework, width_px=900)
+    resp = send_file(png, mimetype="image/png")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
 @clients_bp.route("/<int:client_id>/logo")
 @login_required
 def client_logo_image(client_id):

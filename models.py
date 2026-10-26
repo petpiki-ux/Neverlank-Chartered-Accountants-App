@@ -1835,6 +1835,9 @@ class Client(db.Model):
     # accumulated, each time a new one is uploaded), same pattern as
     # CompanyDocument's own file storage.
     logo_filename = db.Column(db.String(255))
+    # Colours typed for the Financial Statements cover (6-digit hex, no '#'); blank = take them from the logo (cover_art.py).
+    cover_primary = db.Column(db.String(6))
+    cover_accent = db.Column(db.String(6))
 
     engagements = db.relationship("Engagement", backref="client", lazy=True, cascade="all, delete-orphan")
 
