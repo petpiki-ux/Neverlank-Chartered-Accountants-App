@@ -8585,10 +8585,17 @@ COMPANY_DOCUMENT_TYPES = [
     "CR5 - Notice of Situation of Registered Office",
     "Company Summary",
     "Share Register / Share Certificates",
+    "CR9 - Share Transfer Form",
     "Beneficial Ownership Declaration",
     "Director/Shareholder ID Documents",
     "Other",
 ]
+
+# Document types that are filed (Company Documents list and Permanent File) but NOT read for people. A share transfer form names
+# the person giving up shares as well as the person receiving them; suggesting both as shareholders would put someone who no longer
+# holds shares on the list, so a person updates the shareholders by hand from it (the transferee takes the shares, the transferor's
+# holding falls or ends).
+COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE = {"CR9 - Share Transfer Form"}
 
 # Which Permanent File (P-series) FilingIndexSection a Company Document is
 # automatically filed under the moment it's uploaded (see
@@ -8612,6 +8619,7 @@ COMPANY_DOCUMENT_TYPE_TO_FILING_CODE = {
     "CR5 - Notice of Situation of Registered Office": "P1000",
     "Company Summary": "P1000",
     "Share Register / Share Certificates": "P5000",
+    "CR9 - Share Transfer Form": "P5000",
     "Beneficial Ownership Declaration": "P5000",
     "Director/Shareholder ID Documents": "P5000",
     "Other": None,

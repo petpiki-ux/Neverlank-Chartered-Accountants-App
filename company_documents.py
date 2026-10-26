@@ -37,7 +37,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     Client, CompanyDocument, ClientKeyPerson, EntityPublicResearch, PermanentFileDocument,
-    COMPANY_DOCUMENT_TYPES, COMPANY_DOCUMENT_TYPE_TO_FILING_CODE, PERSON_ROLES, PERSON_STATUSES, PUBLIC_RESEARCH_SCOPES,
+    COMPANY_DOCUMENT_TYPES, COMPANY_DOCUMENT_TYPE_TO_FILING_CODE, COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE, PERSON_ROLES, PERSON_STATUSES, PUBLIC_RESEARCH_SCOPES,
     user_has_permission,
 )
 from config import Config
@@ -156,6 +156,16 @@ def upload_document(client_id):
         except OSError:
             pass
 
+    if document_type in COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE:
+        # a share transfer form names the person leaving as well as the person arriving - not read for people (see models)
+        doc.ai_status = "skipped"
+        doc.ai_error = None
+        doc.ai_processed_at = datetime.utcnow()
+        db.session.commit()
+        flash(f"'{doc.title}' uploaded.{permanent_file_note or ''} It is not read for people, because a transfer names the person giving up shares as well as the one receiving them: "
+              "update the shareholders below by hand (the transferee takes the shares, the transferor's holding falls or ends).", "success")
+        return redirect(url_for("clients.view_client", client_id=client_id))
+
     people, ai_status, ai_error = entity_extraction.extract_people_from_document(
         filepath, is_image, doc.extracted_text, doc.extraction_status,
     )
@@ -203,6 +213,9 @@ def reprocess_document(doc_id):
         flash("The original file can no longer be found on disk - re-upload the document.", "danger")
         return redirect(url_for("clients.view_client", client_id=doc.client_id))
 
+    if doc.document_type in COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE:
+        flash("A share transfer form is not read for people: update the shareholders by hand.", "info")
+        return redirect(url_for("clients.view_client", client_id=doc.client_id))
     is_image = doc.file_ext in IMAGE_EXTENSIONS
     people, ai_status, ai_error = entity_extraction.extract_people_from_document(
         filepath, is_image, doc.extracted_text, doc.extraction_status,

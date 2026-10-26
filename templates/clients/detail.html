@@ -116,7 +116,7 @@
 <div class="card">
   <h3 class="mt-0">Company Documents</h3>
   <p class="muted" style="font-size:12px;">
-    Upload this client's incorporation documents, CR6, share register, etc. once here - every engagement's Client
+    Upload this client's incorporation documents, CR6, share register, CR9 share transfer forms, etc. once here - every engagement's Client
     Acceptance tab reuses the same Directors &amp; Shareholders list below, rather than re-entering it each time. The
     app reads the text out of each document automatically, including scanned/photographed pages (via the Claude API),
     and suggests every Director/Shareholder/Beneficial Owner/Company Secretary it finds for review below. Incorporation,
@@ -138,6 +138,8 @@
         <td>
           {% if doc.ai_status == 'done' %}
           <span class="badge risk-Low">Read - {{ doc.extracted_people|length }} suggested</span>
+          {% elif doc.ai_status == 'skipped' %}
+          <span class="badge" title="A transfer names the person giving up shares as well as the one receiving them, so it is filed but not read for people.">Filed - update shareholders by hand</span>
           {% elif doc.ai_status == 'not_configured' %}
           <span class="badge risk-Medium">Automatic reading not set up</span>
           {% elif doc.ai_status == 'error' %}
@@ -149,7 +151,7 @@
         <td class="text-right">
           <a href="{{ url_for('company_documents.download_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
           {% if can_manage_company_documents %}
-          {% if doc.ai_status != 'done' %}
+          {% if doc.ai_status not in ('done', 'skipped') %}
           <form method="post" action="{{ url_for('company_documents.reprocess_document', doc_id=doc.id) }}" style="display:inline;"><button type="submit" class="btn small secondary">Reprocess</button></form>
           {% endif %}
           <form method="post" action="{{ url_for('company_documents.delete_document', doc_id=doc.id) }}" style="display:inline;" onsubmit="return confirm('Delete this document? This cannot be undone.');">
@@ -173,13 +175,24 @@
           {% for t in company_document_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
         </select>
       </div>
-      <div><label for="doc_title">Title (optional)</label><input type="text" id="doc_title" name="title" placeholder="Defaults to the document type"></div>
+      <div><label for="doc_title">Title (optional)</label><input type="text" id="doc_title" name="title" placeholder="Defaults to the document type; for a transfer, say who to whom and the date"></div>
       <div><label for="doc_file">File (PDF, JPG or PNG)</label><input type="file" id="doc_file" name="file" accept=".pdf,.png,.jpg,.jpeg" required></div>
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
     </div>
+    <p id="doc_type_hint" class="muted" style="font-size:12px; display:none; margin:0 0 8px;">
+      A CR9 share transfer form is filed here and to the Permanent File (P5000), but it is not read for people: it names the person giving up shares as well as the one receiving them. After uploading it, update the shareholders below by hand.
+    </p>
     <label for="doc_notes">Notes (optional)</label>
     <textarea id="doc_notes" name="notes" rows="2"></textarea>
   </form>
+  <script>
+    (function () {
+      var sel = document.getElementById('doc_type'), hint = document.getElementById('doc_type_hint');
+      if (!sel || !hint) return;
+      function sync() { hint.style.display = /^CR9\b/.test(sel.value) ? 'block' : 'none'; }
+      sel.addEventListener('change', sync); sync();
+    })();
+  </script>
   {% endif %}
 </div>
 
