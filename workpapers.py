@@ -290,6 +290,29 @@ def _cover_page(doc, engagement):
         _plain_cover_page(doc, engagement)
 
 
+
+def _start_notes_section(doc, engagement):
+    """The Notes to the Financial Statements begin on a new page in their own section, whose running header repeats on every notes page:
+    the entity's name, "NOTES TO THE FINANCIAL STATEMENTS" and the year-end line, over a thin blue rule. The footer stays the pack's footer."""
+    from docx.enum.section import WD_SECTION
+    sec = doc.add_section(WD_SECTION.NEW_PAGE)
+    sec.different_first_page_header_footer = False          # the cover's "no header/footer on page 1" is not inherited
+    client = engagement.client
+    brand.statement_page_header(sec, [
+        (client.name if client else "").upper(),
+        "NOTES TO THE FINANCIAL STATEMENTS",
+        f"For the year ended {_fmt_date(engagement.period_end)}",
+    ])
+
+
+def _end_notes_section(doc):
+    """What follows the notes (the app's own sign-off record) is not a note: it goes in a section with no running header."""
+    from docx.enum.section import WD_SECTION
+    sec = doc.add_section(WD_SECTION.CONTINUOUS)
+    sec.different_first_page_header_footer = False
+    brand.blank_page_header(sec)
+
+
 def _client_details_and_toc_page(doc, engagement, client_key_people, toc_sections):
     """Client Details (registered name, company number, registered address,
     directors, company secretary) and a Table of Contents, together on the
@@ -346,6 +369,29 @@ def _directors_statement_section(doc, directors_statement, engagement=None):
     doc.add_page_break()
 
 
+
+def _opinion_signoff(doc, report_date):
+    """The signing block under the auditor's/reviewer's report: a line to sign on, then the signing auditor, the PAAB / ICAZ numbers, the firm
+    with its PAAB firm number, the place and the date of the report. Kept together on one page."""
+    for _ in range(2):                                   # room for the signature
+        sp = doc.add_paragraph()
+        sp.paragraph_format.space_after = Pt(0)
+        sp.paragraph_format.keep_with_next = True
+    lines = [
+        "\u2026" * 42,
+        brand.AUDITOR_SIGNOFF_NAME,
+        f"(PAAB Practice Certificate No {brand.AUDITOR_PAAB_CERT_NO}, ICAZ No {brand.AUDITOR_ICAZ_NO})",
+        f"{FIRM_NAME} PAAB Firm No. {brand.FIRM_PAAB_NO}",
+        "Harare, Zimbabwe",
+        _fmt_date(report_date),
+    ]
+    for i, text in enumerate(lines):
+        p = doc.add_paragraph(text)
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(0)
+        p.paragraph_format.keep_with_next = i < len(lines) - 1
+
+
 def _audit_opinion_section(doc, audit_opinion):
     is_audit = (audit_opinion.report_basis if audit_opinion else "audit") != "review"
     _add_heading(doc, "Independent Auditor's Report" if is_audit else "Independent Reviewer's Report", level=1)
@@ -365,10 +411,7 @@ def _audit_opinion_section(doc, audit_opinion):
     doc.add_paragraph(audit_opinion.management_responsibility_paragraph or "")
     _add_heading(doc, "Auditor's Responsibility" if is_audit else "Reviewer's Responsibility", level=2)
     doc.add_paragraph(audit_opinion.auditor_responsibility_paragraph or "")
-    doc.add_paragraph()
-    doc.add_paragraph(FIRM_NAME)
-    doc.add_paragraph(FIRM_ADDRESS)
-    doc.add_paragraph(_fmt_date(audit_opinion.report_date))
+    _opinion_signoff(doc, audit_opinion.report_date)
     doc.add_page_break()
 
 
@@ -543,7 +586,10 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     variance_note = "Ties out to the trial balance." if abs(cf["variance"]) <= 0.01 else f"Computed closing cash differs from the trial balance by {_fmt_num(cf['variance'])} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust."
     doc.add_paragraph(variance_note).runs[0].italic = True
 
+    notes_started = False
     if is_ifrs_framework:
+        _start_notes_section(doc, engagement)
+        notes_started = True
         _add_heading(doc, "Notes to the Financial Statements", level=1)
 
         _add_heading(doc, "1. General information", level=2)
@@ -590,10 +636,14 @@ def build_financial_statements_docx(engagement, statements, financial_statements
             for para in financial_statements.notes_to_financial_statements.split("\n"):
                 doc.add_paragraph(para)
     elif financial_statements and financial_statements.notes_to_financial_statements:
+        _start_notes_section(doc, engagement)
+        notes_started = True
         _add_heading(doc, "Notes to the Financial Statements", level=1)
         for para in financial_statements.notes_to_financial_statements.split("\n"):
             doc.add_paragraph(para)
 
+    if notes_started:
+        _end_notes_section(doc)
     _add_heading(doc, "Sign-off", level=2)
     if financial_statements:
         doc.add_paragraph(

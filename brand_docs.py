@@ -50,6 +50,11 @@ SIGNATURE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "brand
 MP_NAME = "Petros Piki"
 MP_CREDENTIALS = "CA(Z), MSc, RPA, RTA"
 MP_TITLE = "Managing Partner"
+# The signing block under an Independent Auditor's / Reviewer's Report (workpapers._audit_opinion_section).
+AUDITOR_SIGNOFF_NAME = "Petros Piki, CA(Z), MSc, RPA"
+AUDITOR_PAAB_CERT_NO = "0625"
+AUDITOR_ICAZ_NO = "254069"
+FIRM_PAAB_NO = "Z10110"
 _sig_cache = {"mtime": None, "bytes": None, "uri": None}
 
 
@@ -402,6 +407,38 @@ def setup_document(doc, margins_in=0.9, base_size=10.5):
         st.paragraph_format.space_before = Pt(14 if name == "Heading 1" else 10)
         st.paragraph_format.space_after = Pt(5)
         st.paragraph_format.keep_with_next = True
+
+
+
+def statement_page_header(section, lines, rule_colour="2E75B6", size=13):
+    """A plain running page header for one section of a document: the given lines (entity name, statement title, period) one under the other
+    in the body font, with a thin coloured rule under the last. Unlinks the section's header from the previous section so only this
+    section (and any later one that links to it) carries it."""
+    header = section.header
+    header.is_linked_to_previous = False
+    for p in list(header.paragraphs)[1:]:
+        p._p.getparent().remove(p._p)
+    first = header.paragraphs[0]
+    for r in list(first.runs):
+        r._r.getparent().remove(r._r)
+    for i, text in enumerate(lines):
+        p = first if i == 0 else header.add_paragraph(style=first.style)
+        p.alignment = WD_ALIGN_PARAGRAPH.LEFT
+        _tight(p, before=0, after=2 if i < len(lines) - 1 else 0)
+        _run(p, text, size=size, colour=INK)
+        if i == len(lines) - 1:
+            para_border(p, "bottom", rule_colour, size=6, space=4)
+    section.header_distance = Inches(0.35)
+
+
+def blank_page_header(section):
+    """An empty header for this section (it does not carry on the previous section's header)."""
+    header = section.header
+    header.is_linked_to_previous = False
+    for p in list(header.paragraphs)[1:]:
+        p._p.getparent().remove(p._p)
+    for r in list(header.paragraphs[0].runs):
+        r._r.getparent().remove(r._r)
 
 
 def branded_footer(doc, firm=None, center=None):
