@@ -85,6 +85,9 @@
 </script>
 {% if not expense %}
 <script>
+  function money2(v) { return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+</script>
+<script>
 (function(){
   var btn=document.getElementById('invoice_read_btn'), fileEl=document.getElementById('invoice_file'), out=document.getElementById('invoice_result');
   if(!btn) return;
@@ -106,7 +109,7 @@
       if(f.due_date){ setVal('due_date',f.due_date); setVal('status','Unpaid'); }
       if(f.currency){ setVal('currency',f.currency); } else if(f.currency_printed){ notes.push('The document shows currency <b>'+esc(f.currency_printed)+'</b>, which is not USD or ZWG: choose the currency yourself.'); }
       if(f.total_amount){ setVal('amount',f.total_amount.toFixed(2));
-        notes.push('Total on the document: <b>'+f.total_amount.toFixed(2)+'</b>'+(f.tax_amount?' including tax of <b>'+f.tax_amount.toFixed(2)+'</b>. This form wants the cost <u>excluding</u> VAT you can claim back, so change the amount if that applies (without the tax it is '+(f.total_amount-f.tax_amount).toFixed(2)+').':'.')); }
+        notes.push('Total on the document: <b>'+money2(f.total_amount)+'</b>'+(f.tax_amount?' including tax of <b>'+money2(f.tax_amount)+'</b>. This form wants the cost <u>excluding</u> VAT you can claim back, so change the amount if that applies (without the tax it is '+(f.total_amount-f.tax_amount).toFixed(2)+').':'.')); }
       else notes.push('No total could be read: type the amount.');
       if(f.legibility&&f.legibility!=='clear') notes.push('The scan was <b>'+esc(f.legibility)+'</b>: check every figure.');
       if(f.document_type&&f.document_type!=='invoice'&&f.document_type!=='receipt') notes.push('This looks like a <b>'+esc(f.document_type)+'</b>, not an invoice or receipt.');

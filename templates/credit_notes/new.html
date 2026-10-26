@@ -38,7 +38,7 @@
           <tr>
             <td><input type="text" name="description" value="{{ desc }}" maxlength="300"></td>
             <td><input type="number" name="quantity" step="any" min="0" value="{{ '%g'|format(qty) }}" class="text-right"></td>
-            <td><input type="number" name="unit_price" step="0.01" min="0" value="{{ '%.2f'|format(price) }}" class="text-right"></td>
+            <td><input type="number" name="unit_price" step="0.01" min="0" value="{{ '%.2f'|plainfmt(price) }}" class="text-right"></td>
             <td class="text-right cn-amt">0.00</td>
           </tr>
           {% endfor %}

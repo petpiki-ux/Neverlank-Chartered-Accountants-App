@@ -101,7 +101,7 @@
     <tbody>
     {% for r in ff %}
       <tr><td>{{ r.label }}</td><td class="n">{{ r.low|cfn }}</td><td class="n">{{ r.mid|cfn }}</td><td class="n">{{ r.high|cfn }}</td>
-        <td><div class="cf-range"><div class="bar" style="left:{{ '%.1f'|format(r.left) }}%;width:{{ '%.1f'|format(r.width) }}%;"></div><div class="mid" style="left:{{ '%.1f'|format(r.mid_at) }}%;"></div></div></td></tr>
+        <td><div class="cf-range"><div class="bar" style="left:{{ '%.1f'|plainfmt(r.left) }}%;width:{{ '%.1f'|plainfmt(r.width) }}%;"></div><div class="mid" style="left:{{ '%.1f'|plainfmt(r.mid_at) }}%;"></div></div></td></tr>
     {% endfor %}
     </tbody>
   </table></div>

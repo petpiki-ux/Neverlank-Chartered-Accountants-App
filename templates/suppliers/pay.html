@@ -23,7 +23,7 @@
     <tr><td>{{ e.expense_date.strftime('%d %b %Y') }}</td><td>{{ e.reference or ('EXP-' ~ e.id) }}</td><td>{{ e.category }}{% if e.description %} - {{ e.description }}{% endif %}</td>
       <td {% if b.due < today %}style="color:var(--danger);"{% endif %}>{{ b.due.strftime('%d %b %Y') }}</td>
       <td class="num">{{ '{:,.2f}'.format(b.left) }}</td>
-      <td class="num"><input type="number" step="0.01" min="0" max="{{ b.left }}" class="payamt" data-left="{{ '%.2f'|format(b.left) }}" name="amt_{{ e.id }}" style="width:130px;text-align:right;" value="{{ form.get('amt_' ~ e.id, '') if form else ('%.2f'|format(b.left) if pre_id == e.id else '') }}">
+      <td class="num"><input type="number" step="0.01" min="0" max="{{ b.left }}" class="payamt" data-left="{{ '%.2f'|plainfmt(b.left) }}" name="amt_{{ e.id }}" style="width:130px;text-align:right;" value="{{ form.get('amt_' ~ e.id, '') if form else ('%.2f'|plainfmt(b.left) if pre_id == e.id else '') }}">
         <a href="#" class="payfull" style="font-size:11px;">full</a></td></tr>
     {% endfor %}
     <tr><td colspan="5" style="text-align:right;"><strong>Total this payment</strong></td><td class="num"><strong id="paytotal">0.00</strong></td></tr>

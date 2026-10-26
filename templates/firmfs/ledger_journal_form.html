@@ -48,18 +48,21 @@
 </form>
 
 <script>
+  function money2(v) { return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+</script>
+<script>
 (function () {
   var body = document.querySelector('#jlines tbody');
   function num(v) { var n = parseFloat(v); return isNaN(n) ? 0 : n; }
   function totals() {
     var dr = 0, cr = 0;
     body.querySelectorAll('.jrow').forEach(function (r) { dr += num(r.querySelector('.jdr').value); cr += num(r.querySelector('.jcr').value); });
-    document.getElementById('tdr').textContent = dr.toFixed(2);
-    document.getElementById('tcr').textContent = cr.toFixed(2);
+    document.getElementById('tdr').textContent = money2(dr);
+    document.getElementById('tcr').textContent = money2(cr);
     var diff = Math.round((dr - cr) * 100) / 100, el = document.getElementById('tdiff');
     if (dr === 0 && cr === 0) { el.textContent = ''; }
     else if (diff === 0) { el.innerHTML = '<span class="badge status-Paid">Balanced</span>'; }
-    else { el.innerHTML = '<span class="badge overdue">Out of balance by ' + Math.abs(diff).toFixed(2) + (diff > 0 ? ' (credit needed)' : ' (debit needed)') + '</span>'; }
+    else { el.innerHTML = '<span class="badge overdue">Out of balance by ' + money2(Math.abs(diff)) + (diff > 0 ? ' (credit needed)' : ' (debit needed)') + '</span>'; }
   }
   body.addEventListener('input', function (e) {
     var row = e.target.closest('.jrow');

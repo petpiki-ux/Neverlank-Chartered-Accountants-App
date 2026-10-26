@@ -12,7 +12,7 @@
     <div><label>Currency</label><select name="currency">{% for c in currencies %}<option {% if currency == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
     <div><label>From</label><input type="date" name="from" value="{{ start.isoformat() }}"></div>
     <div><label>To</label><input type="date" name="to" value="{{ end.isoformat() }}"></div>
-    <div><label>Their statement says we owe</label><input type="number" step="0.01" name="their_balance" value="{{ '' if theirs is none else '%.2f'|format(theirs) }}" placeholder="optional" style="width:150px;"></div>
+    <div><label>Their statement says we owe</label><input type="number" step="0.01" name="their_balance" value="{{ '' if theirs is none else '%.2f'|plainfmt(theirs) }}" placeholder="optional" style="width:150px;"></div>
     <div><button class="btn small" type="submit">Show</button></div>
   </form>
 </div>
