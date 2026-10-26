@@ -572,7 +572,10 @@ def _add_missing_columns():
         "coa_mapping": [("coa_account_number", "VARCHAR(20)")],
         # registration_date / last_agm_date - see models.SecretarialPlan (COBE Act s165(2) and s167(2)).
         "secretarial_plan": [("registration_date", "DATE"), ("last_agm_date", "DATE")],
-        "trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
+        "trial_balance_line": [("coa_account_number", "VARCHAR(20)"), ("sub_category", "VARCHAR(100)")],
+        # sub_category / needs_review / added_by_id / added_from_engagement_id - see models.StandardChartOfAccounts and FSSubCategory.
+        "standard_chart_of_accounts": [("sub_category", "VARCHAR(100)"), ("needs_review", "BOOLEAN DEFAULT 0"),
+                                       ("added_by_id", "INTEGER"), ("added_from_engagement_id", "INTEGER")],
         "qpd_trial_balance_line": [("coa_account_number", "VARCHAR(20)")],
         # recurring_invoice_id / recurrence_index - see models.RecurringInvoice:
         # set on invoices raised by a recurring schedule.
@@ -785,6 +788,7 @@ def create_app():
     from accounting import accounting_bp
     from qpd import qpd_bp, qpd_dashboard_bp
     from standard_coa import standard_coa_bp
+    from tb_setup import tb_setup_bp
     from whistleblower import wb_bp, wb_public_bp
     from training import training_bp
 
@@ -831,6 +835,7 @@ def create_app():
     app.register_blueprint(qpd_bp)
     app.register_blueprint(qpd_dashboard_bp)
     app.register_blueprint(standard_coa_bp)
+    app.register_blueprint(tb_setup_bp)
     app.register_blueprint(wb_bp)
     app.register_blueprint(wb_public_bp)
 

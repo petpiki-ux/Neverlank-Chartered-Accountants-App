@@ -18,10 +18,58 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required, current_user
 
 from extensions import db
-from models import StandardChartOfAccounts, user_has_permission
+from models import StandardChartOfAccounts, FSSubCategory, user_has_permission
 import financials as fin
 
 standard_coa_bp = Blueprint("standard_coa", __name__, url_prefix="/chart-of-accounts")
+
+
+# ---------------------------------------------------------------- the firm's own categories (see models.FSSubCategory)
+def clean_sub_label(label):
+    return " ".join((label or "").split())[:100]
+
+
+def get_or_create_sub(parent_code, label, user_id=None):
+    """The FSSubCategory called `label` under IAS 1 category `parent_code` (matched ignoring case), created if new. Returns its label as stored,
+    or None for a blank label or an unknown parent. Does not commit."""
+    label = clean_sub_label(label)
+    if not label or parent_code not in fin.CATEGORY_BY_CODE or parent_code == "excluded":
+        return None
+    for sub in FSSubCategory.query.filter_by(parent_code=parent_code).all():
+        if sub.label.lower() == label.lower():
+            if not sub.is_active:
+                sub.is_active = True
+            return sub.label
+    db.session.add(FSSubCategory(parent_code=parent_code, label=label, created_by_id=user_id))
+    db.session.flush()
+    return label
+
+
+def sub_category_choices():
+    """[(parent_code, label)] of active own categories, for the pickers."""
+    return [(s.parent_code, s.label) for s in FSSubCategory.query.filter_by(is_active=True).order_by(FSSubCategory.parent_code, FSSubCategory.label).all()]
+
+
+def suggest_account_number(fs_category):
+    """The next free number after the highest numeric account already under this IAS 1 category (the seeded chart steps by 10), or '' when the
+    category has no numeric account to follow."""
+    taken = {a.account_number for a in StandardChartOfAccounts.query.all()}
+    nums = [int(a.account_number) for a in StandardChartOfAccounts.query.filter_by(fs_category=fs_category).all() if (a.account_number or "").isdigit()]
+    if not nums:
+        return ""
+    width = max(len(a.account_number) for a in StandardChartOfAccounts.query.filter_by(fs_category=fs_category).all() if (a.account_number or "").isdigit())
+    n = max(nums) + 10
+    while str(n).zfill(width) in taken:
+        n += 1
+    return str(n).zfill(width)
+
+
+def suggested_numbers():
+    return {code: suggest_account_number(code) for code in fin.CATEGORY_BY_CODE if code != "excluded"}
+
+
+def new_account_order():
+    return max([a.order or 0 for a in StandardChartOfAccounts.query.all()], default=-1) + 1
 
 
 def _ensure_coa_access():
@@ -56,13 +104,15 @@ def list_accounts():
             db.session.add(StandardChartOfAccounts(
                 account_number=account_number, account_name=account_name, fs_category=fs_category,
                 notes=request.form.get("notes", "").strip(), order=max_order + 1,
+                sub_category=get_or_create_sub(fs_category, request.form.get("sub_category"), current_user.id),
             ))
             db.session.commit()
             flash(f"Account {account_number} added.", "success")
         return redirect(url_for("standard_coa.list_accounts"))
     accounts = StandardChartOfAccounts.query.order_by(StandardChartOfAccounts.order, StandardChartOfAccounts.account_number).all()
     return render_template(
-        "standard_coa/list.html", accounts=accounts, fs_category_choices=fin.category_choices(),
+        "standard_coa/list.html", accounts=accounts, fs_category_choices=fin.category_choices(), sub_choices=sub_category_choices(),
+        next_numbers=suggested_numbers(),
         can_manage=user_has_permission(current_user, "manage_chart_of_accounts"),
     )
 
@@ -83,6 +133,8 @@ def update_account(account_id):
     if category in fin.CATEGORY_BY_CODE:
         account.fs_category = category
     account.notes = request.form.get("notes", "").strip()
+    account.sub_category = get_or_create_sub(account.fs_category, request.form.get("sub_category"), current_user.id)
+    account.needs_review = False        # saving the row is the review of an account added from an engagement
     account.is_active = request.form.get("is_active") == "on"
     db.session.commit()
     flash(f"Account {account.account_number} updated.", "success")

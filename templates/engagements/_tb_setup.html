@@ -1,0 +1,115 @@
+{# Trial Balance tab: add Standard accounts, manage this client's remembered mappings, paste accounts from Excel. Context: engagement, trial_balance, coa_accounts, category_choices, client_mappings, next_numbers, sub_choices, accounts_to_review. #}
+<div class="card" id="tb_setup">
+  <h3 class="mt-0">Add a new Standard Chart account</h3>
+  <p class="muted" style="font-size:12.5px;">Can't find the account you need in the Standard Account lists? Add it here and use it straight away. It joins the firm-wide Standard Chart of Accounts and a Partner sees it marked "added from an engagement" to review. You can also give it the firm's <strong>own category</strong> (for example "Biological assets" or "Staff welfare"): the account still rolls into the IAS 1 line you choose, so the financial statements are not changed; the own category is shown as a finer heading on the trial balance.</p>
+  <form method="post" action="{{ url_for('tb_setup.add_standard_account', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;flex-wrap:wrap;">
+    <div>
+      <label for="ns_category">IAS 1 category *</label>
+      <select id="ns_category" name="fs_category" required onchange="tbSuggestNumber(this.value)">
+        <option value="">Choose...</option>
+        {% for group_label, choices in category_choices if group_label != 'Other' %}
+        <optgroup label="{{ group_label }}">{% for code, label in choices %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</optgroup>
+        {% endfor %}
+      </select>
+    </div>
+    <div><label for="ns_number">Account # <span class="muted">(blank = next free)</span></label><input type="text" id="ns_number" name="account_number" style="width:7em;" maxlength="20"></div>
+    <div><label for="ns_name">Account name *</label><input type="text" id="ns_name" name="account_name" style="width:17em;" required maxlength="200"></div>
+    <div><label for="ns_sub">Own category <span class="muted">(optional)</span></label><input type="text" id="ns_sub" name="sub_category" list="tb_sub_list" style="width:12em;" maxlength="100"></div>
+    {% if trial_balance and trial_balance.lines %}
+    <div>
+      <label for="ns_line">Map this account to it</label>
+      <select id="ns_line" name="apply_line_id">
+        <option value="">— nobody yet —</option>
+        {% for line in trial_balance.lines if not line.fs_category %}<option value="{{ line.id }}">{{ line.account_code + ' - ' if line.account_code }}{{ line.account_name }}</option>{% endfor %}
+      </select>
+    </div>
+    {% endif %}
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add account</button></div>
+  </form>
+  <datalist id="tb_sub_list">{% for parent, label in sub_choices %}<option value="{{ label }}">{% endfor %}</datalist>
+  {% if accounts_to_review %}<p class="muted" style="font-size:12px;">{{ accounts_to_review }} account(s) added from engagements are waiting for a Partner to review on the <a href="{{ url_for('standard_coa.list_accounts') }}">Chart of Accounts</a> page.</p>{% endif %}
+  <script>
+    var TB_NEXT_NUMBERS = {{ next_numbers|tojson }};
+    function tbSuggestNumber(cat) {
+      var f = document.getElementById('ns_number');
+      if (f && (f.value === '' || f.dataset.auto === '1')) { f.value = TB_NEXT_NUMBERS[cat] || ''; f.dataset.auto = '1'; }
+    }
+    (function () { var f = document.getElementById('ns_number'); if (f) f.addEventListener('input', function () { f.dataset.auto = ''; }); })();
+  </script>
+</div>
+
+<div class="card" id="tb_mappings">
+  <h3 class="mt-0">{{ engagement.client.name }}: remembered mappings</h3>
+  <p class="muted" style="font-size:12.5px;">Each line says "when this account name appears in this client's trial balance, use this Standard Account / IAS 1 category". They are applied automatically when a trial balance is imported or an account is added. Add the client's account names here before importing to have them mapped on arrival; changing a mapping does not alter accounts that are already mapped.</p>
+  <form method="post" action="{{ url_for('tb_setup.add_mapping', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;flex-wrap:wrap;">
+    <div><label for="nm_name">Account name as in the client's books *</label><input type="text" id="nm_name" name="account_name" style="width:19em;" required maxlength="200"></div>
+    <div>
+      <label for="nm_std">Standard Account</label>
+      <select id="nm_std" name="coa_account_number" onchange="var c=this.options[this.selectedIndex].getAttribute('data-cat'); if(c){ document.getElementById('nm_cat').value=c; }">
+        <option value="">—</option>
+        {% for number, label, cat in coa_accounts %}<option value="{{ number }}" data-cat="{{ cat }}">{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div>
+      <label for="nm_cat">IAS 1 category</label>
+      <select id="nm_cat" name="fs_category">
+        <option value="">Select...</option>
+        {% for group_label, choices in category_choices %}<optgroup label="{{ group_label }}">{% for code, label in choices %}<option value="{{ code }}">{{ label }}</option>{% endfor %}</optgroup>{% endfor %}
+      </select>
+    </div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Save mapping</button></div>
+  </form>
+
+  <details style="margin:6px 0 12px;">
+    <summary style="cursor:pointer;font-size:13px;">Paste many mappings</summary>
+    <form method="post" action="{{ url_for('tb_setup.bulk_mappings', engagement_id=engagement.id) }}" style="margin-top:8px;">
+      <p class="muted" style="font-size:12px;margin:0 0 4px;">One per line: the account name, then a Tab (as copied from two Excel columns) or a semicolon, then a Standard account number such as <code>1040</code> or an IAS 1 category such as <code>Administrative expenses</code>.</p>
+      <textarea name="mappings_text" rows="5" style="width:100%;font-family:monospace;font-size:12px;" placeholder="Bank - FBC Current&#9;1100&#10;Staff welfare;Administrative expenses"></textarea>
+      <button type="submit" class="btn small gold" style="margin-top:6px;">Save these mappings</button>
+    </form>
+  </details>
+
+  {% if client_mappings %}
+  <details {% if client_mappings|length <= 12 %}open{% endif %}>
+    <summary style="cursor:pointer;font-size:13px;">{{ client_mappings|length }} remembered mapping(s)</summary>
+    <table style="margin-top:8px;">
+      <thead><tr><th>Account name</th><th>Standard Account</th><th>IAS 1 category</th><th></th></tr></thead>
+      <tbody>
+      {% for r in client_mappings %}
+        <tr>
+          <form method="post" action="{{ url_for('tb_setup.update_mapping', engagement_id=engagement.id, mapping_id=r.m.id) }}" class="inline">
+          <td>{{ r.m.account_name }}{% if r.sub %}<div class="muted" style="font-size:11px;">{{ r.sub }}</div>{% endif %}</td>
+          <td>
+            <select name="coa_account_number" style="margin-bottom:0;" onchange="var c=this.options[this.selectedIndex].getAttribute('data-cat'); if(c){ this.form.fs_category.value=c; }">
+              <option value="">—</option>
+              {% for number, label, cat in coa_accounts %}<option value="{{ number }}" data-cat="{{ cat }}" {% if r.m.coa_account_number==number %}selected{% endif %}>{{ label }}</option>{% endfor %}
+            </select>
+          </td>
+          <td>
+            <select name="fs_category" style="margin-bottom:0;">
+              {% for group_label, choices in category_choices %}<optgroup label="{{ group_label }}">{% for code, label in choices %}<option value="{{ code }}" {% if r.m.fs_category==code %}selected{% endif %}>{{ label }}</option>{% endfor %}</optgroup>{% endfor %}
+            </select>
+          </td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('tb_setup.delete_mapping', engagement_id=engagement.id, mapping_id=r.m.id) }}" class="btn small danger" onclick="return confirm('Remove this mapping? Accounts already mapped keep their category.')">Remove</button>
+          </td>
+          </form>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% else %}
+  <div class="empty-state">No mappings remembered for this client yet. They are saved as you map accounts, or add them above.</div>
+  {% endif %}
+</div>
+
+<div class="card" id="tb_paste">
+  <h3 class="mt-0">Paste accounts from Excel</h3>
+  <p class="muted" style="font-size:12.5px;">Copy the rows in Excel and paste them below. Columns, in order: <strong>Code, Account name, Current Dr, Current Cr, Prior Dr, Prior Cr</strong> (a header row and a missing Code column are fine; blank amounts count as 0). These are <em>added</em> to the accounts already here; an import replaces them. Accounts the client's remembered mappings recognise are mapped automatically.</p>
+  <form method="post" action="{{ url_for('tb_setup.bulk_add_lines', engagement_id=engagement.id) }}">
+    <textarea name="rows_text" rows="6" style="width:100%;font-family:monospace;font-size:12px;" placeholder="1000&#9;Cash at bank&#9;12,500.00&#9;&#9;9,800.00&#9;"></textarea>
+    <button type="submit" class="btn gold" style="margin-top:6px;">Add these accounts</button>
+  </form>
+</div>

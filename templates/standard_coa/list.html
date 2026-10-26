@@ -17,7 +17,7 @@
 <div class="card">
   {% if accounts %}
   <table>
-    <thead><tr><th>Account #</th><th>Account name</th><th>IAS 1 category</th><th>Notes</th><th>Active</th><th></th></tr></thead>
+    <thead><tr><th>Account #</th><th>Account name</th><th>IAS 1 category</th><th>Own category</th><th>Notes</th><th>Active</th><th></th></tr></thead>
     <tbody>
       {% for a in accounts %}
       <tr{% if not a.is_active %} class="muted"{% endif %}>
@@ -35,7 +35,8 @@
             {% endfor %}
           </select>
         </td>
-        <td><input type="text" name="notes" value="{{ a.notes or '' }}" style="width:10em;"></td>
+        <td><input type="text" name="sub_category" value="{{ a.sub_category or '' }}" list="sub_cat_list" style="width:10em;" placeholder="optional" title="The firm's own heading inside the IAS 1 category. Does not change the financial statements."></td>
+        <td><input type="text" name="notes" value="{{ a.notes or '' }}" style="width:10em;">{% if a.needs_review %}<div class="muted" style="font-size:11px;color:#b36b00;">Added from an engagement - review, then Save</div>{% endif %}</td>
         <td><input type="checkbox" name="is_active" {% if a.is_active %}checked{% endif %}></td>
         <td><button type="submit" class="btn small">Save</button></td>
         </form>
@@ -67,8 +68,10 @@
         {% endfor %}
       </select>
     </div>
+    <div><label for="sub_category">Own category</label><input type="text" id="sub_category" name="sub_category" list="sub_cat_list" style="width:12em;" placeholder="optional"></div>
     <div><label for="notes">Notes</label><input type="text" id="notes" name="notes" style="width:14em;"></div>
     <div><button type="submit" class="btn gold">Add account</button></div>
   </form>
 </div>
+<datalist id="sub_cat_list">{% for parent, label in sub_choices %}<option value="{{ label }}">{% endfor %}</datalist>
 {% endblock %}

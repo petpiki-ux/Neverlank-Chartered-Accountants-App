@@ -242,9 +242,21 @@ def summarise_tb_by_category(lines):
         b["current_credit"] += line.current_credit or 0.0
         b["prior_debit"] += line.prior_debit or 0.0
         b["prior_credit"] += line.prior_credit or 0.0
+        # the firm's own heading inside the category (models.FSSubCategory), shown as indented rows under it
+        sub = (getattr(line, "sub_category", None) or "").strip() if code in label_by_code else ""
+        if sub:
+            s = b.setdefault("subs", {}).setdefault(sub, {"label": sub, "count": 0, "current_debit": 0.0, "current_credit": 0.0, "prior_debit": 0.0, "prior_credit": 0.0})
+            s["count"] += 1
+            s["current_debit"] += line.current_debit or 0.0
+            s["current_credit"] += line.current_credit or 0.0
+            s["prior_debit"] += line.prior_debit or 0.0
+            s["prior_credit"] += line.prior_credit or 0.0
 
     ordered_codes = ([UNMAPPED] if UNMAPPED in buckets else []) + [c[0] for c in FS_CATEGORIES if c[0] in buckets]
-    return [buckets[code] for code in ordered_codes]
+    out = [buckets[code] for code in ordered_codes]
+    for b in out:
+        b["subs"] = sorted(b.get("subs", {}).values(), key=lambda s: s["label"].lower())
+    return out
 
 
 def compute_totals(lines):

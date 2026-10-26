@@ -2155,6 +2155,8 @@
   </div>
   {% endif %}
 
+  {% if not trial_balance %}{% include 'engagements/_tb_setup.html' %}{% endif %}
+
   {% if trial_balance %}
   <div class="stat-grid">
     <div class="stat-card{% if not trial_balance.is_current_balanced %} danger{% endif %}"><div class="num">{{ 'Balanced' if trial_balance.is_current_balanced else 'Out of balance' }}</div><div class="label">Current year TB</div></div>
@@ -2183,7 +2185,7 @@
           <tr{% if not line.fs_category %} class="danger"{% endif %}>
             <td>{{ line.account_code or '' }}</td>
             <td>{{ line.account_name }}</td>
-            <td>{{ category_label(line.fs_category) if line.fs_category else 'Unmapped' }}</td>
+            <td>{{ category_label(line.fs_category) if line.fs_category else 'Unmapped' }}{% if line.sub_category %} <span class="muted" style="font-size:11.5px;">&rsaquo; {{ line.sub_category }}</span>{% endif %}</td>
             <td class="text-right">{{ '%.2f'|format(line.current_debit or 0) }}</td>
             <td class="text-right">{{ '%.2f'|format(line.current_credit or 0) }}</td>
             <td class="text-right">{{ '%.2f'|format(line.prior_debit or 0) }}</td>
@@ -2210,6 +2212,16 @@
             <td class="text-right">{{ '%.2f'|format(g.prior_debit) }}</td>
             <td class="text-right">{{ '%.2f'|format(g.prior_credit) }}</td>
           </tr>
+          {% for s in g.subs %}
+          <tr class="muted" style="font-size:12px;">
+            <td style="padding-left:22px;">&rsaquo; {{ s.label }}</td>
+            <td>{{ s.count }}</td>
+            <td class="text-right">{{ '%.2f'|format(s.current_debit) }}</td>
+            <td class="text-right">{{ '%.2f'|format(s.current_credit) }}</td>
+            <td class="text-right">{{ '%.2f'|format(s.prior_debit) }}</td>
+            <td class="text-right">{{ '%.2f'|format(s.prior_credit) }}</td>
+          </tr>
+          {% endfor %}
         {% endfor %}
         </tbody>
         <tfoot>
@@ -2307,6 +2319,8 @@
     </form>
   </div>
 
+  {% include 'engagements/_tb_setup.html' %}
+
   <div class="card">
     {% if trial_balance.lines %}
     <table>
@@ -2336,6 +2350,7 @@
               </optgroup>
               {% endfor %}
             </select>
+            {% if line.sub_category %}<div class="muted" style="font-size:11px;">&rsaquo; {{ line.sub_category }}</div>{% endif %}
           </td>
           <td><input type="number" step="0.01" name="current_debit" value="{{ line.current_debit or 0 }}" style="width:95px;margin-bottom:0;"></td>
           <td><input type="number" step="0.01" name="current_credit" value="{{ line.current_credit or 0 }}" style="width:95px;margin-bottom:0;"></td>

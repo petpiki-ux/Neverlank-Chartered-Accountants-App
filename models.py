@@ -4006,9 +4006,36 @@ class StandardChartOfAccounts(db.Model):
     is_active = db.Column(db.Boolean, default=True)  # inactive accounts stay on file (history) but drop out of the picker
     notes = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)
+    # The firm's own category this account sits under (see FSSubCategory below). fs_category above stays the IAS 1 line it rolls into,
+    # so the financial statements are unchanged; this only names a finer heading inside it. Free text matched to FSSubCategory.label.
+    sub_category = db.Column(db.String(100))
+    # Set when an account is added from an engagement's Trial Balance tab (not from the Chart of Accounts page): a Partner reviews it once
+    # on the Chart of Accounts page and saving the row clears the flag.
+    needs_review = db.Column(db.Boolean, default=False)
+    added_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    added_from_engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
 
     def __repr__(self):
         return f"<StandardChartOfAccounts {self.account_number} {self.account_name}>"
+
+
+class FSSubCategory(db.Model):
+    """The firm's own category for trial balance accounts, e.g. "Biological assets" or "Staff welfare", created from the Trial Balance tab or
+    the Chart of Accounts page. Each one belongs to exactly one IAS 1 category (parent_code, a financials.FS_CATEGORIES code) and rolls up
+    into it: a trial balance line keeps fs_category = the parent, so the statements, cash flow and notes are computed exactly as before,
+    and the sub-category is a finer heading shown on the trial balance (detailed and summarised views)."""
+    __tablename__ = "fs_sub_category"
+    id = db.Column(db.Integer, primary_key=True)
+    parent_code = db.Column(db.String(50), nullable=False)
+    label = db.Column(db.String(100), nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    __table_args__ = (db.UniqueConstraint("parent_code", "label", name="uq_fs_sub_category"),)
+
+    def __repr__(self):
+        return f"<FSSubCategory {self.parent_code}: {self.label}>"
 
 
 class COAMapping(db.Model):
@@ -4134,6 +4161,7 @@ class TrialBalanceLine(db.Model):
     account_name = db.Column(db.String(200), nullable=False)
     fs_category = db.Column(db.String(50))  # code from financials.FS_CATEGORIES, or "excluded" / blank if unmapped
     coa_account_number = db.Column(db.String(20))  # optional link to one of the firm's own Standard Chart of Accounts entries - see StandardChartOfAccounts/COAMapping
+    sub_category = db.Column(db.String(100))  # the firm's own heading inside fs_category (FSSubCategory); follows the Standard account picked
     current_debit = db.Column(db.Float, default=0.0)
     current_credit = db.Column(db.Float, default=0.0)
     prior_debit = db.Column(db.Float, default=0.0)
