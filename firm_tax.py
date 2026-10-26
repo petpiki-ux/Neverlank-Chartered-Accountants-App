@@ -106,15 +106,36 @@ def simulate_asset(asset, rule, ref_end, target_end):
     Each row: fy_end, opening, additions, allowance, recoupment, scrapping, closing."""
     cost = float(asset.get("cost") or 0.0)
     tcost = min(cost, rule["cap"]) if rule.get("cap") else cost
-    acq, disp = asset["date_acquired"], asset.get("disposed_on")
+    acq, disp = asset.get("date_acquired"), asset.get("disposed_on")
     disp_fy = fy_end_on_or_after(disp, ref_end) if disp else None
     method = rule["method"]
     rows, tv, k = [], 0.0, 0
-    fy = fy_end_on_or_after(acq, ref_end)
+    # A tax value brought forward (the closing tax value of an earlier year, entered rather than rebuilt from the purchase) starts the
+    # working at the year after it. `opening_as_at` is that earlier year end. The number of allowance years already used (for the
+    # special initial allowance) comes from the date acquired; with no date it is taken as all used.
+    opening_tv, opening_as_at = asset.get("opening_tax_value"), asset.get("opening_as_at")
+    carried = (opening_tv is not None and opening_as_at is not None and (acq is None or acq <= opening_as_at))
+    if carried and target_end < opening_as_at:
+        carried = False                          # asking about a year before the one entered: rebuild it from the purchase
+    if carried:
+        tv = float(opening_tv)
+        k = 10 ** 6 if acq is None else max((opening_as_at.year - fy_end_on_or_after(acq, ref_end).year) + 1, 1)
+        fy = fy_end(ref_end, opening_as_at.year + 1) if target_end > opening_as_at else opening_as_at
+        if target_end == opening_as_at:          # the balance itself: nothing worked for this year
+            return [{"fy_end": opening_as_at, "opening": tv, "additions": 0.0, "allowance": 0.0, "recoupment": 0.0,
+                     "scrapping": 0.0, "closing": tv, "carried": True}]
+    elif acq is None:
+        return []
+    else:
+        fy = fy_end_on_or_after(acq, ref_end)
+    first_carried = carried
     while fy <= target_end:
-        start_tv = tcost if k == 0 else tv
-        row = {"fy_end": fy, "opening": 0.0 if k == 0 else tv, "additions": tcost if k == 0 else 0.0,
+        fresh = (k == 0)
+        start_tv = tcost if fresh else tv
+        row = {"fy_end": fy, "opening": 0.0 if fresh else tv, "additions": tcost if fresh else 0.0,
                "allowance": 0.0, "recoupment": 0.0, "scrapping": 0.0, "closing": 0.0}
+        if first_carried:
+            row["carried"] = True
         if disp_fy is not None and fy == disp_fy:
             proceeds = float(asset.get("disposal_proceeds") or 0.0)
             row["recoupment"] = max(0.0, min(proceeds, tcost) - start_tv)
@@ -138,6 +159,7 @@ def simulate_asset(asset, rule, ref_end, target_end):
         rows.append(row)
         tv = row["closing"]
         k += 1
+        first_carried = False
         fy = fy_end(ref_end, fy.year + 1)
     return rows
 
@@ -159,12 +181,16 @@ def capital_allowances(assets, classes, rules, target_end, ref_end=None):
             "asset_code": a.get("asset_code"), "description": a.get("description"), "class_name": cname,
             "class_id": a.get("asset_class_id"), "method": rule["method"], "cost": float(a.get("cost") or 0.0),
             "tax_cost": min(float(a.get("cost") or 0.0), rule["cap"]) if rule.get("cap") else float(a.get("cost") or 0.0),
-            "date_acquired": a["date_acquired"], "disposed_on": a.get("disposed_on"), "proceeds": float(a.get("disposal_proceeds") or 0.0),
+            "date_acquired": a.get("date_acquired"), "disposed_on": a.get("disposed_on"),
+            "disposed": bool(last.get("disposed")),
+            "proceeds": float(a.get("disposal_proceeds") or 0.0) if last.get("disposed") else 0.0,
+            "carried": bool(last.get("carried")), "opening_tax_value": a.get("opening_tax_value"),
+            "disposed_tv": (last["opening"] + last["additions"]) if last.get("disposed") else 0.0,
             "opening": last["opening"], "additions": last["additions"], "allowance": last["allowance"],
             "recoupment": last["recoupment"], "scrapping": last["scrapping"], "closing": last["closing"],
             "capped": bool(rule.get("cap")) and float(a.get("cost") or 0.0) > rule["cap"],
         })
-    keys = ("opening", "additions", "allowance", "recoupment", "scrapping", "closing", "cost", "tax_cost")
+    keys = ("opening", "additions", "allowance", "recoupment", "scrapping", "closing", "cost", "tax_cost", "proceeds", "disposed_tv")
     total = {k: 0.0 for k in keys}
     by_class = {}
     for r in rows:

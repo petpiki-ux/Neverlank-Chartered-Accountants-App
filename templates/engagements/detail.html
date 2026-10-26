@@ -518,15 +518,17 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
-  {% if engagement.is_tax_advisory_type %}
+  {% if engagement.has_asset_schedules %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='asset_register') }}" class="{% if tab=='asset_register' %}active{% endif %}">Asset Register{% if ppe_assets %} ({{ ppe_assets|length }}){% endif %}</a>
   {% endif %}
   {% if engagement.type != 'Business Intelligence and IT Engagements' %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}" class="{% if tab=='income_tax' %}active{% endif %}">Income Tax Computation</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}" class="{% if tab=='deferred_tax' %}active{% endif %}">Deferred Tax Computation</a>
   {% endif %}
-  {% if engagement.has_tax_module %}
+  {% if engagement.has_tax_module or engagement.has_asset_schedules %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}" class="{% if tab=='capital_allowances' %}active{% endif %}">Capital Allowances</a>
+  {% endif %}
+  {% if engagement.has_tax_module %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='qpd') }}" class="{% if tab=='qpd' %}active{% endif %}">Provisional Tax (QPD)</a>
   {% endif %}
   {% if engagement.has_tax_module %}
@@ -4743,27 +4745,30 @@
       <thead><tr><th></th><th>Note</th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
       <tbody>
         <tr><td class="section-title" colspan="4">Non-current assets</td></tr>
-        {% for r in statements.sfp.non_current_assets %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total non-current assets</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.nca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.nca_total.prior) }}</strong></td></tr>
+        {% for r in statements.sfp.non_current_assets %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total non-current assets</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.nca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.nca_total.prior) }}</strong></td></tr>
         <tr><td class="section-title" colspan="4">Current assets</td></tr>
-        {% for r in statements.sfp.current_assets %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total current assets</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ca_total.prior) }}</strong></td></tr>
-        <tr><td><strong>Total assets</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_assets.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_assets.prior) }}</strong></td></tr>
+        {% for r in statements.sfp.current_assets %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total current assets</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.ca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.ca_total.prior) }}</strong></td></tr>
+        <tr><td><strong>Total assets</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_assets.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_assets.prior) }}</strong></td></tr>
         <tr><td class="section-title" colspan="4">Equity</td></tr>
-        {% for r in statements.sfp.equity %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total equity</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity.prior) }}</strong></td></tr>
+        {% for r in statements.sfp.equity %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total equity</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_equity.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_equity.prior) }}</strong></td></tr>
         <tr><td class="section-title" colspan="4">Non-current liabilities</td></tr>
-        {% for r in statements.sfp.non_current_liabilities %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total non-current liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ncl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.ncl_total.prior) }}</strong></td></tr>
+        {% for r in statements.sfp.non_current_liabilities %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total non-current liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.ncl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.ncl_total.prior) }}</strong></td></tr>
         <tr><td class="section-title" colspan="4">Current liabilities</td></tr>
-        {% for r in statements.sfp.current_liabilities %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td><td class="text-right">{{ '%.2f'|format(r.prior) }}</td></tr>{% endfor %}
-        <tr><td><strong>Total current liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.cl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.cl_total.prior) }}</strong></td></tr>
-        <tr><td><strong>Total equity and liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity_and_liabilities.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.sfp.total_equity_and_liabilities.prior) }}</strong></td></tr>
+        {% for r in statements.sfp.current_liabilities %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total current liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.cl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.cl_total.prior) }}</strong></td></tr>
+        <tr><td><strong>Total equity and liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_equity_and_liabilities.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_equity_and_liabilities.prior) }}</strong></td></tr>
       </tbody>
     </table>
     {% set bc = statements.sfp.balance_check %}
+    {% if statements.whole_numbers %}
+    <p class="muted" style="font-size:11.5px;">Figures are rounded to the nearest whole number; every total is added up from the rounded lines.{% for a in statements.rounding.absorbed %} A rounding difference of {{ '%.0f'|format(a.amount|abs) }} is included in {{ a.label|lower }} ({{ a.period }} year) so the statement balances.{% endfor %}</p>
+    {% endif %}
     <p class="muted" style="font-size:11.5px;{% if bc.current|abs > 0.01 or bc.prior|abs > 0.01 %}color:#b02a2a;{% endif %}">
-      Balance check (assets less equity and liabilities): current year {{ '%.2f'|format(bc.current) }}, prior year {{ '%.2f'|format(bc.prior) }}.
+      Balance check (assets less equity and liabilities): current year {{ '%.0f'|format(bc.current) }}, prior year {{ '%.0f'|format(bc.prior) }}.
       {% if bc.current|abs > 0.01 or bc.prior|abs > 0.01 %}Non-zero - check every account is mapped to the right category and that the trial balance above balances.{% else %}Ties out.{% endif %}
     </p>
   </div>
@@ -4777,8 +4782,8 @@
         <tr>
           <td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}</td>
           <td>{{ r.note or '' }}</td>
-          <td class="text-right">{% if r.bold %}<strong>{{ '%.2f'|format(r.current) }}</strong>{% else %}{{ '%.2f'|format(r.current) }}{% endif %}</td>
-          <td class="text-right">{% if r.bold %}<strong>{{ '%.2f'|format(r.prior) }}</strong>{% else %}{{ '%.2f'|format(r.prior) }}{% endif %}</td>
+          <td class="text-right">{% if r.bold %}<strong>{{ '%.0f'|format(r.current) }}</strong>{% else %}{{ '%.0f'|format(r.current) }}{% endif %}</td>
+          <td class="text-right">{% if r.bold %}<strong>{{ '%.0f'|format(r.prior) }}</strong>{% else %}{{ '%.0f'|format(r.prior) }}{% endif %}</td>
         </tr>
       {% endfor %}
       </tbody>
@@ -4788,21 +4793,21 @@
   <div class="card">
     <h3 class="mt-0">Statement of Changes in Equity</h3>
     <table>
-      <thead><tr><th>Component</th><th class="text-right">Opening</th><th>Movement</th><th class="text-right"></th><th class="text-right">Closing</th></tr></thead>
+      <thead><tr><th>Component</th><th class="text-right">Opening</th><th></th><th class="text-right">Movement</th><th class="text-right">Closing</th></tr></thead>
       <tbody>
       {% for r in statements.equity.rows %}
         <tr>
           <td>{{ r.label }}</td>
-          <td class="text-right">{{ '%.2f'|format(r.opening) }}</td>
+          <td class="text-right">{{ '%.0f'|format(r.opening) }}</td>
           <td class="muted" style="font-size:11.5px;">{{ r.movement_desc }}</td>
-          <td class="text-right">{{ '%.2f'|format(r.movement) }}</td>
-          <td class="text-right"><strong>{{ '%.2f'|format(r.closing) }}</strong></td>
+          <td class="text-right">{{ '%.0f'|format(r.movement) }}</td>
+          <td class="text-right"><strong>{{ '%.0f'|format(r.closing) }}</strong></td>
         </tr>
         {% if r.label == 'Retained earnings' %}
-        <tr><td colspan="5" class="muted" style="font-size:11px;{% if r.opening_variance|abs > 0.01 %}color:#b02a2a;{% endif %}">Opening balance should agree with prior year's closing retained earnings ({{ '%.2f'|format(r.opening_check) }}){% if r.opening_variance|abs > 0.01 %} - currently differs by {{ '%.2f'|format(r.opening_variance) }} (may reflect dividends posted directly to retained earnings, a prior period adjustment, or a mapping to review).{% else %} - agrees.{% endif %}</td></tr>
+        <tr><td colspan="5" class="muted" style="font-size:11px;{% if r.opening_variance|abs > 0.01 %}color:#b02a2a;{% endif %}">Opening balance should agree with prior year's closing retained earnings ({{ '%.0f'|format(r.opening_check) }}){% if r.opening_variance|abs > 0.01 %} - currently differs by {{ '%.0f'|format(r.opening_variance) }} (may reflect dividends posted directly to retained earnings, a prior period adjustment, or a mapping to review).{% else %} - agrees.{% endif %}</td></tr>
         {% endif %}
       {% endfor %}
-        <tr><td><strong>Total equity</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statements.equity.total_opening) }}</strong></td><td></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.equity.total_closing) }}</strong></td></tr>
+        <tr><td><strong>Total equity</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.equity.total_opening) }}</strong></td><td></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.equity.total_closing) }}</strong></td></tr>
       </tbody>
     </table>
   </div>
@@ -4818,24 +4823,24 @@
         <tr{% if r.memo %} class="muted"{% endif %}>
           <td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}</td>
           <td>{{ r.note or '' }}</td>
-          <td class="text-right">{% if r.bold %}<strong>{{ '%.2f'|format(r.current) }}</strong>{% else %}{{ '%.2f'|format(r.current) }}{% endif %}</td>
+          <td class="text-right">{% if r.bold %}<strong>{{ '%.0f'|format(r.current) }}</strong>{% else %}{{ '%.0f'|format(r.current) }}{% endif %}</td>
         </tr>
         {% endfor %}
-        <tr><td><strong>Net cash from operating activities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_operating) }}</strong></td></tr>
+        <tr><td><strong>Net cash from operating activities</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.cf.net_operating) }}</strong></td></tr>
         <tr><td class="section-title" colspan="3">Investing activities</td></tr>
-        {% for r in statements.cf.investing_rows %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td></tr>{% endfor %}
-        <tr><td><strong>Net cash used in investing activities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_investing) }}</strong></td></tr>
+        {% for r in statements.cf.investing_rows %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td></tr>{% endfor %}
+        <tr><td><strong>Net cash used in investing activities</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.cf.net_investing) }}</strong></td></tr>
         <tr><td class="section-title" colspan="3">Financing activities</td></tr>
-        {% for r in statements.cf.financing_rows %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.2f'|format(r.current) }}</td></tr>{% endfor %}
-        <tr><td><strong>Net cash from financing activities</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_financing) }}</strong></td></tr>
-        <tr><td><strong>Net increase/(decrease) in cash</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.net_movement) }}</strong></td></tr>
-        <tr><td>Cash at beginning of year</td><td></td><td class="text-right">{{ '%.2f'|format(statements.cf.cash_open) }}</td></tr>
-        <tr><td><strong>Cash at end of year (computed)</strong></td><td></td><td class="text-right"><strong>{{ '%.2f'|format(statements.cf.cash_close_computed) }}</strong></td></tr>
-        <tr><td>Cash at end of year (per trial balance)</td><td></td><td class="text-right">{{ '%.2f'|format(statements.cf.cash_close_actual) }}</td></tr>
+        {% for r in statements.cf.financing_rows %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td></tr>{% endfor %}
+        <tr><td><strong>Net cash from financing activities</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.cf.net_financing) }}</strong></td></tr>
+        <tr><td><strong>Net increase/(decrease) in cash</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.cf.net_movement) }}</strong></td></tr>
+        <tr><td>Cash at beginning of year</td><td></td><td class="text-right">{{ '%.0f'|format(statements.cf.cash_open) }}</td></tr>
+        <tr><td><strong>Cash at end of year (computed)</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.cf.cash_close_computed) }}</strong></td></tr>
+        <tr><td>Cash at end of year (per trial balance)</td><td></td><td class="text-right">{{ '%.0f'|format(statements.cf.cash_close_actual) }}</td></tr>
       </tbody>
     </table>
     <p class="muted" style="font-size:11.5px;{% if statements.cf.variance|abs > 0.01 %}color:#b02a2a;{% endif %}">
-      {% if statements.cf.variance|abs > 0.01 %}Computed closing cash differs from the trial balance by {{ '%.2f'|format(statements.cf.variance) }} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust.{% else %}Ties out to the trial balance.{% endif %}
+      {% if statements.cf.variance|abs > 0.01 %}Computed closing cash differs from the trial balance by {{ '%.0f'|format(statements.cf.variance) }} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust.{% else %}Ties out to the trial balance.{% endif %}
     </p>
   </div>
 
@@ -4872,28 +4877,28 @@
         {% for r in note.movement %}
         <tr>
           <td>{{ r.class_name }}</td>
-          <td class="text-right">{{ '%.2f'|format(r.opening_nbv) }}</td>
-          <td class="text-right">{{ '%.2f'|format(r.additions) }}</td>
-          <td class="text-right">{{ '%.2f'|format(-(r.disposals_cost - r.disposals_acc_dep)) if r.disposals_cost or r.disposals_acc_dep else '0.00' }}</td>
-          <td class="text-right">{{ '%.2f'|format(-r.charge) if r.charge else '0.00' }}</td>
-          <td class="text-right">{{ '%.2f'|format(r.closing_nbv) }}</td>
+          <td class="text-right">{{ '%.0f'|format(r.opening_nbv) }}</td>
+          <td class="text-right">{{ '%.0f'|format(r.additions) }}</td>
+          <td class="text-right">{{ '%.0f'|format(-(r.disposals_cost - r.disposals_acc_dep)) if r.disposals_cost or r.disposals_acc_dep else '0' }}</td>
+          <td class="text-right">{{ '%.0f'|format(-r.charge) if r.charge else '0' }}</td>
+          <td class="text-right">{{ '%.0f'|format(r.closing_nbv) }}</td>
         </tr>
         {% endfor %}
         <tr>
           <td><strong>Total</strong></td>
-          <td class="text-right"><strong>{{ '%.2f'|format(note.movement_total.opening_nbv) }}</strong></td>
-          <td class="text-right"><strong>{{ '%.2f'|format(note.movement_total.additions) }}</strong></td>
-          <td class="text-right"><strong>{{ '%.2f'|format(-(note.movement_total.disposals_cost - note.movement_total.disposals_acc_dep)) if note.movement_total.disposals_cost or note.movement_total.disposals_acc_dep else '0.00' }}</strong></td>
-          <td class="text-right"><strong>{{ '%.2f'|format(-note.movement_total.charge) if note.movement_total.charge else '0.00' }}</strong></td>
-          <td class="text-right"><strong>{{ '%.2f'|format(note.movement_total.closing_nbv) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.opening_nbv) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.additions) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.0f'|format(-(note.movement_total.disposals_cost - note.movement_total.disposals_acc_dep)) if note.movement_total.disposals_cost or note.movement_total.disposals_acc_dep else '0' }}</strong></td>
+          <td class="text-right"><strong>{{ '%.0f'|format(-note.movement_total.charge) if note.movement_total.charge else '0' }}</strong></td>
+          <td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.closing_nbv) }}</strong></td>
         </tr>
       </tbody>
     </table>
     {% if note.reconciliation %}
     {% set rec = note.reconciliation %}
     <p class="muted" style="font-size:11.5px;{% if not rec.ties_out %}color:#B02A2A;{% endif %}">
-      Per trial balance: {{ '%.2f'|format(rec.tb_current) }} (current), {{ '%.2f'|format(rec.tb_prior) }} (prior). Per Asset Register: {{ '%.2f'|format(rec.register_current) }} (current), {{ '%.2f'|format(rec.register_prior) }} (prior).
-      {% if rec.ties_out %}Ties out to the trial balance.{% else %}Difference of {{ '%.2f'|format(rec.diff_current) }} (current), {{ '%.2f'|format(rec.diff_prior) }} (prior) - basis for a proposed adjustment to the trial balance, or a correction to the Asset Register, as appropriate.{% endif %}
+      Per trial balance: {{ '%.0f'|format(rec.tb_current) }} (current), {{ '%.0f'|format(rec.tb_prior) }} (prior). Per Asset Register: {{ '%.0f'|format(rec.register_current) }} (current), {{ '%.0f'|format(rec.register_prior) }} (prior).
+      {% if rec.ties_out %}Ties out to the trial balance.{% else %}Difference of {{ '%.0f'|format(rec.diff_current) }} (current), {{ '%.0f'|format(rec.diff_prior) }} (prior) - basis for a proposed adjustment to the trial balance, or a correction to the Asset Register, as appropriate.{% endif %}
     </p>
     {% endif %}
     {% elif note.accounts %}
@@ -4901,13 +4906,13 @@
       <thead><tr><th>Account</th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
       <tbody>
         {% for a in note.accounts %}
-        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}</td><td class="text-right">{{ '%.2f'|format(a.current) }}</td><td class="text-right">{{ '%.2f'|format(a.prior) }}</td></tr>
+        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}</td><td class="text-right">{{ '%.0f'|format(a.current) }}</td><td class="text-right">{{ '%.0f'|format(a.prior) }}</td></tr>
         {% endfor %}
-        <tr><td><strong>Total</strong></td><td class="text-right"><strong>{{ '%.2f'|format(note.total.current) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(note.total.prior) }}</strong></td></tr>
+        <tr><td><strong>Total</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.prior) }}</strong></td></tr>
       </tbody>
     </table>
     {% else %}
-    <p class="text-right"><strong>{{ '%.2f'|format(note.total.current) }}</strong> ({{ '%.2f'|format(note.total.prior) }} prior year)</p>
+    <p class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong> ({{ '%.0f'|format(note.total.prior) }} prior year)</p>
     {% endif %}
     {% endfor %}
 
@@ -5079,8 +5084,14 @@
   <div class="card">
     <h3 class="mt-0">Asset Register</h3>
     <p class="muted" style="font-size:12.5px;">
-      The client's property, plant and equipment, asset by asset. The <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a> tab works its tax allowances from this register, and the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a> takes the accounting carrying amount from it.
+      The client's property, plant and equipment, asset by asset. The closing balances of the year before are entered once as the <strong>opening balances</strong>; the year's <strong>additions</strong> and <strong>disposals</strong> are then entered as they happen, and the schedules below work themselves out. The <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a> tab works its tax allowances from this register, and the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a> takes the accounting carrying amount from it.
     </p>
+    {% if not as_period_end %}<div class="empty-state">This engagement has no period end, so the opening date cannot be worked out. <a href="{{ url_for('engagements.edit_engagement', engagement_id=engagement.id) }}">Edit the engagement</a> and enter it.</div>{% endif %}
+  </div>
+  {% include "engagements/_asset_schedules.html" %}
+  <div class="card">
+    <h3 class="mt-0">Depreciation policy and the full register</h3>
+    <p class="muted" style="font-size:12.5px;">Every asset in one table, for changing any figure (including those above), and the depreciation policy by asset class.</p>
     {{ ppe_register_section() }}
   </div>
 {% endif %}
@@ -5098,8 +5109,13 @@
     {% if not ca_target_end %}
     <div class="empty-state">This engagement has no period end. <a href="{{ url_for('engagements.edit_engagement', engagement_id=engagement.id) }}">Edit the engagement</a> and enter it, then come back.</div>
     {% endif %}
+    {% if ca_opening_as_at %}
+    <p class="muted" style="font-size:12.5px;">
+      <strong>Opening position.</strong> An asset with a <em>tax value brought forward</em> as at {{ ca_opening_as_at.strftime('%d %B %Y') }} is worked from that figure; without one, its tax value is rebuilt from its cost and date acquired. Enter the opening balances (and this year's additions and disposals) on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='asset_register') }}">Asset Register</a> tab, or type the tax value brought forward in the register below.
+    </p>
+    {% endif %}
     {% if ca_undated %}
-    <div class="flash warning" style="margin:8px 0;">{{ ca_undated|length }} asset(s) have no date acquired and are left out of the schedule: {% for a in ca_undated %}{{ a.asset_code or a.description }}{% if not loop.last %}, {% endif %}{% endfor %}.</div>
+    <div class="flash warning" style="margin:8px 0;">{{ ca_undated|length }} asset(s) have no date acquired and no tax value brought forward, so they are left out of the schedule: {% for a in ca_undated %}{{ a.asset_code or a.description }}{% if not loop.last %}, {% endif %}{% endfor %}.</div>
     {% endif %}
     {% if ca_unclassified %}
     <div class="flash warning" style="margin:8px 0;">{{ ca_unclassified|length }} asset(s) have no class and so get no allowance: {% for a in ca_unclassified %}{{ a.asset_code or a.description }}{% if not loop.last %}, {% endif %}{% endfor %}. Give them a class below.</div>
@@ -5153,7 +5169,7 @@
     <p class="muted" style="font-size:12px;">The same register the Finalisation notes use. Cost and date acquired drive the schedule; the depreciation the client's accounts charged is added back on the Income Tax Computation.</p>
     {% if ca_assets %}
     <table style="font-size:12px;">
-      <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th>Cost</th><th>Depreciation in the accounts</th><th></th></tr></thead>
+      <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th>Cost</th><th>Tax value b/f</th><th>Depreciation in the accounts</th><th></th></tr></thead>
       <tbody>
       {% for a in ca_assets %}
         <form method="post" action="{{ url_for('engagements.update_ppe_asset', asset_id=a.id) }}" class="inline">
@@ -5163,6 +5179,7 @@
           <td><select name="asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in ca_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
           <td><input type="date" name="date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') if a.date_acquired else '' }}" style="width:128px;margin-bottom:0;"></td>
           <td><input type="number" step="0.01" name="cost" value="{{ a.cost or 0 }}" style="width:95px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="opening_tax_value" value="{{ a.opening_tax_value if a.opening_tax_value is not none else '' }}" placeholder="rebuild" style="width:95px;margin-bottom:0;"></td>
           <td><input type="number" step="0.01" name="current_year_depreciation" value="{{ a.current_year_depreciation or 0 }}" style="width:95px;margin-bottom:0;">
             <input type="hidden" name="opening_accumulated_depreciation" value="{{ a.opening_accumulated_depreciation or 0 }}">
             <input type="hidden" name="disposal_cost" value="{{ a.disposal_cost or 0 }}">
@@ -5185,6 +5202,7 @@
       <div><label>Class</label><select name="asset_class_id"><option value="">Unclassified</option>{% for c in ca_classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
       <div><label>Acquired</label><input type="date" name="date_acquired"></div>
       <div><label>Cost</label><input type="number" step="0.01" name="cost"></div>
+      <div><label>Tax value b/f</label><input type="number" step="0.01" name="opening_tax_value"></div>
       <div><label>Depreciation in the accounts</label><input type="number" step="0.01" name="current_year_depreciation"></div>
       <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add asset</button></div>
     </form>
@@ -5219,8 +5237,24 @@
       <div class="stat-card"><div class="num">{{ '%.2f'|format(ca_result.total.scrapping) }}</div><div class="label">Scrapping allowance</div></div>
       <div class="stat-card"><div class="num">{{ '%.2f'|format(ca_result.tax_value_end) }}</div><div class="label">Tax value at the year end</div></div>
     </div>
+    <h4 style="margin-bottom:4px;">By asset class</h4>
+    <div style="overflow-x:auto;">
     <table style="font-size:12px;">
-      <thead><tr><th>Asset</th><th>Class</th><th>Allowance</th><th class="text-right">Cost</th><th class="text-right">Opening tax value</th><th class="text-right">Additions</th><th class="text-right">Allowance</th><th class="text-right">Recoupment</th><th class="text-right">Scrapping</th><th class="text-right">Closing tax value</th></tr></thead>
+      <thead><tr><th>Asset class</th><th class="text-right">Tax value b/f</th><th class="text-right">Additions</th><th class="text-right">Disposals</th><th class="text-right">Allowances</th><th class="text-right">Tax value c/f</th><th class="text-right">Disposal proceeds</th><th class="text-right">Recoupment</th><th class="text-right">Scrapping allowance</th></tr></thead>
+      <tbody>
+      {% for c in ca_result.by_class %}
+        <tr><td>{{ c.class_name }}</td><td class="text-right">{{ '%.2f'|format(c.opening) }}</td><td class="text-right">{{ '%.2f'|format(c.additions) }}</td><td class="text-right">{{ '%.2f'|format(-c.disposed_tv) }}</td><td class="text-right">{{ '%.2f'|format(c.allowance) }}</td><td class="text-right">{{ '%.2f'|format(c.closing) }}</td><td class="text-right">{{ '%.2f'|format(c.proceeds) }}</td><td class="text-right">{{ '%.2f'|format(c.recoupment) }}</td><td class="text-right">{{ '%.2f'|format(c.scrapping) }}</td></tr>
+      {% endfor %}
+        {% set ct = ca_result.total %}
+        <tr><td><strong>Total</strong></td><td class="text-right"><strong>{{ '%.2f'|format(ct.opening) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(ct.additions) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(-ct.disposed_tv) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(ct.allowance) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(ct.closing) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(ct.proceeds) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(ct.recoupment) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(ct.scrapping) }}</strong></td></tr>
+      </tbody>
+    </table>
+    </div>
+    <p class="muted" style="font-size:11.5px;">Tax value c/f = b/f + additions - disposals - allowances. "Disposals" is the tax value of the assets sold; the proceeds are compared with it to give the recoupment or the scrapping allowance.</p>
+    <h4 style="margin-bottom:4px;margin-top:14px;">Asset by asset</h4>
+    <div style="overflow-x:auto;">
+    <table style="font-size:12px;">
+      <thead><tr><th>Asset</th><th>Class</th><th>Allowance</th><th class="text-right">Cost</th><th class="text-right">Tax value b/f</th><th class="text-right">Additions</th><th class="text-right">Disposals</th><th class="text-right">Allowance</th><th class="text-right">Recoupment</th><th class="text-right">Scrapping</th><th class="text-right">Tax value c/f</th></tr></thead>
       <tbody>
       {% for r in ca_result.rows %}
         <tr>
@@ -5228,8 +5262,9 @@
           <td>{{ r.class_name }}</td>
           <td>{{ ca_method_labels.get(r.method, r.method) }}</td>
           <td class="text-right">{{ '%.2f'|format(r.cost) }}{% if r.capped %}<div class="muted" style="font-size:11px;">capped at {{ '%.2f'|format(r.tax_cost) }}</div>{% endif %}</td>
-          <td class="text-right">{{ '%.2f'|format(r.opening) }}</td>
+          <td class="text-right">{{ '%.2f'|format(r.opening) }}{% if r.carried %}<div class="muted" style="font-size:11px;">entered</div>{% endif %}</td>
           <td class="text-right">{{ '%.2f'|format(r.additions) }}</td>
+          <td class="text-right">{{ '%.2f'|format(-r.disposed_tv) }}</td>
           <td class="text-right">{{ '%.2f'|format(r.allowance) }}</td>
           <td class="text-right">{{ '%.2f'|format(r.recoupment) }}</td>
           <td class="text-right">{{ '%.2f'|format(r.scrapping) }}</td>
@@ -5241,6 +5276,7 @@
           <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.cost) }}</strong></td>
           <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.opening) }}</strong></td>
           <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.additions) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.2f'|format(-ca_result.total.disposed_tv) }}</strong></td>
           <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.allowance) }}</strong></td>
           <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.recoupment) }}</strong></td>
           <td class="text-right"><strong>{{ '%.2f'|format(ca_result.total.scrapping) }}</strong></td>
@@ -5248,6 +5284,9 @@
         </tr>
       </tbody>
     </table>
+    </div>
+    <form method="post" action="{{ url_for('assetsched.generate_schedules_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Export &amp; file the Asset Register and Capital Allowance Schedule (Excel)</button></form>
+    {{ filed_workpapers('asset_schedules') }}
     <p class="muted" style="font-size:11.5px;margin-top:8px;">A gain on a sale above cost is a capital gains tax matter and is not included here. An allowance never exceeds the tax value left.</p>
 
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e5e5;">

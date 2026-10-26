@@ -1,0 +1,201 @@
+{# Asset Register: opening balances, additions, disposals and the register schedule. Context from asset_schedules.tab_context(). #}
+{% set as_at_label = as_opening_as_at.strftime('%d %B %Y') if as_opening_as_at else 'the start of the period' %}
+
+<div class="card" id="opening">
+  <h3 class="mt-0">1. Opening balances as at {{ as_at_label }}</h3>
+  <p class="muted" style="font-size:12.5px;">
+    The closing position of the year before, asset by asset: what each asset cost, the depreciation built up to {{ as_at_label }}, and its <strong>tax value brought forward</strong> (the closing tax value on last year's capital allowance schedule). Enter it once; the year's movements below start from here. An asset with no tax value brought forward has its tax value rebuilt from its cost and date acquired.
+  </p>
+
+  {% if as_openings %}
+  <table style="font-size:12px;">
+    <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th class="text-right">Cost b/f</th><th class="text-right">Acc. depreciation b/f</th><th class="text-right">Net book value b/f</th><th class="text-right">Tax value b/f</th><th></th></tr></thead>
+    <tbody>
+    {% for a in as_openings %}
+      <form method="post" action="{{ url_for('assetsched.save_opening', engagement_id=engagement.id, asset_id=a.id) }}" class="inline">
+      <tr>
+        <td><input type="text" name="asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
+        <td><input type="text" name="description" value="{{ a.description }}" style="width:170px;margin-bottom:0;"></td>
+        <td><select name="asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in as_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
+        <td><input type="date" name="date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') if a.date_acquired else '' }}" style="width:128px;margin-bottom:0;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="cost" value="{{ a.cost or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="opening_accumulated_depreciation" value="{{ a.opening_accumulated_depreciation or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right">{{ '%.2f'|format((a.cost or 0) - (a.opening_accumulated_depreciation or 0)) }}</td>
+        <td class="text-right"><input type="number" step="0.01" name="opening_tax_value" value="{{ a.opening_tax_value if a.opening_tax_value is not none else '' }}" placeholder="rebuild" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td><button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" formaction="{{ url_for('engagements.delete_ppe_asset', asset_id=a.id) }}" class="btn small danger" onclick="return confirm('Delete this asset?')">Delete</button></td>
+      </tr>
+      </form>
+    {% endfor %}
+      <tr>
+        <td colspan="4"><strong>Total opening balances</strong></td>
+        <td class="text-right"><strong>{{ '%.2f'|format(as_open_cost) }}</strong></td>
+        <td class="text-right"><strong>{{ '%.2f'|format(as_open_acc) }}</strong></td>
+        <td class="text-right"><strong>{{ '%.2f'|format(as_open_nbv) }}</strong></td>
+        <td class="text-right"><strong>{{ '%.2f'|format(as_open_tax) }}</strong></td>
+        <td></td>
+      </tr>
+    </tbody>
+  </table>
+  {% if as_tb_diff is not none %}
+  <p class="muted" style="font-size:11.5px;{% if as_tb_diff|abs > 0.5 %}color:#b02a2a;{% endif %}">
+    Net book value brought forward {{ '%.2f'|format(as_open_nbv) }}; property, plant and equipment in the prior-year column of the trial balance {{ '%.2f'|format(as_tb_prior_ppe) }}.
+    {% if as_tb_diff|abs > 0.5 %}Difference of {{ '%.2f'|format(as_tb_diff) }} - check the opening balances or the trial balance.{% else %}Agrees.{% endif %}
+  </p>
+  {% endif %}
+  {% if as_no_tax_value %}
+  <p class="muted" style="font-size:11.5px;">{{ as_no_tax_value|length }} opening asset(s) have no tax value brought forward, so the Capital Allowances tab rebuilds theirs from the cost and date acquired: {% for a in as_no_tax_value %}{{ a.asset_code or a.description }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+  {% endif %}
+  {% else %}
+  <div class="empty-state">No opening balances yet - add the assets below, or paste them from Excel.</div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('assetsched.add_opening', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+    <div><label>Code</label><input type="text" name="asset_code"></div>
+    <div style="grid-column: span 2;"><label>Description</label><input type="text" name="description" placeholder="e.g. Toyota Hilux - ABC 1234" required></div>
+    <div><label>Class</label><select name="asset_class_id"><option value="">Unclassified</option>{% for c in as_classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+    <div><label>Acquired</label><input type="date" name="date_acquired"></div>
+    <div><label>Cost b/f</label><input type="number" step="0.01" name="cost"></div>
+    <div><label>Acc. depreciation b/f</label><input type="number" step="0.01" name="opening_accumulated_depreciation"></div>
+    <div><label>Tax value b/f</label><input type="number" step="0.01" name="opening_tax_value"></div>
+    <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add opening balance</button></div>
+  </form>
+
+  <details style="margin-top:6px;">
+    <summary style="cursor:pointer;font-size:12.5px;">Paste many from Excel</summary>
+    <form method="post" action="{{ url_for('assetsched.paste_opening', engagement_id=engagement.id) }}" style="margin-top:8px;">
+      <p class="muted" style="font-size:12px;">One asset a row, columns in this order: <strong>Code, Description, Class, Date acquired, Cost, Accumulated depreciation, Tax value</strong>. Copy the cells from Excel and paste. A header row is skipped; a class that does not exist yet is created.</p>
+      <textarea name="paste" rows="6" placeholder="V001&#9;Toyota Hilux&#9;Motor vehicles&#9;2023-03-15&#9;45000&#9;18000&#9;22500"></textarea>
+      <button type="submit" class="btn small gold">Add the pasted assets</button>
+    </form>
+  </details>
+</div>
+
+<div class="card" id="additions">
+  <h3 class="mt-0">2. Additions during the year</h3>
+  <p class="muted" style="font-size:12.5px;">
+    Assets bought {% if as_period_start %}between {{ as_period_start.strftime('%d %b %Y') }} and {{ as_period_end.strftime('%d %b %Y') }}{% else %}in the year{% endif %}. The date acquired is what makes an asset an addition; its first-year allowance is worked from its cost.
+  </p>
+  {% if as_additions %}
+  <table style="font-size:12px;">
+    <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th class="text-right">Cost</th><th class="text-right">Depreciation in the accounts</th><th></th></tr></thead>
+    <tbody>
+    {% for a in as_additions %}
+      <form method="post" action="{{ url_for('assetsched.save_addition', engagement_id=engagement.id, asset_id=a.id) }}" class="inline">
+      <tr>
+        <td><input type="text" name="asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
+        <td><input type="text" name="description" value="{{ a.description }}" style="width:170px;margin-bottom:0;"></td>
+        <td><select name="asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in as_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
+        <td><input type="date" name="date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') }}" style="width:128px;margin-bottom:0;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="cost" value="{{ a.cost or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="current_year_depreciation" value="{{ a.current_year_depreciation or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td><button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" formaction="{{ url_for('engagements.delete_ppe_asset', asset_id=a.id) }}" class="btn small danger" onclick="return confirm('Delete this asset?')">Delete</button></td>
+      </tr>
+      </form>
+    {% endfor %}
+      <tr><td colspan="4"><strong>Total additions</strong></td><td class="text-right"><strong>{{ '%.2f'|format(as_add_cost) }}</strong></td><td colspan="2"></td></tr>
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No additions recorded for the year.</div>
+  {% endif %}
+  {% if as_later %}
+  <p class="muted" style="font-size:11.5px;color:#b02a2a;">{{ as_later|length }} asset(s) are dated after the period end and are left out of both schedules: {% for a in as_later %}{{ a.asset_code or a.description }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('assetsched.add_addition', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+    <div><label>Code</label><input type="text" name="asset_code"></div>
+    <div style="grid-column: span 2;"><label>Description</label><input type="text" name="description" required></div>
+    <div><label>Class</label><select name="asset_class_id"><option value="">Unclassified</option>{% for c in as_classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
+    <div><label>Acquired</label><input type="date" name="date_acquired" required></div>
+    <div><label>Cost</label><input type="number" step="0.01" name="cost"></div>
+    <div><label>Depreciation in the accounts</label><input type="number" step="0.01" name="current_year_depreciation"></div>
+    <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add addition</button></div>
+  </form>
+</div>
+
+<div class="card" id="disposals">
+  <h3 class="mt-0">3. Disposals during the year</h3>
+  <p class="muted" style="font-size:12.5px;">
+    Assets sold or scrapped in the year. Pick the asset, the date and what it fetched: the cost and the depreciation built up to the sale are removed from the register (change them if only part was sold), and the same date and proceeds give the recoupment or scrapping allowance on the Capital Allowances tab.
+  </p>
+  {% if as_disposals %}
+  <table style="font-size:12px;">
+    <thead><tr><th>Asset</th><th>Sold on</th><th class="text-right">Cost</th><th class="text-right">Acc. depreciation</th><th class="text-right">Carrying amount</th><th class="text-right">Proceeds</th><th class="text-right">Profit / (loss)</th><th></th></tr></thead>
+    <tbody>
+    {% for d in as_disposals %}
+      <form method="post" action="{{ url_for('assetsched.dispose', engagement_id=engagement.id, asset_id=d.asset.id) }}" class="inline">
+      <tr>
+        <td>{{ d.asset.asset_code or '' }} {{ d.asset.description }}</td>
+        <td><input type="date" name="tax_disposed_on" value="{{ d.date.strftime('%Y-%m-%d') if d.date else '' }}" style="width:128px;margin-bottom:0;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="disposal_cost" value="{{ d.cost }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="disposal_accumulated_depreciation" value="{{ d.acc_dep }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right">{{ '%.2f'|format(d.nbv) }}</td>
+        <td class="text-right"><input type="number" step="0.01" name="tax_disposal_proceeds" value="{{ d.proceeds if d.proceeds is not none else '' }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right">{% if d.profit_loss is none %}-{% elif d.profit_loss < 0 %}({{ '%.2f'|format(-d.profit_loss) }}){% else %}{{ '%.2f'|format(d.profit_loss) }}{% endif %}</td>
+        <td><button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" name="clear" value="1" class="btn small danger" onclick="return confirm('Remove this disposal? The asset goes back to being held.')">Remove</button></td>
+      </tr>
+      </form>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No disposals recorded for the year.</div>
+  {% endif %}
+  {% if as_disposable %}
+  <form method="post" action="" class="form-row" style="align-items:flex-end;" id="dispose_form"
+        onsubmit="var s=document.getElementById('dispose_asset'); if(!s.value){alert('Choose the asset first.');return false;} this.action=s.value;">
+    <div style="grid-column: span 2;"><label>Asset sold or scrapped</label>
+      <select id="dispose_asset">
+        <option value="">Choose...</option>
+        {% for a in as_disposable %}<option value="{{ url_for('assetsched.dispose', engagement_id=engagement.id, asset_id=a.id) }}">{{ a.asset_code or '' }} {{ a.description }}</option>{% endfor %}
+      </select></div>
+    <div><label>Date sold</label><input type="date" name="tax_disposed_on" required></div>
+    <div><label>Proceeds</label><input type="number" step="0.01" name="tax_disposal_proceeds" placeholder="0 if scrapped"></div>
+    <div><label>Cost removed</label><input type="number" step="0.01" name="disposal_cost" placeholder="whole cost"></div>
+    <div><label>Acc. depreciation removed</label><input type="number" step="0.01" name="disposal_accumulated_depreciation" placeholder="to the date of sale"></div>
+    <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Record disposal</button></div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card" id="schedule">
+  <h3 class="mt-0">4. Asset Register schedule{% if as_period_end %} - year ended {{ as_period_end.strftime('%d %B %Y') }}{% endif %}</h3>
+  {% if as_movement %}
+  <div style="overflow-x:auto;">
+  <table style="font-size:12px;">
+    <thead>
+      <tr><th rowspan="2">Asset class</th><th colspan="4" class="text-right">Cost</th><th colspan="4" class="text-right">Accumulated depreciation</th><th colspan="2" class="text-right">Net book value</th></tr>
+      <tr><th class="text-right">b/f</th><th class="text-right">Additions</th><th class="text-right">Disposals</th><th class="text-right">c/f</th>
+          <th class="text-right">b/f</th><th class="text-right">Charge</th><th class="text-right">Disposals</th><th class="text-right">c/f</th>
+          <th class="text-right">b/f</th><th class="text-right">c/f</th></tr>
+    </thead>
+    <tbody>
+    {% for r in as_movement.by_class %}
+      <tr>
+        <td>{{ r.class_name }}</td>
+        <td class="text-right">{{ '%.2f'|format(r.opening_cost) }}</td><td class="text-right">{{ '%.2f'|format(r.additions) }}</td><td class="text-right">{{ '%.2f'|format(-r.disposals_cost) }}</td><td class="text-right">{{ '%.2f'|format(r.closing_cost) }}</td>
+        <td class="text-right">{{ '%.2f'|format(r.opening_acc_dep) }}</td><td class="text-right">{{ '%.2f'|format(r.charge) }}</td><td class="text-right">{{ '%.2f'|format(-r.disposals_acc_dep) }}</td><td class="text-right">{{ '%.2f'|format(r.closing_acc_dep) }}</td>
+        <td class="text-right">{{ '%.2f'|format(r.opening_nbv) }}</td><td class="text-right">{{ '%.2f'|format(r.closing_nbv) }}</td>
+      </tr>
+    {% endfor %}
+      {% set t = as_movement.total %}
+      <tr>
+        <td><strong>Total</strong></td>
+        <td class="text-right"><strong>{{ '%.2f'|format(t.opening_cost) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.additions) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(-t.disposals_cost) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.closing_cost) }}</strong></td>
+        <td class="text-right"><strong>{{ '%.2f'|format(t.opening_acc_dep) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.charge) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(-t.disposals_acc_dep) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.closing_acc_dep) }}</strong></td>
+        <td class="text-right"><strong>{{ '%.2f'|format(t.opening_nbv) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.closing_nbv) }}</strong></td>
+      </tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="muted" style="font-size:11.5px;">This is the schedule behind the "Property, plant and equipment" note on the Finalisation tab. The tax side of the same assets (tax value, allowances, recoupment) is on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a> tab.</p>
+  {% else %}
+  <div class="empty-state">Enter the opening balances above and the schedule appears here.</div>
+  {% endif %}
+  <div style="margin-top:10px;">
+    <form method="post" action="{{ url_for('assetsched.generate_schedules_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Export &amp; file the Asset Register and Capital Allowance Schedule (Excel)</button></form>
+    {{ filed_workpapers('asset_schedules') }}
+  </div>
+</div>

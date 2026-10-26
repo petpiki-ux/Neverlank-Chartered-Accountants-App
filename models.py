@@ -2048,6 +2048,12 @@ class Engagement(db.Model):
         return self.type in (WHISTLEBLOWER_SERVICE_TYPE, TRAINING_SERVICE_TYPE, CORPFIN_ENGAGEMENT_TYPE, LEGACY_CONSULTING_TYPE)
 
     @property
+    def has_asset_schedules(self):
+        """Whether this engagement shows the Asset Register and Capital Allowances tabs: every engagement that keeps a client's
+        accounts (so not Secretarial, Business Intelligence and IT, or the stand-alone service lines)."""
+        return self.type not in ("Secretarial", "Business Intelligence and IT Engagements") and not self.is_standalone_service
+
+    @property
     def has_tax_module(self):
         """Whether the Tax tab should appear on this engagement at all -
         either a dedicated Tax engagement type, or any Tax service
@@ -5157,6 +5163,10 @@ class PPEAsset(db.Model):
     # fetched, which the allowance schedule needs (recoupment / scrapping).
     tax_disposed_on = db.Column(db.Date)
     tax_disposal_proceeds = db.Column(db.Float)
+    # The tax value brought forward at the start of the reporting period (the closing tax value of the year before, e.g. 31 Dec
+    # 2024 when the period ends 31 Dec 2025). Blank means "work it out from the date acquired and cost"; a figure here is used as
+    # the opening tax value instead - see firm_tax.simulate_asset.
+    opening_tax_value = db.Column(db.Float)
     order = db.Column(db.Integer, default=0)
 
     engagement = db.relationship(

@@ -15,6 +15,7 @@ year (and any dividends/movements mapped), not read directly off the TB -
 see build_equity_statement() below.
 """
 from datetime import date, timedelta
+from decimal import Decimal, ROUND_HALF_UP
 
 # Each entry: (code, label, statement, section, normal_balance, cash_flow_class)
 #   statement: "SFP" | "PL" | "EQUITY" | "EXCLUDED"
@@ -280,6 +281,89 @@ def compute_totals(lines):
         totals[cat["code"]]["current"] += cur
         totals[cat["code"]]["prior"] += pri
     return totals
+
+
+
+# ---------------------------------------------------------------------------
+# Whole-number presentation. The statements are built from the trial balance to the cent; for the Financial Statements pack and the
+# Finalisation tab every IAS 1 line is rounded to a whole number FIRST and every subtotal is then added up from the rounded lines, so
+# a reader who adds the column gets the printed total. When the rounded statement of financial position is out by a few units while
+# the unrounded one balanced, the difference is a rounding difference: it is put on the largest working-capital or non-current
+# balance (so it is not hidden in cash or in profit) and reported back in statements["rounding"] so the preparer can see it.
+# A genuine imbalance (the unrounded statement does not balance either) is never touched.
+# ---------------------------------------------------------------------------
+
+def whole(x):
+    """x rounded to a whole number, halves away from zero (an accountant's rounding, not Python's round-half-even), never -0."""
+    try:
+        return float(Decimal(repr(float(x or 0.0))).quantize(Decimal(1), rounding=ROUND_HALF_UP)) + 0.0
+    except Exception:
+        return 0.0
+
+
+def round_totals(totals):
+    return {code: {"current": whole(v["current"]), "prior": whole(v["prior"])} for code, v in totals.items()}
+
+
+_ABSORB_ASSETS = ["trade_receivables", "inventories", "other_current_assets", "ppe", "intangible_assets", "investment_property",
+                  "long_term_investments", "other_noncurrent_assets"]
+_ABSORB_LIABILITIES = ["trade_payables", "other_current_liabilities", "short_term_borrowings", "short_term_provisions",
+                       "long_term_borrowings", "long_term_provisions", "other_noncurrent_liabilities"]
+MAX_ROUNDING_ABSORBED = 25.0
+
+
+def _balance_of(totals):
+    pl = build_income_statement(totals)
+    equity = build_equity_statement(totals, pl)
+    return build_financial_position(totals, equity)["balance_check"]
+
+
+def round_totals_balanced(raw):
+    """(rounded totals, [what was absorbed]). See the comment above."""
+    rounded = round_totals(raw)
+    raw_bc = _balance_of(raw)
+    absorbed = []
+    for period in ("current", "prior"):
+        if abs(raw_bc[period]) > 0.01:
+            continue                                   # the trial balance itself does not balance: leave it showing
+        d = whole(_balance_of(rounded)[period])
+        if d == 0 or abs(d) > MAX_ROUNDING_ABSORBED:
+            continue
+        side = [(abs(rounded[c][period]), c, +1) for c in _ABSORB_LIABILITIES if rounded.get(c) and abs(rounded[c][period]) > 0]
+        side += [(abs(rounded[c][period]), c, -1) for c in _ABSORB_ASSETS if rounded.get(c) and abs(rounded[c][period]) > 0]
+        if not side:
+            continue
+        _, code, sign = max(side, key=lambda t: t[0])
+        change = sign * d                               # asset: -d; liability: +d
+        rounded[code][period] += change
+        absorbed.append({"period": period, "category": code, "label": category_label(code), "amount": change})
+    return rounded, absorbed
+
+
+_PPE_MOVEMENT_KEYS = ("opening_cost", "additions", "disposals_cost", "closing_cost", "opening_acc_dep", "charge",
+                      "disposals_acc_dep", "closing_acc_dep", "opening_nbv", "closing_nbv")
+
+
+def round_ppe_movement(mv):
+    """The Asset Register's movement schedule in whole numbers, each class row adding across and the total row adding down."""
+    if not mv:
+        return mv
+
+    def fix(src):
+        r = {k: whole(src.get(k)) for k in _PPE_MOVEMENT_KEYS}
+        r["closing_cost"] = r["opening_cost"] + r["additions"] - r["disposals_cost"]
+        r["closing_acc_dep"] = r["opening_acc_dep"] + r["charge"] - r["disposals_acc_dep"]
+        r["opening_nbv"] = r["opening_cost"] - r["opening_acc_dep"]
+        r["closing_nbv"] = r["closing_cost"] - r["closing_acc_dep"]
+        return r
+
+    by_class = []
+    for row in mv["by_class"]:
+        new = dict(row)
+        new.update(fix(row))
+        by_class.append(new)
+    total = {k: sum(r[k] for r in by_class) for k in _PPE_MOVEMENT_KEYS}
+    return {"by_class": by_class, "total": total}
 
 
 def _row(label, current, prior=None, bold=False, memo=False, category=None):
@@ -1255,7 +1339,23 @@ def _signed_category_value(code, debit, credit):
     return (debit or 0.0) - (credit or 0.0) if normal == "debit" else (credit or 0.0) - (debit or 0.0)
 
 
-def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None):
+
+def _round_note_rows(rows, codes, raw_totals, cur, pri):
+    """Whole numbers for a breakdown note's account rows, adding up to the (whole) total: the rounding difference, if any, goes on the
+    largest row. Done only when the unrounded rows really did add up to the category total (otherwise the gap is a real one - for
+    example an audit adjustment, which the account list does not show - and is left visible)."""
+    for key, total_whole, raw in (("current", cur, sum(raw_totals[c]["current"] for c in codes)),
+                                  ("prior", pri, sum(raw_totals[c]["prior"] for c in codes))):
+        raw_rows = sum(r[key] for r in rows)
+        for r in rows:
+            r[key] = whole(r[key])
+        if rows and abs(raw_rows - raw) <= 0.01:
+            diff = total_whole - sum(r[key] for r in rows)
+            if diff:
+                max(rows, key=lambda r: abs(r[key]))[key] += diff
+
+
+def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_totals=None, ppe_movement_raw=None):
     """Builds the numbered Notes to the Financial Statements: one breakdown
     note per IAS 1 category (or small group of categories - see
     NOTE_DEFINITIONS) with a non-nil current or prior balance, each listing
@@ -1318,6 +1418,8 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None):
                     "account_code": l.account_code, "account_name": l.account_name,
                     "current": current, "prior": prior,
                 })
+        if raw_totals is not None:
+            _round_note_rows(account_rows, codes, raw_totals, cur, pri)
 
         number = next_number
         next_number += 1
@@ -1346,6 +1448,12 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None):
             diff_current = cur - reg_total["closing_nbv"]
             diff_prior = pri - reg_total["opening_nbv"]
             ties_out = abs(diff_current) <= 0.01 and abs(diff_prior) <= 0.01
+            if raw_totals is not None and ppe_movement_raw:
+                # In whole numbers the two sides can differ by the rounding alone: judged on the unrounded figures.
+                raw_cur = sum(raw_totals[c]["current"] for c in codes)
+                raw_pri = sum(raw_totals[c]["prior"] for c in codes)
+                ties_out = (abs(raw_cur - ppe_movement_raw["total"]["closing_nbv"]) <= 0.5
+                            and abs(raw_pri - ppe_movement_raw["total"]["opening_nbv"]) <= 0.5)
             note["reconciliation"] = {
                 "tb_current": cur, "tb_prior": pri,
                 "register_current": reg_total["closing_nbv"], "register_prior": reg_total["opening_nbv"],
@@ -1398,7 +1506,7 @@ def _attach_note_numbers(pl, sfp, cf, note_number_by_category):
 
 
 def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs", cash_flow_method="indirect",
-                          ppe_movement=None, ppe_policy_text=None):
+                          ppe_movement=None, ppe_policy_text=None, whole_numbers=False):
     """`adjustments`, when given (a TrialBalance's .adjustments), are applied
     on top of the preliminary trial balance's totals before the statements
     are built - see apply_adjustments() above. Leave it out (the default)
@@ -1424,16 +1532,24 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     totals = compute_totals(lines)
     if adjustments:
         totals = apply_adjustments(totals, adjustments)
+    raw_totals, rounding, ppe_movement_raw = totals, None, ppe_movement
+    if whole_numbers:
+        totals, absorbed = round_totals_balanced(raw_totals)
+        rounding = {"whole_numbers": True, "absorbed": absorbed}
+        ppe_movement = round_ppe_movement(ppe_movement)
     pl = build_income_statement(totals)
     equity = build_equity_statement(totals, pl)
     sfp = build_financial_position(totals, equity)
     cf = build_cash_flow(totals, pl, method=cash_flow_method)
     if reporting_framework in ("full_ifrs", "ifrs_for_smes"):
-        notes, note_number_by_category = build_notes(lines, totals, ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text)
+        notes, note_number_by_category = build_notes(
+            lines, totals, ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text,
+            raw_totals=raw_totals if whole_numbers else None, ppe_movement_raw=ppe_movement_raw if whole_numbers else None)
         _attach_note_numbers(pl, sfp, cf, note_number_by_category)
     else:
         notes = []
-    return {"totals": totals, "pl": pl, "equity": equity, "sfp": sfp, "cf": cf, "notes": notes}
+    return {"totals": totals, "pl": pl, "equity": equity, "sfp": sfp, "cf": cf, "notes": notes,
+            "whole_numbers": bool(whole_numbers), "rounding": rounding}
 
 
 def parse_tb_rows(rows):

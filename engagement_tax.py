@@ -98,6 +98,22 @@ def ensure_rules(engagement):
     return classes, have
 
 
+def opening_as_at(engagement):
+    """The date the opening balances stand at: the year end before the one being reported (31 Dec 2024 for a period ending 31 Dec 2025)."""
+    end = engagement.period_end
+    return firm_tax.fy_end(end, end.year - 1) if end else None
+
+
+def asset_dict(a, as_at):
+    """One register row as the capital allowance engine reads it. An asset with a tax value brought forward is worked from it."""
+    return {
+        "asset_code": a.asset_code, "description": a.description, "asset_class_id": a.asset_class_id,
+        "date_acquired": a.date_acquired, "cost": a.cost or 0.0, "disposed_on": a.tax_disposed_on,
+        "disposal_proceeds": a.tax_disposal_proceeds or 0.0, "id": a.id,
+        "opening_tax_value": a.opening_tax_value, "opening_as_at": as_at if a.opening_tax_value is not None else None,
+    }
+
+
 def capital_allowance_context(engagement):
     """Everything the Capital Allowances tab shows. Worked for the fiscal year ending on the engagement's period end."""
     classes, rules = ensure_rules(engagement)
@@ -106,7 +122,8 @@ def capital_allowance_context(engagement):
     ctx = {
         "ca_classes": classes, "ca_rules": rules, "ca_assets": assets, "ca_target_end": target_end,
         "ca_methods": RULE_METHODS, "ca_method_labels": RULE_METHOD_LABELS,
-        "ca_result": None, "ca_undated": [a for a in assets if not a.date_acquired],
+        "ca_opening_as_at": opening_as_at(engagement),
+        "ca_result": None, "ca_undated": [a for a in assets if not a.date_acquired and a.opening_tax_value is None],
         "ca_unclassified": [a for a in assets if a.date_acquired and not a.asset_class_id],
         "ca_unverified": [], "ca_depreciation": 0.0, "ca_posted": [], "ca_stale": False,
         "ca_is_senior": _senior(),
@@ -117,11 +134,7 @@ def capital_allowance_context(engagement):
         return ctx
     class_dicts = [{"id": c.id, "name": c.name} for c in classes]
     rule_dicts = {cid: firm_tax.rule_dict(r) for cid, r in rules.items()}
-    asset_dicts = [{
-        "asset_code": a.asset_code, "description": a.description, "asset_class_id": a.asset_class_id,
-        "date_acquired": a.date_acquired, "cost": a.cost or 0.0, "disposed_on": a.tax_disposed_on,
-        "disposal_proceeds": a.tax_disposal_proceeds or 0.0, "id": a.id,
-    } for a in assets if a.date_acquired]
+    asset_dicts = [asset_dict(a, ctx["ca_opening_as_at"]) for a in assets if a.date_acquired or a.opening_tax_value is not None]
     result = firm_tax.capital_allowances(asset_dicts, class_dicts, rule_dicts, target_end, ref_end=target_end)
     ctx["ca_result"] = result
     used = {r["class_id"] for r in result["rows"] if r.get("class_id")}
@@ -193,8 +206,14 @@ def save_disposal(engagement_id, asset_id):
     proceeds = _num(request.form.get("tax_disposal_proceeds"))
     if on and proceeds is None:
         proceeds = 0.0
-    asset.tax_disposed_on = on
-    asset.tax_disposal_proceeds = proceeds if on else None
+    import asset_schedules
+    if on:
+        # Dated here, the disposal also takes the cost and depreciation out of the Asset Register (as on its Disposals card), unless
+        # figures for those were already entered there.
+        keep_cost, keep_acc = asset.disposal_cost or None, asset.disposal_accumulated_depreciation or None
+        asset_schedules.apply_disposal(asset, on, proceeds, keep_cost, keep_acc)
+    else:
+        asset_schedules.clear_disposal(asset)
     db.session.commit()
     flash("Disposal details saved for the allowance schedule." if on else "Disposal details cleared.", "success")
     return _back(eng.id, "capital_allowances")

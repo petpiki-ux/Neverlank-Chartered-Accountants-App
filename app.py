@@ -236,7 +236,7 @@ def _add_missing_columns():
         "user": [("last_seen_at", "DATETIME")],
         "income_tax_computation": [("profit_before_tax_manual", "FLOAT")],
 
-        "ppe_asset": [("tax_disposed_on", "DATE"), ("tax_disposal_proceeds", "FLOAT")],
+        "ppe_asset": [("tax_disposed_on", "DATE"), ("tax_disposal_proceeds", "FLOAT"), ("opening_tax_value", "FLOAT")],
         "message_recipient": [("recalled_at", "DATETIME"), ("deleted_at", "DATETIME")],
         "engagement": [
             ("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0"),
@@ -789,6 +789,7 @@ def create_app():
     from qpd import qpd_bp, qpd_dashboard_bp
     from standard_coa import standard_coa_bp
     from tb_setup import tb_setup_bp
+    from asset_schedules import assetsched_bp
     from whistleblower import wb_bp, wb_public_bp
     from training import training_bp
 
@@ -836,6 +837,7 @@ def create_app():
     app.register_blueprint(qpd_dashboard_bp)
     app.register_blueprint(standard_coa_bp)
     app.register_blueprint(tb_setup_bp)
+    app.register_blueprint(assetsched_bp)
     app.register_blueprint(wb_bp)
     app.register_blueprint(wb_public_bp)
 

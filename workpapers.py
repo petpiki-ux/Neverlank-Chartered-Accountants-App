@@ -58,6 +58,46 @@ def _fmt_num(n):
     return f"({abs(n):,.2f})" if n < 0 else f"{n:,.2f}"
 
 
+def _fmt_whole(n):
+    """A figure of the financial statements: a whole number, thousands separated, a negative in brackets (-0.4 prints as 0, not (0))."""
+    from financials import whole
+    n = whole(n)
+    return f"({abs(n):,.0f})" if n < 0 else f"{n:,.0f}"
+
+
+def _col_widths(doc, table, fractions):
+    """Fix a statement table's column widths as fractions of the usable page width (a wide label column, narrower figure columns)."""
+    from docx.shared import Inches
+    from docx.oxml import OxmlElement
+    total = brand.usable_width_in(doc)
+    widths = [total * f for f in fractions]
+    table.autofit = False
+    layout = OxmlElement("w:tblLayout")
+    layout.set(qn("w:type"), "fixed")
+    table._tbl.tblPr.append(layout)
+    for i, w in enumerate(widths):
+        table.columns[i].width = Inches(w)
+    for row in table.rows:
+        cells = row.cells
+        if len(cells) > 1 and cells[0]._tc is cells[-1]._tc:
+            continue
+        for c, w in zip(cells, widths):
+            c.width = Inches(w)
+
+
+def _right_align(table, first_col=1, skip_cols=()):
+    """Right-align the figure columns of a statement table (header included) - the label column stays on the left. A merged section row
+    is left alone."""
+    for row in table.rows:
+        cells = row.cells
+        if len(cells) > 1 and cells[0]._tc is cells[-1]._tc:
+            continue
+        for i, cell in enumerate(cells):
+            if i >= first_col and i not in skip_cols:
+                for p in cell.paragraphs:
+                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+
+
 # ---------------------------------------------------------------- Word helpers
 
 def _new_document(title, engagement, subtitle=None, doc=None):
@@ -139,6 +179,12 @@ def _statement_table(doc, title, headers, row_specs, level=1):
                             run.bold = True
                         if spec.get("muted"):
                             run.italic = True
+    _col_widths(doc, table, [0.46, 0.10, 0.22, 0.22] if len(headers) == 4 else [0.62, 0.10, 0.28])
+    _right_align(table, first_col=2)
+    for row in table.rows:                                  # the Note reference sits centred between the label and the figures
+        if len(row.cells) > 2 and row.cells[0]._tc is not row.cells[-1]._tc:
+            for p in row.cells[1].paragraphs:
+                p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     doc.add_paragraph()
     return table
 
@@ -148,9 +194,9 @@ def _fs_row_cells(r, with_prior=True):
     label, Note (blank if the row has none), current year, and - unless
     with_prior is False (the Cash Flow Statement, current year only) -
     prior year."""
-    cells = [r["label"], str(r.get("note") or ""), _fmt_num(r["current"])]
+    cells = [r["label"], str(r.get("note") or ""), _fmt_whole(r["current"])]
     if with_prior:
-        cells.append(_fmt_num(r.get("prior", 0)))
+        cells.append(_fmt_whole(r.get("prior", 0)))
     return cells
 
 
@@ -459,13 +505,15 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         for r in rows:
             row = table.add_row().cells
             row[0].text = r["label"]
-            row[1].text = _fmt_num(r["current"])
-            row[2].text = _fmt_num(r.get("prior", 0))
+            row[1].text = _fmt_whole(r["current"])
+            row[2].text = _fmt_whole(r.get("prior", 0))
             if r.get("bold"):
                 for c in row:
                     for p in c.paragraphs:
                         for run in p.runs:
                             run.bold = True
+        _col_widths(doc, table, [0.56, 0.22, 0.22])
+        _right_align(table, first_col=1)
         doc.add_paragraph()
         return table
 
@@ -484,10 +532,10 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         def add_row(label, row, bold=False):
             disposals_nbv = row["disposals_cost"] - row["disposals_acc_dep"]
             values = [
-                label, _fmt_num(row["opening_nbv"]), _fmt_num(row["additions"]),
-                _fmt_num(-disposals_nbv) if disposals_nbv else _fmt_num(0),
-                _fmt_num(-row["charge"]) if row["charge"] else _fmt_num(0),
-                _fmt_num(row["closing_nbv"]),
+                label, _fmt_whole(row["opening_nbv"]), _fmt_whole(row["additions"]),
+                _fmt_whole(-disposals_nbv) if disposals_nbv else _fmt_whole(0),
+                _fmt_whole(-row["charge"]) if row["charge"] else _fmt_whole(0),
+                _fmt_whole(row["closing_nbv"]),
             ]
             cells = table.add_row().cells
             for i, v in enumerate(values):
@@ -500,6 +548,8 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         for row in note["movement"]:
             add_row(row["class_name"], row)
         add_row("Total", note["movement_total"], bold=True)
+        _col_widths(doc, table, [0.25, 0.15, 0.15, 0.15, 0.16, 0.14])
+        _right_align(table, first_col=1)
 
         rec = note.get("reconciliation")
         if rec:
@@ -509,14 +559,14 @@ def build_financial_statements_docx(engagement, statements, financial_statements
             # underlying schedule" step. A non-nil difference is called out
             # as the basis for a proposed adjustment, not silently dropped.
             base = (
-                f"Per trial balance: {_fmt_num(rec['tb_current'])} (current year), {_fmt_num(rec['tb_prior'])} (prior year). "
-                f"Per Asset Register: {_fmt_num(rec['register_current'])} (current year), {_fmt_num(rec['register_prior'])} (prior year)."
+                f"Per trial balance: {_fmt_whole(rec['tb_current'])} (current year), {_fmt_whole(rec['tb_prior'])} (prior year). "
+                f"Per Asset Register: {_fmt_whole(rec['register_current'])} (current year), {_fmt_whole(rec['register_prior'])} (prior year)."
             )
             if rec["ties_out"]:
                 p = doc.add_paragraph(base + " Ties out to the trial balance.")
             else:
                 p = doc.add_paragraph(
-                    base + f" Difference of {_fmt_num(rec['diff_current'])} (current year), {_fmt_num(rec['diff_prior'])} (prior year) "
+                    base + f" Difference of {_fmt_whole(rec['diff_current'])} (current year), {_fmt_whole(rec['diff_prior'])} (prior year) "
                     "- basis for a proposed adjustment to the trial balance or a correction to the Asset Register, as appropriate."
                 )
             p.runs[0].italic = True
@@ -525,28 +575,33 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     sfp = statements["sfp"]
     sfp_specs = [{"section": "Non-current assets"}]
     sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["non_current_assets"]]
-    sfp_specs.append({"cells": ["Total non-current assets", "", _fmt_num(sfp["nca_total"]["current"]), _fmt_num(sfp["nca_total"]["prior"])], "bold": True})
+    sfp_specs.append({"cells": ["Total non-current assets", "", _fmt_whole(sfp["nca_total"]["current"]), _fmt_whole(sfp["nca_total"]["prior"])], "bold": True})
     sfp_specs.append({"section": "Current assets"})
     sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["current_assets"]]
-    sfp_specs.append({"cells": ["Total current assets", "", _fmt_num(sfp["ca_total"]["current"]), _fmt_num(sfp["ca_total"]["prior"])], "bold": True})
-    sfp_specs.append({"cells": ["Total assets", "", _fmt_num(sfp["total_assets"]["current"]), _fmt_num(sfp["total_assets"]["prior"])], "bold": True})
+    sfp_specs.append({"cells": ["Total current assets", "", _fmt_whole(sfp["ca_total"]["current"]), _fmt_whole(sfp["ca_total"]["prior"])], "bold": True})
+    sfp_specs.append({"cells": ["Total assets", "", _fmt_whole(sfp["total_assets"]["current"]), _fmt_whole(sfp["total_assets"]["prior"])], "bold": True})
     sfp_specs.append({"section": "Equity"})
     sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["equity"]]
-    sfp_specs.append({"cells": ["Total equity", "", _fmt_num(sfp["total_equity"]["current"]), _fmt_num(sfp["total_equity"]["prior"])], "bold": True})
+    sfp_specs.append({"cells": ["Total equity", "", _fmt_whole(sfp["total_equity"]["current"]), _fmt_whole(sfp["total_equity"]["prior"])], "bold": True})
     sfp_specs.append({"section": "Non-current liabilities"})
     sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["non_current_liabilities"]]
-    sfp_specs.append({"cells": ["Total non-current liabilities", "", _fmt_num(sfp["ncl_total"]["current"]), _fmt_num(sfp["ncl_total"]["prior"])], "bold": True})
+    sfp_specs.append({"cells": ["Total non-current liabilities", "", _fmt_whole(sfp["ncl_total"]["current"]), _fmt_whole(sfp["ncl_total"]["prior"])], "bold": True})
     sfp_specs.append({"section": "Current liabilities"})
     sfp_specs += [{"cells": _fs_row_cells(r)} for r in sfp["current_liabilities"]]
-    sfp_specs.append({"cells": ["Total current liabilities", "", _fmt_num(sfp["cl_total"]["current"]), _fmt_num(sfp["cl_total"]["prior"])], "bold": True})
-    sfp_specs.append({"cells": ["Total equity and liabilities", "", _fmt_num(sfp["total_equity_and_liabilities"]["current"]), _fmt_num(sfp["total_equity_and_liabilities"]["prior"])], "bold": True})
+    sfp_specs.append({"cells": ["Total current liabilities", "", _fmt_whole(sfp["cl_total"]["current"]), _fmt_whole(sfp["cl_total"]["prior"])], "bold": True})
+    sfp_specs.append({"cells": ["Total equity and liabilities", "", _fmt_whole(sfp["total_equity_and_liabilities"]["current"]), _fmt_whole(sfp["total_equity_and_liabilities"]["prior"])], "bold": True})
     # One continuous table, top to bottom, exactly matching the Finalisation
     # tab on screen - not a separate table per section with paragraph
     # breaks in between.
     _statement_table(doc, "Statement of Financial Position", ["", "Note", "Current year", "Prior year"], sfp_specs)
     bc = sfp["balance_check"]
     tie_note = "Ties out." if abs(bc["current"]) <= 0.01 and abs(bc["prior"]) <= 0.01 else "Non-zero - check every account is mapped to the right category and that the trial balance balances."
-    doc.add_paragraph(f"Balance check (assets less equity and liabilities): current year {_fmt_num(bc['current'])}, prior year {_fmt_num(bc['prior'])}. {tie_note}").runs[0].italic = True
+    doc.add_paragraph(f"Balance check (assets less equity and liabilities): current year {_fmt_whole(bc['current'])}, prior year {_fmt_whole(bc['prior'])}. {tie_note}").runs[0].italic = True
+    if statements.get("whole_numbers"):
+        rounding_text = "All amounts in these financial statements are rounded to the nearest whole number."
+        for a in (statements.get("rounding") or {}).get("absorbed", []):
+            rounding_text += f" A rounding difference of {_fmt_whole(abs(a['amount']))} on {a['label'].lower()} ({'current' if a['period'] == 'current' else 'prior'} year) is included in that line so that the statement of financial position balances."
+        doc.add_paragraph(rounding_text).runs[0].italic = True
 
     pl_specs = [{"cells": _fs_row_cells(r), "bold": r.get("bold", False)} for r in statements["pl"]["rows"]]
     _statement_table(doc, "Statement of Profit or Loss and Other Comprehensive Income", ["", "Note", "Current year", "Prior year"], pl_specs)
@@ -558,10 +613,19 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     _style_table(eq_table)
     for r in statements["equity"]["rows"]:
         row = eq_table.add_row().cells
-        row[0].text = r["label"]
-        row[1].text = _fmt_num(r["opening"])
-        row[2].text = f"{_fmt_num(r['movement'])} ({r['movement_desc']})"
-        row[3].text = _fmt_num(r["closing"])
+        row[0].text = r["label"] + (f" ({r['movement_desc'][0].lower() + r['movement_desc'][1:]})" if r["label"] == "Retained earnings" else "")
+        row[1].text = _fmt_whole(r["opening"])
+        row[2].text = _fmt_whole(r["movement"])
+        row[3].text = _fmt_whole(r["closing"])
+    tot = eq_table.add_row().cells
+    tot[0].text, tot[1].text = "Total equity", _fmt_whole(statements["equity"]["total_opening"])
+    tot[2].text, tot[3].text = _fmt_whole(statements["equity"]["total_closing"] - statements["equity"]["total_opening"]), _fmt_whole(statements["equity"]["total_closing"])
+    for c in tot:
+        for p in c.paragraphs:
+            for run in p.runs:
+                run.bold = True
+    _col_widths(doc, eq_table, [0.43, 0.19, 0.19, 0.19])
+    _right_align(eq_table, first_col=1)
     doc.add_paragraph()
 
     cf = statements["cf"]
@@ -569,21 +633,21 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     cf_specs = [{"section": "Operating activities"}]
     for r in cf["operating_rows"]:
         cf_specs.append({"cells": _fs_row_cells(r, with_prior=False), "bold": r.get("bold", False), "muted": r.get("memo", False)})
-    cf_specs.append({"cells": ["Net cash from operating activities", "", _fmt_num(cf["net_operating"])], "bold": True})
+    cf_specs.append({"cells": ["Net cash from operating activities", "", _fmt_whole(cf["net_operating"])], "bold": True})
     cf_specs.append({"section": "Investing activities"})
     for r in cf["investing_rows"]:
         cf_specs.append({"cells": _fs_row_cells(r, with_prior=False)})
-    cf_specs.append({"cells": ["Net cash used in investing activities", "", _fmt_num(cf["net_investing"])], "bold": True})
+    cf_specs.append({"cells": ["Net cash used in investing activities", "", _fmt_whole(cf["net_investing"])], "bold": True})
     cf_specs.append({"section": "Financing activities"})
     for r in cf["financing_rows"]:
         cf_specs.append({"cells": _fs_row_cells(r, with_prior=False)})
-    cf_specs.append({"cells": ["Net cash from financing activities", "", _fmt_num(cf["net_financing"])], "bold": True})
-    cf_specs.append({"cells": ["Net increase/(decrease) in cash", "", _fmt_num(cf["net_movement"])], "bold": True})
-    cf_specs.append({"cells": ["Cash at beginning of year", "", _fmt_num(cf["cash_open"])]})
-    cf_specs.append({"cells": ["Cash at end of year (computed)", "", _fmt_num(cf["cash_close_computed"])], "bold": True})
-    cf_specs.append({"cells": ["Cash at end of year (per trial balance)", "", _fmt_num(cf["cash_close_actual"])]})
+    cf_specs.append({"cells": ["Net cash from financing activities", "", _fmt_whole(cf["net_financing"])], "bold": True})
+    cf_specs.append({"cells": ["Net increase/(decrease) in cash", "", _fmt_whole(cf["net_movement"])], "bold": True})
+    cf_specs.append({"cells": ["Cash at beginning of year", "", _fmt_whole(cf["cash_open"])]})
+    cf_specs.append({"cells": ["Cash at end of year (computed)", "", _fmt_whole(cf["cash_close_computed"])], "bold": True})
+    cf_specs.append({"cells": ["Cash at end of year (per trial balance)", "", _fmt_whole(cf["cash_close_actual"])]})
     _statement_table(doc, f"Statement of Cash Flows ({method_label}, current year)", ["", "Note", "Amount"], cf_specs)
-    variance_note = "Ties out to the trial balance." if abs(cf["variance"]) <= 0.01 else f"Computed closing cash differs from the trial balance by {_fmt_num(cf['variance'])} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust."
+    variance_note = "Ties out to the trial balance." if abs(cf["variance"]) <= 0.01 else f"Computed closing cash differs from the trial balance by {_fmt_whole(cf['variance'])} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust."
     doc.add_paragraph(variance_note).runs[0].italic = True
 
     notes_started = False
@@ -799,6 +863,116 @@ def build_ppe_asset_register_xlsx(engagement, asset_classes, assets):
     _autofit(ws2, [14, 32, 18, 14, 14, 16, 16, 16, 16, 14, 16, 14])
 
     return _finish_wb(wb)
+
+
+def build_asset_schedules_xlsx(engagement, ctx, ca):
+    """The Asset Register and Capital Allowance Schedule as one workbook for the file: opening balances (the year before's closing),
+    the year's additions and disposals, the Asset Register schedule by class and the Capital Allowance Schedule. `ctx` is
+    asset_schedules.tab_context(engagement); `ca` is engagement_tax.capital_allowance_context(engagement)."""
+    from openpyxl.styles import Alignment
+    as_at = ctx["as_opening_as_at"]
+    wb, ws = _new_workbook_sheet("Asset Register & Capital Allowance Schedule — Ref. N3300", engagement, "Opening balances")
+    money = "#,##0.00;(#,##0.00);-"
+    classes = {c.id: c.name for c in ctx["as_classes"]}
+
+    def put(sheet, row, values, bold=False, numeric_from=None):
+        for i, v in enumerate(values, start=1):
+            cell = sheet.cell(row=row, column=i, value=v)
+            cell.border = _BORDER
+            if bold:
+                cell.font = Font(bold=True)
+            if numeric_from and i >= numeric_from and isinstance(v, (int, float)):
+                cell.number_format = money
+                cell.alignment = Alignment(horizontal="right")
+        return row + 1
+
+    # 1. opening balances
+    ws.cell(row=6, column=1, value=f"Opening balances as at {_fmt_date(as_at)}").font = Font(bold=True, size=12, color=_GOLD_HEX)
+    row = _header_row(ws, 7, ["Code", "Description", "Class", "Date acquired", "Cost b/f", "Accumulated depreciation b/f", "Net book value b/f", "Tax value b/f"])
+    start = row
+    for a in ctx["as_openings"]:
+        row = put(ws, row, [a.asset_code or "", a.description, classes.get(a.asset_class_id, "Unclassified"),
+                            _fmt_date(a.date_acquired) if a.date_acquired else "", a.cost or 0.0,
+                            a.opening_accumulated_depreciation or 0.0, (a.cost or 0.0) - (a.opening_accumulated_depreciation or 0.0),
+                            a.opening_tax_value if a.opening_tax_value is not None else ""], numeric_from=5)
+    if row > start:
+        put(ws, row, ["", "TOTAL", "", ""] + [f"=SUM({get_column_letter(c)}{start}:{get_column_letter(c)}{row - 1})" for c in (5, 6, 7, 8)], bold=True)
+        for c in (5, 6, 7, 8):
+            ws.cell(row=row, column=c).number_format = money
+    _autofit(ws, [12, 36, 20, 14, 16, 18, 18, 16])
+
+    # 2. additions
+    w2 = wb.create_sheet("Additions")
+    w2.cell(row=6, column=1, value="Additions during the year").font = Font(bold=True, size=12, color=_GOLD_HEX)
+    r2 = _header_row(w2, 7, ["Code", "Description", "Class", "Date acquired", "Cost", "Depreciation in the accounts"])
+    s2 = r2
+    for a in ctx["as_additions"]:
+        r2 = put(w2, r2, [a.asset_code or "", a.description, classes.get(a.asset_class_id, "Unclassified"),
+                          _fmt_date(a.date_acquired), a.cost or 0.0, a.current_year_depreciation or 0.0], numeric_from=5)
+    if r2 > s2:
+        put(w2, r2, ["", "TOTAL", "", ""] + [f"=SUM({get_column_letter(c)}{s2}:{get_column_letter(c)}{r2 - 1})" for c in (5, 6)], bold=True)
+        for c in (5, 6):
+            w2.cell(row=r2, column=c).number_format = money
+    _autofit(w2, [12, 36, 20, 14, 16, 22])
+
+    # 3. disposals
+    w3 = wb.create_sheet("Disposals")
+    w3.cell(row=6, column=1, value="Disposals during the year").font = Font(bold=True, size=12, color=_GOLD_HEX)
+    r3 = _header_row(w3, 7, ["Code", "Description", "Class", "Date sold", "Cost", "Accumulated depreciation", "Carrying amount", "Proceeds", "Profit / (loss)"])
+    s3 = r3
+    for d in ctx["as_disposals"]:
+        a = d["asset"]
+        r3 = put(w3, r3, [a.asset_code or "", a.description, classes.get(a.asset_class_id, "Unclassified"),
+                          _fmt_date(d["date"]) if d["date"] else "", d["cost"], d["acc_dep"], d["nbv"],
+                          d["proceeds"] if d["proceeds"] is not None else "", d["profit_loss"] if d["profit_loss"] is not None else ""], numeric_from=5)
+    if r3 > s3:
+        put(w3, r3, ["", "TOTAL", "", ""] + [f"=SUM({get_column_letter(c)}{s3}:{get_column_letter(c)}{r3 - 1})" for c in (5, 6, 7, 8, 9)], bold=True)
+        for c in (5, 6, 7, 8, 9):
+            w3.cell(row=r3, column=c).number_format = money
+    _autofit(w3, [12, 36, 20, 14, 16, 18, 16, 16, 16])
+
+    # 4. Asset Register schedule
+    w4 = wb.create_sheet("Asset Register schedule")
+    w4.cell(row=6, column=1, value=f"Asset Register - year ended {_fmt_date(engagement.period_end)}").font = Font(bold=True, size=12, color=_GOLD_HEX)
+    r4 = _header_row(w4, 7, ["Asset class", "Cost b/f", "Additions", "Disposals", "Cost c/f", "Acc. depreciation b/f", "Charge for the year",
+                             "Depreciation on disposals", "Acc. depreciation c/f", "NBV b/f", "NBV c/f"])
+    mv = ctx["as_movement"]
+    if mv:
+        for r in mv["by_class"]:
+            r4 = put(w4, r4, [r["class_name"], r["opening_cost"], r["additions"], -r["disposals_cost"], r["closing_cost"], r["opening_acc_dep"],
+                              r["charge"], -r["disposals_acc_dep"], r["closing_acc_dep"], r["opening_nbv"], r["closing_nbv"]], numeric_from=2)
+        t = mv["total"]
+        put(w4, r4, ["Total", t["opening_cost"], t["additions"], -t["disposals_cost"], t["closing_cost"], t["opening_acc_dep"], t["charge"],
+                     -t["disposals_acc_dep"], t["closing_acc_dep"], t["opening_nbv"], t["closing_nbv"]], bold=True, numeric_from=2)
+    _autofit(w4, [28] + [16] * 10)
+
+    # 5. Capital Allowance Schedule
+    w5 = wb.create_sheet("Capital allowances")
+    res = ca.get("ca_result")
+    w5.cell(row=6, column=1, value=f"Capital Allowance Schedule - year ended {_fmt_date(engagement.period_end)}").font = Font(bold=True, size=12, color=_GOLD_HEX)
+    r5 = _header_row(w5, 7, ["Asset class", "Tax value b/f", "Additions", "Disposals (tax value)", "Allowances", "Tax value c/f", "Disposal proceeds",
+                             "Recoupment", "Scrapping allowance"])
+    if res and res["rows"]:
+        for c in res["by_class"]:
+            r5 = put(w5, r5, [c["class_name"], c["opening"], c["additions"], -c["disposed_tv"], c["allowance"], c["closing"], c["proceeds"],
+                              c["recoupment"], c["scrapping"]], numeric_from=2)
+        t = res["total"]
+        r5 = put(w5, r5, ["Total", t["opening"], t["additions"], -t["disposed_tv"], t["allowance"], t["closing"], t["proceeds"], t["recoupment"],
+                          t["scrapping"]], bold=True, numeric_from=2)
+        r5 += 2
+        w5.cell(row=r5, column=1, value="Asset by asset").font = Font(bold=True, size=12, color=_GOLD_HEX)
+        r5 = _header_row(w5, r5 + 1, ["Asset", "Tax value b/f", "Additions", "Disposals (tax value)", "Allowances", "Tax value c/f", "Disposal proceeds",
+                                      "Recoupment", "Scrapping allowance", "Class", "Allowance method"])
+        for r in res["rows"]:
+            r5 = put(w5, r5, [f"{r['asset_code'] or ''} {r['description']}".strip(), r["opening"], r["additions"], -r["disposed_tv"], r["allowance"],
+                              r["closing"], r["proceeds"], r["recoupment"], r["scrapping"], r["class_name"], r["method"]], numeric_from=2)
+        r5 += 1
+        w5.cell(row=r5, column=1, value="Allowance rules marked 'not verified' have not yet been checked against the Income Tax Act by a Partner or Admin.").font = Font(italic=True, size=9)
+    else:
+        w5.cell(row=r5, column=1, value="No assets in the schedule for this year.")
+    _autofit(w5, [34, 16, 16, 18, 16, 16, 16, 14, 18, 22, 16])
+    return _finish_wb(wb)
+
 
 
 # ================================================================= Management representation letter (Word)

@@ -555,9 +555,11 @@ def view_engagement(engagement_id):
             tab = "tax"
         elif tab in ("analytical", "risks", "entity", "planning"):
             tab = "overview"
-    elif tab == "asset_register":
+    elif tab == "asset_register" and not engagement.has_asset_schedules:
         tab = "substantive"
-    if tab in ("capital_allowances", "qpd") and not engagement.has_tax_module:
+    if tab == "qpd" and not engagement.has_tax_module:
+        tab = "overview"
+    if tab == "capital_allowances" and not (engagement.has_tax_module or engagement.has_asset_schedules):
         tab = "overview"
     # The VAT register has its own tab once the client has a VAT number (and stays on the Tax tab until then).
     if tab == "vat" and not engagement.shows_vat_tab:
@@ -661,7 +663,7 @@ def view_engagement(engagement_id):
         fin.build_all_statements(
             trial_balance.lines, trial_balance.adjustments,
             reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,
-            ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text,
+            ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text, whole_numbers=True,
         )
         if trial_balance and trial_balance.lines else None
     )
@@ -1036,6 +1038,13 @@ def view_engagement(engagement_id):
             tax_tab_context.update(engagement_tax.capital_allowance_context(engagement))
         if tab == "qpd":
             tax_tab_context.update(engagement_tax.qpd_context(engagement))
+    elif engagement.has_asset_schedules and tab == "capital_allowances":
+        import engagement_tax
+        tax_tab_context.update(engagement_tax.capital_allowance_context(engagement))
+    # The Asset Register and Capital Allowances tabs: opening balances, additions, disposals and the schedules.
+    if engagement.has_asset_schedules and tab in ("asset_register", "capital_allowances"):
+        import asset_schedules
+        tax_tab_context.update(asset_schedules.tab_context(engagement))
 
     return render_template(
         "engagements/detail.html",
@@ -5273,6 +5282,8 @@ def _ppe_tab(engagement):
     made from the Capital Allowances tab goes back there."""
     if "tab=capital_allowances" in (request.referrer or ""):
         return "capital_allowances"
+    if "tab=asset_register" in (request.referrer or "") and engagement.has_asset_schedules:
+        return "asset_register"
     return "asset_register" if engagement.is_tax_advisory_type else "substantive"
 
 
@@ -5356,6 +5367,7 @@ def add_ppe_asset(engagement_id):
         current_year_depreciation=_parse_float(request.form.get("current_year_depreciation")) or 0.0,
         disposal_cost=_parse_float(request.form.get("disposal_cost")) or 0.0,
         disposal_accumulated_depreciation=_parse_float(request.form.get("disposal_accumulated_depreciation")) or 0.0,
+        opening_tax_value=_parse_float(request.form.get("opening_tax_value")),
         order=order,
     ))
     db.session.commit()
@@ -5383,6 +5395,8 @@ def update_ppe_asset(asset_id):
     asset.current_year_depreciation = _parse_float(request.form.get("current_year_depreciation")) or 0.0
     asset.disposal_cost = _parse_float(request.form.get("disposal_cost")) or 0.0
     asset.disposal_accumulated_depreciation = _parse_float(request.form.get("disposal_accumulated_depreciation")) or 0.0
+    if "opening_tax_value" in request.form:                  # forms without the field (the Capital Allowances tab) leave it alone
+        asset.opening_tax_value = _parse_float(request.form.get("opening_tax_value"))
     db.session.commit()
     flash("Asset updated.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
@@ -5773,7 +5787,7 @@ def generate_financial_statements_docx(engagement_id):
     statements = fin.build_all_statements(
         trial_balance.lines, trial_balance.adjustments,
         reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,
-        ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text,
+        ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text, whole_numbers=True,
     )
     financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
     directors_statement = DirectorsStatement.query.filter_by(engagement_id=engagement_id).first()
