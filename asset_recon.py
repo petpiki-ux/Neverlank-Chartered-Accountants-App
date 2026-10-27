@@ -420,3 +420,15 @@ def push_to_tb(engagement_id):
         n = len(prop["lines"]) + len(prop["py_lines"])
         flash(f"Trial balance adjustments: {', '.join(done)} ({n} lines). New or refreshed adjustments need review and partner sign-off on the Finalisation tab.", "success")
     return sched._back(engagement, "reconcile")
+
+
+def preview_for_template(engagement):
+    """The journals the Finalisation tab offers beside the PPE note's tie-out: comparatives restated to the register's opening balances
+    (PPE-REG-PY) and this year's balances brought to the register (PPE-REG), the balance in suspense. None when it cannot be worked."""
+    try:
+        if not engagement.has_asset_schedules:
+            return None
+        rc = reconcile(engagement, "restate_prior", "suspense")
+        return rc if rc.get("ok") else None
+    except Exception:                                        # never let the preview break the Finalisation page
+        return None

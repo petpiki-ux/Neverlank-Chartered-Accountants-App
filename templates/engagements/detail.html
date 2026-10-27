@@ -2141,6 +2141,23 @@
       </form>
       <div><a href="{{ url_for('static', filename='downloads/Neverlank_TB_Import_Template.xlsx') }}" class="btn secondary">Download template</a></div>
     </div>
+    {% set ty_cur = engagement.period_end.year if engagement.period_end else None %}
+    <div style="margin:4px 0 12px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:6px;">
+      <h4 class="mt-0" style="margin-bottom:4px;">Upload one year's trial balance on its own</h4>
+      <p class="muted" style="font-size:12px;margin-top:0;">The {{ ty_cur or 'current' }} trial balance in its own Excel (or CSV) file, in the client's own layout - Account name with Debit and Credit columns, or one Balance / Closing balance column. Only that year's figures are replaced: the other year's figures and the IAS 1 categories already chosen are kept, new accounts are added, and accounts that are not in the file are set to nil for that year. The result says whether the file balances.</p>
+      <div class="form-row" style="align-items:flex-end;">
+        <form method="post" action="{{ url_for('tbyear.upload_year', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;grid-column: span 2;"{% if trial_balance and trial_balance.lines %} onsubmit="return confirm('Replace the {{ ty_cur or 'current' }} figures of the trial balance with this file? The other year is kept.');"{% endif %}>
+          <input type="hidden" name="year" value="current">
+          <div><label>{{ ty_cur or 'Current year' }} trial balance</label><input type="file" name="file" accept=".xlsx,.xls,.csv,.tsv,.txt" required></div>
+          <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload {{ ty_cur or 'current' }} only</button></div>
+        </form>
+        <form method="post" action="{{ url_for('tbyear.upload_year', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;grid-column: span 2;"{% if trial_balance and trial_balance.lines %} onsubmit="return confirm('Replace the {{ (ty_cur - 1) if ty_cur else 'prior-year' }} figures of the trial balance with this file? The other year is kept.');"{% endif %}>
+          <input type="hidden" name="year" value="prior">
+          <div><label>{{ (ty_cur - 1) if ty_cur else 'Prior year' }} trial balance</label><input type="file" name="file" accept=".xlsx,.xls,.csv,.tsv,.txt" required></div>
+          <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Upload {{ (ty_cur - 1) if ty_cur else 'prior year' }} only</button></div>
+        </form>
+      </div>
+    </div>
     {% if trial_balance %}
     <p class="muted" style="font-size:11.5px;">{% if trial_balance.source == 'upload' %}Last imported from '{{ trial_balance.original_filename }}'{% else %}Entered manually{% endif %}{% if trial_balance.completed_by %} by {{ trial_balance.completed_by.name }} on {{ (trial_balance.completed_at|cat).strftime('%d %b %Y') }}{% endif %}. Importing again replaces the accounts below with the new file's rows (any category you'd already set is kept for matching accounts).</p>
     {% endif %}
@@ -4905,6 +4922,34 @@
       Per trial balance: {{ '%.0f'|format(rec.tb_current) }} (current), {{ '%.0f'|format(rec.tb_prior) }} (prior). Per Asset Register: {{ '%.0f'|format(rec.register_current) }} (current), {{ '%.0f'|format(rec.register_prior) }} (prior).
       {% if rec.ties_out %}Ties out to the trial balance.{% else %}Difference of {{ '%.0f'|format(rec.diff_current) }} (current), {{ '%.0f'|format(rec.diff_prior) }} (prior) - basis for a proposed adjustment to the trial balance, or a correction to the Asset Register, as appropriate.{% endif %}
     </p>
+    {% endif %}
+    {% if note.reconciliation and not note.reconciliation.ties_out and engagement.has_asset_schedules %}
+    {% set pp = asset_push_preview(engagement) %}
+    {% if pp and (pp.proposal.lines or pp.proposal.py_lines) %}
+    {% set pr = pp.proposal %}
+    <div class="card" style="background:#faf9f6;">
+      <h4 class="mt-0">Propose journals from the Asset Register</h4>
+      <p class="muted" style="font-size:12px;">Brings the trial balance to the Asset Register so the final trial balance carries the right cost and accumulated depreciation in <strong>both years</strong>: a prior-year journal (<strong>PPE-REG-PY</strong>) restates the comparatives (and this year's opening balances) to the register's opening cost and accumulated depreciation, and a current-year journal (<strong>PPE-REG</strong>) brings cost, accumulated depreciation and the depreciation charge to the register's closing figures. They are posted as draft adjustments, above, for review and partner sign-off; nothing in the client's trial balance is overwritten.</p>
+      {% for title, lines, td, tc in [('PPE-REG-PY - prior year (restates the comparatives)', pr.py_lines, pr.py_total_debit, pr.py_total_credit), ('PPE-REG - current year', pr.lines, pr.total_debit, pr.total_credit)] %}
+      {% if lines %}
+      <table style="font-size:12px;">
+        <thead><tr><th>{{ title }}</th><th>IAS 1 category</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead>
+        <tbody>
+        {% for l in lines %}<tr><td>{{ l.account_name }}</td><td>{{ l.fs_category }}</td><td class="text-right">{{ '%.2f'|format(l.debit) if l.debit else '' }}</td><td class="text-right">{{ '%.2f'|format(l.credit) if l.credit else '' }}</td></tr>{% endfor %}
+        <tr style="font-weight:600;"><td colspan="2">Total</td><td class="text-right">{{ '%.2f'|format(td) }}</td><td class="text-right">{{ '%.2f'|format(tc) }}</td></tr>
+        </tbody>
+      </table>
+      {% endif %}
+      {% endfor %}
+      {% if pr.balancing|abs >= 0.005 %}<p class="muted" style="font-size:11.5px;">{{ '%.2f'|format(pr.balancing|abs) }} of the current-year journal is the other side of the register's movements (the bank, payables or sale proceeds), which the register cannot see; it sits on a suspense line to be cleared before sign-off. Pick "Profit or loss" below if it is a profit or loss on disposal.</p>{% endif %}
+      <form method="post" action="{{ url_for('assetrecon.push_to_tb', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+        <input type="hidden" name="open_to" value="restate_prior">
+        <div style="grid-column: span 2;"><label>The balance of the current-year journal goes to</label>
+          <select name="rest_to"><option value="suspense">Suspense (to be cleared before sign-off)</option><option value="profit_loss">Profit or loss for the year</option></select></div>
+        <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Propose journals</button></div>
+      </form>
+    </div>
+    {% endif %}
     {% endif %}
     {% elif note.accounts %}
     <table>

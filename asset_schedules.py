@@ -52,7 +52,8 @@ def _asset(engagement, asset_id):
 
 
 def _back(engagement, anchor=""):
-    tab = "capital_allowances" if "tab=capital_allowances" in (request.referrer or "") else "asset_register"
+    ref = request.referrer or ""
+    tab = "capital_allowances" if "tab=capital_allowances" in ref else "finalisation" if "tab=finalisation" in ref else "asset_register"
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=tab) + (("#" + anchor) if anchor else ""))
 
 

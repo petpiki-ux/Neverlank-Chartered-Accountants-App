@@ -795,6 +795,7 @@ def create_app():
     from asset_schedules import assetsched_bp
     from asset_import import assetimp_bp
     from asset_recon import assetrecon_bp
+    from tb_year_import import tbyear_bp
     from whistleblower import wb_bp, wb_public_bp
     from training import training_bp
 
@@ -845,6 +846,12 @@ def create_app():
     app.register_blueprint(assetsched_bp)
     app.register_blueprint(assetimp_bp)
     app.register_blueprint(assetrecon_bp)
+    app.register_blueprint(tbyear_bp)
+
+    @app.context_processor
+    def _asset_push_preview_ctx():
+        import asset_recon
+        return {"asset_push_preview": asset_recon.preview_for_template}
     app.register_blueprint(wb_bp)
     app.register_blueprint(wb_public_bp)
 
