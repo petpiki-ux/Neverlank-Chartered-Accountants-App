@@ -69,6 +69,17 @@ def _num(v):
     return -x if neg else x
 
 
+def _tax_value(v):
+    """The tax value brought forward as typed: blank = None (rebuild it from the cost and date acquired); 0, 'nil', '-' or a dash = a NIL
+    tax value (fully written off for tax), which is a real figure and stops the rebuild; anything else as _num."""
+    s = ("" if v is None else str(v)).strip().lower()
+    if s == "":
+        return None
+    if s in ("nil", "-", "\u2013", "\u2014", "n i l"):
+        return 0.0
+    return _num(s)
+
+
 def _date(v):
     s = (v or "").strip()
     if not s:
@@ -215,6 +226,14 @@ def import_opening_from_tb(engagement_id):
 
 # ---------------------------------------------------------------------------------------------------- the tab context
 
+def _recon(engagement):
+    """The reconciliation to the trial balance (asset_recon.py); the two treatment choices come from the preview form's query string."""
+    import asset_recon
+    from flask import has_request_context
+    args = request.args if has_request_context() else {}
+    return asset_recon.reconcile(engagement, args.get("open_to") or "retained_earnings", args.get("rest_to") or "suspense")
+
+
 def tab_context(engagement):
     """Template variables for the Asset Register tab (and the opening column of the Capital Allowances tab)."""
     import engagements as eng
@@ -243,6 +262,7 @@ def tab_context(engagement):
         "as_tb_diff": (open_nbv - tb_prior_ppe) if tb_prior_ppe is not None else None,
         "as_add_cost": sum(a.cost or 0.0 for a in additions),
         "as_tb_import": tb_opening_rows(engagement),
+        "as_recon": _recon(engagement),
     }
 
 
@@ -264,7 +284,7 @@ def _apply_opening(asset, f):
     if "opening_accumulated_depreciation" in f:
         asset.opening_accumulated_depreciation = _num(f.get("opening_accumulated_depreciation")) or 0.0
     if "opening_tax_value" in f:
-        asset.opening_tax_value = _num(f.get("opening_tax_value"))      # blank = rebuild from the cost and the date acquired
+        asset.opening_tax_value = _tax_value(f.get("opening_tax_value"))      # blank = rebuild from the cost and the date acquired; 0 / nil / - = nil
 
 
 @assetsched_bp.route("/<int:engagement_id>/assets/opening/add", methods=["POST"])
@@ -318,10 +338,10 @@ def parse_opening_paste(text):
         if not desc:
             problems.append(f"Line {n}: no description.")
             continue
-        c, a, t = _num(cost), _num(acc), _num(tax)
+        c, a, t = _num(cost), _num(acc), _tax_value(tax)
         if not rows and n == 1 and c is None and (cost or "").strip():
             continue                                       # a header row
-        if (cost or "").strip() not in ("", "-") and c is None or (acc or "").strip() not in ("", "-") and a is None or (tax or "").strip() not in ("", "-") and t is None:
+        if (cost or "").strip() not in ("", "-") and c is None or (acc or "").strip() not in ("", "-") and a is None or (tax or "").strip() and t is None:
             problems.append(f"Line {n}: a figure could not be read.")
             continue
         d = _date(dt)
@@ -420,6 +440,139 @@ def save_addition(engagement_id, asset_id):
     db.session.commit()
     flash("Addition saved.", "success")
     return _back(engagement, "additions")
+
+
+# ---------------------------------------------------------------------------------------------------- save all (one click for every row)
+
+OPENING_FIELDS = ("asset_code", "description", "asset_class_id", "date_acquired", "cost", "opening_accumulated_depreciation", "opening_tax_value")
+ADDITION_FIELDS = ("asset_code", "description", "asset_class_id", "date_acquired", "cost", "current_year_depreciation")
+CA_FIELDS = ("asset_code", "description", "asset_class_id", "date_acquired", "cost", "opening_tax_value", "current_year_depreciation")
+
+
+def _row_fields(form, asset_id, names):
+    """The fields of one row of a 'save all' form: inputs are named f<asset id>_<field>. Only the fields present are returned."""
+    out = {}
+    for n in names:
+        k = f"f{asset_id}_{n}"
+        if k in form:
+            out[n] = form.get(k)
+    return out
+
+
+def _only_ids(form, assets):
+    """The assets a save covers: the one whose own Save was pressed, else all of them."""
+    only = (form.get("only") or "").strip()
+    if only.isdigit():
+        return [a for a in assets if a.id == int(only)]
+    return list(assets)
+
+
+@assetsched_bp.route("/<int:engagement_id>/assets/opening/save-all", methods=["POST"])
+@login_required
+def save_all_openings(engagement_id):
+    engagement = _engagement(engagement_id)
+    ps, _, _ = bounds(engagement)
+    assets = PPEAsset.query.filter_by(engagement_id=engagement.id).all()
+    saved, skipped = 0, []
+    for a in _only_ids(request.form, assets):
+        f = _row_fields(request.form, a.id, OPENING_FIELDS)
+        if not f:
+            continue
+        d = _date(f.get("date_acquired")) if "date_acquired" in f else a.date_acquired
+        if d and ps and d >= ps:
+            skipped.append(a.asset_code or a.description)
+            continue
+        _apply_opening(a, f)
+        saved += 1
+    db.session.commit()
+    flash(f"{saved} opening balance(s) saved." if saved else "Nothing was changed.", "success" if saved else "info")
+    if skipped:
+        flash(f"Not saved, dated inside the period (an addition, not an opening balance): {', '.join(skipped[:6])}.", "danger")
+    return _back(engagement, "opening")
+
+
+@assetsched_bp.route("/<int:engagement_id>/assets/opening/nil-tax", methods=["POST"])
+@login_required
+def nil_tax_values(engagement_id):
+    """Set a NIL tax value brought forward on every opening asset that has none (they would otherwise be rebuilt from cost and date)."""
+    engagement = _engagement(engagement_id)
+    ps, pe, _ = bounds(engagement)
+    openings, _, _ = split_assets(PPEAsset.query.filter_by(engagement_id=engagement.id).all(), ps, pe)
+    n = 0
+    for a in openings:
+        if a.opening_tax_value is None:
+            a.opening_tax_value = 0.0
+            n += 1
+    db.session.commit()
+    flash(f"Tax value brought forward set to nil on {n} opening asset(s)." if n else "Every opening asset already has a tax value.", "success" if n else "info")
+    return _back(engagement, "opening")
+
+
+@assetsched_bp.route("/<int:engagement_id>/assets/addition/save-all", methods=["POST"])
+@login_required
+def save_all_additions(engagement_id):
+    engagement = _engagement(engagement_id)
+    ps, pe, _ = bounds(engagement)
+    assets = PPEAsset.query.filter_by(engagement_id=engagement.id).all()
+    saved, skipped = 0, []
+    for a in _only_ids(request.form, assets):
+        f = _row_fields(request.form, a.id, ADDITION_FIELDS)
+        if not f:
+            continue
+        d = _date(f.get("date_acquired")) if "date_acquired" in f else a.date_acquired
+        if d is None or (ps and pe and not (ps <= d <= pe)):
+            skipped.append(a.asset_code or a.description)
+            continue
+        a.date_acquired = d
+        if (f.get("description") or "").strip():
+            a.description = f["description"].strip()[:200]
+        if "asset_code" in f:
+            a.asset_code = (f.get("asset_code") or "").strip()[:40] or None
+        if "asset_class_id" in f:
+            cid = f.get("asset_class_id")
+            a.asset_class_id = int(cid) if cid and str(cid).isdigit() else None
+        if "cost" in f:
+            a.cost = _num(f.get("cost")) or 0.0
+        if "current_year_depreciation" in f:
+            a.current_year_depreciation = _num(f.get("current_year_depreciation")) or 0.0
+        saved += 1
+    db.session.commit()
+    flash(f"{saved} addition(s) saved." if saved else "Nothing was changed.", "success" if saved else "info")
+    if skipped:
+        flash(f"Not saved, the date acquired is missing or outside the period: {', '.join(skipped[:6])}.", "danger")
+    return _back(engagement, "additions")
+
+
+@assetsched_bp.route("/<int:engagement_id>/assets/capital-allowances/save-all", methods=["POST"])
+@login_required
+def save_all_ca_assets(engagement_id):
+    """The Capital Allowances tab's asset list: description, class, date, cost, tax value b/f and the depreciation in the accounts."""
+    engagement = _engagement(engagement_id)
+    assets = PPEAsset.query.filter_by(engagement_id=engagement.id).all()
+    saved = 0
+    for a in _only_ids(request.form, assets):
+        f = _row_fields(request.form, a.id, CA_FIELDS)
+        if not f:
+            continue
+        if "asset_code" in f:
+            a.asset_code = (f.get("asset_code") or "").strip()[:40] or None
+        if (f.get("description") or "").strip():
+            a.description = f["description"].strip()[:200]
+        if "asset_class_id" in f:
+            cid = f.get("asset_class_id")
+            a.asset_class_id = int(cid) if cid and str(cid).isdigit() else None
+        if "date_acquired" in f:
+            a.date_acquired = _date(f.get("date_acquired"))
+        if "cost" in f:
+            a.cost = _num(f.get("cost")) or 0.0
+        if "opening_tax_value" in f:
+            a.opening_tax_value = _tax_value(f.get("opening_tax_value"))
+        if "current_year_depreciation" in f:
+            a.current_year_depreciation = _num(f.get("current_year_depreciation")) or 0.0
+        saved += 1
+    db.session.commit()
+    flash(f"{saved} asset(s) saved." if saved else "Nothing was changed.", "success" if saved else "info")
+    return _back(engagement, "")
 
 
 # ---------------------------------------------------------------------------------------------------- disposals

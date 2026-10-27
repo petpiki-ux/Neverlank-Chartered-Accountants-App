@@ -17,24 +17,24 @@
   </div>
 
   {% if as_openings %}
+  <form method="post" action="{{ url_for('assetsched.save_all_openings', engagement_id=engagement.id) }}" id="open_form">
+  <div style="display:flex;gap:8px;align-items:center;margin:6px 0;"><button type="submit" class="btn small gold">Save all</button><span class="muted" style="font-size:11.5px;">Saves every row below in one go. The Save button on a row saves just that row.</span></div>
   <table style="font-size:12px;">
     <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th class="text-right">Cost b/f</th><th class="text-right">Acc. depreciation b/f</th><th class="text-right">Net book value b/f</th><th class="text-right">Tax value b/f</th><th></th></tr></thead>
     <tbody>
     {% for a in as_openings %}
-      <form method="post" action="{{ url_for('assetsched.save_opening', engagement_id=engagement.id, asset_id=a.id) }}" class="inline">
       <tr>
-        <td><input type="text" name="asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
-        <td><input type="text" name="description" value="{{ a.description }}" style="width:170px;margin-bottom:0;"></td>
-        <td><select name="asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in as_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
-        <td><input type="date" name="date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') if a.date_acquired else '' }}" style="width:128px;margin-bottom:0;"></td>
-        <td class="text-right"><input type="number" step="0.01" name="cost" value="{{ a.cost or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
-        <td class="text-right"><input type="number" step="0.01" name="opening_accumulated_depreciation" value="{{ a.opening_accumulated_depreciation or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td><input type="text" name="f{{ a.id }}_asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
+        <td><input type="text" name="f{{ a.id }}_description" value="{{ a.description }}" style="width:170px;margin-bottom:0;"></td>
+        <td><select name="f{{ a.id }}_asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in as_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
+        <td><input type="date" name="f{{ a.id }}_date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') if a.date_acquired else '' }}" style="width:128px;margin-bottom:0;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="f{{ a.id }}_cost" value="{{ a.cost or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="f{{ a.id }}_opening_accumulated_depreciation" value="{{ a.opening_accumulated_depreciation or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
         <td class="text-right">{{ '%.2f'|format((a.cost or 0) - (a.opening_accumulated_depreciation or 0)) }}</td>
-        <td class="text-right"><input type="number" step="0.01" name="opening_tax_value" value="{{ a.opening_tax_value if a.opening_tax_value is not none else '' }}" placeholder="rebuild" style="width:105px;margin-bottom:0;text-align:right;"></td>
-        <td><button type="submit" class="btn small secondary">Save</button>
+        <td class="text-right"><input type="text" inputmode="decimal" name="f{{ a.id }}_opening_tax_value" value="{{ a.opening_tax_value if a.opening_tax_value is not none else '' }}" placeholder="blank = rebuild" title="Type 0, nil or - for a NIL tax value; leave blank to rebuild it from the cost and date acquired" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td><button type="submit" name="only" value="{{ a.id }}" class="btn small secondary">Save</button>
           <button type="submit" formaction="{{ url_for('engagements.delete_ppe_asset', asset_id=a.id) }}" class="btn small danger" onclick="return confirm('Delete this asset?')">Delete</button></td>
       </tr>
-      </form>
     {% endfor %}
       <tr>
         <td colspan="4"><strong>Total opening balances</strong></td>
@@ -46,6 +46,8 @@
       </tr>
     </tbody>
   </table>
+  <div style="margin-top:6px;"><button type="submit" class="btn small gold">Save all</button></div>
+  </form>
   {% if as_tb_diff is not none %}
   <p class="muted" style="font-size:11.5px;{% if as_tb_diff|abs > 0.5 %}color:#b02a2a;{% endif %}">
     Net book value brought forward {{ '%.2f'|format(as_open_nbv) }}; property, plant and equipment in the prior-year column of the trial balance {{ '%.2f'|format(as_tb_prior_ppe) }}.
@@ -53,7 +55,8 @@
   </p>
   {% endif %}
   {% if as_no_tax_value %}
-  <p class="muted" style="font-size:11.5px;">{{ as_no_tax_value|length }} opening asset(s) have no tax value brought forward, so the Capital Allowances tab rebuilds theirs from the cost and date acquired: {% for a in as_no_tax_value %}{{ a.asset_code or a.description }}{% if not loop.last %}, {% endif %}{% endfor %}.</p>
+  <div class="muted" style="font-size:11.5px;">{{ as_no_tax_value|length }} opening asset(s) have no tax value brought forward, so the Capital Allowances tab rebuilds theirs from the cost and date acquired: {% for a in as_no_tax_value %}{{ a.asset_code or a.description }}{% if not loop.last %}, {% endif %}{% endfor %}. A tax value of <strong>nil</strong> (fully written off for tax) is a figure in its own right: type <strong>0</strong>, <strong>nil</strong> or <strong>-</strong> in the box, or
+    <form method="post" action="{{ url_for('assetsched.nil_tax_values', engagement_id=engagement.id) }}" class="inline" onsubmit="return confirm('Set a NIL tax value brought forward on all {{ as_no_tax_value|length }} opening asset(s) that have none?');"><button type="submit" class="btn small secondary">set all of these to nil</button></form>.</div>
   {% endif %}
   {% else %}
   <div class="empty-state">No opening balances yet - add the assets below, or paste them from Excel.</div>
@@ -92,7 +95,7 @@
     <div><label>Acquired</label><input type="date" name="date_acquired"></div>
     <div><label>Cost b/f</label><input type="number" step="0.01" name="cost"></div>
     <div><label>Acc. depreciation b/f</label><input type="number" step="0.01" name="opening_accumulated_depreciation"></div>
-    <div><label>Tax value b/f</label><input type="number" step="0.01" name="opening_tax_value"></div>
+    <div><label>Tax value b/f</label><input type="text" inputmode="decimal" name="opening_tax_value" placeholder="blank = rebuild; 0 or nil = nil" title="Type 0, nil or - for a NIL tax value"></div>
     <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add opening balance</button></div>
   </form>
 
@@ -112,26 +115,28 @@
     Assets bought {% if as_period_start %}between {{ as_period_start.strftime('%d %b %Y') }} and {{ as_period_end.strftime('%d %b %Y') }}{% else %}in the year{% endif %}. The date acquired is what makes an asset an addition; its first-year allowance is worked from its cost.
   </p>
   {% if as_additions %}
+  <form method="post" action="{{ url_for('assetsched.save_all_additions', engagement_id=engagement.id) }}" id="add_form">
+  <div style="display:flex;gap:8px;align-items:center;margin:6px 0;"><button type="submit" class="btn small gold">Save all</button><span class="muted" style="font-size:11.5px;">Saves every row below in one go. The Save button on a row saves just that row.</span></div>
   <table style="font-size:12px;">
     <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th class="text-right">Cost</th><th class="text-right">Depreciation in the accounts</th><th></th></tr></thead>
     <tbody>
     {% for a in as_additions %}
-      <form method="post" action="{{ url_for('assetsched.save_addition', engagement_id=engagement.id, asset_id=a.id) }}" class="inline">
       <tr>
-        <td><input type="text" name="asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
-        <td><input type="text" name="description" value="{{ a.description }}" style="width:170px;margin-bottom:0;"></td>
-        <td><select name="asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in as_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
-        <td><input type="date" name="date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') }}" style="width:128px;margin-bottom:0;"></td>
-        <td class="text-right"><input type="number" step="0.01" name="cost" value="{{ a.cost or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
-        <td class="text-right"><input type="number" step="0.01" name="current_year_depreciation" value="{{ a.current_year_depreciation or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
-        <td><button type="submit" class="btn small secondary">Save</button>
+        <td><input type="text" name="f{{ a.id }}_asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
+        <td><input type="text" name="f{{ a.id }}_description" value="{{ a.description }}" style="width:170px;margin-bottom:0;"></td>
+        <td><select name="f{{ a.id }}_asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in as_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
+        <td><input type="date" name="f{{ a.id }}_date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') }}" style="width:128px;margin-bottom:0;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="f{{ a.id }}_cost" value="{{ a.cost or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td class="text-right"><input type="number" step="0.01" name="f{{ a.id }}_current_year_depreciation" value="{{ a.current_year_depreciation or 0 }}" style="width:105px;margin-bottom:0;text-align:right;"></td>
+        <td><button type="submit" name="only" value="{{ a.id }}" class="btn small secondary">Save</button>
           <button type="submit" formaction="{{ url_for('engagements.delete_ppe_asset', asset_id=a.id) }}" class="btn small danger" onclick="return confirm('Delete this asset?')">Delete</button></td>
       </tr>
-      </form>
     {% endfor %}
       <tr><td colspan="4"><strong>Total additions</strong></td><td class="text-right"><strong>{{ '%.2f'|format(as_add_cost) }}</strong></td><td colspan="2"></td></tr>
     </tbody>
   </table>
+  <div style="margin-top:6px;"><button type="submit" class="btn small gold">Save all</button></div>
+  </form>
   {% else %}
   <div class="empty-state">No additions recorded for the year.</div>
   {% endif %}
@@ -233,4 +238,121 @@
     <form method="post" action="{{ url_for('assetsched.generate_schedules_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Export &amp; file the Asset Register and Capital Allowance Schedule (Excel)</button></form>
     {{ filed_workpapers('asset_schedules') }}
   </div>
+</div>
+
+{# 5. Reconcile to the trial balance. Context: as_recon from asset_recon.reconcile(). #}
+{% macro rc_amt(x) %}{% if x is none %}-{% elif x < -0.004 %}({{ '%.2f'|format(-x) }}){% else %}{{ '%.2f'|format(x) }}{% endif %}{% endmacro %}
+{% macro rc_diff(x) %}<span {% if x is not none and x|abs >= 0.5 %}style="color:#b02a2a;font-weight:600;"{% endif %}>{{ rc_amt(x) }}</span>{% endmacro %}
+<div class="card" id="reconcile">
+  <h3 class="mt-0">5. Reconcile to the trial balance</h3>
+  {% if not as_recon or not as_recon.ok %}
+  <div class="empty-state">{{ as_recon.reason if as_recon else 'The reconciliation is not available.' }}</div>
+  {% else %}
+  {% set rc = as_recon %}
+  {% set p = rc.proposal %}
+  <p class="muted" style="font-size:12.5px;">
+    The register against the trial balance: the <strong>opening</strong> cost and accumulated depreciation against the prior-year column (last year's closing balances), and the <strong>closing</strong> cost, accumulated depreciation and depreciation charge against the current-year column with the other adjustments already posted. Where they differ, one balanced adjustment ({{ 'PPE-REG' }}) can be pushed to the trial balance for review and partner sign-off - the client's own trial balance lines are not overwritten.
+  </p>
+
+  <h4 style="margin-bottom:4px;">Opening - as at {{ rc.reg.as_at.strftime('%d %B %Y') if rc.reg.as_at else 'the start of the period' }}</h4>
+  <table style="font-size:12px;">
+    <thead><tr><th></th><th class="text-right">Asset Register</th><th class="text-right">Trial balance (prior-year column)</th><th class="text-right">Difference</th><th class="text-right">Restated ({{ 'PPE-REG-PY' }})</th><th class="text-right">Still unreconciled</th>
+      {% if rc.continuity %}<th class="text-right">{{ rc.continuity.title }} - closing</th><th class="text-right">Comparative vs last year's closing</th>{% endif %}</tr></thead>
+    <tbody>
+    {% for r in rc.opening %}
+      <tr {% if loop.last %}style="font-weight:600;"{% endif %}>
+        <td>{{ r.label }}</td><td class="text-right">{{ rc_amt(r.register) }}</td><td class="text-right">{{ rc_amt(r.tb) }}</td><td class="text-right">{{ rc_diff(r.diff) }}</td><td class="text-right">{{ rc_amt(r.pushed) }}</td><td class="text-right">{{ rc_diff(r.remaining) }}</td>
+        {% if rc.continuity %}<td class="text-right">{{ rc_amt(r.cont) }}</td><td class="text-right">{{ rc_diff(r.cont_diff) }}</td>{% endif %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% if rc.open_differs %}
+  <p class="muted" style="font-size:11.5px;color:#b02a2a;">The register's opening balances do not agree to the trial balance's prior-year column. That is a prior-period matter: check the opening balances entered, or the comparative column. If the comparatives are wrong the correction is a restatement (IAS 8): choose "Restate the comparatives" below and the push posts a prior-year adjustment ({{ 'PPE-REG-PY' }}) that also restates this year's opening balances. The other choices correct this year's balances only and leave the comparative column as it is.</p>
+  {% else %}
+  <p class="muted" style="font-size:11.5px;">The register's opening balances agree to the prior-year column of the trial balance.</p>
+  {% endif %}
+  {% if rc.continuity %}
+  <p class="muted" style="font-size:11.5px;{% if rc.continuity_differs %}color:#b02a2a;{% endif %}">
+    The same client's engagement <em>{{ rc.continuity.title }}</em> ({{ rc.continuity.period_end.strftime('%d %B %Y') }}) closes with the balances shown. {% if rc.continuity_differs %}They do not agree to this trial balance's comparative column - agree the comparatives to last year's signed financial statements.{% else %}They agree to this trial balance's comparative column.{% endif %}
+  </p>
+  {% endif %}
+
+  <h4 style="margin-bottom:4px;">Closing - year ended {{ rc.reg.period_end.strftime('%d %B %Y') if rc.reg.period_end else '' }}</h4>
+  <table style="font-size:12px;">
+    <thead><tr><th></th><th class="text-right">Asset Register</th><th class="text-right">Trial balance (with other adjustments)</th><th class="text-right">Difference</th><th class="text-right">Pushed ({{ 'PPE-REG' }})</th><th class="text-right">Still unreconciled</th></tr></thead>
+    <tbody>
+    {% for r in rc.closing %}
+      <tr {% if loop.last %}style="font-weight:600;"{% endif %}>
+        <td>{{ r.label }}</td><td class="text-right">{{ rc_amt(r.register) }}</td><td class="text-right">{{ rc_amt(r.tb) }}</td><td class="text-right">{{ rc_diff(r.diff) }}</td><td class="text-right">{{ rc_amt(r.pushed) }}</td><td class="text-right">{{ rc_diff(r.remaining) }}</td>
+      </tr>
+    {% endfor %}
+      {% set r = rc.depreciation %}
+      <tr><td>{{ r.label }}</td><td class="text-right">{{ rc_amt(r.register) }}</td><td class="text-right">{{ rc_amt(r.tb) }}</td><td class="text-right">{{ rc_diff(r.diff) }}</td><td class="text-right">{{ rc_amt(r.pushed) }}</td><td class="text-right">{{ rc_diff(r.remaining) }}</td></tr>
+    </tbody>
+  </table>
+  <table style="font-size:11.5px;margin-top:8px;">
+    <tbody>{% for i in rc.info %}<tr><td class="muted">{{ i.label }}</td><td class="text-right" style="width:130px;">{{ rc_amt(i.value) }}</td></tr>{% endfor %}</tbody>
+  </table>
+  {% if rc.dep_in_other_category %}
+  <p class="muted" style="font-size:11.5px;">Depreciation expense found in another expense category and counted: {{ rc.dep_in_other_category|join(', ') }}.</p>
+  {% endif %}
+
+  <h4 style="margin-bottom:4px;">Push to the trial balance</h4>
+  <form method="get" action="{{ url_for('engagements.view_engagement', engagement_id=engagement.id) }}#reconcile" class="form-row" style="align-items:flex-end;">
+    <input type="hidden" name="tab" value="asset_register">
+    <div style="grid-column: span 2;"><label>Opening net book value difference goes to</label>
+      <select name="open_to">{% for k, v in rc.open_to_options.items() %}<option value="{{ k }}" {% if rc.open_to==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+    <div style="grid-column: span 2;"><label>The balance of the entry (other side of additions and disposals) goes to</label>
+      <select name="rest_to">{% for k, v in rc.rest_to_options.items() %}<option value="{{ k }}" {% if rc.rest_to==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+    <div><button type="submit" class="btn small secondary" style="margin-bottom:14px;">Update preview</button></div>
+  </form>
+
+  {% if p.py_lines %}
+  <table style="font-size:12px;">
+    <thead><tr><th>Adjustment {{ 'PPE-REG-PY' }} (prior year, restates the comparatives and this year's opening balances) - proposed lines</th><th>IAS 1 category</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead>
+    <tbody>
+    {% for l in p.py_lines %}
+      <tr><td>{{ l.account_name }}<div class="muted" style="font-size:10.5px;">{{ l.note }}</div></td><td>{{ l.fs_category }}</td>
+        <td class="text-right">{{ '%.2f'|format(l.debit) if l.debit else '' }}</td><td class="text-right">{{ '%.2f'|format(l.credit) if l.credit else '' }}</td></tr>
+    {% endfor %}
+      <tr style="font-weight:600;"><td colspan="2">Total</td><td class="text-right">{{ '%.2f'|format(p.py_total_debit) }}</td><td class="text-right">{{ '%.2f'|format(p.py_total_credit) }}</td></tr>
+    </tbody>
+  </table>
+  {% endif %}
+  {% if rc.existing_py and not p.py_lines %}
+  <p class="muted" style="font-size:11.5px;">{{ 'PPE-REG-PY' }} is on the trial balance but the chosen treatment does not use it - pushing removes it.</p>
+  {% endif %}
+  {% if p.lines or p.py_lines %}
+  {% if p.lines %}
+  <table style="font-size:12px;">
+    <thead><tr><th>Adjustment {{ 'PPE-REG' }} - proposed lines</th><th>IAS 1 category</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead>
+    <tbody>
+    {% for l in p.lines %}
+      <tr><td>{{ l.account_name }}<div class="muted" style="font-size:10.5px;">{{ l.note }}</div></td><td>{{ l.fs_category }}</td>
+        <td class="text-right">{{ '%.2f'|format(l.debit) if l.debit else '' }}</td><td class="text-right">{{ '%.2f'|format(l.credit) if l.credit else '' }}</td></tr>
+    {% endfor %}
+      <tr style="font-weight:600;"><td colspan="2">Total</td><td class="text-right">{{ '%.2f'|format(p.total_debit) }}</td><td class="text-right">{{ '%.2f'|format(p.total_credit) }}</td></tr>
+    </tbody>
+  </table>
+  {% endif %}
+  {% if rc.existing %}
+  <p class="muted" style="font-size:11.5px;">{{ 'PPE-REG' }} is already on the trial balance ({{ rc.existing.lines|length }} lines{% if rc.existing.is_partner_signed %}, partner-signed{% elif rc.existing.is_reviewed %}, reviewed{% endif %}). The preview above is worked from the trial balance <em>before</em> it; pushing replaces its lines and clears the review and partner sign-off.</p>
+  {% endif %}
+  {% if p.rest_to == 'suspense' and p.balancing|abs >= 0.005 %}
+  <p class="muted" style="font-size:11.5px;">A balance of {{ '%.2f'|format(p.balancing|abs) }} is left on a suspense line: it is the other side of the movement (for example the bank or a payable for an addition, or the proceeds of a disposal), which the register cannot see. Find it and move it to the right account on the Finalisation tab before sign-off.</p>
+  {% endif %}
+  <form method="post" action="{{ url_for('assetrecon.push_to_tb', engagement_id=engagement.id) }}"
+        {% if rc.existing and (rc.existing.is_reviewed or rc.existing.is_partner_signed) %}onsubmit="return confirm('This adjustment has been signed off. Pushing again replaces its lines and clears the sign-off. Continue?');"{% endif %}>
+    <input type="hidden" name="open_to" value="{{ rc.open_to }}"><input type="hidden" name="rest_to" value="{{ rc.rest_to }}">
+    <button type="submit" class="btn small gold">{% if rc.existing or rc.existing_py %}Refresh the adjustment(s){% else %}Push to the trial balance{% endif %} ({% if p.py_lines %}{{ 'PPE-REG-PY' }}{% if p.lines %} and {% endif %}{% endif %}{% if p.lines %}{{ 'PPE-REG' }}{% endif %})</button>
+    <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}" class="btn small secondary">Open the adjustments (Finalisation tab)</a>
+  </form>
+  {% else %}
+  <p style="font-size:12.5px;"><strong>The register agrees to the trial balance</strong> (cost, accumulated depreciation and the depreciation charge){% if rc.existing %} after adjustment {{ 'PPE-REG' }}{% endif %}. Nothing to push.</p>
+  {% if rc.existing %}
+  <form method="post" action="{{ url_for('assetrecon.push_to_tb', engagement_id=engagement.id) }}"><button type="submit" class="btn small secondary">Remove adjustment PPE-REG (no longer needed)</button></form>
+  {% endif %}
+  {% endif %}
+  {% endif %}
 </div>

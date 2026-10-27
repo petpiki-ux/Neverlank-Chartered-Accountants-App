@@ -235,6 +235,8 @@ def parse_register(rows, period_start, period_end, mapping=None, header_row=None
         desc = _text(_cell(row, mapping, "description"))
         code = _text(_cell(row, mapping, "code"))
         nums = {k: _abs(to_num(_cell(row, mapping, k))) for k in ("cost", "cost_bf", "additions", "disp_cost", "acc_dep", "charge", "nbv", "tax_value", "proceeds")}
+        if nums["tax_value"] is None and str(_cell(row, mapping, "tax_value") or "").strip().lower() in ("-", "nil", "\u2013", "\u2014"):
+            nums["tax_value"] = 0.0                    # a dash or 'nil' in the tax value column is a nil tax value, not a blank
         d_acq = to_date(_cell(row, mapping, "date"))
         d_sold = to_date(_cell(row, mapping, "disp_date"))
         has_money = any(v not in (None, 0.0) for v in nums.values())

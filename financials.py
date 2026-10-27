@@ -712,6 +712,37 @@ def build_cash_flow(totals, pl, method="indirect"):
     }
 
 
+def is_prior_adjustment(adj):
+    return (getattr(adj, "applies_to", None) or "current") == "prior"
+
+
+def adjustment_effects(adj):
+    """What one adjustment does to the trial balance totals: [(period, category code, amount in that category's own normal sign)].
+
+    A current-year adjustment adjusts the current column only. A PRIOR-YEAR adjustment (a restatement of the comparatives, IAS 8)
+    adjusts the prior column and, unless it is marked not to (`carry_to_current` False), the current year's OPENING position as well:
+    its balance sheet lines are repeated in the current column (the balance is still there at the start of this year) and its profit
+    and loss, OCI and dividend lines go to the current retained earnings brought forward (last year's profit is this year's opening
+    reserves). So after a prior-year journal the prior closing retained earnings and the current opening still agree."""
+    prior = is_prior_adjustment(adj)
+    carry = prior and getattr(adj, "carry_to_current", True) is not False
+    out = []
+    for line in adj.lines:
+        cat = CATEGORY_BY_CODE.get(line.fs_category)
+        if not cat or cat["normal"] is None:
+            continue
+        debit = line.debit or 0.0
+        credit = line.credit or 0.0
+        amount = (debit - credit) if cat["normal"] == "debit" else (credit - debit)
+        out.append(("prior" if prior else "current", cat["code"], amount))
+        if carry:
+            if cat["statement"] == "SFP":
+                out.append(("current", cat["code"], amount))
+            else:
+                out.append(("current", "retained_earnings", credit - debit))
+    return out
+
+
 def apply_adjustments(totals, adjustments):
     """Layers audit adjustments (journal entries) on top of the preliminary
     trial balance's computed totals, to produce the FINAL/ADJUSTED totals the
@@ -720,9 +751,10 @@ def apply_adjustments(totals, adjustments):
     so the caller can still use the unadjusted (preliminary) totals
     elsewhere (e.g. Analytical Review, Substantive Procedures).
 
-    Only the CURRENT year figures are ever adjusted - audit adjustments
-    relate to the year under audit, never to the prior year's comparative
-    column, which stays exactly as originally trial-balanced.
+    An adjustment adjusts the CURRENT year unless it is marked as a
+    PRIOR-YEAR adjustment (AuditAdjustment.applies_to == "prior"), which
+    restates the comparative column and, by default, the current year's
+    opening balances - see adjustment_effects().
 
     `adjustments` is an iterable of objects with a `.lines` relationship of
     objects carrying `.fs_category`, `.debit`, `.credit` (see
@@ -731,15 +763,16 @@ def apply_adjustments(totals, adjustments):
     unmapped/blank category) are skipped rather than raising."""
     adjusted = {code: dict(vals) for code, vals in totals.items()}
     for adj in adjustments:
-        for line in adj.lines:
-            cat = CATEGORY_BY_CODE.get(line.fs_category)
-            if not cat or cat["normal"] is None or cat["code"] not in adjusted:
-                continue
-            debit = line.debit or 0.0
-            credit = line.credit or 0.0
-            amount = (debit - credit) if cat["normal"] == "debit" else (credit - debit)
-            adjusted[cat["code"]]["current"] += amount
+        for period, code, amount in adjustment_effects(adj):
+            if code in adjusted:
+                adjusted[code][period] += amount
     return adjusted
+
+
+def prior_year_adjustments(adjustments):
+    """The prior-year (restating) adjustments among `adjustments`, as [{reference, description, carry}] for the disclosure."""
+    return [{"reference": a.reference or "", "description": a.description or "", "carry": getattr(a, "carry_to_current", True) is not False}
+            for a in (adjustments or []) if is_prior_adjustment(a)]
 
 
 # ---------------------------------------------------------------------------
@@ -1549,7 +1582,7 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     else:
         notes = []
     return {"totals": totals, "pl": pl, "equity": equity, "sfp": sfp, "cf": cf, "notes": notes,
-            "whole_numbers": bool(whole_numbers), "rounding": rounding}
+            "whole_numbers": bool(whole_numbers), "rounding": rounding, "prior_restated": prior_year_adjustments(adjustments)}
 
 
 def parse_tb_rows(rows):

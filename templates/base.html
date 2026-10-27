@@ -179,6 +179,29 @@
       } catch (e) { /* ignore - just lands at the top as before */ }
     })();
   </script>
+  <script>
+    /* After saving a form the page comes back where you were, not at the top. Remembers the scroll position when a form is submitted
+       and puts it back if the next page load is the same page within a few seconds (a redirect after a save). */
+    (function () {
+      var KEY = "nl_scroll";
+      try {
+        document.addEventListener("submit", function (e) {
+          var f = e.target;
+          if (!f || (f.method || "").toLowerCase() !== "post") return;
+          sessionStorage.setItem(KEY, JSON.stringify({p: location.pathname, y: window.scrollY, t: Date.now()}));
+        }, true);
+        var raw = sessionStorage.getItem(KEY);
+        if (raw) {
+          sessionStorage.removeItem(KEY);
+          var v = JSON.parse(raw);
+          if (v && v.p === location.pathname && Date.now() - v.t < 15000 && v.y > 0) {
+            var go = function () { window.scrollTo(0, v.y); };
+            go(); window.addEventListener("load", go); setTimeout(go, 150);
+          }
+        }
+      } catch (err) { /* storage can be blocked; the page then simply opens at the top */ }
+    })();
+  </script>
   <script src="{{ url_for('static', filename='js/select-search.js') }}" defer></script>
 </body>
 </html>

@@ -4627,19 +4627,24 @@
   {% if trial_balance %}
   <div class="card">
     <h3 class="mt-0">Audit adjustments</h3>
-    <p class="muted" style="font-size:12.5px;">Journal entries proposed against the preliminary trial balance above - the Financial Statements below are computed from the preliminary trial balance PLUS these adjustments (current year only; the prior year comparative is never adjusted). Each adjustment carries its own Preparer/Reviewer/Partner sign-off, same as any other workpaper.</p>
+    <p class="muted" style="font-size:12.5px;">Journal entries proposed against the preliminary trial balance above - the Financial Statements below are computed from the preliminary trial balance PLUS these adjustments. A <strong>current-year</strong> adjustment changes the year under audit only. A <strong>prior-year</strong> adjustment restates the comparative column (IAS 8): choose "Prior year" when you add it. By default it also restates this year's opening balances - its balance sheet lines are repeated in the current year and its profit and loss lines go to the retained earnings brought forward - so last year's closing and this year's opening still agree; untick that if the same correction has already been made in the current year's trial balance. Each adjustment carries its own Preparer/Reviewer/Partner sign-off, same as any other workpaper.</p>
     <form method="post" action="{{ url_for('engagements.add_audit_adjustment', tb_id=trial_balance.id) }}" class="form-row" style="align-items:flex-end;">
       <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" placeholder="e.g. AJE 1"></div>
       <div style="grid-column: span 2;"><label for="adj_description">Description</label><input type="text" id="adj_description" name="description" placeholder="e.g. Accrue December audit fee"></div>
+      <div><label for="adj_applies">Adjusts</label><select id="adj_applies" name="applies_to"><option value="current">Current year</option><option value="prior">Prior year (restates comparatives)</option></select></div>
+      <div><label for="adj_carry">If prior year</label><select id="adj_carry" name="carry_to_current"><option value="1">Also restate this year's opening balances</option><option value="0">Comparatives only</option></select></div>
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add adjustment</button></div>
     </form>
 
     {% if trial_balance.adjustments %}
     {% for adj in trial_balance.adjustments %}
-    <div class="card" style="background:#faf9f6;">
+    <div class="card" style="background:#faf9f6;" id="adj{{ adj.id }}">
+      {% if adj.is_prior_year %}<div style="margin-bottom:6px;"><span class="badge status-Review">Prior year - restates the comparatives{% if adj.carry_to_current is not false %} and this year's opening balances{% endif %}</span></div>{% endif %}
       <form method="post" action="{{ url_for('engagements.update_audit_adjustment', adjustment_id=adj.id) }}" class="form-row" style="align-items:flex-end;">
         <div><label>Reference</label><input type="text" name="reference" value="{{ adj.reference or '' }}" style="width:100px;"></div>
         <div style="grid-column: span 2;"><label>Description</label><input type="text" name="description" value="{{ adj.description or '' }}"></div>
+        <div><label>Adjusts</label><select name="applies_to"><option value="current" {% if not adj.is_prior_year %}selected{% endif %}>Current year</option><option value="prior" {% if adj.is_prior_year %}selected{% endif %}>Prior year (restates comparatives)</option></select></div>
+        <div><label>If prior year</label><select name="carry_to_current"><option value="1" {% if adj.carry_to_current is not false %}selected{% endif %}>Also restate this year's opening balances</option><option value="0" {% if adj.carry_to_current is false %}selected{% endif %}>Comparatives only</option></select></div>
         <div>
           <button type="submit" class="btn small secondary" style="margin-bottom:14px;">Save</button>
           <button type="submit" formaction="{{ url_for('engagements.delete_audit_adjustment', adjustment_id=adj.id) }}" class="btn small danger" style="margin-bottom:14px;" onclick="return confirm('Delete this adjustment and all its lines?')">Delete</button>
@@ -4736,7 +4741,7 @@
   <div class="card"><div class="empty-state">{{ trial_balance.unmapped_count }} account(s) above still need a category - the statements below exclude anything unmapped, so treat them as a draft until every account is mapped.</div></div>
   {% endif %}
   {% if trial_balance.adjustments %}
-  <div class="card"><p class="muted" style="font-size:12px;margin:0;">The statements below include {{ trial_balance.adjustments|length }} audit adjustment(s) applied to the current year on top of the preliminary trial balance (see "Audit adjustments" above) - the prior year comparative is unadjusted.</p></div>
+  <div class="card"><p class="muted" style="font-size:12px;margin:0;">The statements below include {{ trial_balance.adjustments|length }} audit adjustment(s) on top of the preliminary trial balance (see "Audit adjustments" above){% set pys = trial_balance.adjustments|selectattr('is_prior_year')|list %}{% if pys %}, of which {{ pys|length }} restate{{ 's' if pys|length == 1 else '' }} the prior year comparatives ({% for a in pys %}{{ a.reference }}{% if not loop.last %}, {% endif %}{% endfor %}){% else %} - the prior year comparative is unadjusted{% endif %}.</p></div>
   {% endif %}
 
   <div class="card">
@@ -5168,31 +5173,30 @@
     <h3 class="mt-0">Asset register</h3>
     <p class="muted" style="font-size:12px;">The same register the Finalisation notes use. Cost and date acquired drive the schedule; the depreciation the client's accounts charged is added back on the Income Tax Computation.</p>
     {% if ca_assets %}
+    <form method="post" action="{{ url_for('assetsched.save_all_ca_assets', engagement_id=engagement.id) }}" id="ca_form">
+    <div style="display:flex;gap:8px;align-items:center;margin:6px 0;"><button type="submit" class="btn small gold">Save all</button><span class="muted" style="font-size:11.5px;">Saves every row in one go. Type 0, nil or - as the tax value for a NIL tax value; leave it blank to rebuild it from the cost and date acquired.</span></div>
     <table style="font-size:12px;">
       <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th>Cost</th><th>Tax value b/f</th><th>Depreciation in the accounts</th><th></th></tr></thead>
       <tbody>
       {% for a in ca_assets %}
-        <form method="post" action="{{ url_for('engagements.update_ppe_asset', asset_id=a.id) }}" class="inline">
         <tr>
-          <td><input type="text" name="asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
-          <td><input type="text" name="description" value="{{ a.description }}" style="width:180px;margin-bottom:0;"></td>
-          <td><select name="asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in ca_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
-          <td><input type="date" name="date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') if a.date_acquired else '' }}" style="width:128px;margin-bottom:0;"></td>
-          <td><input type="number" step="0.01" name="cost" value="{{ a.cost or 0 }}" style="width:95px;margin-bottom:0;"></td>
-          <td><input type="number" step="0.01" name="opening_tax_value" value="{{ a.opening_tax_value if a.opening_tax_value is not none else '' }}" placeholder="rebuild" style="width:95px;margin-bottom:0;"></td>
-          <td><input type="number" step="0.01" name="current_year_depreciation" value="{{ a.current_year_depreciation or 0 }}" style="width:95px;margin-bottom:0;">
-            <input type="hidden" name="opening_accumulated_depreciation" value="{{ a.opening_accumulated_depreciation or 0 }}">
-            <input type="hidden" name="disposal_cost" value="{{ a.disposal_cost or 0 }}">
-            <input type="hidden" name="disposal_accumulated_depreciation" value="{{ a.disposal_accumulated_depreciation or 0 }}"></td>
+          <td><input type="text" name="f{{ a.id }}_asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
+          <td><input type="text" name="f{{ a.id }}_description" value="{{ a.description }}" style="width:180px;margin-bottom:0;"></td>
+          <td><select name="f{{ a.id }}_asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in ca_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
+          <td><input type="date" name="f{{ a.id }}_date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') if a.date_acquired else '' }}" style="width:128px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="f{{ a.id }}_cost" value="{{ a.cost or 0 }}" style="width:95px;margin-bottom:0;"></td>
+          <td><input type="text" inputmode="decimal" name="f{{ a.id }}_opening_tax_value" value="{{ a.opening_tax_value if a.opening_tax_value is not none else '' }}" placeholder="blank = rebuild" title="Type 0, nil or - for a NIL tax value" style="width:95px;margin-bottom:0;"></td>
+          <td><input type="number" step="0.01" name="f{{ a.id }}_current_year_depreciation" value="{{ a.current_year_depreciation or 0 }}" style="width:95px;margin-bottom:0;"></td>
           <td>
-            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" name="only" value="{{ a.id }}" class="btn small secondary">Save</button>
             <button type="submit" formaction="{{ url_for('engagements.delete_ppe_asset', asset_id=a.id) }}" class="btn small danger" onclick="return confirm('Delete this asset?')">Delete</button>
           </td>
         </tr>
-        </form>
       {% endfor %}
       </tbody>
     </table>
+    <div style="margin-top:6px;"><button type="submit" class="btn small gold">Save all</button></div>
+    </form>
     {% else %}
     <div class="empty-state">No assets yet - add one below.</div>
     {% endif %}
@@ -5202,7 +5206,7 @@
       <div><label>Class</label><select name="asset_class_id"><option value="">Unclassified</option>{% for c in ca_classes %}<option value="{{ c.id }}">{{ c.name }}</option>{% endfor %}</select></div>
       <div><label>Acquired</label><input type="date" name="date_acquired"></div>
       <div><label>Cost</label><input type="number" step="0.01" name="cost"></div>
-      <div><label>Tax value b/f</label><input type="number" step="0.01" name="opening_tax_value"></div>
+      <div><label>Tax value b/f</label><input type="text" inputmode="decimal" name="opening_tax_value" placeholder="blank = rebuild; 0 or nil = nil"></div>
       <div><label>Depreciation in the accounts</label><input type="number" step="0.01" name="current_year_depreciation"></div>
       <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add asset</button></div>
     </form>

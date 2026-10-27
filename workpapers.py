@@ -603,6 +603,15 @@ def build_financial_statements_docx(engagement, statements, financial_statements
             rounding_text += f" A rounding difference of {_fmt_whole(abs(a['amount']))} on {a['label'].lower()} ({'current' if a['period'] == 'current' else 'prior'} year) is included in that line so that the statement of financial position balances."
         doc.add_paragraph(rounding_text).runs[0].italic = True
 
+    restated = statements.get("prior_restated") or []
+    if restated:
+        refs = ", ".join(a["reference"] for a in restated if a["reference"]) or "adjustments"
+        carried = any(a["carry"] for a in restated)
+        doc.add_paragraph(
+            "Comparative figures have been restated to correct prior period errors (IAS 8). The prior year amounts above include the restating "
+            f"adjustments {refs}" + ("; the opening balances of the current year have been restated accordingly." if carried else ".")
+        ).runs[0].italic = True
+
     pl_specs = [{"cells": _fs_row_cells(r), "bold": r.get("bold", False)} for r in statements["pl"]["rows"]]
     _statement_table(doc, "Statement of Profit or Loss and Other Comprehensive Income", ["", "Note", "Current year", "Prior year"], pl_specs)
 
@@ -756,7 +765,8 @@ def build_trial_balance_adjustments_xlsx(engagement, trial_balance):
     row += 1
     if trial_balance and trial_balance.adjustments:
         for adj in trial_balance.adjustments:
-            ws.cell(row=row, column=1, value=f"{adj.reference or '(no ref)'} — {adj.description or ''}").font = Font(bold=True)
+            ws.cell(row=row, column=1, value=f"{adj.reference or '(no ref)'} — {adj.description or ''}"
+                    + (" [PRIOR YEAR - restates the comparatives" + (" and this year's opening balances]" if adj.carries_to_current else "]") if adj.is_prior_year else "")).font = Font(bold=True)
             row += 1
             row = _header_row(ws, row, ["Account", "IAS 1 category", "Debit", "Credit"])
             adj_start = row
@@ -971,6 +981,33 @@ def build_asset_schedules_xlsx(engagement, ctx, ca):
     else:
         w5.cell(row=r5, column=1, value="No assets in the schedule for this year.")
     _autofit(w5, [34, 16, 16, 18, 16, 16, 16, 14, 18, 22, 16])
+
+    # 6. reconciliation to the trial balance
+    rc = ctx.get("as_recon")
+    if rc and rc.get("ok"):
+        w6 = wb.create_sheet("Trial balance reconciliation")
+        w6.cell(row=6, column=1, value="Asset Register reconciled to the trial balance").font = Font(bold=True, size=12, color=_GOLD_HEX)
+        cont = rc.get("continuity")
+        head = ["Opening", "Asset Register", "Trial balance (prior-year column)", "Difference"] + ([f"{cont.title} - closing", "Comparative vs last year"] if cont else [])
+        r6 = _header_row(w6, 7, head)
+        for r in rc["opening"]:
+            vals = [r["label"], r["register"], r["tb"], r["diff"]] + ([r.get("cont"), r.get("cont_diff")] if cont else [])
+            r6 = put(w6, r6, vals, bold=r is rc["opening"][-1], numeric_from=2)
+        r6 += 1
+        r6 = _header_row(w6, r6, ["Closing", "Asset Register", "Trial balance (with other adjustments)", "Difference", "Pushed (PPE-REG)", "Still unreconciled"])
+        for r in rc["closing"] + [rc["depreciation"]]:
+            r6 = put(w6, r6, [r["label"], r["register"], r["tb"], r["diff"], r["pushed"], r["remaining"]], numeric_from=2)
+        r6 += 1
+        for i in rc["info"]:
+            r6 = put(w6, r6, [i["label"], i["value"]], numeric_from=2)
+        p = rc["proposal"]
+        if p["lines"]:
+            r6 += 1
+            r6 = _header_row(w6, r6, ["Proposed adjustment PPE-REG", "IAS 1 category", "Debit", "Credit"])
+            for l in p["lines"]:
+                r6 = put(w6, r6, [l["account_name"], l["fs_category"], l["debit"] or "", l["credit"] or ""], numeric_from=3)
+            r6 = put(w6, r6, ["Total", "", p["total_debit"], p["total_credit"]], bold=True, numeric_from=3)
+        _autofit(w6, [62, 18, 24, 16, 22, 22])
     return _finish_wb(wb)
 
 

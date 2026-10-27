@@ -236,6 +236,9 @@ def _add_missing_columns():
         "user": [("last_seen_at", "DATETIME")],
         "income_tax_computation": [("profit_before_tax_manual", "FLOAT")],
 
+        # applies_to: 'current' (the year under audit) or 'prior' (a restatement of the comparative column); carry_to_current: a prior-year
+        # adjustment also restates the current year's opening balances (see financials.apply_adjustments).
+        "audit_adjustment": [("applies_to", "VARCHAR(10) DEFAULT 'current'"), ("carry_to_current", "BOOLEAN DEFAULT 1")],
         "ppe_asset": [("tax_disposed_on", "DATE"), ("tax_disposal_proceeds", "FLOAT"), ("opening_tax_value", "FLOAT")],
         "message_recipient": [("recalled_at", "DATETIME"), ("deleted_at", "DATETIME")],
         "engagement": [
@@ -791,6 +794,7 @@ def create_app():
     from tb_setup import tb_setup_bp
     from asset_schedules import assetsched_bp
     from asset_import import assetimp_bp
+    from asset_recon import assetrecon_bp
     from whistleblower import wb_bp, wb_public_bp
     from training import training_bp
 
@@ -840,6 +844,7 @@ def create_app():
     app.register_blueprint(tb_setup_bp)
     app.register_blueprint(assetsched_bp)
     app.register_blueprint(assetimp_bp)
+    app.register_blueprint(assetrecon_bp)
     app.register_blueprint(wb_bp)
     app.register_blueprint(wb_public_bp)
 

@@ -4189,6 +4189,11 @@ class AuditAdjustment(db.Model):
     trial_balance_id = db.Column(db.Integer, db.ForeignKey("trial_balance.id"), nullable=False)
     reference = db.Column(db.String(50))  # e.g. "AJE 1"
     description = db.Column(db.Text)
+    # Which column of the trial balance the journal adjusts: "current" (the year under audit, the original behaviour) or "prior" (the
+    # comparative column - a restatement). A prior-year journal with carry_to_current also restates the current year's OPENING balances:
+    # its balance sheet lines are repeated in the current column and its profit and loss lines go to the current retained earnings b/f.
+    applies_to = db.Column(db.String(10), default="current")
+    carry_to_current = db.Column(db.Boolean, default=True)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     completed_at = db.Column(db.DateTime)
@@ -4204,6 +4209,14 @@ class AuditAdjustment(db.Model):
         "AuditAdjustmentLine", backref="adjustment", lazy=True,
         cascade="all, delete-orphan", order_by="AuditAdjustmentLine.id",
     )
+
+    @property
+    def is_prior_year(self):
+        return (self.applies_to or "current") == "prior"
+
+    @property
+    def carries_to_current(self):
+        return self.is_prior_year and self.carry_to_current is not False
 
     @property
     def is_reviewed(self):

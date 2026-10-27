@@ -4102,12 +4102,14 @@ def add_audit_adjustment(tb_id):
         trial_balance_id=tb.id,
         reference=reference,
         description=request.form.get("description", "").strip(),
+        applies_to="prior" if request.form.get("applies_to") == "prior" else "current",
+        carry_to_current=request.form.get("carry_to_current", "1") != "0",
         completed_by_id=current_user.id,
         completed_at=datetime.utcnow(),
     )
     db.session.add(adjustment)
     db.session.commit()
-    flash(f"Adjustment '{reference}' added - now add its debit/credit lines below.", "success")
+    flash(f"{'Prior-year adjustment' if adjustment.is_prior_year else 'Adjustment'} '{reference}' added - now add its debit/credit lines below.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=tb.engagement_id, tab="finalisation"))
 
 
@@ -4131,6 +4133,9 @@ def update_audit_adjustment(adjustment_id):
     _ensure_engagement_access(adjustment.trial_balance.engagement)
     adjustment.reference = request.form.get("reference", adjustment.reference or "").strip() or adjustment.reference
     adjustment.description = request.form.get("description", "").strip()
+    if "applies_to" in request.form:
+        adjustment.applies_to = "prior" if request.form.get("applies_to") == "prior" else "current"
+        adjustment.carry_to_current = request.form.get("carry_to_current", "1") != "0"
     _touch_adjustment(adjustment)
     db.session.commit()
     flash("Adjustment updated.", "success")
@@ -5268,6 +5273,12 @@ def _parse_float(value):
         return None
 
 
+def _asset_tax_value(value):
+    """Tax value brought forward: blank = rebuild; 0, 'nil' or '-' = a nil tax value (see asset_schedules._tax_value)."""
+    import asset_schedules
+    return asset_schedules._tax_value(value)
+
+
 def _parse_date(value):
     if not value:
         return None
@@ -5367,7 +5378,7 @@ def add_ppe_asset(engagement_id):
         current_year_depreciation=_parse_float(request.form.get("current_year_depreciation")) or 0.0,
         disposal_cost=_parse_float(request.form.get("disposal_cost")) or 0.0,
         disposal_accumulated_depreciation=_parse_float(request.form.get("disposal_accumulated_depreciation")) or 0.0,
-        opening_tax_value=_parse_float(request.form.get("opening_tax_value")),
+        opening_tax_value=_asset_tax_value(request.form.get("opening_tax_value")),
         order=order,
     ))
     db.session.commit()
@@ -5396,7 +5407,7 @@ def update_ppe_asset(asset_id):
     asset.disposal_cost = _parse_float(request.form.get("disposal_cost")) or 0.0
     asset.disposal_accumulated_depreciation = _parse_float(request.form.get("disposal_accumulated_depreciation")) or 0.0
     if "opening_tax_value" in request.form:                  # forms without the field (the Capital Allowances tab) leave it alone
-        asset.opening_tax_value = _parse_float(request.form.get("opening_tax_value"))
+        asset.opening_tax_value = _asset_tax_value(request.form.get("opening_tax_value"))
     db.session.commit()
     flash("Asset updated.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
