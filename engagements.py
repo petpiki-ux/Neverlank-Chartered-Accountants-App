@@ -5419,9 +5419,11 @@ def delete_ppe_asset(asset_id):
     asset = PPEAsset.query.get_or_404(asset_id)
     engagement = asset.engagement
     _ensure_engagement_access(engagement)
+    import asset_schedules
+    asset_schedules.archive_asset(asset, current_user.id)             # a copy is kept so the deletion can be undone
     db.session.delete(asset)
     db.session.commit()
-    flash("Asset removed from the Asset Register.", "success")
+    flash("Asset removed from the Asset Register. It can be put back under 'Recently deleted' on the Asset Register tab.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
 
 

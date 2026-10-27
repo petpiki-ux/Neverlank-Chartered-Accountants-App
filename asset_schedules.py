@@ -24,7 +24,8 @@ from flask_login import login_required, current_user
 
 import financials as fin
 from extensions import db
-from models import Engagement, PPEAsset, PPEAssetClass, TrialBalance
+import json
+from models import Engagement, PPEAsset, PPEAssetClass, TrialBalance, DeletedPPEAsset
 
 assetsched_bp = Blueprint("assetsched", __name__, url_prefix="/engagements")
 
@@ -224,6 +225,78 @@ def import_opening_from_tb(engagement_id):
     return _back(engagement, "opening")
 
 
+# ---------------------------------------------------------------------------------------------------- undoing a deletion
+
+_SNAP_FIELDS = ("asset_class_id", "asset_code", "description", "cost", "opening_accumulated_depreciation", "current_year_depreciation",
+                "disposal_cost", "disposal_accumulated_depreciation", "tax_disposal_proceeds", "opening_tax_value", "order")
+_SNAP_DATES = ("date_acquired", "tax_disposed_on")
+
+
+def archive_asset(asset, user_id=None):
+    """Keep a copy of an asset that is about to be deleted (call before db.session.delete). Nothing is committed here."""
+    snap = {k: getattr(asset, k) for k in _SNAP_FIELDS}
+    snap.update({k: (getattr(asset, k).isoformat() if getattr(asset, k) else None) for k in _SNAP_DATES})
+    db.session.add(DeletedPPEAsset(engagement_id=asset.engagement_id, description=(asset.description or "")[:200],
+                                   snapshot=json.dumps(snap), deleted_by_id=user_id))
+
+
+def _restore_one(engagement, d):
+    snap = json.loads(d.snapshot)
+    for k in _SNAP_DATES:
+        snap[k] = date.fromisoformat(snap[k]) if snap.get(k) else None
+    cid = snap.get("asset_class_id")
+    if cid and not PPEAssetClass.query.filter_by(id=cid, engagement_id=engagement.id).first():
+        snap["asset_class_id"] = None                           # its class was removed since: back as Unclassified
+    db.session.add(PPEAsset(engagement_id=engagement.id, **snap))
+    db.session.delete(d)
+
+
+@assetsched_bp.route("/<int:engagement_id>/assets/delete-selected", methods=["POST"])
+@login_required
+def delete_selected(engagement_id):
+    """Delete every asset ticked in the list (opening balances, additions or the Capital Allowances list). A copy of each is kept so
+    the deletion can be undone under 'Recently deleted'."""
+    engagement = _engagement(engagement_id)
+    ids = {int(x) for x in request.form.getlist("sel") if str(x).isdigit()}
+    if not ids:
+        flash("Tick the assets to delete first.", "danger")
+        return _back(engagement, "")
+    n = 0
+    for a in PPEAsset.query.filter(PPEAsset.engagement_id == engagement.id, PPEAsset.id.in_(ids)).all():
+        archive_asset(a, current_user.id)
+        db.session.delete(a)
+        n += 1
+    db.session.commit()
+    flash(f"{n} asset(s) deleted. They can be put back under 'Recently deleted'.", "success")
+    return _back(engagement, "")
+
+
+@assetsched_bp.route("/<int:engagement_id>/assets/restore", methods=["POST"])
+@login_required
+def restore_deleted(engagement_id):
+    """Put back deleted assets: the one whose Restore button was pressed (deleted_id), or all of them (deleted_id blank)."""
+    engagement = _engagement(engagement_id)
+    q = DeletedPPEAsset.query.filter_by(engagement_id=engagement.id).order_by(DeletedPPEAsset.id)
+    did = (request.form.get("deleted_id") or "").strip()
+    rows = [d for d in q.all() if (not did) or (did.isdigit() and d.id == int(did))]
+    for d in rows:
+        _restore_one(engagement, d)
+    db.session.commit()
+    flash(f"{len(rows)} asset(s) restored to the register." if rows else "Nothing to restore.", "success" if rows else "info")
+    return _back(engagement, "opening")
+
+
+@assetsched_bp.route("/<int:engagement_id>/assets/restore/discard", methods=["POST"])
+@login_required
+def discard_deleted(engagement_id):
+    """Forget the saved copies of deleted assets (they can no longer be restored)."""
+    engagement = _engagement(engagement_id)
+    n = DeletedPPEAsset.query.filter_by(engagement_id=engagement.id).delete()
+    db.session.commit()
+    flash(f"{n} saved copy(ies) of deleted assets discarded.", "info")
+    return _back(engagement, "opening")
+
+
 # ---------------------------------------------------------------------------------------------------- the tab context
 
 def _recon(engagement):
@@ -263,6 +336,7 @@ def tab_context(engagement):
         "as_add_cost": sum(a.cost or 0.0 for a in additions),
         "as_tb_import": tb_opening_rows(engagement),
         "as_recon": _recon(engagement),
+        "as_deleted": DeletedPPEAsset.query.filter_by(engagement_id=engagement.id).order_by(DeletedPPEAsset.id.desc()).limit(200).all(),
     }
 
 

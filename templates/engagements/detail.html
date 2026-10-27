@@ -5174,13 +5174,14 @@
     <p class="muted" style="font-size:12px;">The same register the Finalisation notes use. Cost and date acquired drive the schedule; the depreciation the client's accounts charged is added back on the Income Tax Computation.</p>
     {% if ca_assets %}
     <form method="post" action="{{ url_for('assetsched.save_all_ca_assets', engagement_id=engagement.id) }}" id="ca_form">
-    <div style="display:flex;gap:8px;align-items:center;margin:6px 0;"><button type="submit" class="btn small gold">Save all</button><span class="muted" style="font-size:11.5px;">Saves every row in one go. Type 0, nil or - as the tax value for a NIL tax value; leave it blank to rebuild it from the cost and date acquired.</span></div>
+    <div style="display:flex;gap:8px;align-items:center;margin:6px 0;"><button type="submit" class="btn small gold">Save all</button> <button type="submit" formaction="{{ url_for('assetsched.delete_selected', engagement_id=engagement.id) }}" class="btn small danger" onclick="return confirm('Delete the ticked assets? They can be restored from Recently deleted.');">Delete selected</button><span class="muted" style="font-size:11.5px;">Saves every row in one go. Type 0, nil or - as the tax value for a NIL tax value; leave it blank to rebuild it from the cost and date acquired.</span></div>
     <table style="font-size:12px;">
-      <thead><tr><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th>Cost</th><th>Tax value b/f</th><th>Depreciation in the accounts</th><th></th></tr></thead>
+      <thead><tr><th><input type="checkbox" title="Tick all" onclick="var f=this.form;for(var i=0;i<f.elements.length;i++){if(f.elements[i].name==='sel')f.elements[i].checked=this.checked;}"></th><th>Code</th><th>Description</th><th>Class</th><th>Acquired</th><th>Cost</th><th>Tax value b/f</th><th>Depreciation in the accounts</th><th></th></tr></thead>
       <tbody>
       {% for a in ca_assets %}
         <tr>
-          <td><input type="text" name="f{{ a.id }}_asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
+
+        <td><input type="checkbox" name="sel" value="{{ a.id }}"></td>          <td><input type="text" name="f{{ a.id }}_asset_code" value="{{ a.asset_code or '' }}" style="width:64px;margin-bottom:0;"></td>
           <td><input type="text" name="f{{ a.id }}_description" value="{{ a.description }}" style="width:180px;margin-bottom:0;"></td>
           <td><select name="f{{ a.id }}_asset_class_id" style="width:auto;margin-bottom:0;"><option value="">Unclassified</option>{% for c in ca_classes %}<option value="{{ c.id }}" {% if a.asset_class_id==c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></td>
           <td><input type="date" name="f{{ a.id }}_date_acquired" value="{{ a.date_acquired.strftime('%Y-%m-%d') if a.date_acquired else '' }}" style="width:128px;margin-bottom:0;"></td>

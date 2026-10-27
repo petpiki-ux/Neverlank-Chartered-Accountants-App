@@ -5146,6 +5146,19 @@ class PPEAssetClass(db.Model):
         return f"<PPEAssetClass {self.name} engagement={self.engagement_id}>"
 
 
+class DeletedPPEAsset(db.Model):
+    """A copy of an Asset Register row taken at the moment it was deleted, so that a deletion can be undone ("Recently deleted" on the
+    Asset Register tab). Restoring puts the row back exactly as it was and removes the copy."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, index=True)
+    description = db.Column(db.String(200))
+    snapshot = db.Column(db.Text, nullable=False)          # JSON of the PPEAsset fields
+    deleted_at = db.Column(db.DateTime, default=datetime.utcnow)
+    deleted_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+
+    deleted_by = db.relationship("User", foreign_keys=[deleted_by_id])
+
+
 class PPEAsset(db.Model):
     """One row of the Property, Plant and Equipment Asset Register working
     paper - a single fixed asset, editable directly in the app (with an
