@@ -3825,6 +3825,11 @@ def upload_trial_balance(engagement_id):
     if format_note:
         flash(format_note, "info")
     flash(f"Imported {len(cleaned_rows)} account(s) from '{original_name}'.", "success")
+    for yr, dk, ck in (("current year", "current_debit", "current_credit"), ("prior year", "prior_debit", "prior_credit")):
+        d, c_ = sum(r[dk] or 0 for r in cleaned_rows), sum(r[ck] or 0 for r in cleaned_rows)
+        if abs(d - c_) >= 0.01:
+            flash(f"The {yr} columns do not balance after import: debits {d:,.2f}, credits {c_:,.2f}, difference {d - c_:,.2f}. "
+                  "Check the file for subtotal or total rows, or use 'Upload one year on its own' on this tab, which shows every row before importing.", "danger")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
 
