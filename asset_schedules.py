@@ -305,7 +305,7 @@ def _recon(engagement):
     import asset_recon
     from flask import has_request_context
     args = request.args if has_request_context() else {}
-    return asset_recon.reconcile(engagement, args.get("open_to") or "retained_earnings", args.get("rest_to") or "suspense")
+    return asset_recon.reconcile(engagement, args.get("open_to") or "retained_earnings", args.get("rest_to") or "suspense", args.get("basis") or "class", asset_recon.legs_from(args))
 
 
 def tab_context(engagement):

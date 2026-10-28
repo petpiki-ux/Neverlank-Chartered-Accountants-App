@@ -239,6 +239,7 @@ def _add_missing_columns():
         # applies_to: 'current' (the year under audit) or 'prior' (a restatement of the comparative column); carry_to_current: a prior-year
         # adjustment also restates the current year's opening balances (see financials.apply_adjustments).
         "audit_adjustment": [("applies_to", "VARCHAR(10) DEFAULT 'current'"), ("carry_to_current", "BOOLEAN DEFAULT 1")],
+        "ppe_asset_class": [("tb_aliases", "VARCHAR(400)")],
         "ppe_asset": [("tax_disposed_on", "DATE"), ("tax_disposal_proceeds", "FLOAT"), ("opening_tax_value", "FLOAT")],
         "message_recipient": [("recalled_at", "DATETIME"), ("deleted_at", "DATETIME")],
         "engagement": [

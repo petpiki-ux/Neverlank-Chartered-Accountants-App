@@ -265,6 +265,7 @@
 {# 5. Reconcile to the trial balance. Context: as_recon from asset_recon.reconcile(). #}
 {% macro rc_amt(x) %}{% if x is none %}-{% elif x < -0.004 %}({{ '%.2f'|format(-x) }}){% else %}{{ '%.2f'|format(x) }}{% endif %}{% endmacro %}
 {% macro rc_diff(x) %}<span {% if x is not none and x|abs >= 0.5 %}style="color:#b02a2a;font-weight:600;"{% endif %}>{{ rc_amt(x) }}</span>{% endmacro %}
+{% macro leg_opts(rc, selected, blank_label) %}{% if blank_label %}<option value="">{{ blank_label }}</option>{% endif %}{% for k, v in rc.rest_to_options.items() %}<option value="{{ k }}" {% if selected==k %}selected{% endif %}>{{ v }}</option>{% endfor %}{% if rc.leg_accounts %}<optgroup label="An account in the trial balance">{% for k, v in rc.leg_accounts %}<option value="{{ k }}" {% if selected==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</optgroup>{% endif %}{% endmacro %}
 <div class="card" id="reconcile">
   <h3 class="mt-0">5. Reconcile to the trial balance</h3>
   {% if not as_recon or not as_recon.ok %}
@@ -320,13 +321,68 @@
   <p class="muted" style="font-size:11.5px;">Depreciation expense found in another expense category and counted: {{ rc.dep_in_other_category|join(', ') }}.</p>
   {% endif %}
 
+  <h4 style="margin-bottom:4px;">By asset class</h4>
+  <p class="muted" style="font-size:11.5px;">Each trial balance asset class (the name its cost and accumulated depreciation accounts share, e.g. "Motor vehicles - cost") is paired with the register class of the same name. A class on one side only is shown on its own line: match it to the right register class, and the journal below is then posted class by class.</p>
+  <div style="overflow-x:auto;">
+  <table style="font-size:11.5px;">
+    <thead>
+      <tr><th rowspan="2">Asset class</th><th colspan="3" class="text-center">Cost brought forward</th><th colspan="3" class="text-center">Accumulated depreciation brought forward</th><th colspan="3" class="text-center">Cost carried forward</th><th colspan="3" class="text-center">Accumulated depreciation carried forward</th><th colspan="3" class="text-center">Depreciation charge</th></tr>
+      <tr>{% for _ in range(5) %}<th class="text-right">Register</th><th class="text-right">TB</th><th class="text-right">Diff.</th>{% endfor %}</tr>
+    </thead>
+    <tbody>
+    {% for ur in rc.units %}
+      {% set u = ur.unit %}
+      <tr {% if u.kind != 'matched' %}style="background:#fff6e5;"{% endif %}>
+        <td><strong>{{ u.label }}</strong>
+          {% if u.kind == 'matched' %}{% if u.tb_labels and u.tb_labels[0]|lower != u.label|lower %}<div class="muted" style="font-size:10.5px;">TB: {{ u.tb_labels|join(', ') }}</div>{% endif %}
+          {% elif u.kind == 'tb_only' %}<div style="font-size:10.5px;color:#a15c00;">In the trial balance only</div>
+            <form method="post" action="{{ url_for('assetrecon.match_class', engagement_id=engagement.id) }}" style="margin-top:3px;">
+              <input type="hidden" name="tb_key" value="{{ u.tb_keys[0] }}">
+              <select name="class_id" style="font-size:11px;"><option value="">Match to a register class...</option>{% for c in rc.register_classes %}{% if c.class_id is not none %}<option value="{{ c.class_id }}">{{ c.name }}</option>{% endif %}{% endfor %}</select>
+              <button type="submit" class="btn small secondary">Match</button></form>
+          {% else %}<div style="font-size:10.5px;color:#a15c00;">In the register only</div>{% endif %}
+        </td>
+        {% for k in ['open_cost','open_acc','close_cost','close_acc','charge'] %}{% set r = ur[k] %}
+        <td class="text-right">{{ rc_amt(r.register) }}</td><td class="text-right">{{ rc_amt(r.tb) }}</td><td class="text-right">{{ rc_diff(r.diff) }}</td>
+        {% endfor %}
+      </tr>
+    {% endfor %}
+    {% if rc.unalloc_dep|abs >= 0.005 %}
+      <tr><td><em>Depreciation expense not named for a class</em></td>{% for _ in range(12) %}<td></td>{% endfor %}<td class="text-right">-</td><td class="text-right">{{ rc_amt(rc.unalloc_dep) }}</td><td></td></tr>
+    {% endif %}
+    </tbody>
+  </table>
+  </div>
+  {% if rc.class_attention %}
+  <p class="muted" style="font-size:11.5px;color:#a15c00;">{{ rc.class_attention|length }} class(es) appear on one side only (shaded). They may be the same class under different names - match them above - or a genuine difference (a class missing from the register, or one not yet in the trial balance).</p>
+  {% endif %}
+  {% if rc.basis_requested == 'class' and rc.basis == 'total' %}
+  <p class="muted" style="font-size:11.5px;color:#a15c00;">No trial balance asset class could be matched to a register class, so the journal below is in total. Match the classes above to post class by class.</p>
+  {% endif %}
+
   <h4 style="margin-bottom:4px;">Push to the trial balance</h4>
   <form method="get" action="{{ url_for('engagements.view_engagement', engagement_id=engagement.id) }}#reconcile" class="form-row" style="align-items:flex-end;">
     <input type="hidden" name="tab" value="asset_register">
     <div style="grid-column: span 2;"><label>Opening net book value difference goes to</label>
       <select name="open_to">{% for k, v in rc.open_to_options.items() %}<option value="{{ k }}" {% if rc.open_to==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
     <div style="grid-column: span 2;"><label>The balance of the entry (other side of additions and disposals) goes to</label>
-      <select name="rest_to">{% for k, v in rc.rest_to_options.items() %}<option value="{{ k }}" {% if rc.rest_to==k %}selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+      <select name="rest_to">{{ leg_opts(rc, rc.rest_to, '') }}</select></div>
+    <div><label>Post the journal</label>
+      <select name="basis"><option value="class" {% if rc.basis_requested=='class' %}selected{% endif %}>Class by class</option><option value="total" {% if rc.basis_requested=='total' %}selected{% endif %}>In total</option></select></div>
+    {% if rc.basis == 'class' %}
+    <details style="grid-column: 1 / -1;margin-bottom:10px;" {% if rc.legs %}open{% endif %}>
+      <summary style="cursor:pointer;font-size:12.5px;">Choose the balancing leg for each class (where the other side of the entry goes)</summary>
+      <p class="muted" style="font-size:11.5px;margin:6px 0;">The default above is used unless you pick something else here. Pick the bank, payables, a loan or any account in the trial balance when you know what the difference is - for example an addition paid from the bank, or an asset bought on credit.</p>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:4px 14px;">
+        {% for ur in rc.units %}{% set u = ur.unit %}
+        <div><label style="font-size:12px;">{{ u.label }}</label>
+          <select name="leg_{{ u.id }}" style="font-size:12px;">{{ leg_opts(rc, rc.legs.get(u.id), 'Same as the default') }}</select></div>
+        {% endfor %}
+        <div><label style="font-size:12px;">Depreciation charge difference</label>
+          <select name="leg_dep" style="font-size:12px;">{{ leg_opts(rc, rc.legs.get('dep'), 'Same as the default') }}</select></div>
+      </div>
+    </details>
+    {% endif %}
     <div><button type="submit" class="btn small secondary" style="margin-bottom:14px;">Update preview</button></div>
   </form>
 
@@ -366,7 +422,7 @@
   {% endif %}
   <form method="post" action="{{ url_for('assetrecon.push_to_tb', engagement_id=engagement.id) }}"
         {% if rc.existing and (rc.existing.is_reviewed or rc.existing.is_partner_signed) %}onsubmit="return confirm('This adjustment has been signed off. Pushing again replaces its lines and clears the sign-off. Continue?');"{% endif %}>
-    <input type="hidden" name="open_to" value="{{ rc.open_to }}"><input type="hidden" name="rest_to" value="{{ rc.rest_to }}">
+    <input type="hidden" name="open_to" value="{{ rc.open_to }}"><input type="hidden" name="rest_to" value="{{ rc.rest_to }}"><input type="hidden" name="basis" value="{{ rc.basis_requested }}">{% for k, v in rc.legs.items() %}<input type="hidden" name="leg_{{ k }}" value="{{ v }}">{% endfor %}
     <button type="submit" class="btn small gold">{% if rc.existing or rc.existing_py %}Refresh the adjustment(s){% else %}Push to the trial balance{% endif %} ({% if p.py_lines %}{{ 'PPE-REG-PY' }}{% if p.lines %} and {% endif %}{% endif %}{% if p.lines %}{{ 'PPE-REG' }}{% endif %})</button>
     <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}" class="btn small secondary">Open the adjustments (Finalisation tab)</a>
   </form>

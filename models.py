@@ -5127,6 +5127,7 @@ class PPEAssetClass(db.Model):
     rate_percent = db.Column(db.Float)
     useful_life_years = db.Column(db.Float)
     order = db.Column(db.Integer, default=0)
+    tb_aliases = db.Column(db.String(400))        # trial balance asset-class keys matched to this class ("a|b") - see asset_recon.build_units
 
     engagement = db.relationship(
         "Engagement",
