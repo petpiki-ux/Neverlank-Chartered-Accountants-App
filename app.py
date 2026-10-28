@@ -848,6 +848,15 @@ def create_app():
     app.register_blueprint(assetimp_bp)
     app.register_blueprint(assetrecon_bp)
     app.register_blueprint(tbyear_bp)
+    from backup import backup_bp, nav_state as _backup_nav_state, start_scheduler as _start_backups
+    app.register_blueprint(backup_bp)
+
+    @app.context_processor
+    def _backup_alert_ctx():
+        if current_user.is_authenticated and current_user.role in ("admin", "partner"):
+            return {"backup_alert": _backup_nav_state()}
+        return {"backup_alert": ""}
+    _start_backups(app)
 
     @app.context_processor
     def _asset_push_preview_ctx():
@@ -1039,6 +1048,11 @@ def create_app():
         _merge_tax_engagement_types()
         _rename_consulting_service()
         _backfill_task_categories()
+        try:                                    # 'Premises' and 'Land & Buildings' are one asset class, called Land and Buildings
+            import asset_schedules as _asched
+            _asched.normalise_class_names()
+        except Exception:
+            db.session.rollback()
         _migrate_screenings_to_client()
         # First-run convenience: seed an admin login + starter checklist
         # templates automatically so a freshly-installed copy works with zero

@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}Backup - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Backup</h1>
+  <div class="subtitle">A copy of the database and every uploaded file, made automatically every day and whenever you ask.</div></div>
+</div>
+
+<div class="card" style="border-left:4px solid {% if level == 'ok' %}#2e7d4f{% elif level == 'warn' %}#b8923a{% else %}#b02a2a{% endif %};">
+  <h3 class="mt-0">{% if level == 'ok' %}Backups are running{% elif level == 'warn' %}Needs attention{% else %}The last backup failed{% endif %}</h3>
+  <p style="font-size:13px;">{{ message }}</p>
+  <p class="muted" style="font-size:12px;">
+    {% if scheduler_on %}A backup is made automatically once a day (about {{ '%02d'|format((hour + 2) % 24) }}:00 Harare time, and straight after the app restarts if one was missed). The newest {{ limits.auto }} automatic and {{ limits.manual }} manual backups are kept.{% else %}The automatic schedule is switched off (BACKUP_SCHEDULER=off).{% endif %}
+    {% if disk %}Disk: {{ human_size(disk.free) }} free of {{ human_size(disk.total) }}.{% endif %}
+  </p>
+  {% if not sqlite_ok %}<p class="flash warning">This installation does not use the built-in SQLite database, so only the files are backed up. Back up the database with your database provider.</p>{% endif %}
+  <form method="post" action="{{ url_for('backup.backup_now') }}"><button type="submit" class="btn gold">Back up now</button></form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Backups on the disk</h3>
+  {% if not backups %}
+  <div class="empty-state">No backup yet. Press "Back up now" - or wait for the first automatic one (it runs a couple of minutes after the app starts).</div>
+  {% else %}
+  <div style="overflow-x:auto;">
+  <table style="font-size:12.5px;">
+    <thead><tr><th>Made (UTC)</th><th>Kind</th><th class="text-right">Size</th><th>Files</th><th>Database check</th><th>By</th><th></th></tr></thead>
+    <tbody>
+    {% for b in backups %}
+      <tr>
+        <td>{{ b.created_at.strftime('%d %b %Y %H:%M') }}<div class="muted" style="font-size:10.5px;">{{ b.name }}</div></td>
+        <td>{% if b.kind == 'auto' %}Automatic{% elif b.kind == 'manual' %}Manual{% else %}Before a restore{% endif %}</td>
+        <td class="text-right">{{ human_size(b.size) }}</td>
+        <td>{{ b.file_count if b.file_count is not none else '-' }}</td>
+        <td>{% if not b.has_db %}no database{% elif b.integrity == 'ok' %}passed{% elif b.integrity %}<span style="color:#b02a2a;">{{ b.integrity }}</span>{% else %}-{% endif %}</td>
+        <td>{{ b.by }}</td>
+        <td style="white-space:nowrap;">
+          <a class="btn small secondary" href="{{ url_for('backup.download', name=b.name) }}">Download</a>
+          <form method="post" action="{{ url_for('backup.delete', name=b.name) }}" class="inline" onsubmit="return confirm('Delete this backup?');"><button type="submit" class="btn small danger">Delete</button></form>
+        </td>
+      </tr>
+      {% if can_restore and sqlite_ok and b.has_db %}
+      <tr><td colspan="7" style="padding-top:0;border-top:none;">
+        <details><summary style="cursor:pointer;font-size:12px;color:#8a5a00;">Restore from this backup...</summary>
+          <form method="post" action="{{ url_for('backup.restore', name=b.name) }}" style="margin:8px 0;">
+            <p style="font-size:12px;">This replaces <strong>all data in the app</strong> with how it was at {{ b.created_at.strftime('%d %b %Y %H:%M') }} UTC. Everything entered since then is lost from the app - but a backup of the current state is taken first, so it can be brought back. You will be signed out.</p>
+            <label style="font-weight:normal;font-size:12px;"><input type="checkbox" name="with_files" value="1"> Also put back the files in this backup (uploads, templates, libraries). Files are only added or overwritten, never deleted.</label>
+            <div class="form-row" style="align-items:flex-end;margin-top:6px;">
+              <div><label style="font-size:12px;">Type RESTORE to confirm</label><input type="text" name="confirm" autocomplete="off" style="width:160px;"></div>
+              <div><button type="submit" class="btn small danger" style="margin-bottom:14px;">Restore</button></div>
+            </div>
+          </form></details>
+      </td></tr>
+      {% endif %}
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% endif %}
+  {% if not can_restore %}<p class="muted" style="font-size:11.5px;">Restoring is limited to an Admin.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Keeping them safe</h3>
+  <ul style="font-size:12.5px;line-height:1.6;">
+    <li>These backups sit on the same disk as the live data. They protect against mistakes, a bad import or a corrupted database - not against losing the disk. <strong>Download one regularly</strong> (for example every Friday) and keep it in OneDrive.</li>
+    <li>What is in each backup: the database, and every file the app keeps under <code>{{ data_dir }}</code> (uploads, document templates, policy / notice / legislation libraries, ZIMRA files).</li>
+    <li>Not in a backup: the program code (it is in GitHub) and the Render environment variables such as the secret key, email key and API keys - keep a private copy of those.</li>
+    <li>Render also takes its own snapshots of the disk; check the service's Disks page in the Render dashboard.</li>
+  </ul>
+</div>
+{% endblock %}

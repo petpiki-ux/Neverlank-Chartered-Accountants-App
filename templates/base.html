@@ -51,6 +51,9 @@
       {% if user_has_permission(current_user, 'manage_users') %}
       <a href="{{ url_for('users.list_users') }}">Team</a>
       {% endif %}
+      {% if current_user.role in ('admin', 'partner') %}
+      <a href="{{ url_for('backup.index') }}"{% if request.blueprint == 'backup' %} class="active"{% endif %}>Backup{% if backup_alert %} <span class="badge overdue" title="{{ backup_alert }}">!</span>{% endif %}</a>
+      {% endif %}
     </nav>
     <div class="user-menu">
       {% if open_check_in %}
