@@ -56,7 +56,7 @@
           {% else %}<span class="muted">—</span>{% endif %}
           {% if c.overdue_instalments %}<div><span class="badge overdue">{{ c.overdue_instalments|length }} instalment(s) overdue</span></div>{% endif %}
         </td>
-        <td class="text-right">{% if c.balance is not none %}{{ c.currency }} {{ '{:,.2f}'.format(c.balance) }}{% else %}—{% endif %}</td>
+        <td class="text-right">{% if c.balance is not none %}{{ c.currency }} {{ '%.2f'|format(c.balance) }}{% else %}—{% endif %}</td>
       </tr>
       {% endfor %}
     </tbody>

@@ -30,8 +30,8 @@
 <div class="form-row" style="flex-wrap:wrap;">
   <div class="card" style="flex:1;min-width:150px;padding:12px;"><div class="muted" style="font-size:11px;">Expenses tested</div><div style="font-size:22px;font-weight:600;">{{ sched['items']|length }}</div></div>
   <div class="card" style="flex:1;min-width:150px;padding:12px;"><div class="muted" style="font-size:11px;">Prohibited / partly / review</div><div style="font-size:22px;font-weight:600;">{{ sched.counts.PROHIBITED_SECTION_16 }} / {{ sched.counts.PARTIALLY_PROHIBITED }} / {{ sched.counts.REVIEW_REQUIRED }}</div></div>
-  <div class="card" style="flex:1;min-width:150px;padding:12px;border-left:4px solid #b03a2e;"><div class="muted" style="font-size:11px;">Total add-back</div><div style="font-size:22px;font-weight:600;">{{ '{:,.2f}'.format(sched.total_addback) }}</div></div>
-  <div class="card" style="flex:1;min-width:150px;padding:12px;"><div class="muted" style="font-size:11px;">Posted to Income Tax Computation</div><div style="font-size:22px;font-weight:600;">{{ '{:,.2f}'.format(posted_total) }}</div>{% if stale %}<div style="font-size:11px;color:#b03a2e;">differs from the schedule - post again</div>{% endif %}</div>
+  <div class="card" style="flex:1;min-width:150px;padding:12px;border-left:4px solid #b03a2e;"><div class="muted" style="font-size:11px;">Total add-back</div><div style="font-size:22px;font-weight:600;">{{ '%.2f'|format(sched.total_addback) }}</div></div>
+  <div class="card" style="flex:1;min-width:150px;padding:12px;"><div class="muted" style="font-size:11px;">Posted to Income Tax Computation</div><div style="font-size:22px;font-weight:600;">{{ '%.2f'|format(posted_total) }}</div>{% if stale %}<div style="font-size:11px;color:#b03a2e;">differs from the schedule - post again</div>{% endif %}</div>
 </div>
 
 <div class="card">
@@ -59,8 +59,8 @@
   </form>
   {% if sched.thin %}
   <div style="font-size:12.5px;margin-top:8px;background:#f7f5ef;border-radius:6px;padding:8px 10px;"><strong>Thin capitalisation:</strong> {{ sched.thin.note or '-' }}.
-    {% if sched.thin.ratio is not none %}Debt {{ '{:,.2f}'.format(sched.thin.debt) }} on equity {{ '{:,.2f}'.format(sched.thin.equity) }}.{% endif %}
-    Interest disallowed: <strong>{{ '{:,.2f}'.format(sched.thin.disallowed) }}</strong> of {{ '{:,.2f}'.format(sched.thin.interest) }}.</div>
+    {% if sched.thin.ratio is not none %}Debt {{ '%.2f'|format(sched.thin.debt) }} on equity {{ '%.2f'|format(sched.thin.equity) }}.{% endif %}
+    Interest disallowed: <strong>{{ '%.2f'|format(sched.thin.disallowed) }}</strong> of {{ '%.2f'|format(sched.thin.interest) }}.</div>
   {% endif %}
 </div>
 
@@ -104,11 +104,11 @@
     <thead><tr><th>Voucher</th><th>Description</th><th>Status</th><th class="text-right">Charged</th><th class="text-right">Add-back</th></tr></thead>
     <tbody>
     {% for g in sched.groups %}
-      <tr style="background:#f7f5ef;"><td colspan="3"><strong>{{ act_ref(g.clause, text='Section ' ~ g.clause) }}</strong> - {{ g.title }}</td><td class="text-right">{{ '{:,.2f}'.format(g.amount) }}</td><td class="text-right"><strong>{{ '{:,.2f}'.format(g.addback) }}</strong></td></tr>
-      {% for i in g['items'] %}<tr><td>{{ i.voucher_ref or '-' }}</td><td>{{ i.description }}{% if i.eval_note %}<div class="muted" style="font-size:11px;">{{ i.eval_note }}</div>{% endif %}</td><td>{{ badge(i.status) }}</td><td class="text-right">{{ '{:,.2f}'.format(i.amount) }}</td><td class="text-right">{{ '{:,.2f}'.format(i.addback_amount) }}</td></tr>{% endfor %}
+      <tr style="background:#f7f5ef;"><td colspan="3"><strong>{{ act_ref(g.clause, text='Section ' ~ g.clause) }}</strong> - {{ g.title }}</td><td class="text-right">{{ '%.2f'|format(g.amount) }}</td><td class="text-right"><strong>{{ '%.2f'|format(g.addback) }}</strong></td></tr>
+      {% for i in g['items'] %}<tr><td>{{ i.voucher_ref or '-' }}</td><td>{{ i.description }}{% if i.eval_note %}<div class="muted" style="font-size:11px;">{{ i.eval_note }}</div>{% endif %}</td><td>{{ badge(i.status) }}</td><td class="text-right">{{ '%.2f'|format(i.amount) }}</td><td class="text-right">{{ '%.2f'|format(i.addback_amount) }}</td></tr>{% endfor %}
     {% endfor %}
-    {% if sched.thin and sched.thin_addback %}<tr style="background:#f7f5ef;"><td colspan="3"><strong>{{ act_ref(sched.thin.clause, text='Section ' ~ sched.thin.clause) }}</strong> - thin capitalisation</td><td class="text-right">{{ '{:,.2f}'.format(sched.thin.interest) }}</td><td class="text-right"><strong>{{ '{:,.2f}'.format(sched.thin_addback) }}</strong></td></tr>{% endif %}
-    <tr><td colspan="4"><strong>Total add-backs</strong></td><td class="text-right"><strong>{{ '{:,.2f}'.format(sched.total_addback) }}</strong></td></tr>
+    {% if sched.thin and sched.thin_addback %}<tr style="background:#f7f5ef;"><td colspan="3"><strong>{{ act_ref(sched.thin.clause, text='Section ' ~ sched.thin.clause) }}</strong> - thin capitalisation</td><td class="text-right">{{ '%.2f'|format(sched.thin.interest) }}</td><td class="text-right"><strong>{{ '%.2f'|format(sched.thin_addback) }}</strong></td></tr>{% endif %}
+    <tr><td colspan="4"><strong>Total add-backs</strong></td><td class="text-right"><strong>{{ '%.2f'|format(sched.total_addback) }}</strong></td></tr>
     </tbody>
   </table>
   {% else %}<div class="empty-state">Nothing is disallowed yet. Add expenses above or pull them from the ledger.</div>{% endif %}
@@ -118,13 +118,13 @@
   <h3 class="mt-0" style="font-size:14px;">Tax computation statement</h3>
   {% if statement %}
   <table style="max-width:680px;"><tbody>
-    <tr><td>Profit before tax <span class="muted">({{ basis }})</span></td><td class="text-right">{{ '{:,.2f}'.format(statement.profit_before_tax) }}</td></tr>
-    {% for l in statement.addbacks %}<tr><td style="padding-left:24px;">Add: {{ l.description }}</td><td class="text-right">{{ '{:,.2f}'.format(l.amount) }}</td></tr>{% endfor %}
-    <tr><td><strong>Total add-backs</strong></td><td class="text-right"><strong>{{ '{:,.2f}'.format(statement.total_addbacks) }}</strong></td></tr>
-    {% for l in statement.deductions %}<tr><td style="padding-left:24px;">Less: {{ l.description }}</td><td class="text-right">({{ '{:,.2f}'.format(l.amount) }})</td></tr>{% endfor %}
-    <tr><td><strong>Taxable income before assessed loss</strong></td><td class="text-right"><strong>{{ '{:,.2f}'.format(statement.taxable_income_before_losses) }}</strong></td></tr>
-    <tr><td>Less: assessed loss utilised</td><td class="text-right">({{ '{:,.2f}'.format(statement.loss_utilised) }})</td></tr>
-    <tr><td><strong>Taxable income</strong></td><td class="text-right"><strong>{{ '{:,.2f}'.format(statement.taxable_income) }}</strong></td></tr>
+    <tr><td>Profit before tax <span class="muted">({{ basis }})</span></td><td class="text-right">{{ '%.2f'|format(statement.profit_before_tax) }}</td></tr>
+    {% for l in statement.addbacks %}<tr><td style="padding-left:24px;">Add: {{ l.description }}</td><td class="text-right">{{ '%.2f'|format(l.amount) }}</td></tr>{% endfor %}
+    <tr><td><strong>Total add-backs</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statement.total_addbacks) }}</strong></td></tr>
+    {% for l in statement.deductions %}<tr><td style="padding-left:24px;">Less: {{ l.description }}</td><td class="text-right">({{ '%.2f'|format(l.amount) }})</td></tr>{% endfor %}
+    <tr><td><strong>Taxable income before assessed loss</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statement.taxable_income_before_losses) }}</strong></td></tr>
+    <tr><td>Less: assessed loss utilised</td><td class="text-right">({{ '%.2f'|format(statement.loss_utilised) }})</td></tr>
+    <tr><td><strong>Taxable income</strong></td><td class="text-right"><strong>{{ '%.2f'|format(statement.taxable_income) }}</strong></td></tr>
   </tbody></table>
   <p class="muted" style="font-size:11.5px;">Deductions, capital allowances and exempt income are the lines already entered in the Income Tax Computation; add any that are missing there. Rates are entered there too.</p>
   {% else %}<div class="empty-state">Profit before tax isn't available: complete the Trial Balance tab or enter it in the setup above.</div>{% endif %}
@@ -146,7 +146,7 @@
         <td>{{ rules[i.expense_type].name if i.expense_type in rules else i.expense_type }}</td>
         <td>{{ badge(i.status) }}{% if not i.rule_verified and i.disallowed_amount %}<div class="muted" style="font-size:10.5px;">unverified rule</div>{% endif %}</td>
         <td>{{ i.clause_label or '-' }}</td>
-        <td class="text-right">{{ '{:,.2f}'.format(i.amount) }}</td><td class="text-right">{{ '{:,.2f}'.format(i.addback_amount) }}</td>
+        <td class="text-right">{{ '%.2f'|format(i.amount) }}</td><td class="text-right">{{ '%.2f'|format(i.addback_amount) }}</td>
         <td><details><summary style="cursor:pointer;">Edit</summary>
           <form method="post" action="{{ url_for('prohibited.update_item', item_id=i.id) }}" style="min-width:560px;">
             {% set it = i %}{% include "prohibited/_item_fields.html" %}

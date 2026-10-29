@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>Receipts</h1>
-    <div class="subtitle">{{ receipts|length }} receipt(s){% for cur, amt in totals.items() %} &middot; {{ cur }} {{ '{:,.2f}'.format(amt) }} received{% endfor %} <span class="muted">(excludes advances applied to invoices &mdash; that money was received earlier)</span></div>
+    <div class="subtitle">{{ receipts|length }} receipt(s){% for cur, amt in totals.items() %} &middot; {{ cur }} {{ '%.2f'|format(amt) }} received{% endfor %} <span class="muted">(excludes advances applied to invoices &mdash; that money was received earlier)</span></div>
   </div>
   <div><a href="{{ url_for('advances.list_advances') }}" class="btn secondary">Customer advances</a> <a href="{{ url_for('invoicing.list_invoices') }}" class="btn secondary">Invoices</a></div>
 </div>
@@ -35,7 +35,7 @@
         <td>{{ r.client.name }}</td>
         <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=r.invoice_id) }}">{{ r.invoice.invoice_number }}</a></td>
         <td>{{ r.method or '—' }}{% if r.advance_application %} <a href="{{ url_for('advances.view_advance', advance_id=r.advance_application.advance_id) }}" class="muted" style="font-size:11.5px;">({{ r.advance_application.advance.advance_number }})</a>{% endif %}</td>
-        <td class="text-right">{{ r.currency }} {{ '{:,.2f}'.format(r.amount) }}</td>
+        <td class="text-right">{{ r.currency }} {{ '%.2f'|format(r.amount) }}</td>
         <td class="text-right"><a href="{{ url_for('receipts.view_receipt', receipt_id=r.id) }}" class="btn small secondary">View / print</a></td>
       </tr>
       {% endfor %}

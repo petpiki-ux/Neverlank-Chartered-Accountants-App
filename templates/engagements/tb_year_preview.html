@@ -66,8 +66,8 @@
         <tr {% if it.flag %}style="background:#fff6e5;"{% endif %}>
           <td><input type="checkbox" class="inc" name="inc" value="{{ it.idx }}" data-debit="{{ it.debit|round(2) }}" data-credit="{{ it.credit|round(2) }}" data-flagged="{{ 1 if it.flag else 0 }}" {% if not it.flag %}checked{% endif %} onchange="tbTotals()"></td>
           <td>{{ it.row_no }}</td><td>{{ it.code }}</td><td>{{ it.name }}</td>
-          <td class="text-right">{% if it.debit %}{{ '{:,.2f}'.format(it.debit) }}{% endif %}</td>
-          <td class="text-right">{% if it.credit %}{{ '{:,.2f}'.format(it.credit) }}{% endif %}</td>
+          <td class="text-right">{% if it.debit %}{{ '%.2f'|format(it.debit) }}{% endif %}</td>
+          <td class="text-right">{% if it.credit %}{{ '%.2f'|format(it.credit) }}{% endif %}</td>
           <td style="font-size:11px;color:#a15c00;">{{ it.flag }}</td>
         </tr>
       {% else %}

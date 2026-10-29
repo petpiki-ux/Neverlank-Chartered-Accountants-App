@@ -185,10 +185,10 @@
 <div class="card" id="payments">
   <h3 class="mt-0">Payments &amp; receipts</h3>
   <div class="form-row" style="margin-bottom:6px;">
-    <div><strong>Invoice total:</strong> {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.total) }}</div>
-    {% if invoice.credited_total > 0.005 %}<div><strong>Credit notes:</strong> ({{ invoice.currency }} {{ '{:,.2f}'.format(invoice.credited_total) }})</div>{% endif %}
-    <div><strong>Received:</strong> {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.total if invoice.legacy_paid else invoice.amount_paid) }}</div>
-    <div><strong>Balance owing:</strong> <span {% if invoice.balance > 0.005 and invoice.is_overdue %}style="color:#c0392b;font-weight:700;"{% endif %}>{{ invoice.currency }} {{ '{:,.2f}'.format(invoice.balance) }}</span></div>
+    <div><strong>Invoice total:</strong> {{ invoice.currency }} {{ '%.2f'|format(invoice.total) }}</div>
+    {% if invoice.credited_total > 0.005 %}<div><strong>Credit notes:</strong> ({{ invoice.currency }} {{ '%.2f'|format(invoice.credited_total) }})</div>{% endif %}
+    <div><strong>Received:</strong> {{ invoice.currency }} {{ '%.2f'|format(invoice.total if invoice.legacy_paid else invoice.amount_paid) }}</div>
+    <div><strong>Balance owing:</strong> <span {% if invoice.balance > 0.005 and invoice.is_overdue %}style="color:#c0392b;font-weight:700;"{% endif %}>{{ invoice.currency }} {{ '%.2f'|format(invoice.balance) }}</span></div>
   </div>
 
   {% if invoice.receipts %}
@@ -200,7 +200,7 @@
         <td><a href="{{ url_for('receipts.view_receipt', receipt_id=r.id) }}">{{ r.receipt_number }}</a>{% if r.is_void %} <span class="badge overdue" style="text-decoration:none;">Void</span>{% endif %}</td>
         <td>{{ r.paid_on.strftime('%d %b %Y') }}</td>
         <td>{{ r.method or '—' }}{% if r.advance_application %} <a href="{{ url_for('advances.view_advance', advance_id=r.advance_application.advance_id) }}" class="muted" style="font-size:11.5px;">({{ r.advance_application.advance.advance_number }})</a>{% endif %}</td>
-        <td class="text-right">{{ r.currency }} {{ '{:,.2f}'.format(r.amount) }}</td>
+        <td class="text-right">{{ r.currency }} {{ '%.2f'|format(r.amount) }}</td>
         <td>{{ r.issued_by.name if r.issued_by else '—' }}</td>
         <td class="text-right"><a href="{{ url_for('receipts.view_receipt', receipt_id=r.id) }}" class="btn small secondary">View / print</a></td>
       </tr>
@@ -225,7 +225,7 @@
         <tr>
           <td><a href="{{ url_for('advances.view_advance', advance_id=a.id) }}">{{ a.advance_number }}</a>{% if a.purpose %} <span class="muted">{{ a.purpose }}</span>{% endif %}</td>
           <td>{{ a.received_on.strftime('%d %b %Y') }}</td>
-          <td class="text-right">{{ a.currency }} {{ '{:,.2f}'.format(a.balance) }}</td>
+          <td class="text-right">{{ a.currency }} {{ '%.2f'|format(a.balance) }}</td>
           <td>
             <form method="post" action="{{ url_for('advances.apply', advance_id=a.id) }}" class="form-row" style="align-items:flex-end;margin:0;">
               <input type="hidden" name="invoice_id" value="{{ invoice.id }}"><input type="hidden" name="next" value="invoice">
@@ -270,7 +270,7 @@
         <td><a href="{{ url_for('credit_notes.view_credit_note', note_id=c.id) }}">{{ c.credit_note_number }}</a>{% if c.is_void %} <span class="badge overdue" style="text-decoration:none;">Void</span>{% endif %}</td>
         <td>{{ c.issue_date.strftime('%d %b %Y') }}</td>
         <td>{{ c.reason }}</td>
-        <td class="text-right">{{ c.currency }} {{ '{:,.2f}'.format(c.total) }}</td>
+        <td class="text-right">{{ c.currency }} {{ '%.2f'|format(c.total) }}</td>
         <td>{{ c.issued_by.name if c.issued_by else '—' }}</td>
         <td class="text-right"><a href="{{ url_for('credit_notes.view_credit_note', note_id=c.id) }}" class="btn small secondary">View / print</a></td>
       </tr>
@@ -281,7 +281,7 @@
   <p class="muted" style="font-size:12.5px;margin-top:0;">No credit notes. A credit note reduces what the client owes on this invoice, in full or in part.</p>
   {% endif %}
   {% if invoice.refund_due > 0.005 %}
-  <p style="margin:10px 0 0;font-weight:600;color:#9a3412;">Refund due to client: {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.refund_due) }} (they paid more than they now owe).</p>
+  <p style="margin:10px 0 0;font-weight:600;color:#9a3412;">Refund due to client: {{ invoice.currency }} {{ '%.2f'|format(invoice.refund_due) }} (they paid more than they now owe).</p>
   {% endif %}
   {% if invoice.status in ('Sent', 'Paid') and invoice.creditable_balance > 0.005 and user_has_permission(current_user, 'issue_credit_notes') %}
   <p style="margin:12px 0 0;"><a class="btn gold" href="{{ url_for('credit_notes.new_credit_note', invoice_id=invoice.id) }}">Issue credit note</a></p>

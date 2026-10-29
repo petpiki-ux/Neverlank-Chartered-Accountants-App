@@ -28,7 +28,7 @@
     <tr><td>Customer advances held at the year-end</td><td class="num">{{ fm(d.advances) }}</td></tr>
     <tr><td>Net book value of property, plant and equipment</td><td class="num">{{ fm(sched.closing_nbv) }}</td></tr>
   </tbody></table></div>
-  <p class="muted" style="font-size:12px;margin-bottom:0;">Profit before tax is USD {{ fm(pbt) }}{% if pbt > 0 and ye.tax_rate_percent %}; at {{ ye.tax_rate_percent }}% the indicative income tax is USD {{ '{:,.2f}'.format(indicative_tax) }} (for guidance only; enter the tax expense your computation gives){% endif %}.</p>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">Profit before tax is USD {{ fm(pbt) }}{% if pbt > 0 and ye.tax_rate_percent %}; at {{ ye.tax_rate_percent }}% the indicative income tax is USD {{ '%.2f'|format(indicative_tax) }} (for guidance only; enter the tax expense your computation gives){% endif %}.</p>
 </div>
 
 <div class="card" id="tax">

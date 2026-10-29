@@ -46,11 +46,11 @@
     <h3 class="mt-0">Amounts ({{ case.currency }})</h3>
     <table>
       <tbody>
-        <tr><td>Tax assessed by ZIMRA</td><td class="text-right">{{ '{:,.2f}'.format(case.amount_assessed) if case.amount_assessed is not none else '—' }}</td></tr>
-        <tr><td>Penalties &amp; interest</td><td class="text-right">{{ '{:,.2f}'.format(case.penalties_interest) if case.penalties_interest is not none else '—' }}</td></tr>
-        <tr><td>Amount agreed / finally payable</td><td class="text-right">{{ '{:,.2f}'.format(case.amount_agreed) if case.amount_agreed is not none else '—' }}</td></tr>
-        <tr><td>Paid to date</td><td class="text-right">{{ '{:,.2f}'.format(case.amount_paid) if case.amount_paid is not none else '—' }}</td></tr>
-        <tr style="font-weight:700;"><td>Balance still to pay</td><td class="text-right">{{ '{:,.2f}'.format(case.balance) if case.balance is not none else '—' }}</td></tr>
+        <tr><td>Tax assessed by ZIMRA</td><td class="text-right">{{ '%.2f'|format(case.amount_assessed) if case.amount_assessed is not none else '—' }}</td></tr>
+        <tr><td>Penalties &amp; interest</td><td class="text-right">{{ '%.2f'|format(case.penalties_interest) if case.penalties_interest is not none else '—' }}</td></tr>
+        <tr><td>Amount agreed / finally payable</td><td class="text-right">{{ '%.2f'|format(case.amount_agreed) if case.amount_agreed is not none else '—' }}</td></tr>
+        <tr><td>Paid to date</td><td class="text-right">{{ '%.2f'|format(case.amount_paid) if case.amount_paid is not none else '—' }}</td></tr>
+        <tr style="font-weight:700;"><td>Balance still to pay</td><td class="text-right">{{ '%.2f'|format(case.balance) if case.balance is not none else '—' }}</td></tr>
       </tbody>
     </table>
     {% if case.amount_agreed is none and case.balance is not none %}<p class="muted" style="font-size:11.5px;margin-bottom:0;">No agreed amount yet, so the balance is assessed tax plus penalties and interest, less what is paid.</p>{% endif %}
@@ -75,8 +75,8 @@
       {% for i in case.instalments %}
       <tr>
         <td>{{ i.due_date.strftime('%d %b %Y') }}{% if i.is_overdue %} <span class="badge overdue">overdue</span>{% endif %}</td>
-        <td class="text-right">{{ case.currency }} {{ '{:,.2f}'.format(i.amount) }}</td>
-        <td>{% if i.is_paid %}{{ case.currency }} {{ '{:,.2f}'.format(i.paid_amount) }} on {{ i.paid_on.strftime('%d %b %Y') }}{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td class="text-right">{{ case.currency }} {{ '%.2f'|format(i.amount) }}</td>
+        <td>{% if i.is_paid %}{{ case.currency }} {{ '%.2f'|format(i.paid_amount) }} on {{ i.paid_on.strftime('%d %b %Y') }}{% else %}<span class="muted">—</span>{% endif %}</td>
         <td class="text-right">
           {% if not i.is_paid %}
           <form method="post" action="{{ url_for('zimra.instalment_paid', inst_id=i.id) }}" class="inline" style="display:inline-flex;gap:4px;align-items:center;">

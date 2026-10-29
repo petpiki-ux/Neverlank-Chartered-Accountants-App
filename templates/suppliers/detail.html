@@ -34,7 +34,7 @@
     <tr><td>{{ e.expense_date.strftime('%d %b %Y') }}</td><td>{{ e.reference or ('EXP-' ~ e.id) }}</td><td>{{ e.category }}{% if e.description %} - {{ e.description }}{% endif %}</td>
       <td>{{ b.due.strftime('%d %b %Y') }}</td>
       <td><span class="badge {{ 'status-Paid' if b.state == 'Paid' else ('overdue' if b.state == 'Overdue' else 'status-Sent') }}">{{ b.state }}</span></td>
-      <td class="num">{{ e.currency }} {{ '{:,.2f}'.format(e.amount) }}</td><td class="num">{{ '{:,.2f}'.format(b.paid) if b.paid else '-' }}</td><td class="num">{{ '{:,.2f}'.format(b.left) if b.left else '-' }}</td>
+      <td class="num">{{ e.currency }} {{ '%.2f'|format(e.amount) }}</td><td class="num">{{ '%.2f'|format(b.paid) if b.paid else '-' }}</td><td class="num">{{ '%.2f'|format(b.left) if b.left else '-' }}</td>
       <td style="white-space:nowrap;">{% if b.left and can_pay %}<a class="btn small" href="{{ url_for('suppliers.pay', supplier_id=s.id, bill=e.id) }}">Pay</a> {% endif %}<a class="btn small secondary" href="{{ url_for('expenses.edit_expense', expense_id=e.id) }}">Edit</a></td></tr>
     {% endfor %}</tbody></table></div>
   {% else %}<p class="muted">No bills yet.</p>{% endif %}
@@ -46,7 +46,7 @@
   <div class="tbl-scroll"><table>
     <thead><tr><th>Date</th><th>Reference</th><th>Purpose</th><th class="num">Paid</th><th class="num">Not yet used</th><th></th></tr></thead><tbody>
     {% for x in advances %}{% set a = x.a %}<tr><td>{{ a.advance_date.strftime('%d %b %Y') }}</td><td>{{ a.reference or ('ADV-' ~ a.id) }}</td><td>{{ a.purpose or '-' }}</td>
-      <td class="num">{{ a.currency }} {{ '{:,.2f}'.format(a.amount) }}</td><td class="num">{{ '{:,.2f}'.format(x.left) if x.left else '-' }}</td>
+      <td class="num">{{ a.currency }} {{ '%.2f'|format(a.amount) }}</td><td class="num">{{ '%.2f'|format(x.left) if x.left else '-' }}</td>
       <td><a class="btn small secondary" href="{{ url_for('suppliers.advance', advance_id=a.id) }}">Open</a></td></tr>{% endfor %}
   </tbody></table></div>
   {% if held and can_bill %}{% for c in held %}<form method="post" action="{{ url_for('suppliers.auto_apply', supplier_id=s.id) }}" style="display:inline-block;margin-top:8px;margin-right:8px;" onsubmit="return confirm('Apply the unused {{ c }} advances to the oldest open {{ c }} bills?');"><input type="hidden" name="currency" value="{{ c }}"><input type="hidden" name="applied_on" value="{{ today.isoformat() }}"><button class="btn small gold" type="submit">Apply {{ c }} advances to the oldest open bills</button></form>{% endfor %}{% endif %}
@@ -59,7 +59,7 @@
   <div class="tbl-scroll"><table>
     <thead><tr><th>Date</th><th>Batch</th><th>Method</th><th>Reference</th><th>Bill</th><th class="num">Amount</th><th></th></tr></thead><tbody>
     {% for p in pays %}<tr><td>{{ p.payment_date.strftime('%d %b %Y') }}</td><td><a href="{{ url_for('suppliers.remittance', batch=p.batch_ref) }}">{{ p.batch_ref }}</a></td><td>{{ p.method or '-' }}</td><td>{{ p.reference or '-' }}</td>
-      <td>{{ p.expense.reference or ('EXP-' ~ p.expense_id) }}</td><td class="num">{{ p.currency }} {{ '{:,.2f}'.format(p.amount) }}</td>
+      <td>{{ p.expense.reference or ('EXP-' ~ p.expense_id) }}</td><td class="num">{{ p.currency }} {{ '%.2f'|format(p.amount) }}</td>
       <td><form method="post" action="{{ url_for('suppliers.delete_payment', payment_id=p.id) }}" style="display:inline;" onsubmit="return confirm('Delete this payment? The bill will show the amount as owed again.');"><button class="btn small danger" type="submit">Delete</button></form></td></tr>{% endfor %}
     </tbody></table></div>
   {% else %}<p class="muted">No payments recorded here yet. Bills marked Paid in the Expense register before this page existed are counted as settled on their paid date.</p>{% endif %}

@@ -38,7 +38,7 @@
           {% elif e.supplier_payments %}<span class="badge status-Sent">Part-paid</span>
           {% else %}<span class="badge {{ 'overdue' if e.due_date and e.due_date < today else 'status-Sent' }}">Unpaid{% if e.due_date %} &middot; due {{ e.due_date.strftime('%d %b') }}{% endif %}</span>{% endif %}
         </td>
-        <td class="num">{{ e.currency }} {{ '{:,.2f}'.format(e.amount) }}</td>
+        <td class="num">{{ e.currency }} {{ '%.2f'|format(e.amount) }}</td>
         <td style="white-space:nowrap;">
           {% if e.status == 'Unpaid' %}<form method="post" action="{{ url_for('expenses.mark_paid', expense_id=e.id) }}" style="display:inline;"><button class="btn small" type="submit">Mark paid</button></form>{% endif %}
           <a class="btn small secondary" href="{{ url_for('expenses.edit_expense', expense_id=e.id) }}">Edit</a>

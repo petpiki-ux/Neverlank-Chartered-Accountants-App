@@ -9,8 +9,8 @@
   {% if rows %}<div class="tbl-scroll"><table>
     <thead><tr><th>Date</th><th>Supplier</th><th>Reference</th><th>Purpose</th><th class="num">Paid</th><th class="num">Not yet used</th><th></th></tr></thead><tbody>
     {% for x in rows %}{% set a = x.a %}<tr><td>{{ a.advance_date.strftime('%d %b %Y') }}</td><td><a href="{{ url_for('suppliers.detail', supplier_id=a.supplier_id) }}">{{ a.supplier.name }}</a></td>
-      <td>{{ a.reference or ('ADV-' ~ a.id) }}</td><td>{{ a.purpose or '-' }}</td><td class="num">{{ a.currency }} {{ '{:,.2f}'.format(a.amount) }}</td>
-      <td class="num">{{ '{:,.2f}'.format(x.left) if x.left else 'used' }}</td><td><a class="btn small secondary" href="{{ url_for('suppliers.advance', advance_id=a.id) }}">Open</a></td></tr>{% endfor %}
+      <td>{{ a.reference or ('ADV-' ~ a.id) }}</td><td>{{ a.purpose or '-' }}</td><td class="num">{{ a.currency }} {{ '%.2f'|format(a.amount) }}</td>
+      <td class="num">{{ '%.2f'|format(x.left) if x.left else 'used' }}</td><td><a class="btn small secondary" href="{{ url_for('suppliers.advance', advance_id=a.id) }}">Open</a></td></tr>{% endfor %}
   </tbody></table></div>{% else %}<p class="muted">No advances have been paid to suppliers.</p>{% endif %}
 </div>
 {% endblock %}

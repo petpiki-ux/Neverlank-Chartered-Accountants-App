@@ -159,8 +159,8 @@
           <tr>
             <td class="desc">{{ line.description }}</td>
             <td class="r">{{ '%g'|format(line.quantity) }}</td>
-            <td class="r">{{ '{:,.2f}'.format(line.unit_price or 0) }}</td>
-            <td class="r"><strong>{{ '{:,.2f}'.format(line.line_total) }}</strong></td>
+            <td class="r">{{ '%.2f'|format(line.unit_price or 0) }}</td>
+            <td class="r"><strong>{{ '%.2f'|format(line.line_total) }}</strong></td>
           </tr>
           {% endfor %}
         </tbody>
@@ -168,9 +168,9 @@
 
       <div class="totals-wrap">
         <div class="totals">
-          <div class="row"><span>Subtotal</span><span>{{ doc.currency }} {{ '{:,.2f}'.format(doc.subtotal) }}</span></div>
-          <div class="row"><span>VAT ({{ '%g'|format(doc.vat_pct) }}%)</span><span>{{ doc.currency }} {{ '{:,.2f}'.format(doc.vat_amount) }}</span></div>
-          <div class="row grand"><span>{% block total_label %}Total{% endblock %}</span><span>{{ doc.currency }} {{ '{:,.2f}'.format(doc.total) }}</span></div>
+          <div class="row"><span>Subtotal</span><span>{{ doc.currency }} {{ '%.2f'|format(doc.subtotal) }}</span></div>
+          <div class="row"><span>VAT ({{ '%g'|format(doc.vat_pct) }}%)</span><span>{{ doc.currency }} {{ '%.2f'|format(doc.vat_amount) }}</span></div>
+          <div class="row grand"><span>{% block total_label %}Total{% endblock %}</span><span>{{ doc.currency }} {{ '%.2f'|format(doc.total) }}</span></div>
         </div>
       </div>
       {% endblock %}

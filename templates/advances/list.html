@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>Customer advances</h1>
-    <div class="subtitle">{{ advances|length }} advance(s){% for cur, amt in received.items() %} &middot; {{ cur }} {{ '{:,.2f}'.format(amt) }} received{% endfor %}{% for cur, amt in held.items() %} &middot; <strong>{{ cur }} {{ '{:,.2f}'.format(amt) }} still held</strong>{% endfor %}</div>
+    <div class="subtitle">{{ advances|length }} advance(s){% for cur, amt in received.items() %} &middot; {{ cur }} {{ '%.2f'|format(amt) }} received{% endfor %}{% for cur, amt in held.items() %} &middot; <strong>{{ cur }} {{ '%.2f'|format(amt) }} still held</strong>{% endfor %}</div>
   </div>
   <div><a href="{{ url_for('advances.new_advance') }}" class="btn gold">Record an advance</a></div>
 </div>
@@ -35,8 +35,8 @@
         <td>{{ a.client.name }}</td>
         <td>{{ a.purpose or (a.engagement.title if a.engagement else '—') }}</td>
         <td>{{ a.method or '—' }}</td>
-        <td class="text-right">{{ a.currency }} {{ '{:,.2f}'.format(a.amount) }}</td>
-        <td class="text-right">{{ a.currency }} {{ '{:,.2f}'.format(a.balance) }}</td>
+        <td class="text-right">{{ a.currency }} {{ '%.2f'|format(a.amount) }}</td>
+        <td class="text-right">{{ a.currency }} {{ '%.2f'|format(a.balance) }}</td>
         <td><span class="badge {{ 'overdue' if a.is_void else ('status-Sent' if a.balance > 0.005 else 'status-Paid') }}">{{ a.state }}</span></td>
         <td class="text-right"><a href="{{ url_for('advances.view_advance', advance_id=a.id) }}" class="btn small secondary">Open</a></td>
       </tr>

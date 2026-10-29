@@ -1,4 +1,4 @@
-{% macro fm(v) -%}{%- if v is none -%}{%- elif v|abs < 0.005 -%}-{%- elif v < 0 -%}({{ '{:,.2f}'.format(-v) }}){%- else -%}{{ '{:,.2f}'.format(v) }}{%- endif -%}{%- endmacro %}
+{% macro fm(v) -%}{%- if v is none -%}{%- elif v|abs < 0.005 -%}-{%- elif v < 0 -%}({{ '%.2f'|format(-v) }}){%- else -%}{{ '%.2f'|format(v) }}{%- endif -%}{%- endmacro %}
 
 {% macro heads(stm, first='') -%}
 <thead><tr><th>{{ first }}</th><th class="nt" style="text-align:center;">Note</th>

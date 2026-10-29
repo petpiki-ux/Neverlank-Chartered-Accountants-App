@@ -11,13 +11,13 @@
 
 <div class="card" style="max-width:860px;">
   <div class="form-row" style="margin-bottom:6px;">
-    <div><strong>Invoice total:</strong> {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.total) }}</div>
-    <div><strong>Already credited:</strong> {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.credited_total) }}</div>
-    <div><strong>Still creditable:</strong> {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.creditable_balance) }}</div>
+    <div><strong>Invoice total:</strong> {{ invoice.currency }} {{ '%.2f'|format(invoice.total) }}</div>
+    <div><strong>Already credited:</strong> {{ invoice.currency }} {{ '%.2f'|format(invoice.credited_total) }}</div>
+    <div><strong>Still creditable:</strong> {{ invoice.currency }} {{ '%.2f'|format(invoice.creditable_balance) }}</div>
     <div><strong>VAT:</strong> {{ '%g'|format(invoice.vat_pct) }}%</div>
   </div>
   {% if invoice.amount_paid > 0.005 or invoice.legacy_paid %}
-  <p class="muted" style="font-size:12.5px;">The client has already paid {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.total if invoice.legacy_paid else invoice.amount_paid) }} on this invoice. If the credit takes the amount owed below what they have paid, the invoice will show a refund due to the client.</p>
+  <p class="muted" style="font-size:12.5px;">The client has already paid {{ invoice.currency }} {{ '%.2f'|format(invoice.total if invoice.legacy_paid else invoice.amount_paid) }} on this invoice. If the credit takes the amount owed below what they have paid, the invoice will show a refund due to the client.</p>
   {% endif %}
 
   <form method="post" id="cn-form">
@@ -62,7 +62,7 @@
       </div>
     </div>
     <div id="cn-full" style="display:none;" class="muted">
-      <p>A credit note for {{ invoice.currency }} {{ '{:,.2f}'.format(invoice.creditable_balance) }} (including VAT) will be issued, cancelling what is left of this invoice.</p>
+      <p>A credit note for {{ invoice.currency }} {{ '%.2f'|format(invoice.creditable_balance) }} (including VAT) will be issued, cancelling what is left of this invoice.</p>
     </div>
 
     <div class="form-row">

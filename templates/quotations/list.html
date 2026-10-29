@@ -15,7 +15,7 @@
   <div class="card" style="flex:1;min-width:200px;padding:12px;border-top:3px solid var(--gold);">
     <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;">{{ label }}</div>
     <div style="font-size:22px;font-weight:700;">{{ count }}</div>
-    <div class="muted" style="font-size:12px;">{% if money %}{% for cur, amt in money.items() %}{{ cur }} {{ '{:,.2f}'.format(amt) }}{% if not loop.last %} &middot; {% endif %}{% endfor %}{% else %}&mdash;{% endif %}</div>
+    <div class="muted" style="font-size:12px;">{% if money %}{% for cur, amt in money.items() %}{{ cur }} {{ '%.2f'|format(amt) }}{% if not loop.last %} &middot; {% endif %}{% endfor %}{% else %}&mdash;{% endif %}</div>
   </div>
   {% endfor %}
 </div>
@@ -51,7 +51,7 @@
         <td>{{ q.subject or (q.engagement.title if q.engagement else '—') }}</td>
         <td>{{ q.issue_date.strftime('%d %b %Y') if q.issue_date else '—' }}</td>
         <td>{{ q.valid_until.strftime('%d %b %Y') if q.valid_until else '—' }}</td>
-        <td class="text-right">{{ q.currency }} {{ '{:,.2f}'.format(q.total) }}</td>
+        <td class="text-right">{{ q.currency }} {{ '%.2f'|format(q.total) }}</td>
         <td><span class="badge status-{{ q.display_status }}">{{ q.display_status }}</span></td>
         <td>{% if q.invoice %}<a href="{{ url_for('invoicing.view_invoice', invoice_id=q.invoice.id) }}">{{ q.invoice.invoice_number }}</a>{% else %}—{% endif %}</td>
         <td class="text-right"><a href="{{ url_for('quotations.view_quotation', quotation_id=q.id) }}" class="btn small secondary">Open</a></td>

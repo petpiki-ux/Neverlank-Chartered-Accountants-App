@@ -88,9 +88,9 @@
             <tr><td class="muted">Officer</td><td>{{ case.zimra_officer or '—' }}</td></tr>
             <tr><td class="muted">Tax head</td><td>{{ case.tax_head or '—' }}</td></tr>
             <tr><td class="muted">Period</td><td>{{ case.period_label or '—' }}</td></tr>
-            <tr><td class="muted">Assessed</td><td>{{ case.currency }} {{ '{:,.2f}'.format(case.amount_assessed) if case.amount_assessed is not none else '—' }}</td></tr>
-            <tr><td class="muted">Penalties &amp; interest</td><td>{{ '{:,.2f}'.format(case.penalties_interest) if case.penalties_interest is not none else '—' }}</td></tr>
-            <tr><td class="muted">Balance</td><td>{{ '{:,.2f}'.format(case.balance) if case.balance is not none else '—' }}</td></tr>
+            <tr><td class="muted">Assessed</td><td>{{ case.currency }} {{ '%.2f'|format(case.amount_assessed) if case.amount_assessed is not none else '—' }}</td></tr>
+            <tr><td class="muted">Penalties &amp; interest</td><td>{{ '%.2f'|format(case.penalties_interest) if case.penalties_interest is not none else '—' }}</td></tr>
+            <tr><td class="muted">Balance</td><td>{{ '%.2f'|format(case.balance) if case.balance is not none else '—' }}</td></tr>
           </tbody>
         </table>
         <p class="muted" style="font-size:11.5px;margin-bottom:0;">Figures come from the case. If something here is wrong, fix it under <a href="{{ url_for('zimra.edit_case', case_id=case.id) }}">Edit case</a> rather than only in the letter.</p>

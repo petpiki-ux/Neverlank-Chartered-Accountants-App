@@ -6,7 +6,7 @@
   <div><a class="btn secondary" href="{{ url_for('suppliers.detail', supplier_id=s.id) }}">Back to {{ s.code }}</a></div></div>
 {% include "firmfs/_nav.html" %}
 {% if problem %}<div class="card" style="border-left:4px solid var(--danger);">{{ problem }}</div>{% endif %}
-{% if advance_available %}<div class="card" style="border-left:4px solid var(--warning);">{{ currency }} {{ '{:,.2f}'.format(advance_available) }} was paid to this supplier in advance and is not yet used. <a href="{{ url_for('suppliers.detail', supplier_id=s.id) }}">Apply it to these bills first</a> instead of paying again.</div>{% endif %}
+{% if advance_available %}<div class="card" style="border-left:4px solid var(--warning);">{{ currency }} {{ '%.2f'|format(advance_available) }} was paid to this supplier in advance and is not yet used. <a href="{{ url_for('suppliers.detail', supplier_id=s.id) }}">Apply it to these bills first</a> instead of paying again.</div>{% endif %}
 {% if s.bank_account_number %}<div class="card muted" style="font-size:12.5px;">Bank details on file: {{ s.bank_name or '' }} {{ s.bank_account_name or '' }} {{ s.bank_account_number }}</div>{% endif %}
 <div class="card">
   <form method="get" class="an-filters" style="margin-bottom:0;">
@@ -22,7 +22,7 @@
     {% for b in open_bills %}{% set e = b.e %}
     <tr><td>{{ e.expense_date.strftime('%d %b %Y') }}</td><td>{{ e.reference or ('EXP-' ~ e.id) }}</td><td>{{ e.category }}{% if e.description %} - {{ e.description }}{% endif %}</td>
       <td {% if b.due < today %}style="color:var(--danger);"{% endif %}>{{ b.due.strftime('%d %b %Y') }}</td>
-      <td class="num">{{ '{:,.2f}'.format(b.left) }}</td>
+      <td class="num">{{ '%.2f'|format(b.left) }}</td>
       <td class="num"><input type="number" step="0.01" min="0" max="{{ b.left }}" class="payamt" data-left="{{ '%.2f'|plainfmt(b.left) }}" name="amt_{{ e.id }}" style="width:130px;text-align:right;" value="{{ form.get('amt_' ~ e.id, '') if form else ('%.2f'|plainfmt(b.left) if pre_id == e.id else '') }}">
         <a href="#" class="payfull" style="font-size:11px;">full</a></td></tr>
     {% endfor %}

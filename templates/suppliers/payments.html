@@ -18,7 +18,7 @@
     <thead><tr><th>Date</th><th>Supplier</th><th>Batch</th><th>Method</th><th>Reference</th><th>Bill</th><th class="num">Amount</th></tr></thead><tbody>
     {% for p in rows %}<tr><td>{{ p.payment_date.strftime('%d %b %Y') }}</td><td><a href="{{ url_for('suppliers.detail', supplier_id=p.supplier_id) }}">{{ p.supplier.name }}</a></td>
       <td><a href="{{ url_for('suppliers.remittance', batch=p.batch_ref) }}">{{ p.batch_ref }}</a></td><td>{{ p.method or '-' }}</td><td>{{ p.reference or '-' }}</td><td>{{ p.expense.reference or ('EXP-' ~ p.expense_id) }}</td>
-      <td class="num">{{ p.currency }} {{ '{:,.2f}'.format(p.amount) }}</td></tr>{% endfor %}
+      <td class="num">{{ p.currency }} {{ '%.2f'|format(p.amount) }}</td></tr>{% endfor %}
   </tbody></table></div>{% else %}<p class="muted">No payments match.</p>{% endif %}
 </div>
 {% endblock %}

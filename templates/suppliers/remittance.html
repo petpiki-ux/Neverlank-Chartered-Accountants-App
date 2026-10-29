@@ -15,7 +15,7 @@ td.n,th.n{text-align:right;white-space:nowrap;} tr.tot td{font-weight:bold;borde
   <p><strong>To:</strong> {{ s.name }}{% if s.address %}<br><span style="white-space:pre-line;">{{ s.address }}</span>{% endif %}</p>
   <p>We have paid the following to you{% if method %} by {{ method|lower }}{% endif %}{% if reference %} (reference {{ reference }}){% endif %}.</p>
   <table><thead><tr><th>Your reference</th><th>Bill date</th><th>Details</th><th class="n">Amount paid</th></tr></thead><tbody>
-    {% for p in rows %}<tr><td>{{ p.expense.reference or ('EXP-' ~ p.expense_id) }}</td><td>{{ p.expense.expense_date.strftime('%d %b %Y') }}</td><td>{{ p.expense.description or p.expense.category }}</td><td class="n">{{ '{:,.2f}'.format(p.amount) }}</td></tr>{% endfor %}
-    <tr class="tot"><td colspan="3">Total paid ({{ currency }})</td><td class="n">{{ '{:,.2f}'.format(total) }}</td></tr>
+    {% for p in rows %}<tr><td>{{ p.expense.reference or ('EXP-' ~ p.expense_id) }}</td><td>{{ p.expense.expense_date.strftime('%d %b %Y') }}</td><td>{{ p.expense.description or p.expense.category }}</td><td class="n">{{ '%.2f'|format(p.amount) }}</td></tr>{% endfor %}
+    <tr class="tot"><td colspan="3">Total paid ({{ currency }})</td><td class="n">{{ '%.2f'|format(total) }}</td></tr>
   </tbody></table>
 </div></body></html>

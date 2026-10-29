@@ -937,7 +937,7 @@ def create_app():
         from recurring import daily_check
         daily_check(app)
 
-    # Thousand separators on every figure the templates print with '%.2f'|format(x) (and %.0f, %.1f, %+.2f ...): 1250000 -> 1,250,000.00.
+    # Thousand separators (and brackets for negative amounts) on every figure the templates print with '%.2f'|format(x) (and %.0f, %.1f, %+.2f ...): 1250000 -> 1,250,000.00.
     # Anything else the filter is used for (a non-number, several arguments, other format strings) behaves exactly as Jinja's own `format`.
     # Where a plain number is needed (the value/max of a number box, a data- attribute) the template uses |plainfmt instead.
     import re as _re
@@ -951,7 +951,13 @@ def create_app():
             m = _plain_float_fmt.match(value)
             n = args[0]
             if m and isinstance(n, (_numbers.Real, _Decimal)) and not isinstance(n, bool):
-                return f"{n:{m.group(1)},.{m.group(2)}f}"
+                sign, d = m.group(1), m.group(2)
+                if not sign and d in ("0", "2"):
+                    # Money: a negative amount is shown in brackets, (1,234.50), never with a minus sign; a figure that rounds to
+                    # nothing is plain 0.00 / 0 (never "-0.00" or "(0.00)"). Rates and percentages (%.1f, %.4f) keep their minus sign.
+                    txt = f"{abs(n):,.{d}f}"
+                    return f"({txt})" if n < 0 and txt.strip("0.,") else txt
+                return f"{n:{sign},.{d}f}"
         return _jinja_format(value, *args, **kwargs)
 
     app.jinja_env.filters["format"] = _grouped_format

@@ -697,8 +697,8 @@
         <td><a href="{{ url_for('advances.view_advance', advance_id=a.id) }}">{{ a.advance_number }}</a></td>
         <td>{{ a.received_on.strftime('%d %b %Y') }}</td>
         <td>{{ a.purpose or (a.engagement.title if a.engagement else '—') }}</td>
-        <td class="text-right">{{ a.currency }} {{ '{:,.2f}'.format(a.amount) }}</td>
-        <td class="text-right">{{ a.currency }} {{ '{:,.2f}'.format(a.balance) }}</td>
+        <td class="text-right">{{ a.currency }} {{ '%.2f'|format(a.amount) }}</td>
+        <td class="text-right">{{ a.currency }} {{ '%.2f'|format(a.balance) }}</td>
       </tr>
       {% endfor %}
     </tbody>

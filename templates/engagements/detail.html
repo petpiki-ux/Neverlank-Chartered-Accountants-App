@@ -5023,7 +5023,7 @@
           <thead><tr><th>Category</th><th>Staff headcount</th><th class="text-right">Max annual turnover</th><th class="text-right">Max gross assets (excl. real estate)</th></tr></thead>
           <tbody>
             {% for code, max_staff, max_turnover, max_assets in sme_act_size_thresholds %}
-            <tr><td>{{ sme_act_size_bands|selectattr('0', 'equalto', code)|map(attribute='1')|first }}</td><td>&le; {{ max_staff }}</td><td class="text-right">US$ {{ '{:,.0f}'.format(max_turnover) }}</td><td class="text-right">US$ {{ '{:,.0f}'.format(max_assets) }}</td></tr>
+            <tr><td>{{ sme_act_size_bands|selectattr('0', 'equalto', code)|map(attribute='1')|first }}</td><td>&le; {{ max_staff }}</td><td class="text-right">US$ {{ '%.0f'|format(max_turnover) }}</td><td class="text-right">US$ {{ '%.0f'|format(max_assets) }}</td></tr>
             {% endfor %}
             <tr><td>Large</td><td colspan="3">Exceeds every threshold above</td></tr>
           </tbody>

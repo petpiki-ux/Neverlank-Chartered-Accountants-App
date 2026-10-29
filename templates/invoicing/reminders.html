@@ -34,7 +34,7 @@
         <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a></td>
         <td><a href="{{ url_for('clients.view_client', client_id=inv.client_id) }}">{{ inv.client.name }}</a>
           <div class="muted" style="font-size:11.5px;">{{ inv.client.email or 'no email' }} &middot; {{ inv.client.phone or 'no phone' }}</div></td>
-        <td class="text-right">{{ inv.currency }} {{ '{:,.2f}'.format(inv.balance) }}</td>
+        <td class="text-right">{{ inv.currency }} {{ '%.2f'|format(inv.balance) }}</td>
         <td><span style="color:#c0392b;font-weight:600;">{{ r.overdue }} days</span><div class="muted" style="font-size:11.5px;">due {{ inv.due_date.strftime('%d %b %Y') if inv.due_date else '—' }}</div></td>
         <td>{% if r.last %}{{ r.last_day.strftime('%d %b %Y') }}<div class="muted" style="font-size:11.5px;">{{ {'email': 'Email', 'whatsapp': 'WhatsApp', 'manual': 'Phone / other'}.get(r.last.channel) }}</div>{% else %}<span class="muted">never</span>{% endif %}</td>
         <td>{% if r.paused %}<span class="badge">Paused</span>{% elif r.due_now %}<span class="badge overdue">Due now</span>{% else %}{{ r.next_due.strftime('%d %b') }}{% endif %}</td>

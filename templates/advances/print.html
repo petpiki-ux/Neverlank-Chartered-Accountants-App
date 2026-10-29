@@ -18,14 +18,14 @@
 {% endblock %}
 {% block items_section %}
       <div class="words"><div class="k">Amount received</div>
-        <div class="v">{{ advance.currency }} {{ '{:,.2f}'.format(advance.amount) }}</div>
+        <div class="v">{{ advance.currency }} {{ '%.2f'|format(advance.amount) }}</div>
         <div style="font-size:12px;color:#3b4652;margin-top:2px;">{{ words }}</div></div>
       <div class="totals-wrap">
         <div class="totals">
-          <div class="row"><span>Advance received</span><span>{{ advance.currency }} {{ '{:,.2f}'.format(advance.amount) }}</span></div>
-          <div class="row"><span>Applied to invoices</span><span>{{ advance.currency }} {{ '{:,.2f}'.format(advance.applied_total) }}</span></div>
-          {% if advance.refunded_total > 0.005 %}<div class="row"><span>Refunded</span><span>{{ advance.currency }} {{ '{:,.2f}'.format(advance.refunded_total) }}</span></div>{% endif %}
-          <div class="row grand"><span>Held on your account</span><span>{{ advance.currency }} {{ '{:,.2f}'.format(advance.balance) }}</span></div>
+          <div class="row"><span>Advance received</span><span>{{ advance.currency }} {{ '%.2f'|format(advance.amount) }}</span></div>
+          <div class="row"><span>Applied to invoices</span><span>{{ advance.currency }} {{ '%.2f'|format(advance.applied_total) }}</span></div>
+          {% if advance.refunded_total > 0.005 %}<div class="row"><span>Refunded</span><span>{{ advance.currency }} {{ '%.2f'|format(advance.refunded_total) }}</span></div>{% endif %}
+          <div class="row grand"><span>Held on your account</span><span>{{ advance.currency }} {{ '%.2f'|format(advance.balance) }}</span></div>
         </div>
       </div>
 {% endblock %}

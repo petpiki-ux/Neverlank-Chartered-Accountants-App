@@ -15,21 +15,21 @@ table{border-collapse:collapse;width:100%;} th,td{border-bottom:1px solid #ddd;p
 <h2>Add-backs by clause</h2>
 <table><thead><tr><th>Voucher</th><th>Description</th><th>Status</th><th class="r">Original amount</th><th class="r">Add-back</th></tr></thead><tbody>
 {% for g in sched.groups %}
-<tr class="g"><td colspan="3">Section {{ g.clause }} - {{ g.title }}</td><td class="r">{{ '{:,.2f}'.format(g.amount) }}</td><td class="r">{{ '{:,.2f}'.format(g.addback) }}</td></tr>
-{% for i in g['items'] %}<tr><td>{{ i.voucher_ref or '-' }}</td><td>{{ i.description }}{% if i.eval_note %}<div class="muted">{{ i.eval_note }}</div>{% endif %}</td><td>{{ i.status.replace('_',' ') }}</td><td class="r">{{ '{:,.2f}'.format(i.amount) }}</td><td class="r">{{ '{:,.2f}'.format(i.addback_amount) }}</td></tr>{% endfor %}
+<tr class="g"><td colspan="3">Section {{ g.clause }} - {{ g.title }}</td><td class="r">{{ '%.2f'|format(g.amount) }}</td><td class="r">{{ '%.2f'|format(g.addback) }}</td></tr>
+{% for i in g['items'] %}<tr><td>{{ i.voucher_ref or '-' }}</td><td>{{ i.description }}{% if i.eval_note %}<div class="muted">{{ i.eval_note }}</div>{% endif %}</td><td>{{ i.status.replace('_',' ') }}</td><td class="r">{{ '%.2f'|format(i.amount) }}</td><td class="r">{{ '%.2f'|format(i.addback_amount) }}</td></tr>{% endfor %}
 {% endfor %}
-{% if sched.thin and sched.thin_addback %}<tr class="g"><td colspan="3">Section {{ sched.thin.clause }} - thin capitalisation ({{ sched.thin.note }})</td><td class="r">{{ '{:,.2f}'.format(sched.thin.interest) }}</td><td class="r">{{ '{:,.2f}'.format(sched.thin_addback) }}</td></tr>{% endif %}
-<tr class="t"><td colspan="4">Total add-backs</td><td class="r">{{ '{:,.2f}'.format(sched.total_addback) }}</td></tr>
+{% if sched.thin and sched.thin_addback %}<tr class="g"><td colspan="3">Section {{ sched.thin.clause }} - thin capitalisation ({{ sched.thin.note }})</td><td class="r">{{ '%.2f'|format(sched.thin.interest) }}</td><td class="r">{{ '%.2f'|format(sched.thin_addback) }}</td></tr>{% endif %}
+<tr class="t"><td colspan="4">Total add-backs</td><td class="r">{{ '%.2f'|format(sched.total_addback) }}</td></tr>
 </tbody></table>
 {% if statement %}
 <h2>Tax computation statement</h2>
 <table style="max-width:640px;"><tbody>
-<tr><td>Profit before tax</td><td class="r">{{ '{:,.2f}'.format(statement.profit_before_tax) }}</td></tr>
-{% for l in statement.addbacks %}<tr><td>Add: {{ l.description }}</td><td class="r">{{ '{:,.2f}'.format(l.amount) }}</td></tr>{% endfor %}
-{% for l in statement.deductions %}<tr><td>Less: {{ l.description }}</td><td class="r">({{ '{:,.2f}'.format(l.amount) }})</td></tr>{% endfor %}
-<tr class="t"><td>Taxable income before assessed loss</td><td class="r">{{ '{:,.2f}'.format(statement.taxable_income_before_losses) }}</td></tr>
-<tr><td>Less: assessed loss utilised</td><td class="r">({{ '{:,.2f}'.format(statement.loss_utilised) }})</td></tr>
-<tr class="t"><td>Taxable income</td><td class="r">{{ '{:,.2f}'.format(statement.taxable_income) }}</td></tr>
+<tr><td>Profit before tax</td><td class="r">{{ '%.2f'|format(statement.profit_before_tax) }}</td></tr>
+{% for l in statement.addbacks %}<tr><td>Add: {{ l.description }}</td><td class="r">{{ '%.2f'|format(l.amount) }}</td></tr>{% endfor %}
+{% for l in statement.deductions %}<tr><td>Less: {{ l.description }}</td><td class="r">({{ '%.2f'|format(l.amount) }})</td></tr>{% endfor %}
+<tr class="t"><td>Taxable income before assessed loss</td><td class="r">{{ '%.2f'|format(statement.taxable_income_before_losses) }}</td></tr>
+<tr><td>Less: assessed loss utilised</td><td class="r">({{ '%.2f'|format(statement.loss_utilised) }})</td></tr>
+<tr class="t"><td>Taxable income</td><td class="r">{{ '%.2f'|format(statement.taxable_income) }}</td></tr>
 </tbody></table>
 {% endif %}
 <p class="muted" style="margin-top:18px;">Prepared from the firm's section 16(1) rule table. Clause references and treatments must be confirmed against the Income Tax Act [Chapter 23:06] as currently amended.</p>

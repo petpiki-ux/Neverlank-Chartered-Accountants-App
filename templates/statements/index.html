@@ -40,8 +40,8 @@
     {% for currency, t in totals.items() %}
     <div style="border:1px solid var(--border);border-radius:8px;padding:10px 16px;min-width:200px;">
       <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;">Owing in {{ currency }}</div>
-      <div style="font-size:22px;font-weight:700;">{{ '{:,.2f}'.format(t.total) }}</div>
-      <div class="muted" style="font-size:12px;">{{ t.clients }} client{{ '' if t.clients == 1 else 's' }}{% if t.overdue > 0.005 %} &middot; <span style="color:#c0392b;">{{ '{:,.2f}'.format(t.overdue) }} overdue</span>{% endif %}</div>
+      <div style="font-size:22px;font-weight:700;">{{ '%.2f'|format(t.total) }}</div>
+      <div class="muted" style="font-size:12px;">{{ t.clients }} client{{ '' if t.clients == 1 else 's' }}{% if t.overdue > 0.005 %} &middot; <span style="color:#c0392b;">{{ '%.2f'|format(t.overdue) }} overdue</span>{% endif %}</div>
     </div>
     {% endfor %}
   </div>
@@ -52,8 +52,8 @@
       <tr>
         <td><a href="{{ url_for('clients.view_client', client_id=r.client.id) }}">{{ r.client.name }}</a></td>
         <td>{{ r.currency }}</td>
-        {% for key, label in buckets %}<td style="text-align:right;{% if key != 'current' and r.buckets[key] > 0.005 %}color:#c0392b;{% endif %}">{{ '{:,.2f}'.format(r.buckets[key]) if r.buckets[key] else '—' }}</td>{% endfor %}
-        <td style="text-align:right;"><strong>{{ '{:,.2f}'.format(r.total) }}</strong></td>
+        {% for key, label in buckets %}<td style="text-align:right;{% if key != 'current' and r.buckets[key] > 0.005 %}color:#c0392b;{% endif %}">{{ '%.2f'|format(r.buckets[key]) if r.buckets[key] else '—' }}</td>{% endfor %}
+        <td style="text-align:right;"><strong>{{ '%.2f'|format(r.total) }}</strong></td>
         <td><a class="btn small secondary" href="{{ url_for('statements.client_statement', client_id=r.client.id, date_to=as_of.isoformat()) }}">Statement</a></td>
       </tr>
       {% endfor %}
@@ -69,7 +69,7 @@
     {% for currency, amt in held_totals.items() %}
     <div style="border:1px solid var(--border);border-radius:8px;padding:8px 14px;min-width:180px;">
       <div class="muted" style="font-size:11px;text-transform:uppercase;letter-spacing:.08em;">Held in {{ currency }}</div>
-      <div style="font-size:18px;font-weight:700;">{{ '{:,.2f}'.format(amt) }}</div></div>
+      <div style="font-size:18px;font-weight:700;">{{ '%.2f'|format(amt) }}</div></div>
     {% endfor %}
   </div>
   <table>
@@ -77,7 +77,7 @@
     <tbody>
       {% for r in held_rows %}
       <tr><td><a href="{{ url_for('clients.view_client', client_id=r.client.id) }}">{{ r.client.name }}</a></td><td>{{ r.currency }}</td>
-        <td style="text-align:right;"><strong>{{ '{:,.2f}'.format(r.held) }}</strong></td>
+        <td style="text-align:right;"><strong>{{ '%.2f'|format(r.held) }}</strong></td>
         <td><a class="btn small secondary" href="{{ url_for('advances.list_advances', client_id=r.client.id, state='open') }}">Advances</a></td></tr>
       {% endfor %}
     </tbody>

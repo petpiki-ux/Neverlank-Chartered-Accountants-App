@@ -38,7 +38,7 @@
     {% if editing %}</form>
     <form method="post" action="{{ url_for('firmfs.delete_asset', asset_id=asset.id) }}" style="margin-top:12px;" onsubmit="return confirm('Remove this asset from the register? Use Dispose for an asset that was sold or scrapped.');"><button class="btn small danger" type="submit">Remove from register</button></form>
     {% else %}</form>{% endif %}
-  {% if editing and asset.disposed_on %}<p class="muted" style="margin-top:12px;">Disposed on {{ asset.disposed_on.strftime('%d %b %Y') }} for USD {{ '{:,.2f}'.format(asset.disposal_proceeds or 0) }}{% if asset.disposal_note %} - {{ asset.disposal_note }}{% endif %}.</p>{% endif %}
+  {% if editing and asset.disposed_on %}<p class="muted" style="margin-top:12px;">Disposed on {{ asset.disposed_on.strftime('%d %b %Y') }} for USD {{ '%.2f'|format(asset.disposal_proceeds or 0) }}{% if asset.disposal_note %} - {{ asset.disposal_note }}{% endif %}.</p>{% endif %}
 </div>
 {{ fundScript() }}
 {% endblock %}

@@ -16,10 +16,10 @@
 
 <div class="card">
   <div class="form-row">
-    <div><strong>Received:</strong> {{ advance.currency }} {{ '{:,.2f}'.format(advance.amount) }}</div>
-    <div><strong>Applied to invoices:</strong> {{ advance.currency }} {{ '{:,.2f}'.format(advance.applied_total) }}</div>
-    <div><strong>Refunded:</strong> {{ advance.currency }} {{ '{:,.2f}'.format(advance.refunded_total) }}</div>
-    <div><strong>Still held for the client:</strong> {{ advance.currency }} {{ '{:,.2f}'.format(advance.balance) }}</div>
+    <div><strong>Received:</strong> {{ advance.currency }} {{ '%.2f'|format(advance.amount) }}</div>
+    <div><strong>Applied to invoices:</strong> {{ advance.currency }} {{ '%.2f'|format(advance.applied_total) }}</div>
+    <div><strong>Refunded:</strong> {{ advance.currency }} {{ '%.2f'|format(advance.refunded_total) }}</div>
+    <div><strong>Still held for the client:</strong> {{ advance.currency }} {{ '%.2f'|format(advance.balance) }}</div>
   </div>
   {% if advance.purpose or advance.engagement %}<p style="margin:6px 0 0;"><strong>For:</strong> {{ advance.purpose or '' }}{% if advance.engagement %}{% if advance.purpose %} &middot; {% endif %}{{ advance.engagement.title }}{% endif %}</p>{% endif %}
   {% if advance.notes %}<p class="muted" style="margin:6px 0 0;white-space:pre-line;">{{ advance.notes }}</p>{% endif %}
@@ -38,7 +38,7 @@
       <tr>
         <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a>{% if inv.engagement %} <span class="muted">{{ inv.engagement.title }}</span>{% endif %}</td>
         <td>{{ inv.due_date.strftime('%d %b %Y') if inv.due_date else '—' }}</td>
-        <td class="text-right">{{ inv.currency }} {{ '{:,.2f}'.format(inv.receiptable_balance) }}</td>
+        <td class="text-right">{{ inv.currency }} {{ '%.2f'|format(inv.receiptable_balance) }}</td>
         <td>
           <form method="post" action="{{ url_for('advances.apply', advance_id=advance.id) }}" class="form-row" style="align-items:flex-end;margin:0;">
             <input type="hidden" name="invoice_id" value="{{ inv.id }}">
@@ -68,7 +68,7 @@
         <td>{{ ap.applied_on.strftime('%d %b %Y') }}</td>
         <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=ap.invoice_id) }}">{{ ap.invoice.invoice_number }}</a></td>
         <td>{% if ap.receipt %}<a href="{{ url_for('receipts.view_receipt', receipt_id=ap.receipt.id) }}">{{ ap.receipt.receipt_number }}</a>{% endif %}{% if not ap.is_active %} <span class="badge overdue" style="text-decoration:none;">Reversed</span>{% endif %}</td>
-        <td class="text-right">{{ advance.currency }} {{ '{:,.2f}'.format(ap.amount) }}</td>
+        <td class="text-right">{{ advance.currency }} {{ '%.2f'|format(ap.amount) }}</td>
         <td>{{ ap.applied_by.name if ap.applied_by else '—' }}</td>
         <td class="text-right">{% if is_senior and ap.is_active %}
           <form method="post" action="{{ url_for('advances.reverse_application', application_id=ap.id) }}" style="display:inline;" onsubmit="var r = prompt('Why is this application being reversed?'); if (!r) { return false; } this.reason.value = r; return true;">
@@ -89,7 +89,7 @@
       {% for r in advance.refunds %}
       <tr{% if r.is_void %} style="opacity:.55;text-decoration:line-through;"{% endif %}>
         <td>{{ r.refunded_on.strftime('%d %b %Y') }}</td><td>{{ r.method or '—' }}</td><td>{{ r.reference or '—' }}</td>
-        <td class="text-right">{{ advance.currency }} {{ '{:,.2f}'.format(r.amount) }}{% if r.is_void %} <span class="badge overdue" style="text-decoration:none;">Void</span>{% endif %}</td>
+        <td class="text-right">{{ advance.currency }} {{ '%.2f'|format(r.amount) }}{% if r.is_void %} <span class="badge overdue" style="text-decoration:none;">Void</span>{% endif %}</td>
         <td class="text-right">{% if is_senior and not r.is_void %}
           <form method="post" action="{{ url_for('advances.void_refund', refund_id=r.id) }}" style="display:inline;" onsubmit="var x = prompt('Why is this refund being voided?'); if (!x) { return false; } this.reason.value = x; return true;">
             <input type="hidden" name="reason" value=""><button type="submit" class="btn small secondary">Void</button></form>{% endif %}</td>

@@ -67,13 +67,13 @@
       {% for line in quotation.lines %}
       <tr>
         {% if locked %}
-        <td>{{ line.description }}</td><td class="text-right">{{ line.quantity }}</td><td class="text-right">{{ '{:,.2f}'.format(line.unit_price) }}</td><td class="text-right">{{ '{:,.2f}'.format(line.line_total) }}</td><td></td>
+        <td>{{ line.description }}</td><td class="text-right">{{ line.quantity }}</td><td class="text-right">{{ '%.2f'|format(line.unit_price) }}</td><td class="text-right">{{ '%.2f'|format(line.line_total) }}</td><td></td>
         {% else %}
         <form method="post" action="{{ url_for('quotations.update_quotation_line', line_id=line.id) }}" class="inline">
         <td><input type="text" name="description" value="{{ line.description }}" style="margin-bottom:0;"></td>
         <td><input type="number" step="0.01" name="quantity" value="{{ line.quantity }}" style="width:80px;margin-bottom:0;text-align:right;"></td>
         <td><input type="number" step="0.01" name="unit_price" value="{{ line.unit_price }}" style="width:110px;margin-bottom:0;text-align:right;"></td>
-        <td class="text-right">{{ '{:,.2f}'.format(line.line_total) }}</td>
+        <td class="text-right">{{ '%.2f'|format(line.line_total) }}</td>
         <td>
           <button type="submit" class="btn small secondary">Save</button>
           <button type="submit" formaction="{{ url_for('quotations.delete_quotation_line', line_id=line.id) }}" class="btn small danger" onclick="return confirm('Delete this line?')">Delete</button>
@@ -99,9 +99,9 @@
 </div>
 
 <div class="card" style="max-width:360px;margin-left:auto;">
-  <div class="form-row"><div>Subtotal</div><div class="text-right">{{ quotation.currency }} {{ '{:,.2f}'.format(quotation.subtotal) }}</div></div>
-  <div class="form-row"><div>VAT ({{ quotation.vat_pct }}%)</div><div class="text-right">{{ quotation.currency }} {{ '{:,.2f}'.format(quotation.vat_amount) }}</div></div>
-  <div class="form-row"><div><strong>Total</strong></div><div class="text-right"><strong>{{ quotation.currency }} {{ '{:,.2f}'.format(quotation.total) }}</strong></div></div>
+  <div class="form-row"><div>Subtotal</div><div class="text-right">{{ quotation.currency }} {{ '%.2f'|format(quotation.subtotal) }}</div></div>
+  <div class="form-row"><div>VAT ({{ quotation.vat_pct }}%)</div><div class="text-right">{{ quotation.currency }} {{ '%.2f'|format(quotation.vat_amount) }}</div></div>
+  <div class="form-row"><div><strong>Total</strong></div><div class="text-right"><strong>{{ quotation.currency }} {{ '%.2f'|format(quotation.total) }}</strong></div></div>
 </div>
 
 {% if quotation.notes %}<div class="card"><h3 class="mt-0">Introduction / scope</h3><div style="white-space:pre-wrap;">{{ quotation.notes }}</div></div>{% endif %}

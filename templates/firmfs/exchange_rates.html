@@ -127,7 +127,7 @@
     <div><label style="margin:0;" for="purpose">For</label><select id="purpose" name="purpose" style="margin:0;"><option value="reporting">Financial reporting</option><option value="tax">Tax</option></select></div>
     <button class="btn" type="submit">Convert</button>
   </form>
-  {% if convert %}<p style="margin:10px 0 0;">{% if convert.value is not none %}<b>{{ '{:,.2f}'.format(convert.amount) }} {{ convert.from }} = {{ '{:,.2f}'.format(convert.value) }} {{ convert.to }}</b>{% if convert.rate %} at {{ '%g'|format(convert.rate.rate) }} ({{ convert.rate.source }}, dated {{ convert.rate.rate_date.strftime('%d %b %Y') }}){% endif %}{% else %}No rate is on file on or before {{ convert.on.strftime('%d %b %Y') }}.{% endif %}</p>{% endif %}
+  {% if convert %}<p style="margin:10px 0 0;">{% if convert.value is not none %}<b>{{ '%.2f'|format(convert.amount) }} {{ convert.from }} = {{ '%.2f'|format(convert.value) }} {{ convert.to }}</b>{% if convert.rate %} at {{ '%g'|format(convert.rate.rate) }} ({{ convert.rate.source }}, dated {{ convert.rate.rate_date.strftime('%d %b %Y') }}){% endif %}{% else %}No rate is on file on or before {{ convert.on.strftime('%d %b %Y') }}.{% endif %}</p>{% endif %}
   <p class="muted" style="font-size:12px;margin:8px 0 0;">The same answer is available to any page or script at <code>/firm-finance/exchange-rates/lookup?on=2026-09-30&amp;purpose=tax</code>.</p>
 </div>
 {% endblock %}

@@ -34,18 +34,18 @@
 {% block total_label %}Total credited{% endblock %}
 {% block extras %}
   <div class="words"><div class="k">Amount credited</div>
-    <div class="v">{{ note.currency }} {{ '{:,.2f}'.format(note.total) }}</div>
+    <div class="v">{{ note.currency }} {{ '%.2f'|format(note.total) }}</div>
     <div style="font-size:12px;color:#3b4652;margin-top:2px;">{{ words }}</div></div>
 
   <div class="totals-wrap">
     <div class="totals">
-      <div class="row"><span>Invoice total</span><span>{{ note.currency }} {{ '{:,.2f}'.format(invoice.total) }}</span></div>
-      <div class="row"><span>Total credited to date</span><span>({{ note.currency }} {{ '{:,.2f}'.format(invoice.credited_total) }})</span></div>
-      <div class="row grand"><span>Invoice net of credits</span><span>{{ note.currency }} {{ '{:,.2f}'.format(invoice.net_total) }}</span></div>
+      <div class="row"><span>Invoice total</span><span>{{ note.currency }} {{ '%.2f'|format(invoice.total) }}</span></div>
+      <div class="row"><span>Total credited to date</span><span>({{ note.currency }} {{ '%.2f'|format(invoice.credited_total) }})</span></div>
+      <div class="row grand"><span>Invoice net of credits</span><span>{{ note.currency }} {{ '%.2f'|format(invoice.net_total) }}</span></div>
     </div>
   </div>
   {% if invoice.refund_due > 0.005 and not note.is_void %}
-  <div class="block"><h4>Refund due</h4><div class="txt">The client has paid more than is now owing on this invoice. An amount of {{ note.currency }} {{ '{:,.2f}'.format(invoice.refund_due) }} is due back to the client or may be held as credit against future invoices.</div></div>
+  <div class="block"><h4>Refund due</h4><div class="txt">The client has paid more than is now owing on this invoice. An amount of {{ note.currency }} {{ '%.2f'|format(invoice.refund_due) }} is due back to the client or may be held as credit against future invoices.</div></div>
   {% endif %}
   {% if note.notes %}<div class="block"><h4>Notes</h4><div class="txt">{{ note.notes }}</div></div>{% endif %}
   {% if note.is_void %}

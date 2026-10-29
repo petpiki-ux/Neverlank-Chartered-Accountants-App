@@ -4,7 +4,7 @@
 <div class="page-header">
   <div>
     <h1>Credit notes</h1>
-    <div class="subtitle">{{ notes|length }} credit note(s){% for cur, amt in totals.items() %} &middot; {{ cur }} {{ '{:,.2f}'.format(amt) }} credited{% endfor %}</div>
+    <div class="subtitle">{{ notes|length }} credit note(s){% for cur, amt in totals.items() %} &middot; {{ cur }} {{ '%.2f'|format(amt) }} credited{% endfor %}</div>
   </div>
   <div><a href="{{ url_for('invoicing.list_invoices') }}" class="btn secondary">Invoices</a></div>
 </div>
@@ -32,7 +32,7 @@
         <td>{{ c.client.name }}</td>
         <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=c.invoice_id) }}">{{ c.invoice.invoice_number }}</a></td>
         <td>{{ c.reason }}</td>
-        <td class="text-right">{{ c.currency }} {{ '{:,.2f}'.format(c.total) }}</td>
+        <td class="text-right">{{ c.currency }} {{ '%.2f'|format(c.total) }}</td>
         <td class="text-right"><a href="{{ url_for('credit_notes.view_credit_note', note_id=c.id) }}" class="btn small secondary">View / print</a></td>
       </tr>
       {% endfor %}
