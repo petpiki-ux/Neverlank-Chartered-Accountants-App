@@ -143,7 +143,7 @@ def list_backups():
             when = mtime
         out.append({"name": n, "kind": meta.get("kind") or n.rsplit("_", 1)[-1][:-4], "created_at": _parse_iso(meta.get("created_at")) or when,
                     "size": size, "by": meta.get("by") or "", "integrity": meta.get("integrity"), "db_bytes": meta.get("db_bytes"),
-                    "file_count": meta.get("file_count"), "has_db": meta.get("has_db", True)})
+                    "file_count": meta.get("file_count"), "has_db": meta.get("has_db", True), "scope": meta.get("scope", "full")})
     out.sort(key=lambda b: (b["created_at"], b["name"]), reverse=True)
     return out
 
@@ -176,6 +176,8 @@ def health(now=None):
     last_ok = _parse_iso(st.get("last_success"))
     if st.get("last_error") and (not last_ok or (_parse_iso(st.get("last_attempt")) or now) >= last_ok):
         return "bad", "The last backup failed: " + str(st["last_error"])
+    if st.get("last_warning"):
+        return "warn", st["last_warning"]
     last_auto = _parse_iso(st.get("last_auto_success"))
     if last_auto is None:
         return "warn", "No automatic backup has completed yet."
@@ -244,14 +246,73 @@ def _acquire_file_lock():
         return None
 
 
-def make_backup(app, kind="manual", by=None):
-    """Make one backup now. Returns {"ok": True, "name", "size", ...} or {"ok": False, "error": "..."}. Never raises; the outcome is also
+class LowSpace(RuntimeError):
+    """There is not enough room on the disk for the backup."""
+
+
+_INCOMPRESSIBLE = {".pdf", ".docx", ".xlsx", ".pptx", ".zip", ".jpg", ".jpeg", ".png", ".gif", ".gz", ".mp3", ".mp4", ".7z", ".rar"}
+
+
+def estimate_zip_bytes(files, db_bytes):
+    """A realistic size for the zip: PDFs, Office files and pictures are already compressed (about 1:1); text and the database shrink a lot."""
+    est = db_bytes * 0.45
+    for p, _rel in files:
+        try:
+            sz = os.path.getsize(p)
+        except OSError:
+            continue
+        est += sz if os.path.splitext(p)[1].lower() in _INCOMPRESSIBLE else sz * 0.5
+    return est
+
+
+def disk_breakdown(limit=10):
+    """What is using the data disk: [(label, bytes)], biggest first (top-level folders under DATA_DIR, the database, the backups)."""
+    rows = []
+    try:
+        entries = list(os.scandir(DATA_DIR))
+    except OSError:
+        return rows
+    for e in entries:
+        try:
+            if e.is_file(follow_symlinks=False):
+                size = e.stat().st_size
+            else:
+                size = 0
+                for root, _d, fs in os.walk(e.path):
+                    for f in fs:
+                        try:
+                            size += os.path.getsize(os.path.join(root, f))
+                        except OSError:
+                            pass
+        except OSError:
+            continue
+        rows.append((e.name + ("/" if e.is_dir() else ""), size))
+    rows.sort(key=lambda r: -r[1])
+    return rows[:limit]
+
+
+def make_backup_auto(app, kind="auto", by="automatic"):
+    """The scheduled backup: a full one; when there is no room for the files, the database alone (the part that matters most), with a warning."""
+    r = make_backup(app, kind, by, "full")
+    if r["ok"] or "Not enough free space" not in (r.get("error") or ""):
+        return r
+    full_error = r["error"]
+    r2 = make_backup(app, kind, by, "database")
+    if r2["ok"]:
+        _write_status(last_warning="Only the database was backed up - there was not enough room for the files. " + full_error)
+    return r2
+
+
+def make_backup(app, kind="manual", by=None, scope="full"):
+    """Make one backup now. scope="database" backs up the database only (small; used when there is no room for the files). Returns {"ok": True, "name", "size", ...} or {"ok": False, "error": "..."}. Never raises; the outcome is also
     written to the status file the page and the badge read. Only one runs at a time."""
     kind = kind if kind in KINDS else "manual"
+    scope = "database" if scope == "database" else "full"
     if not _local_lock.acquire(blocking=False):
         return {"ok": False, "error": "Another backup is already running."}
     lock_path = None
     tmp = None
+    snap_dir = None
     now = datetime.utcnow()
     try:
         lock_path = _acquire_file_lock()
@@ -259,20 +320,28 @@ def make_backup(app, kind="manual", by=None):
             return {"ok": False, "error": "Another backup is already running."}
         _write_status(last_attempt=now.strftime("%Y-%m-%dT%H:%M:%S"))
         tmp = tempfile.mkdtemp(prefix="nlbackup_", dir=backup_dir())
-        files = list(_walk_files(app, extra_skip=[tmp]))
-        data_bytes = sum(os.path.getsize(p) for p, _ in files if os.path.exists(p))
+        files = [] if scope == "database" else list(_walk_files(app, extra_skip=[tmp]))
         dbp = db_file(app)
         db_bytes = os.path.getsize(dbp) if dbp and os.path.exists(dbp) else 0
-        free = shutil.disk_usage(backup_dir()).free
-        need = int((data_bytes + db_bytes) * 1.05) + db_bytes + 20 * 1024 * 1024        # the snapshot, then the zip
-        total_disk = shutil.disk_usage(backup_dir()).total
+        usage = shutil.disk_usage(backup_dir())
+        free, total_disk = usage.free, usage.total
+        # the database snapshot is a working copy: keep it on the server's temporary storage when there is room, not on the data disk
+        snap_dir = tmp
+        try:
+            sys_tmp = tempfile.gettempdir()
+            if db_bytes and not _is_inside(sys_tmp, DATA_DIR) and shutil.disk_usage(sys_tmp).free > db_bytes * 1.2 + 50 * 1024 * 1024:
+                snap_dir = tempfile.mkdtemp(prefix="nlsnap_", dir=sys_tmp)
+        except OSError:
+            snap_dir = tmp
+        est = estimate_zip_bytes(files, db_bytes)
+        need = int(est * 1.1) + 10 * 1024 * 1024 + (db_bytes if snap_dir == tmp else 0)
         reserve = min(total_disk * 0.05, 200 * 1024 * 1024)          # always leave the live app some room
         if free < need + reserve:
-            raise RuntimeError(f"Not enough free space on the disk for a backup (it needs about {human_size(need)} and the disk should keep {human_size(reserve)} spare; "
-                               f"{human_size(free)} is free). Delete old backups or enlarge the disk.")
+            raise LowSpace(f"Not enough free space on the disk for {'a full ' if scope == 'full' else 'a database '}backup (it needs about {human_size(need)} and the disk should keep "
+                           f"{human_size(reserve)} spare; {human_size(free)} is free). Delete old backups or enlarge the disk.")
         integrity, snap = None, None
         if dbp and os.path.exists(dbp):
-            snap = os.path.join(tmp, "neverlank.db")
+            snap = os.path.join(snap_dir, "neverlank.db")
             integrity = _snapshot_db(app, snap)
             if integrity != "ok":
                 raise RuntimeError("The database failed SQLite's integrity check, so it was not backed up: " + str(integrity)[:200])
@@ -291,7 +360,7 @@ def make_backup(app, kind="manual", by=None):
                 except (OSError, ValueError):
                     continue                                   # a file removed or locked while we were reading - skip it
             info = {"created_at": now.strftime("%Y-%m-%dT%H:%M:%S"), "kind": kind, "by": by or "", "has_db": bool(snap), "integrity": integrity,
-                    "db_bytes": db_bytes, "file_count": count, "app": "Neverlank Audit App"}
+                    "db_bytes": db_bytes, "file_count": count, "scope": scope, "app": "Neverlank Audit App"}
             z.writestr("backup_info.json", json.dumps(info, indent=2))
             z.writestr("README.txt", README_TEXT)
         os.replace(partial, final)
@@ -300,12 +369,14 @@ def make_backup(app, kind="manual", by=None):
         with open(final[:-4] + ".json", "w", encoding="utf-8") as fh:
             json.dump(meta, fh)
         ok_at = now.strftime("%Y-%m-%dT%H:%M:%S")
-        changes = {"last_success": ok_at, "last_error": None, "last_name": name}
+        changes = {"last_success": ok_at, "last_error": None, "last_name": name, "last_scope": scope}
         if kind == "auto":
             changes["last_auto_success"] = ok_at
         _write_status(**changes)
+        if scope == "full":
+            _write_status(last_warning=None)
         removed = prune()
-        return {"ok": True, "name": name, "size": size, "file_count": count, "db_bytes": db_bytes, "removed": removed, "has_db": bool(snap)}
+        return {"ok": True, "name": name, "size": size, "file_count": count, "db_bytes": db_bytes, "removed": removed, "has_db": bool(snap), "scope": scope}
     except Exception as e:                                       # a backup must never take the app down
         try:
             for f in os.listdir(backup_dir()):
@@ -319,6 +390,11 @@ def make_backup(app, kind="manual", by=None):
     finally:
         if tmp:
             shutil.rmtree(tmp, ignore_errors=True)
+        try:
+            if snap_dir and snap_dir != tmp:
+                shutil.rmtree(snap_dir, ignore_errors=True)
+        except NameError:
+            pass
         if lock_path:
             try:
                 os.remove(lock_path)
@@ -482,7 +558,7 @@ def start_scheduler(app):
             try:
                 with app.app_context():
                     if is_due():
-                        make_backup(app, "auto", "automatic")
+                        make_backup_auto(app, "auto", "automatic")
             except Exception:
                 pass
             time.sleep(600)
@@ -515,16 +591,17 @@ def index():
     return render_template("backup/index.html", backups=list_backups(), level=level, message=message, status=st, disk=disk,
                            human_size=human_size, can_restore=current_user.role == "admin", sqlite_ok=bool(db_file()),
                            limits=keep_limits(), hour=backup_hour(), scheduler_on=os.environ.get("BACKUP_SCHEDULER", "on").lower() != "off",
-                           last_auto=_parse_iso(st.get("last_auto_success")), data_dir=DATA_DIR)
+                           last_auto=_parse_iso(st.get("last_auto_success")), data_dir=DATA_DIR, breakdown=disk_breakdown())
 
 
 @backup_bp.route("/now", methods=["POST"])
 @login_required
 def backup_now():
     _guard()
-    res = make_backup(current_app._get_current_object(), "manual", current_user.name)
+    scope = "database" if request.form.get("scope") == "database" else "full"
+    res = make_backup(current_app._get_current_object(), "manual", current_user.name, scope)
     if res["ok"]:
-        flash(f"Backup made: {res['name']} ({human_size(res['size'])}, {res['file_count']} file(s) and the database).", "success")
+        flash(f"Backup made: {res['name']} ({human_size(res['size'])}, " + ("the database only)." if res.get("scope") == "database" else f"{res['file_count']} file(s) and the database)."), "success")
     else:
         flash("The backup could not be made: " + res["error"], "danger")
     return redirect(url_for("backup.index"))
