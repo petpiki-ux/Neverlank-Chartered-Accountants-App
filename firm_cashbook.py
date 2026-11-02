@@ -74,8 +74,10 @@ def cash_book():
     rows, totals = cashbook.summary(accounts, txns, start, end)
     un = cashbook.unassigned(txns)
     moves = {a.source_key for a in CashAssign.query.all()}
+    import firm_payroll
+    pay_notes = firm_payroll.cash_line_notes()
     return render_template(
-        "firmfs/cash_book.html", ye=None, active="cash", accounts=accounts, selected=selected, lg=lg, rec=rec,
+        "firmfs/cash_book.html", pay_notes=pay_notes, ye=None, active="cash", accounts=accounts, selected=selected, lg=lg, rec=rec,
         start=start, end=end, rows=rows, totals=totals, unassigned=un, periods=_periods(), moves=moves,
         stmt_date=stmt_date, stmt_balance=stmt_balance, today=today, label=_line_label,
         back=request.full_path.rstrip("?"),

@@ -144,6 +144,8 @@ def _expense_rows(currency):
     for p in SupplierPayment.query.filter(SupplierPayment.currency == currency).all():
         pays[p.expense_id].append((p.payment_date, p.amount or 0.0))
     rows = []
+    import firm_payroll
+    flags = firm_payroll.expense_flags()      # bills the payroll already carries (salary payments, medical aid): owed and paid, but not a cost
     for e in Expense.query.filter(Expense.currency == currency).all():
         paid = None
         if e.id in pays:
@@ -158,7 +160,7 @@ def _expense_rows(currency):
         rows.append({
             "id": e.id, "date": e.expense_date, "supplier": e.supplier, "category": e.category or "Other",
             "amount": e.amount or 0.0, "paid": paid, "due": e.due_date or e.expense_date,
-            "description": e.description or "", "settle": settle,
+            "description": e.description or "", "settle": settle, "payroll": flags.get(e.id),
         })
     return rows
 
@@ -303,6 +305,9 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
 
     inv = _invoice_rows(currency)
     exp = _expense_rows(currency)
+    # what the firm's costs are: bills the payroll already carries are payments of a liability, not costs; the payroll's own cost replaces them
+    import firm_payroll
+    cost = [e for e in exp if not e.get("payroll")] + firm_payroll.cost_rows(currency)
 
     # previous period of the same length, immediately before
     span = (end - start).days + 1
@@ -314,8 +319,8 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
     billed_gross = _sum(inv, "gross", start, end, "issue")
     collected = collected_net(inv, start, end)
     collected_prev = collected_net(inv, p_start, p_end)
-    expenses = _sum(exp, "amount", start, end, "date")
-    expenses_prev = _sum(exp, "amount", p_start, p_end, "date")
+    expenses = _sum(cost, "amount", start, end, "date")
+    expenses_prev = _sum(cost, "amount", p_start, p_end, "date")
     profit = revenue - expenses
     profit_prev = revenue_prev - expenses_prev
 
@@ -345,7 +350,7 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
     for m in months:
         lo, hi = max(m, start), min(month_end(m), end)
         r = _sum(inv, "net", lo, hi, "issue")
-        e = _sum(exp, "amount", lo, hi, "date")
+        e = _sum(cost, "amount", lo, hi, "date")
         m_rev.append(round(r, 2))
         m_coll.append(round(collected_net(inv, lo, hi), 2))
         m_exp.append(round(e, 2))
@@ -368,7 +373,7 @@ def build_report(currency="USD", preset="12m", date_from=None, date_to=None, tod
 
     # ---- expenses by category
     by_cat = defaultdict(float)
-    for e in exp:
+    for e in cost:
         if start <= e["date"] <= end:
             by_cat[e["category"]] += e["amount"]
 

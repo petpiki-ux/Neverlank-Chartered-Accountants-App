@@ -75,8 +75,9 @@
         <td style="white-space:nowrap;">{{ t.date.strftime('%d %b %Y') }}</td>
         <td>{% if t.link %}<a href="{{ url_for(t.link[0], **t.link[1]) }}">{{ label(t) }}</a>{% else %}{{ label(t) }}{% endif %}
           {% if t.category and t.source == 'Entry' %}<div class="muted" style="font-size:11.5px;">{{ t.category }}</div>{% endif %}
+          {% if t.key in pay_notes %}<div class="muted" style="font-size:11.5px;">{{ pay_notes[t.key][1] }}</div>{% endif %}
           {% if t.key in moves %}<span class="badge" title="Moved to this account by hand">moved</span>{% endif %}</td>
-        <td><span class="badge">{{ t.source }}</span></td>
+        <td><span class="badge">{{ pay_notes[t.key][0] if t.key in pay_notes else t.source }}</span></td>
         <td class="num">{{ fm(t.amount) if t.amount > 0 else '' }}</td>
         <td class="num">{{ fm(-t.amount) if t.amount < 0 else '' }}</td>
         <td class="num">{{ fm(t.balance) }}</td>
