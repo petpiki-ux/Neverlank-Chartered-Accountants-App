@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block title %}Valuations - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Valuation certificates</h1>
+    <div class="subtitle">{{ certs|length }} certificate(s). Each one downloads as Word or PDF on the firm letterhead and is signed by the Managing Partner here.</div>
+  </div>
+  <div>{% if is_senior %}<a href="{{ url_for('valuations.new_certificate') }}" class="btn gold">New certificate</a>{% endif %}</div>
+</div>
+<div class="card">
+  {% if certs %}
+  <table>
+    <thead><tr><th>Reference</th><th>Client</th><th>Certificate</th><th>Valuation date</th><th class="text-right">Adopted value</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for c in certs %}
+      <tr>
+        <td><a href="{{ url_for('valuations.view_certificate', cert_id=c.id) }}">{{ c.reference }}</a></td>
+        <td>{{ c.client_name }}</td>
+        <td>{{ c.certificate_title }}</td>
+        <td>{{ long_date(c.valuation_date) }}</td>
+        <td class="text-right">{{ money(c, c.adopted_value) }}</td>
+        <td>{% if mp_signed(c) %}<span class="badge status-Completed">Signed {{ (c.mp_signed_at|cat).strftime('%d %b %Y') }}</span>
+          {% elif left[c.id] %}<span class="badge status-Submitted">{{ left[c.id] }} to complete</span>
+          {% else %}<span class="badge status-OnHold">Awaiting signature</span>{% endif %}</td>
+        <td class="text-right"><a href="{{ url_for('valuations.view_certificate', cert_id=c.id) }}" class="btn small secondary">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:0;">No valuation certificates yet.{% if is_senior %} <a href="{{ url_for('valuations.new_certificate') }}">Start one</a> from the Desktop Valuation Certificate wording.{% endif %}</p>
+  {% endif %}
+</div>
+{% endblock %}

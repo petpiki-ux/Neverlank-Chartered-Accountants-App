@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}{{ firm_name }}{% endblock %}</title>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/neverlank-logo.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  {% if current_user.is_authenticated %}
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  {% endif %}
+</head>
+<body>
+  {% if current_user.is_authenticated %}
+  <div class="topbar">
+    <div class="brand">
+      <img src="{{ url_for('static', filename='img/neverlank-logo.png') }}" alt="Neverlank">
+      Neverlank <span class="tag">Audit &middot; Assurance &middot; Corporate Finance</span>
+    </div>
+    <nav>
+      <a href="{{ url_for('engagements.dashboard') }}">Practice Dashboard</a>
+      <a href="{{ url_for('engagements.directory') }}">Clients &amp; Engagements</a>
+      <a href="{{ url_for('engagements.list_templates') }}">Checklist Templates</a>
+      <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a>
+      <a href="{{ url_for('tickmarks.list_tickmarks') }}">Tickmarks</a>
+      <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>
+      <a href="{{ url_for('scan.search_documents') }}">Search Documents</a>
+      <a href="{{ url_for('regulatory_notices.list_notices') }}">Regulatory Notices</a>
+      <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Updates</a>
+      <a href="{{ url_for('zimra.list_cases') }}">ZIMRA Matters{% if zimra_overdue_count %} <span class="badge overdue" title="ZIMRA letters past their response deadline">{{ zimra_overdue_count }}</span>{% endif %}{% if zimra_approval_count %} <span class="badge" style="background:#b8923a;color:#fff;" title="Letters to ZIMRA waiting for your approval">{{ zimra_approval_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('valuations.list_certificates') }}"{% if request.blueprint == 'valuations' %} class="active"{% endif %}>Valuations</a>
+      <a href="{{ url_for('learning.index') }}"{% if request.blueprint == 'learning' %} class="active"{% endif %}>Firm Learning{% if learning_pending_count %} <span class="badge" style="background:#b8934a;color:#fff;" title="Lessons waiting for your decision">{{ learning_pending_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('qpd_dashboard.dashboard') }}">QPD</a>
+      <a href="{{ url_for('hr.project_board') }}">Tasks{% if my_open_task_count %} <span class="badge overdue">{{ my_open_task_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('daily_updates.my_update') }}"{% if request.blueprint == 'daily_updates' %} class="active"{% endif %}>Daily Update{% if daily_fire_count %} <span class="badge overdue" title="Urgent fires reported today">{{ daily_fire_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
+      <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
+      {% set finance_blueprints = ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'advances', 'credit_notes', 'statements', 'analytics', 'expenses', 'firmfs'] %}
+      <a href="{{ url_for('invoicing.list_invoices') }}"{% if request.blueprint in finance_blueprints %} class="active"{% endif %}>Finance{% if recurring_review_count or invoice_reminder_count %} <span class="badge overdue" title="Recurring invoices waiting for review and overdue-invoice reminders due">{{ recurring_review_count + invoice_reminder_count }}</span>{% endif %}</a>
+      {% if user_has_permission(current_user, 'manage_corporate_finance') %}
+      <a href="{{ url_for('corpfin.dashboard') }}" style="white-space:nowrap;"{% if request.blueprint == 'corpfin' %} class="active"{% endif %}>Corporate Finance</a>
+      {% endif %}
+      {% if user_has_permission(current_user, 'manage_whistleblower') %}
+      <a href="{{ url_for('whistleblower.dashboard') }}">Whistle-blower</a>
+      {% endif %}
+      {% if user_has_permission(current_user, 'manage_training') %}
+      <a href="{{ url_for('training.dashboard') }}">Training</a>
+      {% endif %}
+      {% if user_has_permission(current_user, 'manage_chart_of_accounts') %}
+      <a href="{{ url_for('standard_coa.list_accounts') }}">Chart of Accounts</a>
+      {% endif %}
+      {% if user_has_permission(current_user, 'manage_users') %}
+      <a href="{{ url_for('users.list_users') }}">Team</a>
+      {% endif %}
+      {% if current_user.role in ('admin', 'partner') %}
+      <a href="{{ url_for('backup.index') }}"{% if request.blueprint == 'backup' %} class="active"{% endif %}>Backup{% if backup_alert %} <span class="badge overdue" title="{{ backup_alert }}">!</span>{% endif %}</a>
+      {% endif %}
+    </nav>
+    <div class="user-menu">
+      {% if open_check_in %}
+      <form method="post" action="{{ url_for('hr.check_out') }}" class="inline" title="Checked in at {{ (open_check_in.check_in_at|cat).strftime('%H:%M') }}">
+        <button type="submit" class="btn small danger">Check Out ({{ (open_check_in.check_in_at|cat).strftime('%H:%M') }})</button>
+      </form>
+      {% else %}
+      <form method="post" action="{{ url_for('hr.check_in') }}" class="inline">
+        <button type="submit" class="btn small gold">Check In</button>
+      </form>
+      {% endif %}
+      <a href="{{ url_for('messages.inbox') }}">Messages{% if unread_message_count %} <span class="badge overdue">{{ unread_message_count }}</span>{% endif %}</a>
+      <span>{{ current_user.name }}</span>
+      <a href="{{ url_for('auth.account') }}">Account</a>
+      <a href="{{ url_for('auth.logout') }}">Log out</a>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="container">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-list">
+        {% for category, message in messages %}
+          <div class="flash {{ category }}">{{ message }}</div>
+        {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    {% if request.blueprint in ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'advances', 'credit_notes', 'statements', 'analytics', 'expenses', 'firmfs'] %}
+    <div class="finance-tabs">
+      <a href="{{ url_for('quotations.list_quotations') }}"{% if request.blueprint == 'quotations' %} class="on"{% endif %}>Quotations</a>
+      <a href="{{ url_for('invoicing.list_invoices') }}"{% if request.blueprint in ['invoicing', 'recurring'] or (request.blueprint == 'invoice_send' and request.endpoint != 'invoice_send.reminders') %} class="on"{% endif %}>Invoices{% if recurring_review_count %} <span class="badge overdue" title="Recurring invoices raised as Drafts, waiting for your review">{{ recurring_review_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('invoice_send.reminders') }}"{% if request.endpoint == 'invoice_send.reminders' %} class="on"{% endif %}>Reminders{% if invoice_reminder_count %} <span class="badge overdue" title="Overdue invoices due a reminder">{{ invoice_reminder_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('receipts.list_receipts') }}"{% if request.blueprint == 'receipts' %} class="on"{% endif %}>Receipts</a>
+      <a href="{{ url_for('advances.list_advances') }}"{% if request.blueprint == 'advances' %} class="on"{% endif %}>Advances</a>
+      <a href="{{ url_for('credit_notes.list_credit_notes') }}"{% if request.blueprint == 'credit_notes' %} class="on"{% endif %}>Credit notes</a>
+      <a href="{{ url_for('statements.index') }}"{% if request.blueprint == 'statements' %} class="on"{% endif %}>Statements</a>
+      {% if user_has_permission(current_user, 'view_firm_finances') %}
+      <a href="{{ url_for('analytics.dashboard') }}"{% if request.blueprint in ['analytics', 'expenses'] %} class="on"{% endif %}>Analytics</a>
+      <a href="{{ url_for('firmfs.index') }}"{% if request.blueprint == 'firmfs' %} class="on"{% endif %}>Firm Finance</a>
+      {% endif %}
+    </div>
+    {% endif %}
+    {% block content %}{% endblock %}
+  </div>
+
+  {% if current_user.is_authenticated %}
+  <div id="incoming-call-banner" style="display:none;position:fixed;bottom:20px;right:20px;z-index:1000;max-width:320px;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 6px 24px rgba(0,0,0,0.18);padding:14px;">
+    <div style="font-weight:600;">Incoming call</div>
+    <div id="incoming-call-from" class="muted" style="font-size:12.5px;margin:4px 0 10px;"></div>
+    <button type="button" id="incoming-call-accept" class="btn small gold">Accept</button>
+    <button type="button" id="incoming-call-decline" class="btn small secondary">Decline</button>
+  </div>
+  <script>
+    (function () {
+      var socket = window.__neverlankSocket || io();
+      window.__neverlankSocket = socket;
+      var banner = document.getElementById("incoming-call-banner");
+      var fromEl = document.getElementById("incoming-call-from");
+      var acceptBtn = document.getElementById("incoming-call-accept");
+      var declineBtn = document.getElementById("incoming-call-decline");
+      var current = null;
+
+      socket.on("call:incoming", function (data) {
+        current = data;
+        fromEl.textContent = data.from_name + " is calling you.";
+        banner.style.display = "block";
+      });
+      ["call:cancelled", "call:declined", "call:ended"].forEach(function (evt) {
+        socket.on(evt, function (data) {
+          if (current && data.call_id === current.call_id) {
+            current = null;
+            banner.style.display = "none";
+          }
+        });
+      });
+      acceptBtn.addEventListener("click", function () {
+        if (!current) return;
+        window.location.href = "/calls/" + current.from_id + "?call_id=" + encodeURIComponent(current.call_id);
+      });
+      declineBtn.addEventListener("click", function () {
+        if (!current) return;
+        socket.emit("call:decline", { call_id: current.call_id });
+        banner.style.display = "none";
+        current = null;
+      });
+    })();
+  </script>
+  {% endif %}
+
+  <script>
+    // Every "Save"/"Confirm"/etc. button on a card partway down a long page
+    // (Directors & Shareholders, a checklist item, Client Acceptance...) is
+    // an ordinary form POST that redirects back to the same page - which
+    // otherwise always lands back at the very top, losing your place on
+    // anything but a short page. This restores the scroll position you were
+    // at right before you submitted, on the very next page load only - it
+    // never affects a normal link click or typing a URL directly.
+    (function () {
+      var STORAGE_PREFIX = "neverlankScrollPos:";
+      var key = STORAGE_PREFIX + location.pathname + location.search;
+
+      document.addEventListener("submit", function (event) {
+        var form = event.target;
+        if (!(form instanceof HTMLFormElement)) return;
+        try {
+          sessionStorage.setItem(
+            STORAGE_PREFIX + location.pathname + location.search,
+            String(window.scrollY)
+          );
+        } catch (e) { /* sessionStorage unavailable (private mode, etc.) - fall back to default browser behaviour */ }
+      }, true);
+
+      try {
+        var saved = sessionStorage.getItem(key);
+        if (saved !== null) {
+          sessionStorage.removeItem(key);
+          var y = parseInt(saved, 10);
+          if (!isNaN(y)) {
+            // Wait a tick for layout (images/late CSS) to settle before scrolling.
+            window.requestAnimationFrame(function () { window.scrollTo(0, y); });
+          }
+        }
+      } catch (e) { /* ignore - just lands at the top as before */ }
+    })();
+  </script>
+  <script>
+    /* After saving a form the page comes back where you were, not at the top. Remembers the scroll position when a form is submitted
+       and puts it back if the next page load is the same page within a few seconds (a redirect after a save). */
+    (function () {
+      var KEY = "nl_scroll";
+      try {
+        document.addEventListener("submit", function (e) {
+          var f = e.target;
+          if (!f || (f.method || "").toLowerCase() !== "post") return;
+          sessionStorage.setItem(KEY, JSON.stringify({p: location.pathname, y: window.scrollY, t: Date.now()}));
+        }, true);
+        var raw = sessionStorage.getItem(KEY);
+        if (raw) {
+          sessionStorage.removeItem(KEY);
+          var v = JSON.parse(raw);
+          if (v && v.p === location.pathname && Date.now() - v.t < 15000 && v.y > 0) {
+            var go = function () { window.scrollTo(0, v.y); };
+            go(); window.addEventListener("load", go); setTimeout(go, 150);
+          }
+        }
+      } catch (err) { /* storage can be blocked; the page then simply opens at the top */ }
+    })();
+  </script>
+  <script src="{{ url_for('static', filename='js/select-search.js') }}" defer></script>
+</body>
+</html>
