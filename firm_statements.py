@@ -203,7 +203,9 @@ def derive_period(period_start, period_end, zwg_rate):
         "ageing": [0.0] * len(analytics.AGEING_BUCKETS), "warnings": [], "zwg_rate": zwg_rate,
     }
     import firm_payroll
-    pay_medical = firm_payroll.linked_medical()      # medical aid bills posted from payroll: not a second expense (see firm_payroll.py)
+    pay_rows = firm_payroll.periods()
+    # medical aid bills posted from payroll, and salary payments filed in the Expense register: not a second expense (see firm_payroll.py)
+    pay_medical = set(firm_payroll.linked_medical(pay_rows)) | set(firm_payroll.salary_bills(firm_payroll.link_start(pay_rows)))
     for cur in INVOICE_CURRENCIES:
         inv = analytics._invoice_rows(cur)
         exp = analytics._expense_rows(cur)

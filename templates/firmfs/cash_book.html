@@ -83,9 +83,10 @@
         <td>{% if t.cleared_on %}{{ t.cleared_on.strftime('%d %b %Y') }}{% else %}<span class="muted">-</span>{% endif %}</td>
         <td style="white-space:nowrap;">
           {% if t.source == 'Entry' %}
-            {% if not t.transfer_id %}<a class="btn small secondary" href="{{ url_for('firmfs.cash_entry_edit', entry_id=t.entry_id) }}">Edit</a>{% endif %}
+            <a class="btn small secondary" href="{{ url_for('firmfs.cash_entry_edit', entry_id=t.entry_id) }}">Edit</a>
             <form method="post" action="{{ url_for('firmfs.cash_entry_delete', entry_id=t.entry_id) }}" style="display:inline;" onsubmit="return confirm('{{ 'Delete this transfer from both accounts?' if t.transfer_id else 'Delete this entry?' }}');"><button class="btn small danger" type="submit">Delete</button></form>
           {% else %}
+            {% if t.link %}<a class="btn small secondary" href="{{ url_for(t.link[0], **t.link[1]) }}" title="Receipts, bills and advances are corrected where they were recorded">Edit at source</a>{% endif %}
             <details style="display:inline-block;position:relative;"><summary class="btn small secondary" style="display:inline-block;cursor:pointer;">Move</summary>
               <form method="post" action="{{ url_for('firmfs.cash_assign') }}" style="position:absolute;right:0;z-index:5;background:#fff;border:1px solid var(--border,#e3e8ee);border-radius:8px;padding:10px;width:250px;box-shadow:0 4px 14px rgba(0,0,0,.12);">
                 <input type="hidden" name="key" value="{{ t.key }}"><input type="hidden" name="back" value="{{ back }}">

@@ -127,18 +127,26 @@ def payments(start):
     return out
 
 
-def overlap_warnings(start):
-    """Bills in the Expense register filed under a salary-type category from the link start would count salaries twice."""
+def salary_bills(start):
+    """{expense id: Expense} of bills filed in the Expense register under a salary / wage / payroll category from the link start (a salary
+    payment recorded before the payroll was linked). They are not a second expense: each is treated as a payment of net salaries and
+    clears Net salaries payable, so nothing needs deleting."""
     if start is None:
-        return []
-    bills = [e for e in Expense.query.filter(Expense.expense_date >= start).all()
-             if not (e.source_key or "").startswith("payroll_medical:") and any(w in (e.category or "").lower() for w in SALARY_WORDS)]
+        return {}
+    return {e.id: e for e in Expense.query.filter(Expense.expense_date >= start).all()
+            if not (e.source_key or "").startswith("payroll_medical:") and any(w in (e.category or "").lower() for w in SALARY_WORDS)}
+
+
+def overlap_warnings(start):
+    """A note (not an error) when Expense-register bills are being treated as salary payments."""
+    bills = salary_bills(start)
     if not bills:
         return []
-    cats = sorted({b.category for b in bills})
-    return [f"{len(bills)} bill(s) in the Expense register under {', '.join(repr(c) for c in cats)} are dated {start.strftime('%d %b %Y')} or later. "
-            "Salaries now come from the finalized payroll periods, so these would count salaries twice - delete them, or move the payroll start date "
-            "(Payroll Tax Settings) after them."]
+    cats = sorted({b.category for b in bills.values()})
+    total = sum(b.amount or 0.0 for b in bills.values())
+    return [f"{len(bills)} bill(s) in the Expense register under {', '.join(repr(c) for c in cats)} (total {total:,.2f}) are dated {start.strftime('%d %b %Y')} or later. "
+            "Salaries come from the finalized payroll, so these are not counted as a second expense: each is treated as a payment of net salaries and clears "
+            "'Net salaries payable'. Check that Net salaries payable is not left in debit; if a bill is not net pay, file it under another category."]
 
 
 def factor(currency, rate):
@@ -188,6 +196,11 @@ def statement_items(start, end, zwg_rate):
                 f = factor(e.currency, zwg_rate)
                 if f is not None:
                     acc[DED] -= (e.amount or 0.0) * f
+    for e in salary_bills(pstart).values():
+        if e.expense_date and e.expense_date <= end:
+            f = factor(e.currency, zwg_rate)
+            if f is not None:
+                acc[NET] -= (e.amount or 0.0) * f
     if left_out:
         warnings.append(f"Payroll in {', '.join(sorted(left_out))} was left out of the statements: no rate is entered for this year-end.")
     warnings.extend(overlap_warnings(pstart))

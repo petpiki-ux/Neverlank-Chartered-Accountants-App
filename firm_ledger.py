@@ -597,6 +597,7 @@ def build_ledger(year_ends=None, include_journals=True):
     pay_rows = firm_payroll.periods()
     pay_start = firm_payroll.link_start(pay_rows)
     pay_medical = firm_payroll.linked_medical(pay_rows)
+    pay_salary = firm_payroll.salary_bills(pay_start)
     for r in pay_rows:
         cur = r["currency"]
         if cur not in INVOICE_CURRENCIES:
@@ -624,7 +625,9 @@ def build_ledger(year_ends=None, include_journals=True):
                 continue
             key = f"EXP:{e['category']}"
             debit = (key if L.account(key) else "EXP_OTHER")
-            if e["id"] in pay_medical:
+            if e["id"] in pay_salary:
+                debit = "PAY_NET"        # a salary payment filed in the Expense register: it pays off net salaries, it is not a second expense
+            elif e["id"] in pay_medical:
                 debit = "PAY_DED"        # the cost is already in the payroll: this bill moves what was deducted from pay to the society's account
             L.post(e["date"], "Expense bill", f"EXP-{e['id']}", f"{e['supplier']} - {e['category']}",
                    [(debit, amt, 0, e["description"][:120]), ("AP", 0, amt, e["supplier"])],

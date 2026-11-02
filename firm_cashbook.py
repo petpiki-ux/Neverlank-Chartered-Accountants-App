@@ -165,7 +165,12 @@ def _entry_form_context(entry=None, form=None):
         pool = cats_in if entry.direction == "in" else cats_out
         if entry.category not in pool:
             pool.append(entry.category)   # an older entry keeps its own heading when edited
-    return dict(ye=None, active="cash", accounts=cashbook.accounts_in_order(active_only=True), entry=entry, form=form,
+    import firm_payroll
+    pay_heads = [(h, firm_payroll.PAYABLE_NAMES[k]) for h, k in firm_payroll.PAYMENT_HEADINGS.items()]   # [(heading, ledger account it pays off)]
+    cats_out = [c for c in cats_out if c not in firm_payroll.PAYMENT_HEADINGS]
+    if entry is not None and entry.category in firm_payroll.PAYMENT_HEADINGS:
+        cats_out = [c for c in cats_out]                                  # an older entry keeps its heading in the payroll group below
+    return dict(ye=None, active="cash", accounts=cashbook.accounts_in_order(active_only=True), entry=entry, form=form, pay_heads=pay_heads,
                 cats_in=cats_in, cats_out=cats_out, expense_cats=category_names(), today=date.today(), preselect=pre)
 
 
@@ -279,8 +284,7 @@ def cash_entry_new():
 def cash_entry_edit(entry_id):
     en = CashEntry.query.get_or_404(entry_id)
     if en.transfer_id:
-        flash("A transfer cannot be edited: delete it and enter it again.", "info")
-        return redirect(url_for("firmfs.cash_book", account=en.account_id))
+        return _edit_transfer(en)
     if request.method == "POST":
         d, err = _read_entry_form()
         if err:
@@ -310,6 +314,37 @@ def cash_entry_edit(entry_id):
             flash("Entry updated.", "success")
             return redirect(url_for("firmfs.cash_book", account=en.account_id))
     return render_template("firmfs/cash_entry.html", **_entry_form_context(en, request.form if request.method == "POST" else None))
+
+
+def _edit_transfer(en):
+    """A transfer is two entries sharing a transfer_id (out of one account, into the other); editing changes both together."""
+    legs = CashEntry.query.filter_by(transfer_id=en.transfer_id).all()
+    out = next((e for e in legs if e.direction == "out"), None)
+    inn = next((e for e in legs if e.direction == "in"), None)
+    if out is None or inn is None:
+        flash("This transfer is incomplete: delete it and enter it again.", "danger")
+        return redirect(url_for("firmfs.cash_book", account=en.account_id))
+    if request.method == "POST":
+        if request.form.get("kind") != "transfer":
+            d, err = None, "A transfer stays a transfer: to change it into something else, delete it and enter the new entry."
+        else:
+            d, err = _read_entry_form()
+        if err:
+            flash(err, "danger")
+            return render_template("firmfs/cash_entry.html", **_entry_form_context(out, request.form))
+        for leg, acct in ((out, d["acct"]), (inn, d["to"])):
+            moved = CashClear.query.filter_by(source_key=f"entry:{leg.id}").first()
+            if moved and moved.account_id != acct.id:
+                db.session.delete(moved)
+            leg.account_id, leg.entry_date, leg.amount = acct.id, d["on"], d["amount"]
+            leg.description = d["desc"] or f"Transfer {d['acct'].name} to {d['to'].name}"
+            leg.reference = d["ref"]
+        db.session.commit()
+        flash("Transfer updated on both accounts.", "success")
+        return redirect(url_for("firmfs.cash_book", account=out.account_id))
+    form = {"kind": "transfer", "account_id": str(out.account_id), "to_account_id": str(inn.account_id), "entry_date": out.entry_date.isoformat(),
+            "amount": out.amount, "description": out.description or "", "reference": out.reference or ""}
+    return render_template("firmfs/cash_entry.html", **_entry_form_context(out, form))
 
 
 @firmfs_bp.route("/cash-book/entries/<int:entry_id>/delete", methods=["POST"])
