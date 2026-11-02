@@ -89,6 +89,10 @@ def content_key(doc):
         parts = [doc.subject, doc.body, doc.signatory, doc.addressee, doc.letter_date]
     elif cls == "WorkpaperNarrative":
         parts = [doc.kind, doc.body]
+    elif cls == "ValuationCertificate":
+        import valuation_docs
+        parts = [doc.reference, doc.valuation_date, doc.certificate_date, doc.currency, doc.area_ha, doc.low_value, doc.adopted_value,
+                 doc.high_value] + [getattr(doc, f, None) for f in valuation_docs.TEXT_FIELDS]
     else:
         number = next((getattr(doc, a) for a in ("invoice_number", "quote_number", "credit_note_number", "receipt_number", "advance_number", "number")
                        if getattr(doc, a, None)), "")

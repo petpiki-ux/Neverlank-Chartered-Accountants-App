@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}{{ cert.reference }} - {{ firm_name }}{% endblock %}
+{% macro rich(parts) %}{% for t, b, ph in parts %}{% if ph %}<mark style="background:#ffec99;font-weight:600;">{{ t }}</mark>{% elif b %}<strong>{{ t }}</strong>{% else %}{{ t }}{% endif %}{% endfor %}{% endmacro %}
+{% macro body(blocks) %}
+  {% set ns = namespace(open=false) %}
+  {% for kind, parts in blocks %}
+    {% if kind == 'b' %}{% if not ns.open %}<ul style="margin:4px 0 10px 0;padding-left:20px;">{% set ns.open = true %}{% endif %}<li style="margin-bottom:4px;">{{ rich(parts) }}</li>
+    {% else %}{% if ns.open %}</ul>{% set ns.open = false %}{% endif %}<p style="margin:0 0 9px;">{{ rich(parts) }}</p>{% endif %}
+  {% endfor %}
+  {% if ns.open %}</ul>{% endif %}
+{% endmacro %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ cert.certificate_title }} <span class="badge {{ 'status-Completed' if signed else 'status-OnHold' }}" style="vertical-align:middle;">{{ 'Signed' if signed else 'Not signed' }}</span></h1>
+    <div class="subtitle">{{ cert.reference }} &middot; {{ cert.client_name }}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    {% with sign_doc=cert, sign_kind='valuation' %}{% include "_mp_sign_control.html" %}{% endwith %}
+    <a href="{{ url_for('valuations.download_certificate', cert_id=cert.id, fmt='docx') }}" class="btn secondary">Word</a>
+    <a href="{{ url_for('valuations.download_certificate', cert_id=cert.id, fmt='pdf') }}" class="btn secondary">PDF</a>
+    {% if is_senior %}<a href="{{ url_for('valuations.edit_certificate', cert_id=cert.id) }}" class="btn gold">Edit</a>{% endif %}
+    <a href="{{ url_for('valuations.list_certificates') }}" class="btn secondary">All valuations</a>
+  </div>
+</div>
+
+{% if left and not signed %}
+<div class="flash" style="background:#fff7e0;border-left:4px solid #b8923a;color:#5a4410;"><strong>{{ left|length }} [CONFIRM: ...] placeholder(s) still in the certificate</strong> - it cannot be signed until they are completed.{% if is_senior %} <a href="{{ url_for('valuations.edit_certificate', cert_id=cert.id) }}">Edit certificate</a>{% endif %}</div>
+{% endif %}
+
+<div class="card" style="padding:0;overflow:hidden;font-family:Calibri,Arial,sans-serif;font-size:14px;line-height:1.55;max-width:900px;">
+  <div style="background:#0f2942;color:#fff;padding:16px 22px;border-bottom:4px solid #b8934a;display:flex;gap:16px;align-items:center;justify-content:space-between;flex-wrap:wrap;">
+    <div style="display:flex;gap:14px;align-items:center;">
+      <img src="{{ url_for('static', filename='img/neverlank-logo.png') }}" alt="" style="height:64px;">
+      <div><div style="font-family:Georgia,serif;font-size:18px;font-weight:bold;">{{ firm_name }}</div>
+        <div style="font-size:10.5px;letter-spacing:.08em;color:#d4af6a;font-weight:bold;">AUDIT &middot; ASSURANCE &middot; CORPORATE FINANCE</div></div>
+    </div>
+    <div style="text-align:right;"><div style="font-family:Georgia,serif;color:#d4af6a;font-size:19px;font-weight:bold;text-transform:uppercase;">{{ cert.certificate_title }}</div>
+      <div style="font-weight:bold;">{{ cert.reference }}</div>{% if left %}<div style="font-size:11px;color:#cdd8e4;">DRAFT - placeholders to complete</div>{% endif %}</div>
+  </div>
+  <div style="padding:20px 24px;">
+    <div style="display:flex;flex-wrap:wrap;background:#f6f8fb;border:1px solid #e3e8ee;margin-bottom:12px;">
+      {% for k, v in [('Certificate no.', cert.reference), ('Valuation date', long_date(cert.valuation_date)), ('Issued', long_date(cert.certificate_date)), ('Currency', prefix|trim)] %}
+      <div style="flex:1;min-width:130px;padding:8px 12px;border-right:1px solid #e3e8ee;"><div style="font-size:10px;color:#6b7684;font-weight:bold;letter-spacing:.05em;">{{ k|upper }}</div><div style="font-weight:bold;color:#0f2942;">{{ v }}</div></div>
+      {% endfor %}
+    </div>
+    <div style="background:#f6f8fb;border-left:4px solid #b8934a;padding:9px 14px;margin-bottom:14px;">
+      <div style="font-size:10px;color:#b8934a;font-weight:bold;letter-spacing:.05em;">PREPARED FOR</div>
+      <div style="font-weight:bold;color:#0f2942;font-size:16px;">{{ cert.client_name }}</div>
+      {% if cert.purpose %}<div style="font-size:12.5px;color:#555;">{{ cert.purpose }}</div>{% endif %}
+    </div>
+    {% if intro %}<p style="margin:0 0 8px;">{{ rich(intro) }}</p>{% endif %}
+
+    <h2 style="font-family:Georgia,serif;color:#0f2942;font-size:19px;border-bottom:2px solid #b8934a;padding-bottom:3px;margin:20px 0 10px;">Certificate particulars</h2>
+    <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+      {% for k, parts in particulars %}<tr><th style="text-align:left;width:190px;background:#f6f8fb;color:#0f2942;border:1px solid #e3e8ee;padding:7px 10px;vertical-align:top;">{{ k }}</th><td style="border:1px solid #e3e8ee;padding:7px 10px;">{{ rich(parts) }}</td></tr>{% endfor %}
+    </table>
+
+    <h2 style="font-family:Georgia,serif;color:#0f2942;font-size:19px;border-bottom:2px solid #b8934a;padding-bottom:3px;margin:20px 0 10px;">Valuation conclusion</h2>
+    <p style="margin:0 0 10px;">{{ conclusion[0] }}{% if '[CONFIRM' in conclusion[1] %}<mark style="background:#ffec99;font-weight:600;">{{ conclusion[1] }}</mark>{% else %}<strong style="color:#0f2942;">{{ conclusion[1] }}</strong>{% endif %}{{ conclusion[2] }}</p>
+    {% if value_rows %}
+    <div style="display:flex;justify-content:flex-end;margin:10px 0;"><div style="background:#0f2942;color:#fff;padding:9px 16px;display:flex;gap:28px;align-items:center;"><strong>Adopted value</strong><strong style="color:#d4af6a;font-size:16px;">{{ money(cert, cert.adopted_value) }}</strong></div></div>
+    <table style="border-collapse:collapse;font-size:13.5px;min-width:60%;">
+      <thead><tr>{% for h in value_head %}<th style="background:#0f2942;color:#fff;padding:7px 12px;text-align:{{ 'left' if loop.first else 'right' }};">{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for row in value_rows %}<tr{% if row[0] == 'Adopted' %} style="background:#fbf4e4;font-weight:bold;border-top:1px solid #b8934a;border-bottom:1px solid #b8934a;"{% endif %}>
+        {% for t in row %}<td style="padding:7px 12px;border-bottom:1px solid #e3e8ee;text-align:{{ 'left' if loop.first else 'right' }};{% if loop.first or row[0] == 'Adopted' %}color:#0f2942;font-weight:bold;{% endif %}">{{ t }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table>
+    {% endif %}
+    {% if range_note %}<p style="margin:8px 0;">{{ rich(range_note) }}</p>{% endif %}
+
+    {% if approach %}<h2 style="font-family:Georgia,serif;color:#0f2942;font-size:19px;border-bottom:2px solid #b8934a;padding-bottom:3px;margin:20px 0 10px;">Basis and approach</h2>{{ body(approach) }}{% endif %}
+    {% if assumptions %}<h2 style="font-family:Georgia,serif;color:#0f2942;font-size:19px;border-bottom:2px solid #b8934a;padding-bottom:3px;margin:20px 0 10px;">Assumptions and limiting conditions</h2>{{ body(assumptions) }}{% endif %}
+
+    <h2 style="font-family:Georgia,serif;color:#0f2942;font-size:19px;border-bottom:2px solid #b8934a;padding-bottom:3px;margin:20px 0 10px;">Certification</h2>
+    {{ body(certification) }}
+    <div style="margin-top:10px;max-width:340px;">
+      {% if signed %}<img src="{{ mp_signature_for(cert) }}" alt="Signature" style="display:block;height:62px;margin-bottom:2px;">{% else %}<div style="height:48px;"></div>{% endif %}
+      <div style="border-top:1.5px solid #0f2942;padding-top:3px;"><strong style="color:#0f2942;">{{ cert.signatory_name }}</strong></div>
+      <div style="font-size:12.5px;color:#6b7684;">{{ cert.signatory_title }}</div>
+      <div style="font-size:12.5px;color:#6b7684;">{{ firm_address }}</div>
+      <div style="font-size:13px;margin-top:3px;">Date: {{ long_date(cert.certificate_date) if cert.certificate_date else '______________________' }}</div>
+      {% if signed %}<div style="font-size:11.5px;color:#6b7684;">Signed electronically by the Managing Partner on {{ (cert.mp_signed_at|cat).strftime('%d %b %Y') }}</div>{% endif %}
+    </div>
+
+    {% if sources %}
+    <h3 style="font-family:Georgia,serif;color:#0f2942;font-size:15px;border-bottom:2px solid #b8934a;padding-bottom:3px;margin:22px 0 8px;">Sources</h3>
+    {% if cert.sources_heading %}<div style="font-size:12.5px;color:#6b7684;">{{ cert.sources_heading }}</div>{% endif %}
+    <ul style="font-size:12.5px;padding-left:20px;margin:4px 0;">{% for title, url in sources %}<li>{% if url %}<a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ title }}</a>{% else %}{{ title }}{% endif %}</li>{% endfor %}</ul>
+    {% endif %}
+  </div>
+</div>
+
+{% if is_senior and not signed and not cert.mp_signed_at %}
+<form method="post" action="{{ url_for('valuations.delete_certificate', cert_id=cert.id) }}" style="margin-top:12px;" onsubmit="return confirm('Delete this certificate?');"><button type="submit" class="btn small secondary">Delete certificate</button></form>
+{% endif %}
+{% endblock %}

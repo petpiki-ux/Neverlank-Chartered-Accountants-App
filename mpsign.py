@@ -11,7 +11,7 @@ from flask_login import current_user, login_required
 
 import brand_docs
 from extensions import db
-from models import ClientAdvance, CreditNote, Invoice, Quotation, Receipt, WorkpaperNarrative, ZimraReply
+from models import ClientAdvance, CreditNote, Invoice, Quotation, Receipt, ValuationCertificate, WorkpaperNarrative, ZimraReply
 
 mpsign_bp = Blueprint("mpsign", __name__, url_prefix="/sign")
 
@@ -23,6 +23,7 @@ KINDS = {
     "receipt": (Receipt, "receipt", lambda d: url_for("receipts.view_receipt", receipt_id=d.id)),
     "advance": (ClientAdvance, "advance receipt", lambda d: url_for("advances.view_advance", advance_id=d.id)),
     "zimra_reply": (ZimraReply, "letter", lambda d: url_for("zimra.view_reply", reply_id=d.id)),
+    "valuation": (ValuationCertificate, "valuation certificate", lambda d: url_for("valuations.view_certificate", cert_id=d.id)),
     "report_to_management": (WorkpaperNarrative, "Report to Management letter",
                              lambda d: url_for("engagements.view_engagement", engagement_id=d.engagement_id, tab="finalisation")),
 }
@@ -39,6 +40,15 @@ def can_sign(doc):
         return False, "A voided document cannot be signed."
     if type(doc).__name__ == "ZimraReply" and not brand_docs.is_managing_partner(doc.signatory):
         return False, "This letter is signed by someone other than the Managing Partner. Change 'Signed by' to the Managing Partner first."
+    if type(doc).__name__ == "ValuationCertificate":
+        import valuation_docs
+        if not brand_docs.is_managing_partner(doc.signatory_name):
+            return False, "This certificate is signed by someone other than the Managing Partner. Change 'Signed by' to the Managing Partner first."
+        if valuation_docs.figures_problems(doc):
+            return False, "The figures need attention first: " + " ".join(valuation_docs.figures_problems(doc))
+        left = valuation_docs.unresolved(doc)
+        if left:
+            return False, f"{len(left)} [CONFIRM: ...] placeholder(s) are still in the certificate. Complete them first."
     if type(doc).__name__ == "WorkpaperNarrative" and doc.kind != "report_to_management":
         return False, "Only the Report to Management letter carries the signature."
     if not brand_docs.signature_bytes():

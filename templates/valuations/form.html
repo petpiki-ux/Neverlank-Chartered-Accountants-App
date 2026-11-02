@@ -1,0 +1,92 @@
+{% extends "base.html" %}
+{% set editing = cert.id is not none %}
+{% block title %}{{ 'Edit' if editing else 'New' }} valuation certificate - {{ firm_name }}{% endblock %}
+{% macro num(x) %}{% if x is not none %}{{ x|int if x == x|int else x }}{% endif %}{% endmacro %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ 'Edit' if editing else 'New' }} valuation certificate</h1>
+    <div class="subtitle">{% if template_key %}Starting from: {{ templates[template_key][0] }}{% else %}{{ cert.reference }}{% endif %}</div>
+  </div>
+  <div>{% if editing %}<a href="{{ url_for('valuations.view_certificate', cert_id=cert.id) }}" class="btn secondary">Cancel</a>{% else %}<a href="{{ url_for('valuations.list_certificates') }}" class="btn secondary">Cancel</a>{% endif %}</div>
+</div>
+{% if error %}<div class="flash danger">{{ error }}</div>{% endif %}
+{% if editing and mp_signed(cert) %}<div class="flash" style="background:#fff7e0;border-left:4px solid #b8923a;color:#5a4410;">This certificate is signed. If you change the figures or the wording, the Managing Partner's signature is dropped until it is signed again.</div>{% endif %}
+{% if left %}<div class="flash" style="background:#fff7e0;border-left:4px solid #b8923a;color:#5a4410;"><strong>{{ left|length }} placeholder(s) to complete.</strong> Replace each <code>[CONFIRM: ...]</code> with the facts. The certificate cannot be signed while any remain.</div>{% endif %}
+
+<form method="post" action="{{ url_for('valuations.edit_certificate', cert_id=cert.id) if editing else url_for('valuations.new_certificate', template=template_key) }}">
+  <div class="card">
+    <h3 class="mt-0">Certificate</h3>
+    <div class="form-row">
+      <div><label for="reference">Reference *</label><input id="reference" name="reference" value="{{ cert.reference or '' }}" required maxlength="60"></div>
+      <div><label for="certificate_title">Title</label><input id="certificate_title" name="certificate_title" value="{{ cert.certificate_title or '' }}" maxlength="200"></div>
+      <div><label for="valuation_date">Valuation date *</label><input type="date" id="valuation_date" name="valuation_date" value="{{ cert.valuation_date.isoformat() if cert.valuation_date else '' }}" required></div>
+      <div><label for="certificate_date">Date of certificate</label><input type="date" id="certificate_date" name="certificate_date" value="{{ cert.certificate_date.isoformat() if cert.certificate_date else '' }}"></div>
+    </div>
+    <div class="form-row">
+      <div style="flex:2;"><label for="client_name">Client / title holder (as printed) *</label><input id="client_name" name="client_name" value="{{ cert.client_name or '' }}" required maxlength="200"></div>
+      <div><label for="client_id">Link to a client record <span class="muted" style="font-weight:normal;">(optional)</span></label>
+        <select id="client_id" name="client_id"><option value="">None</option>{% for c in clients %}<option value="{{ c.id }}" {% if cert.client_id == c.id %}selected{% endif %}>{{ c.name }}</option>{% endfor %}</select></div>
+    </div>
+    <label for="intro">Opening paragraph</label>
+    <textarea id="intro" name="intro" rows="3">{{ cert.intro or '' }}</textarea>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Certificate particulars</h3>
+    <label for="subject_asset">Subject asset</label><textarea id="subject_asset" name="subject_asset" rows="2">{{ cert.subject_asset or '' }}</textarea>
+    <label for="title_reference">Title reference</label><textarea id="title_reference" name="title_reference" rows="2">{{ cert.title_reference or '' }}</textarea>
+    <label for="asset_stage">Asset stage</label><textarea id="asset_stage" name="asset_stage" rows="2">{{ cert.asset_stage or '' }}</textarea>
+    <div class="form-row">
+      <div><label for="purpose">Purpose</label><input id="purpose" name="purpose" value="{{ cert.purpose or '' }}"></div>
+      <div><label for="asset_noun">The asset is called <span class="muted" style="font-weight:normal;">(in "the value of the ___")</span></label><input id="asset_noun" name="asset_noun" value="{{ cert.asset_noun or '' }}" maxlength="60"></div>
+    </div>
+    <label for="basis_of_value">Basis of value</label><textarea id="basis_of_value" name="basis_of_value" rows="2">{{ cert.basis_of_value or '' }}</textarea>
+    <label for="valuation_type">Type of valuation</label><textarea id="valuation_type" name="valuation_type" rows="2">{{ cert.valuation_type or '' }}</textarea>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Valuation conclusion</h3>
+    <p class="muted" style="margin-top:0;font-size:12.5px;">Type the three figures in whole units. The conclusion sentence, the amount in words, the table and the per-hectare values are worked out from them.</p>
+    <div class="form-row">
+      <div><label for="currency">Currency</label><select id="currency" name="currency">{% for c in currencies %}<option value="{{ c }}" {% if cert.currency == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+      <div><label for="low_value">Low</label><input id="low_value" name="low_value" inputmode="decimal" value="{{ num(cert.low_value) }}"></div>
+      <div><label for="adopted_value">Adopted *</label><input id="adopted_value" name="adopted_value" inputmode="decimal" value="{{ num(cert.adopted_value) }}" required></div>
+      <div><label for="high_value">High</label><input id="high_value" name="high_value" inputmode="decimal" value="{{ num(cert.high_value) }}"></div>
+      <div><label for="area_ha">Area, hectares <span class="muted" style="font-weight:normal;">(for a per-hectare column)</span></label><input id="area_ha" name="area_ha" inputmode="decimal" value="{{ num(cert.area_ha) }}"></div>
+    </div>
+    <label for="range_note">Note under the table</label><textarea id="range_note" name="range_note" rows="3">{{ cert.range_note or '' }}</textarea>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Basis and approach</h3>
+    <p class="muted" style="margin-top:0;font-size:12.5px;">Separate paragraphs with a blank line. Start a paragraph with <code>**Comparable.**</code> to give it a bold lead-in.</p>
+    <textarea id="approach" name="approach" rows="14">{{ cert.approach or '' }}</textarea>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Assumptions and limiting conditions</h3>
+    <p class="muted" style="margin-top:0;font-size:12.5px;">An opening sentence, a blank line, then one condition per line starting with <code>- </code> (for example <code>- **Title.** text</code>).</p>
+    <textarea id="assumptions" name="assumptions" rows="14">{{ cert.assumptions or '' }}</textarea>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Certification and signature</h3>
+    <label for="certification">Certification wording</label><textarea id="certification" name="certification" rows="4">{{ cert.certification or '' }}</textarea>
+    <div class="form-row">
+      <div><label for="signatory_name">Signed by (name and credentials)</label><input id="signatory_name" name="signatory_name" value="{{ cert.signatory_name or '' }}"></div>
+      <div><label for="signatory_title">Title</label><input id="signatory_title" name="signatory_title" value="{{ cert.signatory_title or '' }}"></div>
+    </div>
+    <p class="muted" style="font-size:12px;margin:4px 0 0;">The Managing Partner's signature image is only placed on a certificate signed by the Managing Partner, after the Admin presses <em>Sign as Managing Partner</em>.</p>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Sources <span class="muted" style="font-weight:normal;font-size:12px;">(optional)</span></h3>
+    <label for="sources_heading">Heading line</label><input id="sources_heading" name="sources_heading" value="{{ cert.sources_heading or '' }}">
+    <label for="sources">One per line: <code>- [Title](https://link)</code></label>
+    <textarea id="sources" name="sources" rows="6">{{ cert.sources or '' }}</textarea>
+  </div>
+
+  <button type="submit" class="btn gold">{{ 'Save changes' if editing else 'Save certificate' }}</button>
+</form>
+{% endblock %}

@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}New valuation certificate - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>New valuation certificate</h1>
+    <div class="subtitle">Choose a starting point. Everything can be changed before the certificate is signed.</div>
+  </div>
+  <div><a href="{{ url_for('valuations.list_certificates') }}" class="btn secondary">Back to valuations</a></div>
+</div>
+<div class="card">
+  {% for key, t in templates.items() %}
+  <div style="display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 0;{% if not loop.first %}border-top:1px solid #e3e8ee;{% endif %}">
+    <div><strong>{{ t[0] }}</strong>
+      <span class="muted" style="display:block;font-size:12px;">{% if key == 'desktop' %}Particulars, the Low / Adopted / High table with per-hectare values, the market-approach reasoning, assumptions, certification and sources - ready to review.{% else %}The same layout with the standard closing wording; the particulars, figures and reasoning are left to complete.{% endif %}</span></div>
+    <a href="{{ url_for('valuations.new_certificate', template=key) }}" class="btn gold">Use this</a>
+  </div>
+  {% endfor %}
+</div>
+{% endblock %}

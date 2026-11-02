@@ -778,6 +778,7 @@ def create_app():
     from attendance import attendance_bp
     from invoice_send import invoice_send_bp, public_invoice_bp
     from zimra import zimra_bp
+    from valuations import valuations_bp
     from finance import analytics_bp, expenses_bp
     from supplier_views import suppliers_bp
     from regulatory_notices import regulatory_notices_bp
@@ -827,6 +828,7 @@ def create_app():
     app.register_blueprint(invoice_send_bp)
     app.register_blueprint(public_invoice_bp)
     app.register_blueprint(zimra_bp)
+    app.register_blueprint(valuations_bp)
     app.register_blueprint(analytics_bp)
     app.register_blueprint(expenses_bp)
     app.register_blueprint(suppliers_bp)

@@ -11820,3 +11820,45 @@ class ScanText(db.Model):
     @property
     def from_picture(self):
         return self.method in ("tesseract", "claude")
+
+
+class ValuationCertificate(MPSignedMixin, db.Model):
+    """A valuation certificate issued by the firm (desktop valuation of a mining claim, a business, a property...). The figures (low,
+    adopted, high) and the wording are kept here; valuation_docs.py lays them out on the firm letterhead as Word / PDF, and the Managing
+    Partner signs it with the same 'Sign as Managing Partner' step as every other document (mpsign.py). Changing the figures or the wording
+    after signing drops the signature until it is signed again (brand_docs.content_key)."""
+    __tablename__ = "valuation_certificate"
+    id = db.Column(db.Integer, primary_key=True)
+    reference = db.Column(db.String(60), nullable=False, unique=True)   # NCA/DVC/2026/001
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"))        # optional link; client_name is what is printed
+    client_name = db.Column(db.String(200), nullable=False, default="")
+    certificate_title = db.Column(db.String(200), nullable=False, default="Desktop Valuation Certificate")
+    certificate_date = db.Column(db.Date)
+    valuation_date = db.Column(db.Date)
+    intro = db.Column(db.Text)
+    subject_asset = db.Column(db.Text)
+    title_reference = db.Column(db.Text)
+    asset_stage = db.Column(db.Text)
+    purpose = db.Column(db.Text)
+    basis_of_value = db.Column(db.Text)
+    valuation_type = db.Column(db.Text)
+    currency = db.Column(db.String(3), nullable=False, default="USD")    # USD | ZWG
+    area_ha = db.Column(db.Float)                                         # when set, a per-hectare column is shown
+    low_value = db.Column(db.Float)
+    adopted_value = db.Column(db.Float)
+    high_value = db.Column(db.Float)
+    asset_noun = db.Column(db.String(60), default="claim")               # "claim" in "the value of the claim at ..."
+    range_note = db.Column(db.Text)
+    approach = db.Column(db.Text)        # paragraphs separated by a blank line; "**Lead-in.** text"
+    assumptions = db.Column(db.Text)     # one per line, starting "- "; "**Lead-in.** text"
+    certification = db.Column(db.Text)
+    signatory_name = db.Column(db.String(200))
+    signatory_title = db.Column(db.String(200))
+    sources_heading = db.Column(db.String(300))
+    sources = db.Column(db.Text)         # one per line, "- [Title](https://...)"
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    client = db.relationship("Client", foreign_keys=[client_id])
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
