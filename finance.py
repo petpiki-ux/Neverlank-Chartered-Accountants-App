@@ -252,16 +252,11 @@ def list_expenses():
         except (ValueError, IndexError):
             month = ""
     expenses = q.order_by(Expense.expense_date.desc(), Expense.id.desc()).all()
-    import firm_payroll
-    flags = firm_payroll.expense_flags()
-    pay_tags = {i: firm_payroll.FLAG_TAGS[f] for i, f in flags.items()}      # bills the payroll carries: a payment of a liability, not an expense
     totals = {}
     for e in expenses:
-        if e.id in pay_tags:
-            continue
         totals[e.currency] = totals.get(e.currency, 0.0) + (e.amount or 0)
     return render_template(
-        "expenses/list.html", expenses=expenses, totals=totals, money=fmt_money, pay_tags=pay_tags,
+        "expenses/list.html", expenses=expenses, totals=totals, money=fmt_money,
         f_currency=currency, f_category=category, f_status=status, f_month=month, today=date.today(),
         categories=all_categories, statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
     )
