@@ -90,6 +90,25 @@
 </div>
 {% endif %}
 
+{% if ledger %}
+<div class="card">
+  <h2 style="margin-top:0;font-size:16px;">In Firm Financials</h2>
+  {% if ledger.posted %}
+  <p class="muted" style="font-size:12px;">This finalized period is in the firm's ledger and financial statements, dated {{ ledger.date.strftime('%d %b %Y') }}. Totals only - no names or individual pay. Pay what is owed from Firm Finance &gt; Cash Book using the headings <em>Salaries paid</em>, <em>PAYE and other taxes paid</em> and <em>NSSA contributions paid</em>; each clears the matching amount owed.</p>
+  <table style="max-width:560px;font-size:13px;">
+    <thead><tr><th>Account</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead>
+    <tbody>{% for name, dr, cr in ledger.legs %}<tr><td>{{ name }}</td><td class="text-right">{% if dr %}{{ '%.2f'|format(dr) }}{% endif %}</td><td class="text-right">{% if cr %}{{ '%.2f'|format(cr) }}{% endif %}</td></tr>{% endfor %}</tbody>
+  </table>
+  <p class="muted" style="font-size:11.5px;">Amounts in {{ period.currency }}. The employer's medical aid share is already in gross pay; the medical aid bills posted below clear "Other payroll deductions payable" rather than being a second expense.</p>
+  {% if ledger.net_diff %}<p class="flash warning">The payslips' net pay differs from gross pay less deductions (a net pay was typed by hand). The ledger uses gross less deductions ({{ period.currency }} {{ '%.2f'|format(ledger.row.net) }}).</p>{% endif %}
+  {% elif not ledger.finalized %}
+  <p class="muted" style="font-size:12px;">Not in Firm Financials yet: the period posts to the firm's ledger and statements when it is finalized, and comes out again if it is reopened.</p>
+  {% else %}
+  <p class="muted" style="font-size:12px;">This period is not posted to Firm Financials{% if ledger.from %}: it is dated before the start date set in <a href="{{ url_for('payroll.tax_settings') }}">Payroll Tax Settings</a> ({{ ledger.from.strftime('%d %b %Y') }}){% else %}: it has no pay date or period end{% endif %}.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {% if med %}
 <div class="card">
   <h2 style="margin-top:0;font-size:16px;">Medical aid due to the society</h2>

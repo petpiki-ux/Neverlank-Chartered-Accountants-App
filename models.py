@@ -10504,6 +10504,9 @@ class PayrollTaxSettings(db.Model):
     # payroll_calc.calculate_payslip for exactly where it's computed.
     apwcs_pct = db.Column(db.Float, default=1.25)
     medical_aid_supplier_id = db.Column(db.Integer)   # the medical aid society (a Supplier) the payroll medical aid bills are posted to
+    # Finalized internal periods dated before this day are NOT posted to the firm's books (firm_payroll.py). Blank = the link starts with the
+    # earliest finalized period.
+    ledger_from = db.Column(db.Date)
     source_notes = db.Column(db.Text)
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     updated_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -11460,7 +11463,7 @@ class FirmBalanceLine(db.Model):
 CASH_ACCOUNT_KINDS = ["Bank", "Cash", "Mobile money"]
 CASH_ENTRY_CATEGORIES = [
     "Owner / shareholder contribution", "Loan received", "Loan repayment", "Dividend paid", "Interest received",
-    "Bank charges", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Salaries paid",
+    "Bank charges", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Salaries paid", "NSSA contributions paid",
     "Other receipt", "Other payment", "QPD (provisional tax) paid",
 ]
 CASH_TRANSFER_CATEGORY = "Transfer between accounts"

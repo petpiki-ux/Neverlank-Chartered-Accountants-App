@@ -202,13 +202,15 @@ def derive_period(period_start, period_end, zwg_rate):
         "receivables": 0.0, "payables": 0.0, "advances": 0.0, "supplier_advances": 0.0, "vat_in_receivables": 0.0, "vat_charged": 0.0,
         "ageing": [0.0] * len(analytics.AGEING_BUCKETS), "warnings": [], "zwg_rate": zwg_rate,
     }
+    import firm_payroll
+    pay_medical = firm_payroll.linked_medical()      # medical aid bills posted from payroll: not a second expense (see firm_payroll.py)
     for cur in INVOICE_CURRENCIES:
         inv = analytics._invoice_rows(cur)
         exp = analytics._expense_rows(cur)
         revenue = analytics._sum(inv, "net", period_start, period_end, "issue")
         owed_rows = analytics.outstanding_at(inv, period_end)
         unpaid = [dict(e, amount=analytics.exp_owed_on(e, period_end)) for e in exp if analytics.exp_owed_on(e, period_end) > 0]
-        spend = [e for e in exp if period_start <= e["date"] <= period_end]
+        spend = [e for e in exp if period_start <= e["date"] <= period_end and e["id"] not in pay_medical]
         advances = analytics.advances_held(cur, period_end)
         supp_adv = analytics.supplier_advances_held(cur, period_end)
         activity = any(abs(x) > 0.004 for x in (
@@ -350,6 +352,13 @@ def build_column(ye, prev_end, classes, assets, prev_col=None):
         if code == "retained_earnings":
             re_entered = True
         add(code, name, usd)
+
+    # The firm's own finalized staff payroll: salaries and employer contributions as expenses, and what is still owed on them
+    import firm_payroll
+    p_items, w_p, _med = firm_payroll.statement_items(start, end, rate)
+    warnings.extend(w_p)
+    for code, name, amount in p_items:
+        add(code, name, amount)
 
     # Posted manual journals (Firm Finance > Ledger) add to the statements through the accounts' statement lines
     import firm_ledger

@@ -12,6 +12,7 @@ Two kinds of entry make the ledger
     advance applied           Dr Customer advances        Cr Trade receivables
     expense bill              Dr Expense (by category)    Cr Trade payables
     expense paid              Dr Trade payables           Cr Bank
+    finalized staff payroll   Dr Salaries and employer NSSA/APWCS  Cr PAYE, NSSA, deductions and net salaries payable (firm_payroll.py)
     cash book entries         Dr/Cr Bank against tax payable, VAT control, a transfer clearing account or "to be allocated"
     depreciation, disposals   Dr Depreciation / Cr Accumulated depreciation; disposals clear cost and depreciation
     income tax and deferred   Dr Tax expense Cr Tax payable / Deferred tax (from the Tax pages)
@@ -41,6 +42,7 @@ from models import (
 import analytics
 import cashbook
 import financials
+import firm_payroll
 
 CAT = {c[0]: c for c in financials.FS_CATEGORIES if c[0] != "excluded"}
 EXCLUDED = "excluded"
@@ -78,6 +80,10 @@ STARTER_CHART = [
     ("2030", "VAT payable (per VAT return)", "Liability", "other_current_liabilities", None, None),
     ("2040", "PAYE and other statutory deductions payable", "Liability", "other_current_liabilities", None, None),
     ("2050", "Other payables", "Liability", "other_current_liabilities", None, None),
+    ("2041", "PAYE and AIDS levy payable (payroll)", "Liability", "other_current_liabilities", "PAY_ZIMRA", "Owed to ZIMRA from the finalized staff payroll. Posted by the app; the Cash Book heading 'PAYE and other taxes paid' clears it."),
+    ("2042", "NSSA contributions payable (payroll)", "Liability", "other_current_liabilities", "PAY_NSSA", "Employees' and employer's NSSA and APWCS owed to NSSA from the finalized staff payroll. Posted by the app; the Cash Book heading 'NSSA contributions paid' clears it."),
+    ("2043", "Net salaries payable (payroll)", "Liability", "other_current_liabilities", "PAY_NET", "Net pay owed to staff from the finalized staff payroll. Posted by the app; the Cash Book heading 'Salaries paid' clears it."),
+    ("2044", "Other payroll deductions payable", "Liability", "other_current_liabilities", "PAY_DED", "Deductions taken off staff pay (medical aid, advances, union dues ...). Posted by the app; the medical aid bills posted from payroll clear it."),
     ("2100", "Bank overdraft and short-term loans", "Liability", "short_term_borrowings", None, None),
     ("2150", "Short-term provisions", "Liability", "short_term_provisions", None, None),
     ("2200", "Income tax payable", "Liability", "current_tax_payable", "TAX_PAY", "Posted by the app from the Tax pages and the cash book (a debit balance is shown as tax prepaid)."),
@@ -99,6 +105,8 @@ STARTER_CHART = [
     ("5900", "Expenses - category not in the chart", "Expense", "admin_expenses", "EXP_OTHER", "Where an expense whose category has no account of its own is posted."),
     ("6100", "Distribution costs", "Expense", "distribution_costs", None, None),
     ("6200", "Provision for doubtful debts", "Expense", "admin_expenses", None, None),
+    ("6300", "Salaries and wages", "Expense", "admin_expenses", "PAY_SAL", "Gross pay from the finalized staff payroll. Posted by the app."),
+    ("6310", "Employer NSSA and APWCS contributions", "Expense", "admin_expenses", "PAY_ER", "The employer's own NSSA and APWCS cost from the finalized staff payroll. Posted by the app."),
     ("6900", "Depreciation", "Expense", "depreciation_amortisation", "DEPR", "Posted by the app from the Asset register."),
     ("6910", "Amortisation of intangible assets", "Expense", "depreciation_amortisation", None, None),
     ("6960", "Other expenses", "Expense", "other_expenses", None, None),
@@ -119,7 +127,7 @@ STARTER_CHART = [
 ]
 SYSTEM_KEYS = {row[4] for row in STARTER_CHART if row[4]}
 # Accounts the statements derive themselves: a journal to one of these is a deliberate adjustment, so it carries a warning.
-CONTROL_KEYS = {"AR", "AP", "ADV", "SUPP_ADV", "PPE_COST", "PPE_ACCDEP", "DEPR", "VAT_CTRL"}
+CONTROL_KEYS = {"AR", "AP", "ADV", "SUPP_ADV", "PPE_COST", "PPE_ACCDEP", "DEPR", "VAT_CTRL", "PAY_SAL", "PAY_ER", "PAY_ZIMRA", "PAY_NSSA", "PAY_NET", "PAY_DED"}
 # Accounts only the app may post to (their statement figure is calculated, or one account feeds two statement lines).
 JOURNAL_REFUSED_KEYS = {"TAX_PAY", "TAX_EXP_CUR", "TAX_EXP_DEF", "DTL", "DTA", "DISP_GL"}
 SUSPENSE_KEYS = ("SUSP_OPEN", "SUSP_CASH", "SUSP_ASSET", "CLR_TRANSFER", "VAT_CTRL")
@@ -585,6 +593,29 @@ def build_ledger(year_ends=None, include_journals=True):
         L.post(rc.paid_on, "Advance applied", rc.receipt_number, f"{inv.client.name if inv.client else 'Client'} - advance applied to invoice {inv.invoice_number}",
                [("ADV", amt, 0, "advance used"), ("AR", 0, amt, "invoice paid")], link=("invoicing.view_invoice", {"invoice_id": inv.id}))
 
+    # ---------------- staff payroll (finalized internal periods) and the medical aid bills posted from them
+    pay_rows = firm_payroll.periods()
+    pay_start = firm_payroll.link_start(pay_rows)
+    pay_medical = firm_payroll.linked_medical(pay_rows)
+    for r in pay_rows:
+        cur = r["currency"]
+        if cur not in INVOICE_CURRENCIES:
+            L.warnings.append(f"Payroll period '{r['name']}' is in {cur}, which the ledger does not handle, so it was left out.")
+            continue
+        usd = lambda v: L.usd(v, cur, r["date"], "payroll periods")
+        gross, paye, nssa_ee, nssa_er, apwcs, ded = (usd(r[k]) for k in ("gross", "paye_aids", "nssa_ee", "nssa_er", "apwcs", "ded"))
+        if None in (gross, paye, nssa_ee, nssa_er, apwcs, ded):
+            continue
+        net = r2(gross - paye - nssa_ee - ded)
+        L.post(r["date"], "Payroll", f"PAY-{r['id']}", f"Staff payroll - {r['name']}",
+               [("PAY_SAL", gross, 0, "gross pay"), ("PAY_ER", nssa_er + apwcs, 0, "employer NSSA and APWCS"),
+                ("PAY_ZIMRA", 0, paye, "PAYE and AIDS levy"), ("PAY_NSSA", 0, nssa_ee + nssa_er + apwcs, "NSSA (employees, employer, APWCS)"),
+                ("PAY_DED", 0, ded, "deductions from pay"), ("PAY_NET", 0, net, "net pay to staff")],
+               meta={"kind": "payroll", "period": r["id"]})
+    for name, stored, calc in firm_payroll.net_pay_differences():
+        L.warnings.append(f"Payroll period '{name}': the payslips' net pay ({stored:,.2f}) is not gross pay less deductions ({calc:,.2f}); the ledger uses {calc:,.2f}.")
+    L.warnings.extend(firm_payroll.overlap_warnings(pay_start))
+
     # ---------------- expense bills
     for cur in INVOICE_CURRENCIES:
         for e in exp_rows[cur]:
@@ -592,8 +623,11 @@ def build_ledger(year_ends=None, include_journals=True):
             if amt is None:
                 continue
             key = f"EXP:{e['category']}"
+            debit = (key if L.account(key) else "EXP_OTHER")
+            if e["id"] in pay_medical:
+                debit = "PAY_DED"        # the cost is already in the payroll: this bill moves what was deducted from pay to the society's account
             L.post(e["date"], "Expense bill", f"EXP-{e['id']}", f"{e['supplier']} - {e['category']}",
-                   [(key if L.account(key) else "EXP_OTHER", amt, 0, e["description"][:120]), ("AP", 0, amt, e["supplier"])],
+                   [(debit, amt, 0, e["description"][:120]), ("AP", 0, amt, e["supplier"])],
                    link=("expenses.edit_expense", {"expense_id": e["id"]}))
 
     # ---------------- bills settled from an advance paid earlier (no cash moves now)
@@ -643,7 +677,10 @@ def build_ledger(year_ends=None, include_journals=True):
             contra = "SUPP_ADV"
         else:
             cat = t.get("category") or ""
-            if cat == CASH_TRANSFER_CATEGORY:
+            pay_key = firm_payroll.cash_key(cat, t["date"], pay_start) if src == "Entry" else None
+            if pay_key:
+                contra = pay_key
+            elif cat == CASH_TRANSFER_CATEGORY:
                 contra = "CLR_TRANSFER"
             elif cat in ("QPD (provisional tax) paid", "Income tax paid"):
                 contra = "TAX_PAY" if in_tax_window(t["date"]) else "SUSP_CASH"

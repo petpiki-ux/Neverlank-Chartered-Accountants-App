@@ -52,6 +52,13 @@
       remittance.
     </p>
 
+    <label for="ledger_from">Firm Financials: start posting payroll from (optional)</label>
+    <input type="date" id="ledger_from" name="ledger_from" value="{{ settings.ledger_from.isoformat() if settings.ledger_from else '' }}">
+    <p class="muted" style="font-size:11px;margin-top:4px;">
+      Neverlank's own finalized pay periods post to Firm Financials (salaries and employer NSSA/APWCS as expenses, PAYE, NSSA and net pay as amounts owed).
+      Leave blank to start with the earliest finalized period. Fill it in to leave out earlier periods whose salaries you have already recorded another way.
+    </p>
+
     <label for="source_notes">Source / notes (where these rates came from, and when they were last checked)</label>
     <textarea id="source_notes" name="source_notes" rows="3">{{ settings.source_notes }}</textarea>
 

@@ -19,10 +19,11 @@ import firm_statements as fs
 
 BACK_PREFIX = "/firm-finance/cash-book"
 
-# Headings offered for NEW manual entries. Bank charges and salaries are expense categories now (they are filed in the
-# Expense register), so they are not offered here again; entries already saved under them keep working.
+# Headings offered for NEW manual entries. Bank charges are an expense category (filed in the Expense register), so they are not offered
+# here again; entries already saved under them keep working. Salaries paid, PAYE and NSSA are the three headings that pay off what the
+# firm's own finalized payroll owes (firm_payroll.py): the expense itself comes from the payroll, not from the payment.
 CASH_IN_CATEGORIES = ["Owner / shareholder contribution", "Loan received", "Interest received", "Other receipt"]
-CASH_OUT_CATEGORIES = ["Loan repayment", "Dividend paid", "QPD (provisional tax) paid", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Other payment"]
+CASH_OUT_CATEGORIES = ["Loan repayment", "Dividend paid", "QPD (provisional tax) paid", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Salaries paid", "NSSA contributions paid", "Other payment"]
 NEW_CATEGORY = "__new__"
 
 

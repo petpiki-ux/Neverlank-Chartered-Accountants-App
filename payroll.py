@@ -179,6 +179,7 @@ def tax_settings():
         ceiling = request.form.get("nssa_insurable_ceiling", "").strip()
         settings.nssa_insurable_ceiling = _parse_float(ceiling) if ceiling else None
         settings.apwcs_pct = _parse_float(request.form.get("apwcs_pct"), settings.apwcs_pct or 0.0)
+        settings.ledger_from = _parse_date(request.form.get("ledger_from"))
         settings.source_notes = request.form.get("source_notes", "").strip()
         settings.updated_by_id = current_user.id
         settings.updated_at = datetime.utcnow()
@@ -452,7 +453,14 @@ def view_period(period_id):
         sup_default = pm.default_supplier()
         med = {"tot": pm.medical_lines(period), "posted": pm.posted_bills(period), "stale": pm.out_of_date(period), "supplier": sup_default,
                "suppliers": Supplier.query.order_by(Supplier.name).all(), "can_post": user_has_permission(current_user, "view_firm_finances")}
-    return render_template("payroll/period_detail.html", period=period, pending_employees=pending_employees, med=med)
+    ledger = None
+    if period.scope == "internal" and period.payslips:
+        import firm_payroll
+        row = firm_payroll.row_for(period)
+        ledger = {"posted": row is not None, "date": firm_payroll.period_date(period), "legs": firm_payroll.posting_preview(row) if row else [],
+                  "from": firm_payroll.ledger_from(), "finalized": period.status == "Finalized",
+                  "net_diff": bool(row and abs(row["net_stored"] - row["net"]) >= 0.01), "row": row}
+    return render_template("payroll/period_detail.html", period=period, pending_employees=pending_employees, med=med, ledger=ledger)
 
 
 @payroll_bp.route("/periods/<int:period_id>/medical-aid/post", methods=["POST"])
