@@ -20,10 +20,10 @@ import firm_statements as fs
 BACK_PREFIX = "/firm-finance/cash-book"
 
 # Headings offered for NEW manual entries. Bank charges are an expense category (filed in the Expense register), so they are not offered
-# here again; entries already saved under them keep working. Salaries paid, PAYE and NSSA are the three headings that pay off what the
+# here again; entries already saved under them keep working. Salaries paid, PAYE, NSSA and Medical aid and other deductions paid are the four headings that pay off what the
 # firm's own finalized payroll owes (firm_payroll.py): the expense itself comes from the payroll, not from the payment.
 CASH_IN_CATEGORIES = ["Owner / shareholder contribution", "Loan received", "Interest received", "Other receipt"]
-CASH_OUT_CATEGORIES = ["Loan repayment", "Dividend paid", "QPD (provisional tax) paid", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Salaries paid", "NSSA contributions paid", "Other payment"]
+CASH_OUT_CATEGORIES = ["Loan repayment", "Dividend paid", "QPD (provisional tax) paid", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Salaries paid", "NSSA contributions paid", "Medical aid and other deductions paid", "Other payment"]
 NEW_CATEGORY = "__new__"
 
 
@@ -74,8 +74,10 @@ def cash_book():
     rows, totals = cashbook.summary(accounts, txns, start, end)
     un = cashbook.unassigned(txns)
     moves = {a.source_key for a in CashAssign.query.all()}
+    import firm_payroll
+    pay_notes = firm_payroll.cash_line_notes()
     return render_template(
-        "firmfs/cash_book.html", ye=None, active="cash", accounts=accounts, selected=selected, lg=lg, rec=rec,
+        "firmfs/cash_book.html", pay_notes=pay_notes, ye=None, active="cash", accounts=accounts, selected=selected, lg=lg, rec=rec,
         start=start, end=end, rows=rows, totals=totals, unassigned=un, periods=_periods(), moves=moves,
         stmt_date=stmt_date, stmt_balance=stmt_balance, today=today, label=_line_label,
         back=request.full_path.rstrip("?"),

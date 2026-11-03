@@ -11486,6 +11486,7 @@ CASH_ACCOUNT_KINDS = ["Bank", "Cash", "Mobile money"]
 CASH_ENTRY_CATEGORIES = [
     "Owner / shareholder contribution", "Loan received", "Loan repayment", "Dividend paid", "Interest received",
     "Bank charges", "Income tax paid", "VAT paid to ZIMRA", "PAYE and other taxes paid", "Salaries paid", "NSSA contributions paid",
+    "Medical aid and other deductions paid",
     "Other receipt", "Other payment", "QPD (provisional tax) paid",
 ]
 CASH_TRANSFER_CATEGORY = "Transfer between accounts"

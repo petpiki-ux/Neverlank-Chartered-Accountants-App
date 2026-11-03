@@ -15,12 +15,14 @@ For each finalized period, dated its pay date (else the period end):
 
 Only totals are posted (never a name or an individual's pay), because the ledger can be seen by people who may not see payslips.
 
-The payables are cleared by the Cash Book, with three headings for money out:
-    "Salaries paid"              -> Net salaries payable
-    "PAYE and other taxes paid"  -> PAYE and AIDS levy payable
-    "NSSA contributions paid"    -> NSSA contributions payable
-and the medical aid bills posted from a period (payroll_medical.py) clear Other payroll deductions payable instead of being a
-second expense: the employer's share is already in the gross pay, the employees' share is money taken off their pay.
+The payables are cleared by the Cash Book, with four headings for money out:
+    "Salaries paid"                          -> Net salaries payable
+    "PAYE and other taxes paid"              -> PAYE and AIDS levy payable
+    "NSSA contributions paid"                -> NSSA contributions payable
+    "Medical aid and other deductions paid"  -> Other payroll deductions payable
+and the medical aid bills posted from a period (payroll_medical.py), and medical aid bills filed in the Expense register from the
+link start, clear Other payroll deductions payable instead of being a second expense: the employer's share is already in the gross
+pay, the employees' share is money taken off their pay.
 
 The link starts with the earliest finalized period (or the date set in Payroll Tax Settings). A cash book entry or a period
 before that date is treated as before: nothing already in the books is changed unless it is dated from then on.
@@ -35,10 +37,12 @@ CENT = 0.005
 
 SAL, ER, ZIMRA, NSSA, DED, NET = "PAY_SAL", "PAY_ER", "PAY_ZIMRA", "PAY_NSSA", "PAY_DED", "PAY_NET"
 # cash book heading (money out) -> the payable it clears
-PAYMENT_HEADINGS = {"Salaries paid": NET, "PAYE and other taxes paid": ZIMRA, "NSSA contributions paid": NSSA}
+PAYMENT_HEADINGS = {"Salaries paid": NET, "PAYE and other taxes paid": ZIMRA, "NSSA contributions paid": NSSA,
+                    "Medical aid and other deductions paid": DED}
 PAYABLE_NAMES = {NET: "Net salaries payable", ZIMRA: "PAYE and AIDS levy payable", NSSA: "NSSA contributions payable",
                  DED: "Other payroll deductions payable"}
 SALARY_WORDS = ("salar", "wage", "payroll")
+MEDICAL_WORDS = ("medical aid", "medical scheme", "medical insurance")
 
 
 def r2(v):
@@ -96,9 +100,21 @@ def cash_key(category, day, start):
     return PAYMENT_HEADINGS.get(category)
 
 
+def medical_register_bills(start):
+    """{expense id: Expense} of medical aid bills filed by hand in the Expense register (category with 'medical aid', 'medical scheme' or
+    'medical insurance') dated from the link start, other than those posted from a payroll period. The payroll already carries the
+    cost (the employer's share is in gross pay, the employees' share was taken off pay), so paying the society settles Other payroll
+    deductions payable: it is not a second expense."""
+    if start is None:
+        return {}
+    return {e.id: e for e in Expense.query.filter(Expense.expense_date >= start).all()
+            if not (e.source_key or "").startswith("payroll_medical:") and any(w in (e.category or "").lower() for w in MEDICAL_WORDS)}
+
+
 def linked_medical(rows=None):
-    """{expense id: period id} of the medical aid bills posted from a period that is itself posted to the books. Their cost is not a
-    second expense: it clears Other payroll deductions payable."""
+    """{expense id: period id (None for a bill filed by hand)} of the medical aid bills whose cost the payroll already carries: those posted
+    from a period that is itself posted to the books, and medical aid bills filed in the Expense register from the link start. They are not
+    a second expense: each clears Other payroll deductions payable."""
     rows = periods() if rows is None else rows
     ids = {r["id"] for r in rows}
     out = {}
@@ -112,11 +128,13 @@ def linked_medical(rows=None):
             continue
         if pid in ids:
             out[e.id] = pid
+    for eid in medical_register_bills(link_start(rows)):
+        out.setdefault(eid, None)
     return out
 
 
 def payments(start):
-    """Cash book entries (money out) under the three payroll headings dated from the link start: [{date, heading, key, amount, currency}]."""
+    """Cash book entries (money out) under the four payroll headings dated from the link start: [{date, heading, key, amount, currency}]."""
     if start is None:
         return []
     out = []
@@ -138,15 +156,23 @@ def salary_bills(start):
 
 
 def overlap_warnings(start):
-    """A note (not an error) when Expense-register bills are being treated as salary payments."""
+    """Notes (not errors) when Expense-register bills are being treated as payments of what the payroll owes."""
+    out = []
     bills = salary_bills(start)
-    if not bills:
-        return []
-    cats = sorted({b.category for b in bills.values()})
-    total = sum(b.amount or 0.0 for b in bills.values())
-    return [f"{len(bills)} bill(s) in the Expense register under {', '.join(repr(c) for c in cats)} (total {total:,.2f}) are dated {start.strftime('%d %b %Y')} or later. "
-            "Salaries come from the finalized payroll, so these are not counted as a second expense: each is treated as a payment of net salaries and clears "
-            "'Net salaries payable'. Check that Net salaries payable is not left in debit; if a bill is not net pay, file it under another category."]
+    if bills:
+        cats = sorted({b.category for b in bills.values()})
+        total = sum(b.amount or 0.0 for b in bills.values())
+        out.append(f"{len(bills)} bill(s) in the Expense register under {', '.join(repr(c) for c in cats)} (total {total:,.2f}) are dated {start.strftime('%d %b %Y')} or later. "
+                   "Salaries come from the finalized payroll, so these are not counted as a second expense: each is treated as a payment of net salaries and clears "
+                   "'Net salaries payable'. Check that Net salaries payable is not left in debit; if a bill is not net pay, file it under another category.")
+    med = medical_register_bills(start)
+    if med:
+        cats = sorted({b.category for b in med.values()})
+        total = sum(b.amount or 0.0 for b in med.values())
+        out.append(f"{len(med)} medical aid bill(s) in the Expense register under {', '.join(repr(c) for c in cats)} (total {total:,.2f}) are dated {start.strftime('%d %b %Y')} or later. "
+                   "The medical aid is already in the payroll (the employer's share in gross pay, the employees' share taken off pay), so these are not counted as a second expense: "
+                   "each is treated as a payment of 'Other payroll deductions payable'. Check that account is not left in debit; if a bill is for something else, file it under another category.")
+    return out
 
 
 def factor(currency, rate):
@@ -236,3 +262,48 @@ def row_for(period):
         if r["id"] == period.id:
             return r
     return None
+
+
+def cash_line_notes():
+    """{cash book line key: (badge, note)} for payments of bills that are NOT an expense because the payroll carries the cost: salary bills
+    filed in the Expense register (they pay off Net salaries payable) and medical aid bills posted from payroll (they pay off Other payroll
+    deductions payable). The cash book shows these as payroll payments instead of expenses."""
+    from models import SupplierPayment
+    rows = periods()
+    salary = salary_bills(link_start(rows))
+    medical = linked_medical(rows)
+    out = {}
+    def mark(ids, badge, note):
+        for i in ids:
+            out[f"expense:{i}"] = (badge, note)
+        if ids:
+            for sp in SupplierPayment.query.filter(SupplierPayment.expense_id.in_(list(ids))).all():
+                out[f"supplierpay:{sp.id}"] = (badge, note)
+    mark(set(salary), "Salaries paid", f"Payroll payment - clears {PAYABLE_NAMES[NET]}; not an expense")
+    mark(set(medical), "Medical aid", f"Payroll payment - clears {PAYABLE_NAMES[DED]}; not an expense")
+    return out
+
+
+def expense_flags():
+    """{expense id: "salary" | "medical"} for bills that are NOT an expense because the payroll carries the cost."""
+    rows = periods()
+    out = {i: "medical" for i in linked_medical(rows)}
+    out.update({i: "salary" for i in salary_bills(link_start(rows))})
+    return out
+
+
+FLAG_TAGS = {"salary": ("Paid via payroll", f"Not an expense: a payment of {PAYABLE_NAMES[NET]}"),
+             "medical": ("Paid via payroll", f"Not a second expense: settles {PAYABLE_NAMES[DED]}")}
+
+
+def cost_rows(currency):
+    """The payroll's own cost as expense-shaped rows for the analytics (salaries and the employer's NSSA/APWCS), in `currency`."""
+    out = []
+    for r in periods():
+        if r["currency"] != currency:
+            continue
+        for cat, amt in (("Salaries and wages (payroll)", r["gross"]), ("Employer NSSA and APWCS (payroll)", r["employer_cost"])):
+            if abs(amt) >= CENT:
+                out.append({"id": None, "date": r["date"], "supplier": "Staff payroll", "category": cat, "amount": amt, "paid": r["date"],
+                            "due": r["date"], "description": r["name"], "settle": [], "payroll": "cost"})
+    return out

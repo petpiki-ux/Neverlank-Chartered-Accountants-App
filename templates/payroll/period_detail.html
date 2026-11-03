@@ -94,7 +94,7 @@
 <div class="card">
   <h2 style="margin-top:0;font-size:16px;">In Firm Financials</h2>
   {% if ledger.posted %}
-  <p class="muted" style="font-size:12px;">This finalized period is in the firm's ledger and financial statements, dated {{ ledger.date.strftime('%d %b %Y') }}. Totals only - no names or individual pay. Pay what is owed from Firm Finance &gt; Cash Book using the headings <em>Salaries paid</em>, <em>PAYE and other taxes paid</em> and <em>NSSA contributions paid</em>; each clears the matching amount owed.</p>
+  <p class="muted" style="font-size:12px;">This finalized period is in the firm's ledger and financial statements, dated {{ ledger.date.strftime('%d %b %Y') }}. Totals only - no names or individual pay. Pay what is owed from Firm Finance &gt; Cash Book using the headings <em>Salaries paid</em>, <em>PAYE and other taxes paid</em>, <em>NSSA contributions paid</em> and <em>Medical aid and other deductions paid</em>; each clears the matching amount owed.</p>
   <table style="max-width:560px;font-size:13px;">
     <thead><tr><th>Account</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead>
     <tbody>{% for name, dr, cr in ledger.legs %}<tr><td>{{ name }}</td><td class="text-right">{% if dr %}{{ '%.2f'|format(dr) }}{% endif %}</td><td class="text-right">{% if cr %}{{ '%.2f'|format(cr) }}{% endif %}</td></tr>{% endfor %}</tbody>
