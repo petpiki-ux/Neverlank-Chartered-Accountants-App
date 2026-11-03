@@ -1146,6 +1146,11 @@ def create_app():
         # must run after the CR-code migration above and before the Company Summary one below.
         migrate_cobe_wording()
         migrate_secretarial_finalisation_company_summary()
+        # d62: the CR17 Company Document type was renamed ("CR17 - Annual Report (AGM)" -> "CR17 & Annual Return"); stored uploads keep
+        # the label they were uploaded under, so bring them across. A no-op once done.
+        from models import CompanyDocument
+        CompanyDocument.query.filter_by(document_type="CR17 - Annual Report (AGM)").update({"document_type": "CR17 & Annual Return"})
+        db.session.commit()
         # The Tax / CGT Advisory checklist reworded against the Capital Gains Tax Act (see cgt_checks.py).
         from seed import migrate_cgt_wording
         migrate_cgt_wording()
