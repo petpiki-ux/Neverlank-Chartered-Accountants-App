@@ -1,0 +1,722 @@
+{% extends "base.html" %}
+{% block title %}{{ client.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ client.name }}</h1>
+    <div class="subtitle">{{ client.industry or 'Client' }}{% if client.contact_person %} &middot; {{ client.contact_person }}{% endif %}</div>
+  </div>
+  <div>
+    <a href="{{ url_for('clients.edit_client', client_id=client.id) }}" class="btn secondary">Edit</a>
+    <a href="{{ url_for('engagements.new_engagement') }}" class="btn gold">+ New Engagement</a>
+  </div>
+</div>
+
+<div class="card">
+  <div class="form-row">
+    <div><strong>Email:</strong> {{ client.email or '—' }}</div>
+    <div><strong>Phone:</strong> {{ client.phone or '—' }}</div>
+  </div>
+  <div class="form-row">
+    <div><strong>Company number:</strong> {{ client.company_number or '—' }}</div>
+    <div><strong>Address:</strong> {{ client.address or '—' }}</div>
+  </div>
+  <div class="form-row">
+    <div><strong>TIN:</strong> {{ client.tin_number or '—' }}</div>
+    <div><strong>VAT number:</strong> {{ client.vat_number or 'Not VAT registered / not recorded' }}</div>
+  </div>
+  {% if client.notes %}<p class="muted">{{ client.notes }}</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Client logo</h3>
+  <p class="muted" style="font-size:12px;">Shown on this client's Financial Statements cover page, whose colours follow the logo (not on any firm-branded letterhead, which always uses Neverlank's own logo).</p>
+  <div class="form-row" style="align-items:center;">
+    <div>
+      {% if client.logo_filename %}
+      <img src="{{ url_for('clients.client_logo_image', client_id=client.id) }}" alt="{{ client.name }} logo" style="max-height:70px;max-width:220px;">
+      {% else %}
+      <span class="muted">No logo uploaded yet.</span>
+      {% endif %}
+    </div>
+    <div>
+      <form method="post" action="{{ url_for('clients.upload_client_logo', client_id=client.id) }}" enctype="multipart/form-data" class="inline">
+        <input type="file" name="logo" accept=".png,.jpg,.jpeg" required>
+        <button type="submit" class="btn small secondary">{{ 'Replace' if client.logo_filename else 'Upload' }}</button>
+      </form>
+      {% if client.logo_filename %}
+      <form method="post" action="{{ url_for('clients.remove_client_logo', client_id=client.id) }}" class="inline" onsubmit="return confirm('Remove this client\'s logo?')">
+        <button type="submit" class="btn small danger">Remove</button>
+      </form>
+      {% endif %}
+    </div>
+  </div>
+  <div style="display:flex; gap:22px; flex-wrap:wrap; margin-top:14px; align-items:flex-start;">
+    <div>
+      <div class="muted" style="font-size:12px; margin-bottom:4px;">Cover page preview ({{ 'colours typed below' if client.cover_primary else ('colours taken from the logo' if client.logo_filename else 'firm colours - no logo yet') }})</div>
+      <a href="{{ url_for('clients.cover_preview', client_id=client.id) }}" target="_blank"><img src="{{ url_for('clients.cover_preview', client_id=client.id) }}" alt="Financial Statements cover preview" style="width:190px; border:1px solid var(--border); border-radius:4px; box-shadow:0 2px 8px rgba(15,41,66,.15);"></a>
+    </div>
+    <form method="post" action="{{ url_for('clients.save_cover_colours', client_id=client.id) }}" style="flex:1; min-width:260px; max-width:420px;">
+      <p class="muted" style="font-size:12px; margin-top:0;">The cover's colours are taken from the logo automatically. If they come out wrong (a logo on a white box, a faded scan), type the right ones here; leave both blank to follow the logo.</p>
+      <div class="form-row">
+        <div><label for="cover_primary">Main colour (hex)</label><input type="text" id="cover_primary" name="cover_primary" maxlength="7" placeholder="e.g. 1F4E9C" value="{{ client.cover_primary or '' }}"></div>
+        <div><label for="cover_accent">Second colour (hex)</label><input type="text" id="cover_accent" name="cover_accent" maxlength="7" placeholder="e.g. F28C28" value="{{ client.cover_accent or '' }}"></div>
+      </div>
+      <button type="submit" class="btn small secondary">Save colours</button>
+      {% if client.cover_primary or client.cover_accent %}<button type="submit" name="reset" value="1" class="btn small">Use the logo's colours</button>{% endif %}
+    </form>
+  </div>
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+    <h3 class="mt-0" style="margin-bottom:0;">ZIMRA matters &amp; correspondence</h3>
+    <a href="{{ url_for('zimra.new_case', client_id=client.id) }}" class="btn small gold">+ New ZIMRA case</a>
+  </div>
+  {% if zimra_cases %}
+  <table style="margin-top:8px;">
+    <thead><tr><th>Case</th><th>Type</th><th>Status</th><th>Next reply due</th></tr></thead>
+    <tbody>
+      {% for z in zimra_cases %}
+      {% set nd = z.next_deadline %}
+      <tr>
+        <td><a href="{{ url_for('zimra.view_case', case_id=z.id) }}">{{ z.case_number }}</a> {{ z.title }}</td>
+        <td>{{ z.case_type or '—' }}{% if z.tax_head %}<div class="muted" style="font-size:11px;">{{ z.tax_head }}</div>{% endif %}</td>
+        <td>{{ z.status }}</td>
+        <td>{% if nd %}{{ nd.response_due.strftime('%d %b %Y') }}{% if nd.is_overdue %} <span class="badge overdue">overdue</span>{% endif %}{% else %}<span class="muted">—</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin-bottom:0;">No ZIMRA audits, queries or assessments recorded for this client.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Engagements</h3>
+  {% if visible_engagements %}
+  <table>
+    <thead><tr><th>Title</th><th>Type</th><th>Status</th><th>Deadline</th><th>Partner</th></tr></thead>
+    <tbody>
+      {% for e in visible_engagements %}
+      <tr>
+        <td><a href="{{ url_for('engagements.view_engagement', engagement_id=e.id) }}">{{ e.title }}</a></td>
+        <td><span class="badge type-{{ e.type|replace(' ', '') }}">{{ e.type }}</span></td>
+        <td><span class="badge status-{{ e.status|replace(' ', '') }}">{{ e.status }}</span></td>
+        <td>{{ e.deadline.strftime('%d %b %Y') if e.deadline else '—' }}</td>
+        <td>{{ e.partner.name if e.partner else '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">
+    {% if client.engagements %}You're not assigned to any of this client's engagements.{% else %}No engagements for this client yet.{% endif %}
+  </div>
+  {% endif %}
+</div>
+
+{% if client.qualifies_for_qpd %}
+<div class="card">
+  <h3 class="mt-0">Quarterly Payment Dates (QPDs)</h3>
+  <p class="muted" style="font-size:12px;">
+    This client's Quarterly Payment Dates (provisional tax) estimator now has its own dedicated section -
+    see the <a href="{{ url_for('qpd_dashboard.dashboard') }}">QPD</a> link in the main navigation, or jump
+    straight to <a href="{{ url_for('qpd.view_qpd', client_id=client.id) }}">this client's QPD estimate</a>.
+  </p>
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Company Documents</h3>
+  <p class="muted" style="font-size:12px;">
+    Upload this client's incorporation documents, CR6, share register, CR9 share transfer forms, etc. once here - every engagement's Client
+    Acceptance tab reuses the same Directors &amp; Shareholders list below, rather than re-entering it each time. The
+    app reads the text out of each document automatically, including scanned/photographed pages (via the Claude API),
+    and suggests every Director/Shareholder/Beneficial Owner/Company Secretary it finds for review below. Incorporation,
+    registry and ownership document types are also automatically filed to the Permanent File below (see its own P-code
+    reference in the table) - no need to upload them a second time there.
+  </p>
+  {% if client.company_documents %}
+  <table>
+    <thead><tr><th>Type</th><th>Title</th><th>Permanent File</th><th>Uploaded</th><th>Reading status</th><th></th></tr></thead>
+    <tbody>
+      {% for doc in client.company_documents %}
+      <tr>
+        <td><span class="badge">{{ doc.document_type }}</span></td>
+        <td>{{ doc.title }}{% if doc.notes %}<div class="muted" style="font-size:12px;">{{ doc.notes }}</div>{% endif %}</td>
+        <td class="muted">
+          {% if doc.permanent_file_entry %}{{ doc.permanent_file_entry.reference_code }}{% else %}—{% endif %}
+        </td>
+        <td class="muted">{{ (doc.uploaded_at|cat).strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
+        <td>
+          {% if doc.ai_status == 'done' %}
+          <span class="badge risk-Low">Read - {{ doc.extracted_people|length }} suggested</span>
+          {% elif doc.ai_status == 'skipped' %}
+          {% set nr = company_document_not_read.get(doc.document_type) %}
+          <span class="badge" title="{{ ('This is filed but not read for people: ' ~ nr[1]) if nr else 'Filed but not read for people.' }}">{{ nr[0] if nr else 'Filed - not read for people' }}</span>
+          {% elif doc.ai_status == 'not_configured' %}
+          <span class="badge risk-Medium">Automatic reading not set up</span>
+          {% elif doc.ai_status == 'error' %}
+          <span class="badge risk-High" title="{{ doc.ai_error or '' }}">Reading failed</span>
+          {% else %}
+          <span class="badge">Not yet processed</span>
+          {% endif %}
+        </td>
+        <td class="text-right">
+          <a href="{{ url_for('company_documents.download_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
+          {% if can_manage_company_documents %}
+          {% if doc.ai_status not in ('done', 'skipped') %}
+          <form method="post" action="{{ url_for('company_documents.reprocess_document', doc_id=doc.id) }}" style="display:inline;"><button type="submit" class="btn small secondary">Reprocess</button></form>
+          {% endif %}
+          <form method="post" action="{{ url_for('company_documents.delete_document', doc_id=doc.id) }}" style="display:inline;" onsubmit="return confirm('Delete this document? This cannot be undone.');">
+            <button type="submit" class="btn small danger">Delete</button>
+          </form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No company documents uploaded yet.</div>
+  {% endif %}
+  {% if can_manage_company_documents %}
+  <form method="post" action="{{ url_for('company_documents.upload_document', client_id=client.id) }}" enctype="multipart/form-data" style="margin-top:10px;">
+    <div class="form-row" style="align-items:flex-end;">
+      <div>
+        <label for="doc_type">Document type</label>
+        <select id="doc_type" name="document_type" required>
+          {% for t in company_document_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="doc_title">Title (optional)</label><input type="text" id="doc_title" name="title" placeholder="Defaults to the document type; for a transfer, say who to whom and the date"></div>
+      <div><label for="doc_file">File (PDF, JPG or PNG)</label><input type="file" id="doc_file" name="file" accept=".pdf,.png,.jpg,.jpeg" required></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
+    </div>
+    <p id="doc_type_hint" class="muted" style="font-size:12px; display:none; margin:0 0 8px;">
+      A <span id="doc_type_hint_form">CR</span> form is filed here and to the Permanent File (<span id="doc_type_hint_code">P5000</span>), but it is not read for people: <span id="doc_type_hint_why"></span>. After uploading it, update the directors and shareholders below by hand where it changes who they are.
+    </p>
+    <label for="doc_notes">Notes (optional)</label>
+    <textarea id="doc_notes" name="notes" rows="2"></textarea>
+  </form>
+  <script>
+    (function () {
+      var sel = document.getElementById('doc_type'), hint = document.getElementById('doc_type_hint');
+      if (!sel || !hint) return;
+      var notes = {{ company_document_not_read_js|tojson }};
+      function sync() {
+        var n = notes[sel.value];
+        hint.style.display = n ? 'block' : 'none';
+        if (n) { document.getElementById('doc_type_hint_form').textContent = n.form; document.getElementById('doc_type_hint_code').textContent = n.code; document.getElementById('doc_type_hint_why').textContent = n.why; }
+      }
+      sel.addEventListener('change', sync); sync();
+    })();
+  </script>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Permanent File</h3>
+  <p class="muted" style="font-size:12px;">
+    Information of continuing relevance across audit years - filed once here rather than re-uploaded to every
+    engagement (see the firm's <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index &amp; Manual</a>
+    for the full P-series policy). The engagement's own Documents tab is for working papers specific to the year
+    under audit. Each P-code is a category (e.g. "P1000" = Incorporation &amp; Statutory) - every document filed
+    under it gets its own numbered sub-reference (P1001, P1002, P1003, ...) rather than sharing the bare code, and
+    documents auto-filed from Company Documents above are marked "Auto".
+  </p>
+  {% if client.permanent_file_documents %}
+  <table>
+    <thead><tr><th>File</th><th>Reference</th><th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+    <tbody>
+      {% for doc in client.permanent_file_documents %}
+      <tr>
+        <td>
+          {{ doc.original_filename }}
+          {% if doc.source_company_document_id %}<span class="badge" title="Auto-filed from Company Documents">Auto</span>{% endif %}
+        </td>
+        <td>
+          {% if doc.reference_code %}<strong>{{ doc.reference_code }}</strong><br>{% endif %}
+          <form method="post" action="{{ url_for('permanent_file.update_permanent_file_document', doc_id=doc.id) }}" class="inline form-row" style="flex-wrap:nowrap;gap:4px;">
+            <select name="filing_index_id" style="width:9em;" onchange="if(this.form.reference_number){this.form.reference_number.value=''}">
+              <option value="">No P-code</option>
+              {% for s in permanent_file_sections %}<option value="{{ s.id }}" {% if doc.filing_index_id == s.id %}selected{% endif %}>{{ s.code }} — {{ s.section }}</option>{% endfor %}
+            </select>
+            {% if doc.filing_index_id %}
+            <span class="muted">{{ doc.filing_index.code[0] }}</span>
+            <input type="number" name="reference_number" value="{{ doc.reference_number or '' }}" style="width:5.5em;" title="Sub-reference number">
+            {% endif %}
+            <button type="submit" class="btn small secondary">Save</button>
+          </form>
+          {% if doc.notes %}<div class="muted" style="font-size:11.5px;">{{ doc.notes }}</div>{% endif %}
+        </td>
+        <td>v{{ doc.version }}</td>
+        <td>{{ doc.uploaded_by.name if doc.uploaded_by else '—' }}</td>
+        <td>{{ (doc.uploaded_at|cat).strftime('%d %b %Y %H:%M') }}</td>
+        <td>
+          <a href="{{ url_for('permanent_file.download_permanent_file_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
+          {% if user_has_permission(current_user, 'delete_documents') %}
+          <form method="post" action="{{ url_for('permanent_file.delete_permanent_file_document', doc_id=doc.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No Permanent File documents uploaded yet.</div>
+  {% endif %}
+  <form method="post" action="{{ url_for('permanent_file.upload_permanent_file_document', client_id=client.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div><label for="perm_file">File *</label><input type="file" id="perm_file" name="file" required></div>
+    <div>
+      <label for="perm_filing_index_id">P-code</label>
+      <select id="perm_filing_index_id" name="filing_index_id">
+        <option value="">No WP number</option>
+        {% for s in permanent_file_sections %}<option value="{{ s.id }}">{{ s.code }} — {{ s.section }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label for="perm_notes">Notes</label><input type="text" id="perm_notes" name="notes"></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
+  </form>
+</div>
+
+{% if client.has_tax_or_accounting_engagement %}
+<div class="card">
+  <h3 class="mt-0">Tax &amp; Accounting Filing Archive</h3>
+  <p class="muted" style="font-size:12px;">
+    Filed once per client, across tax years and engagements, rather than tied to whichever Tax Advisory or
+    Accounting &amp; Bookkeeping engagement happened to be open at the time - three sections: Tax Clearances,
+    Returns, and Schedules.
+  </p>
+
+  {% for section_key, section_label in filing_archive_sections %}
+  <h4 style="margin-bottom:4px;{% if not loop.first %}margin-top:20px;{% endif %}">{{ loop.index }}. {{ section_label }}</h4>
+  {% set docs = filing_archive_by_section.get(section_key, []) %}
+  {% if docs %}
+  <table>
+    <thead><tr><th>File</th><th>Tax head</th><th>Period</th><th>Reference</th><th>Uploaded</th><th></th></tr></thead>
+    <tbody>
+      {% for doc in docs %}
+      <tr>
+        <td>
+          {{ doc.title or doc.original_filename }}
+          {% if doc.notes %}<div class="muted" style="font-size:11.5px;">{{ doc.notes }}</div>{% endif %}
+        </td>
+        <td class="muted">{{ doc.tax_head or '—' }}</td>
+        <td class="muted">{{ doc.period_label or '—' }}</td>
+        <td class="muted">{{ doc.reference or '—' }}</td>
+        <td class="muted">{{ (doc.uploaded_at|cat).strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
+        <td class="text-right">
+          <a href="{{ url_for('filing_archive.download_filing_archive_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
+          {% if can_delete_filing_archive %}
+          <form method="post" action="{{ url_for('filing_archive.delete_filing_archive_document', doc_id=doc.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No {{ section_label|lower }} filed yet.</div>
+  {% endif %}
+  <form method="post" action="{{ url_for('filing_archive.upload_filing_archive_document', client_id=client.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;margin-top:6px;">
+    <input type="hidden" name="section" value="{{ section_key }}">
+    <div><label for="fa_file_{{ section_key }}">File *</label><input type="file" id="fa_file_{{ section_key }}" name="file" required></div>
+    <div>
+      <label for="fa_tax_head_{{ section_key }}">Tax head</label>
+      <select id="fa_tax_head_{{ section_key }}" name="tax_head">
+        <option value="">{{ "All taxes" if section_key == "tax_clearance" else "N/A" }}</option>
+        {% for h in tax_heads %}<option value="{{ h }}">{{ h }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label for="fa_title_{{ section_key }}">Title</label><input type="text" id="fa_title_{{ section_key }}" name="title" placeholder="{{ 'e.g. Debtors Schedule' if section_key == 'schedule' else 'Optional' }}"></div>
+    <div><label for="fa_period_{{ section_key }}">Period</label><input type="text" id="fa_period_{{ section_key }}" name="period_label" placeholder="e.g. 2026 or 2026 Q1"></div>
+    <div><label for="fa_reference_{{ section_key }}">Reference</label><input type="text" id="fa_reference_{{ section_key }}" name="reference" placeholder="Certificate / ack. no."></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">File it</button></div>
+  </form>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Relevant Legislative Updates</h3>
+  <p class="muted" style="font-size:12px;">
+    Acts, Government Notices and Statutory Instruments a team member has tagged as affecting this client -
+    filed and summarised under <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Update
+    Control</a>.
+  </p>
+  {% if client.legislative_update_links %}
+  <table>
+    <thead><tr><th>Instrument</th><th>Type</th><th>Gazetted</th><th>Summary</th><th></th></tr></thead>
+    <tbody>
+      {% for link in client.legislative_update_links %}
+      {% set update = link.legislative_update %}
+      <tr>
+        <td>
+          {{ update.title }}{% if update.source_reference %} <span class="muted">({{ update.source_reference }})</span>{% endif %}
+          {% if link.notes %}<div class="muted" style="font-size:11.5px;">{{ link.notes }}</div>{% endif %}
+        </td>
+        <td class="muted">{{ update.type_label }}</td>
+        <td class="muted">{{ update.gazette_date.strftime('%d %b %Y') if update.gazette_date else '—' }}</td>
+        <td style="font-size:12px;">{{ (update.ai_summary or update.summary or '—')|truncate(140) }}</td>
+        <td class="text-right">
+          {% if update.has_file %}<a href="{{ url_for('tax.download_legislative_update', update_id=update.id) }}" class="btn small secondary">Download</a>{% endif %}
+          <form method="post" action="{{ url_for('tax.unlink_client_from_update', link_id=link.id) }}" class="inline" onsubmit="return confirm('Untag this update from this client?')">
+            <input type="hidden" name="redirect_client_id" value="{{ client.id }}">
+            <button type="submit" class="btn small danger">Untag</button>
+          </form>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No legislative updates tagged as relevant to this client yet.</div>
+  {% endif %}
+  {% if legislative_updates_for_tagging %}
+  <form method="post" action="{{ url_for('tax.link_client_to_update') }}" class="form-row" style="flex-wrap:wrap;align-items:flex-end;margin-top:6px;">
+    <input type="hidden" name="redirect_client_id" value="{{ client.id }}">
+    <input type="hidden" name="client_id" value="{{ client.id }}">
+    <div>
+      <label for="leg_update_select">Tag an update as relevant</label>
+      <select id="leg_update_select" name="update_id" required>
+        <option value="">Choose an instrument...</option>
+        {% for u in legislative_updates_for_tagging %}<option value="{{ u.id }}">{{ u.title }}{% if u.source_reference %} ({{ u.source_reference }}){% endif %}</option>{% endfor %}
+      </select>
+    </div>
+    <div><input type="text" name="notes" placeholder="Why it's relevant (optional)"></div>
+    <div><button type="submit" class="btn small gold">Tag</button></div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="page-header" style="margin-bottom:6px;">
+    <h3 class="mt-0">Directors &amp; Shareholders</h3>
+    {% if can_manage_company_documents and has_legacy_details %}
+    <form method="post" action="{{ url_for('company_documents.split_legacy_details_for_client', client_id=client.id) }}">
+      <button type="submit" class="btn small secondary">Split existing notes into fields (AI)</button>
+    </form>
+    {% endif %}
+  </div>
+  <p class="muted" style="font-size:11.5px;margin-top:-6px;">
+    Number of shares, shareholding %, ID number, nationality and address each have their own field below. Anything
+    else stated (date of appointment, another role also held, etc.) goes under "Other notes".
+  </p>
+  {% if suggested_people %}
+  <p class="muted" style="font-size:12px;">Suggested from an uploaded document below - review each one against the source document, correct anything needed, then Confirm before it's used for screening.</p>
+  <table>
+    <thead><tr><th>Name</th><th>Role</th><th>No. of shares</th><th>Shareholding %</th><th>ID number</th><th>Nationality</th><th>Address</th><th>Other notes</th><th>Source document</th><th></th></tr></thead>
+    <tbody>
+      {% for p in suggested_people %}
+        <form method="post" action="{{ url_for('company_documents.update_key_person', person_id=p.id) }}" class="inline">
+        <tr>
+          <td><input type="text" name="full_name" value="{{ p.full_name }}" style="min-width:150px;margin-bottom:0;"></td>
+          <td>
+            <select name="role" style="margin-bottom:0;">
+              {% for r in person_roles %}<option value="{{ r }}" {% if p.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </td>
+          <td><input type="text" name="number_of_shares" value="{{ p.number_of_shares or '' }}" style="min-width:80px;margin-bottom:0;"></td>
+          <td><input type="text" name="shareholding_percentage" value="{{ p.shareholding_percentage or '' }}" style="min-width:70px;margin-bottom:0;"></td>
+          <td><input type="text" name="id_number" value="{{ p.id_number or '' }}" style="min-width:110px;margin-bottom:0;"></td>
+          <td><input type="text" name="nationality" value="{{ p.nationality or '' }}" style="min-width:100px;margin-bottom:0;"></td>
+          <td><input type="text" name="address" value="{{ p.address or '' }}" style="min-width:140px;margin-bottom:0;"></td>
+          <td><input type="text" name="details" value="{{ p.details or '' }}" style="min-width:140px;margin-bottom:0;"></td>
+          <td class="muted">{{ p.source_document.title if p.source_document else '—' }}</td>
+          <td>
+            <button type="submit" class="btn small secondary">Save edits</button>
+            <button type="submit" formaction="{{ url_for('company_documents.confirm_key_person', person_id=p.id) }}" class="btn small gold">Confirm</button>
+            <button type="submit" formaction="{{ url_for('company_documents.delete_key_person', person_id=p.id) }}" class="btn small danger" onclick="return confirm('Remove this suggestion?')">Remove</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if confirmed_people %}
+  <table style="margin-top:{% if suggested_people %}14px{% else %}0{% endif %};">
+    <thead><tr><th>Name</th><th>Role</th><th>No. of shares</th><th>Shareholding %</th><th>ID number</th><th>Nationality</th><th>Address</th><th>Other notes</th><th></th></tr></thead>
+    <tbody>
+      {% for p in confirmed_people %}
+        <form method="post" action="{{ url_for('company_documents.update_key_person', person_id=p.id) }}" class="inline">
+        <tr>
+          <td>
+            <input type="text" name="full_name" value="{{ p.full_name }}" style="min-width:150px;margin-bottom:0;">
+            {% if p.needs_detail_review %}<div class="badge risk-Medium" style="margin-top:4px;">AI-split - please check</div>{% endif %}
+          </td>
+          <td>
+            <select name="role" style="margin-bottom:0;">
+              {% for r in person_roles %}<option value="{{ r }}" {% if p.role==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+            </select>
+          </td>
+          <td><input type="text" name="number_of_shares" value="{{ p.number_of_shares or '' }}" style="min-width:80px;margin-bottom:0;"></td>
+          <td><input type="text" name="shareholding_percentage" value="{{ p.shareholding_percentage or '' }}" style="min-width:70px;margin-bottom:0;"></td>
+          <td><input type="text" name="id_number" value="{{ p.id_number or '' }}" style="min-width:110px;margin-bottom:0;"></td>
+          <td><input type="text" name="nationality" value="{{ p.nationality or '' }}" style="min-width:100px;margin-bottom:0;"></td>
+          <td><input type="text" name="address" value="{{ p.address or '' }}" style="min-width:140px;margin-bottom:0;"></td>
+          <td><input type="text" name="details" value="{{ p.details or '' }}" style="min-width:140px;margin-bottom:0;"></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            {% if p.needs_detail_review %}
+            <button type="submit" formaction="{{ url_for('company_documents.confirm_detail_review', person_id=p.id) }}" class="btn small gold">Looks correct</button>
+            {% endif %}
+            <button type="submit" formaction="{{ url_for('company_documents.delete_key_person', person_id=p.id) }}" class="btn small danger" onclick="return confirm('Delete this person?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif not suggested_people %}
+  <div class="empty-state">No directors/shareholders on file yet - upload a company document above, or add one manually below.</div>
+  {% endif %}
+
+  {% if can_manage_company_documents %}
+  <form method="post" action="{{ url_for('company_documents.add_key_person', client_id=client.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;flex-wrap:wrap;">
+    <div><label for="kp_name">Name</label><input type="text" id="kp_name" name="full_name" placeholder="Full name" required></div>
+    <div>
+      <label for="kp_role">Role</label>
+      <select id="kp_role" name="role">
+        {% for r in person_roles %}<option value="{{ r }}">{{ r }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><label for="kp_shares">No. of shares</label><input type="text" id="kp_shares" name="number_of_shares"></div>
+    <div><label for="kp_shareholding">Shareholding %</label><input type="text" id="kp_shareholding" name="shareholding_percentage" placeholder="e.g. 25%"></div>
+    <div><label for="kp_id">ID number</label><input type="text" id="kp_id" name="id_number"></div>
+    <div><label for="kp_nationality">Nationality</label><input type="text" id="kp_nationality" name="nationality"></div>
+    <div><label for="kp_address">Address</label><input type="text" id="kp_address" name="address"></div>
+    <div><label for="kp_details">Other notes</label><input type="text" id="kp_details" name="details"></div>
+    <div><button type="submit" class="btn small gold" style="margin-bottom:0;">Add</button></div>
+  </form>
+  {% endif %}
+  <p class="muted" style="font-size:11.5px;margin-top:8px;margin-bottom:0;">
+    A confirmed person here can be added straight to the Sanctions &amp; AML Vetting list below.
+  </p>
+</div>
+
+<div class="card" id="vetting">
+  <h3 class="mt-0">Sanctions &amp; AML Vetting</h3>
+  <p class="muted" style="font-size:12px;">
+    Applies to every engagement for this client. Screen every key individual - directors, beneficial owners, authorised signatories{% if has_investigative %}, and any suspect, target or key witness on an investigative engagement{% endif %} -
+    against the UN Sanctions List, OFAC (US Treasury), the EU Sanctions List, and adverse notices issued by the Reserve Bank of Zimbabwe (RBZ) or the Financial Intelligence Unit (FIU).
+    Advisory only: a confirmed hit does not block anything automatically - escalate it to the Partner/MLRO. Each engagement's Client Acceptance tab shows a summary of this list.
+  </p>
+
+  <div class="card" style="background:#faf9f6;margin-bottom:14px;">
+    <strong style="font-size:12.5px;">Automated screening status</strong>
+    <table style="font-size:12px;margin-top:6px;margin-bottom:0;">
+      <thead><tr><th>Source</th><th>Cache last refreshed</th><th>Entries cached</th><th></th></tr></thead>
+      <tbody>
+        {% for source in sanctions_auto_sources %}
+        {% set status = sanctions_list_status.get(source) %}
+        <tr>
+          <td><strong>{{ source }}</strong></td>
+          <td class="muted">
+            {% if status and status.last_refreshed_at %}{{ (status.last_refreshed_at|cat).strftime('%d %b %Y %H:%M') }}{% else %}Never refreshed{% endif %}
+            {% if status and status.last_error %}<br><span style="color:#b02a2a;">Last attempt failed: {{ status.last_error[:160] }}</span>{% endif %}
+          </td>
+          <td>{{ status.entry_count if status else 0 }}</td>
+          <td></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if can_manage_sanctions_lists %}
+    <form method="post" action="{{ url_for('acceptance.refresh_sanctions_lists') }}" style="margin-top:8px;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Refresh UN/OFAC/EU lists now</button>
+    </form>
+    {% endif %}
+    <p class="muted" style="font-size:11.5px;margin-top:8px;margin-bottom:0;">
+      RBZ and FIU Zimbabwe don't publish a feed the app can check automatically - instead, matching is against the firm's own
+      <a href="{{ url_for('regulatory_notices.list_notices') }}">Regulatory Notices</a> library:
+      {% for source in regulatory_notice_sources %}{% set c = regulatory_notice_counts.get(source, {'total': 0, 'searchable': 0}) %}{{ source }} {{ c.searchable }}/{{ c.total }} notice(s) searchable{% if not loop.last %}, {% endif %}{% endfor %}.
+    </p>
+  </div>
+
+  <div class="flash {{ vetting_assessment.level }}" style="margin-bottom:10px;">{{ vetting_assessment.label }}</div>
+  {% if vetting_list %}
+  {% if can_vet %}
+  <form method="post" action="{{ url_for('clients.auto_screen_all_vetting', client_id=client.id) }}" style="margin-bottom:8px;">
+    <button type="submit" class="btn small gold">Auto-screen all individuals now</button>
+  </form>
+  {% endif %}
+  <div style="overflow-x:auto;">
+  <table>
+    <thead><tr><th>Individual</th><th>Role</th>{% for field, label in sanctions_screening_sources %}<th>{{ label }}</th>{% endfor %}<th>Notes</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for s in vetting_list %}
+      <form method="post" action="{{ url_for('clients.update_vetting', screening_id=s.id) }}" class="inline">
+      <tr>
+        <td><strong>{{ s.individual_name }}</strong></td>
+        <td><input type="text" name="role_description" value="{{ s.role_description or '' }}" style="width:130px;margin-bottom:0;" placeholder="e.g. Director" {% if not can_vet %}disabled{% endif %}></td>
+        {% for field, label in sanctions_screening_sources %}
+        <td>
+          <select name="{{ field }}" style="margin-bottom:0;min-width:120px;" title="{{ s.auto_notes_for(field) or '' }}" {% if not can_vet %}disabled{% endif %}>
+            {% for r in sanctions_screening_results %}<option value="{{ r }}" {% if s[field]==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+          </select>
+        </td>
+        {% endfor %}
+        <td>
+          <input type="text" name="notes" value="{{ s.notes or '' }}" placeholder="Match details / reference" style="width:150px;margin-bottom:0;" {% if not can_vet %}disabled{% endif %}>
+          {% if s.auto_screened_at %}
+          <div class="muted" style="font-size:10.5px;margin-top:3px;">Auto-screened {{ (s.auto_screened_at|cat).strftime('%d %b %Y') }}{% if s.auto_screened_by %} by {{ s.auto_screened_by.name }}{% endif %} - hover a result for its notes.</div>
+          {% endif %}
+        </td>
+        <td><span class="badge {% if s.overall_status == 'Confirmed Hit' %}risk-High{% elif s.overall_status == 'Potential Match' %}risk-Medium{% elif s.overall_status == 'Clear' %}risk-Low{% endif %}">{{ s.overall_status }}</span></td>
+        <td>
+          {% if can_vet %}
+          <button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" formaction="{{ url_for('clients.auto_screen_vetting', screening_id=s.id) }}" class="btn small secondary">Auto-screen</button>
+          <button type="submit" formaction="{{ url_for('clients.delete_vetting', screening_id=s.id) }}" class="btn small danger" onclick="return confirm('Delete this individual\'s vetting record?')">Delete</button>
+          {% endif %}
+        </td>
+      </tr>
+      </form>
+    {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No key individuals added yet - add each director, beneficial owner, authorised signatory{% if has_investigative %}, or investigation target/witness{% endif %} below.</div>
+  {% endif %}
+  {% if can_vet %}
+  {% if vetting_key_people %}
+  <form method="post" action="{{ url_for('clients.add_vetting_from_key_person', client_id=client.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div>
+      <label for="vet_key_person_id">Add from the Directors &amp; Shareholders above</label>
+      <select id="vet_key_person_id" name="key_person_id" style="min-width:260px;">
+        {% for p in vetting_key_people %}<option value="{{ p.id }}">{{ p.full_name }} ({{ p.role }})</option>{% endfor %}
+      </select>
+    </div>
+    <div><button type="submit" class="btn small secondary" style="margin-bottom:0;">Add for vetting</button></div>
+  </form>
+  {% endif %}
+  <form method="post" action="{{ url_for('clients.add_vetting_individual', client_id=client.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div><label for="vetting_name">Or add an individual's name directly</label><input type="text" id="vetting_name" name="individual_name" placeholder="Full name" required></div>
+    <div><label for="vetting_role">Role</label><input type="text" id="vetting_role" name="role_description" placeholder="e.g. Director, Beneficial Owner"></div>
+    <div><button type="submit" class="btn small gold" style="margin-bottom:0;">Add individual</button></div>
+  </form>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Understanding the Entity's Business - Public Information</h3>
+  <p class="muted" style="font-size:12px;">
+    Scans publicly available information - including news and social media - about this company, its confirmed
+    Directors/Shareholders, and its products, using the Claude API. Each scan is a billed AI web search, so it only
+    ever runs when you click the button below - nothing here is automatic. Like every other AI-assisted feature in
+    this app, this only ever surfaces what a search finds for you to read and judge - it never decides anything or
+    flags a client as high-risk on its own.
+  </p>
+  {% if can_manage_company_documents %}
+  <form method="post" action="{{ url_for('company_documents.run_public_research', client_id=client.id) }}" class="form-row" style="align-items:flex-end;">
+    <div>
+      <label for="research_scope">What should it look for?</label>
+      <select id="research_scope" name="scope">
+        {% for value, label in public_research_scopes %}<option value="{{ value }}" {% if value=='both' %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+    </div>
+    <div><button type="submit" class="btn gold">Run scan</button></div>
+  </form>
+  {% endif %}
+
+  {% if public_research_runs %}
+  <div style="margin-top:14px;">
+    {% for run in public_research_runs %}
+    <div class="card" style="background:#faf9f6;margin-bottom:10px;">
+      <div class="form-row" style="margin-bottom:4px;">
+        <div><span class="badge">{{ run.scope_label }}</span></div>
+        <div class="muted" style="font-size:11.5px;">
+          {{ (run.requested_at|cat).strftime('%d %b %Y %H:%M') if run.requested_at else '—' }}
+          {% if run.requested_by %}by {{ run.requested_by.name }}{% endif %}
+        </div>
+      </div>
+      {% if run.status == 'done' %}
+        {% if run.business_profile %}
+        <p class="section-title" style="margin-bottom:2px;">Business profile</p>
+        <p style="font-size:13px;white-space:pre-wrap;">{{ run.business_profile }}</p>
+        {% endif %}
+        {% if run.risk_findings %}
+        <p class="section-title" style="margin-bottom:2px;">Possible concerns found</p>
+        <p style="font-size:13px;white-space:pre-wrap;">{{ run.risk_findings }}</p>
+        {% endif %}
+        {% if run.sources %}
+        <p class="muted" style="font-size:11.5px;margin-bottom:2px;">Sources:</p>
+        <ul style="font-size:11.5px;margin-top:0;">
+          {% for s in run.sources %}<li><a href="{{ s.url }}" target="_blank" rel="noopener">{{ s.title or s.url }}</a></li>{% endfor %}
+        </ul>
+        {% endif %}
+      {% elif run.status == 'not_configured' %}
+        <div class="badge risk-Medium">Automatic reading not set up - {{ run.error_message }}</div>
+      {% else %}
+        <div class="badge risk-High" title="{{ run.error_message or '' }}">Scan failed - {{ run.error_message }}</div>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">No scans run yet.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="page-header" style="margin-bottom:10px;">
+    <h3 class="mt-0">Invoices</h3>
+    <a href="{{ url_for('quotations.new_quotation', client_id=client.id) }}" class="btn small secondary">+ New Quotation</a>
+    <a href="{{ url_for('invoicing.new_invoice', client_id=client.id) }}" class="btn small gold">+ New Invoice</a>
+  </div>
+  {% if visible_invoices %}
+  <table>
+    <thead><tr><th>Invoice #</th><th>Issue date</th><th class="text-right">Total</th><th>Status</th></tr></thead>
+    <tbody>
+      {% for inv in visible_invoices %}
+      <tr{% if inv.is_overdue %} class="danger"{% endif %}>
+        <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a></td>
+        <td>{{ inv.issue_date.strftime('%d %b %Y') if inv.issue_date else '—' }}</td>
+        <td class="text-right">{{ inv.currency }} {{ '%.2f'|format(inv.total) }}</td>
+        <td><span class="badge status-{{ inv.status }}">{{ inv.status }}</span></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No invoices for this client yet.</div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div class="page-header" style="margin-bottom:10px;">
+    <h3 class="mt-0">Advances received</h3>
+    <a href="{{ url_for('advances.new_advance', client_id=client.id) }}" class="btn small gold">+ Record an advance</a>
+  </div>
+  {% if visible_advances %}
+  <table>
+    <thead><tr><th>Advance #</th><th>Received</th><th>For</th><th class="text-right">Amount</th><th class="text-right">Still held</th></tr></thead>
+    <tbody>
+      {% for a in visible_advances %}
+      <tr>
+        <td><a href="{{ url_for('advances.view_advance', advance_id=a.id) }}">{{ a.advance_number }}</a></td>
+        <td>{{ a.received_on.strftime('%d %b %Y') }}</td>
+        <td>{{ a.purpose or (a.engagement.title if a.engagement else '—') }}</td>
+        <td class="text-right">{{ a.currency }} {{ '%.2f'|format(a.amount) }}</td>
+        <td class="text-right">{{ a.currency }} {{ '%.2f'|format(a.balance) }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <div class="empty-state">No advances from this client. Record one when the client pays before an invoice is raised.</div>
+  {% endif %}
+</div>
+
+{% if user_has_permission(current_user, 'delete_clients') %}
+<form method="post" action="{{ url_for('clients.delete_client', client_id=client.id) }}" onsubmit="return confirm('Delete this client and ALL its engagements? This cannot be undone.');">
+  <button type="submit" class="btn danger small">Delete client</button>
+</form>
+{% endif %}
+{% endblock %}
