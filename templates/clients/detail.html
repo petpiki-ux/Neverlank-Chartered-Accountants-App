@@ -154,7 +154,8 @@
           {% if doc.ai_status == 'done' %}
           <span class="badge risk-Low">Read - {{ doc.extracted_people|length }} suggested</span>
           {% elif doc.ai_status == 'skipped' %}
-          <span class="badge" title="A transfer names the person giving up shares as well as the one receiving them, so it is filed but not read for people.">Filed - update shareholders by hand</span>
+          {% set nr = company_document_not_read.get(doc.document_type) %}
+          <span class="badge" title="{{ ('This is filed but not read for people: ' ~ nr[1]) if nr else 'Filed but not read for people.' }}">{{ nr[0] if nr else 'Filed - not read for people' }}</span>
           {% elif doc.ai_status == 'not_configured' %}
           <span class="badge risk-Medium">Automatic reading not set up</span>
           {% elif doc.ai_status == 'error' %}
@@ -195,7 +196,7 @@
       <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
     </div>
     <p id="doc_type_hint" class="muted" style="font-size:12px; display:none; margin:0 0 8px;">
-      A CR9 share transfer form is filed here and to the Permanent File (P5000), but it is not read for people: it names the person giving up shares as well as the one receiving them. After uploading it, update the shareholders below by hand.
+      A <span id="doc_type_hint_form">CR</span> form is filed here and to the Permanent File (<span id="doc_type_hint_code">P5000</span>), but it is not read for people: <span id="doc_type_hint_why"></span>. After uploading it, update the directors and shareholders below by hand where it changes who they are.
     </p>
     <label for="doc_notes">Notes (optional)</label>
     <textarea id="doc_notes" name="notes" rows="2"></textarea>
@@ -204,7 +205,12 @@
     (function () {
       var sel = document.getElementById('doc_type'), hint = document.getElementById('doc_type_hint');
       if (!sel || !hint) return;
-      function sync() { hint.style.display = /^CR9\b/.test(sel.value) ? 'block' : 'none'; }
+      var notes = {{ company_document_not_read_js|tojson }};
+      function sync() {
+        var n = notes[sel.value];
+        hint.style.display = n ? 'block' : 'none';
+        if (n) { document.getElementById('doc_type_hint_form').textContent = n.form; document.getElementById('doc_type_hint_code').textContent = n.code; document.getElementById('doc_type_hint_why').textContent = n.why; }
+      }
       sel.addEventListener('change', sync); sync();
     })();
   </script>

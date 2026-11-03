@@ -8677,7 +8677,10 @@ COMPANY_DOCUMENT_TYPES = [
     "CR5 - Notice of Situation of Registered Office",
     "Company Summary",
     "Share Register / Share Certificates",
+    "CR8 - Special Resolution",
     "CR9 - Share Transfer Form",
+    "CR11 - Allotment of Shares",
+    "CR17 - Annual Report (AGM)",
     "Beneficial Ownership Declaration",
     "Director/Shareholder ID Documents",
     "Other",
@@ -8687,7 +8690,16 @@ COMPANY_DOCUMENT_TYPES = [
 # the person giving up shares as well as the person receiving them; suggesting both as shareholders would put someone who no longer
 # holds shares on the list, so a person updates the shareholders by hand from it (the transferee takes the shares, the transferor's
 # holding falls or ends).
-COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE = {"CR9 - Share Transfer Form"}
+COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE = {"CR8 - Special Resolution", "CR9 - Share Transfer Form", "CR11 - Allotment of Shares", "CR17 - Annual Report (AGM)"}
+# Why each is not read, and the badge shown on the list: (badge, why). CR8, CR11 and CR17 (d61) are filed the same way as the CR9: a resolution may
+# remove or appoint people, an allotment adds to what existing members hold, and the AGM declaration is signed by whoever were directors that day,
+# so suggesting everyone named as a director or shareholder could put the wrong people on the list. A person updates the key people by hand.
+COMPANY_DOCUMENT_NOT_READ_NOTES = {
+    "CR8 - Special Resolution": ("Filed - not read for people", "a resolution can appoint, remove or name people, so reading it could put the wrong people on the list"),
+    "CR9 - Share Transfer Form": ("Filed - update shareholders by hand", "a transfer names the person giving up shares as well as the one receiving them"),
+    "CR11 - Allotment of Shares": ("Filed - update shareholders by hand", "an allotment adds to what members already hold, so the register needs a person's judgement"),
+    "CR17 - Annual Report (AGM)": ("Filed - not read for people", "it is signed by whoever were directors that day, which may not be today's directors"),
+}
 
 # Which Permanent File (P-series) FilingIndexSection a Company Document is
 # automatically filed under the moment it's uploaded (see
@@ -8711,7 +8723,10 @@ COMPANY_DOCUMENT_TYPE_TO_FILING_CODE = {
     "CR5 - Notice of Situation of Registered Office": "P1000",
     "Company Summary": "P1000",
     "Share Register / Share Certificates": "P5000",
+    "CR8 - Special Resolution": "P1000",
     "CR9 - Share Transfer Form": "P5000",
+    "CR11 - Allotment of Shares": "P5000",
+    "CR17 - Annual Report (AGM)": "P1000",
     "Beneficial Ownership Declaration": "P5000",
     "Director/Shareholder ID Documents": "P5000",
     "Other": None,

@@ -11,7 +11,7 @@ from extensions import db
 from models import (
     Client, INDUSTRY_OPTIONS, user_has_permission, user_can_access_engagement,
     client_scope_ids, user_can_access_client,
-    COMPANY_DOCUMENT_TYPES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES, FilingIndexSection,
+    COMPANY_DOCUMENT_TYPES, COMPANY_DOCUMENT_TYPE_TO_FILING_CODE, COMPANY_DOCUMENT_NOT_READ_NOTES, PERSON_ROLES, PUBLIC_RESEARCH_SCOPES, FilingIndexSection,
     TAX_HEADS, FILING_ARCHIVE_SECTIONS, LegislativeUpdate,
     ClientSanctionsScreening, ClientKeyPerson, screening_assessment_for,
     SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS, SANCTIONS_AUTO_SOURCES,
@@ -237,7 +237,8 @@ def view_client(client_id):
         regulatory_notice_counts=regulatory_notice_counts,
         suggested_people=suggested_people, confirmed_people=confirmed_people,
         has_legacy_details=has_legacy_details,
-        company_document_types=COMPANY_DOCUMENT_TYPES, person_roles=PERSON_ROLES,
+        company_document_types=COMPANY_DOCUMENT_TYPES, company_document_not_read=COMPANY_DOCUMENT_NOT_READ_NOTES,
+        company_document_not_read_js={t: {'form': t.split(' - ')[0], 'code': COMPANY_DOCUMENT_TYPE_TO_FILING_CODE.get(t) or '', 'why': n[1]} for t, n in COMPANY_DOCUMENT_NOT_READ_NOTES.items()}, person_roles=PERSON_ROLES,
         public_research_scopes=PUBLIC_RESEARCH_SCOPES,
         public_research_runs=client.public_research_runs,
         can_manage_company_documents=user_has_permission(current_user, "manage_company_documents"),

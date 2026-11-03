@@ -37,7 +37,7 @@ from werkzeug.utils import secure_filename
 from extensions import db
 from models import (
     Client, CompanyDocument, ClientKeyPerson, EntityPublicResearch, PermanentFileDocument,
-    COMPANY_DOCUMENT_TYPES, COMPANY_DOCUMENT_TYPE_TO_FILING_CODE, COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE, PERSON_ROLES, PERSON_STATUSES, PUBLIC_RESEARCH_SCOPES,
+    COMPANY_DOCUMENT_TYPES, COMPANY_DOCUMENT_TYPE_TO_FILING_CODE, COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE, COMPANY_DOCUMENT_NOT_READ_NOTES, PERSON_ROLES, PERSON_STATUSES, PUBLIC_RESEARCH_SCOPES,
     user_has_permission,
 )
 from config import Config
@@ -162,8 +162,9 @@ def upload_document(client_id):
         doc.ai_error = None
         doc.ai_processed_at = datetime.utcnow()
         db.session.commit()
-        flash(f"'{doc.title}' uploaded.{permanent_file_note or ''} It is not read for people, because a transfer names the person giving up shares as well as the one receiving them: "
-              "update the shareholders below by hand (the transferee takes the shares, the transferor's holding falls or ends).", "success")
+        why = COMPANY_DOCUMENT_NOT_READ_NOTES.get(document_type, ("", "it names people whose roles need a person's judgement"))[1]
+        flash(f"'{doc.title}' uploaded.{permanent_file_note or ''} It is not read for people, because {why}: "
+              "update the directors and shareholders below by hand if it changes who they are.", "success")
         return redirect(url_for("clients.view_client", client_id=client_id))
 
     people, ai_status, ai_error = entity_extraction.extract_people_from_document(
@@ -214,7 +215,7 @@ def reprocess_document(doc_id):
         return redirect(url_for("clients.view_client", client_id=doc.client_id))
 
     if doc.document_type in COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE:
-        flash("A share transfer form is not read for people: update the shareholders by hand.", "info")
+        flash(f"A {doc.document_type.split(' - ')[0]} form is not read for people: update the directors and shareholders by hand.", "info")
         return redirect(url_for("clients.view_client", client_id=doc.client_id))
     is_image = doc.file_ext in IMAGE_EXTENSIONS
     people, ai_status, ai_error = entity_extraction.extract_people_from_document(
