@@ -1839,7 +1839,26 @@ class Client(db.Model):
     cover_primary = db.Column(db.String(6))
     cover_accent = db.Column(db.String(6))
 
+    # The decision to accept (or decline) the client, made once on the client's page after the Sanctions & AML vetting (d63). Pending /
+    # Accepted / Accepted with conditions / Declined (CLIENT_ACCEPT_DECISIONS). NULL on a row from before this existed: app.py
+    # _migrate_client_acceptance_decisions carries it over from the engagements' old per-engagement decisions at start-up.
+    acceptance_decision = db.Column(db.String(30), default="Pending")
+    acceptance_decision_notes = db.Column(db.Text)
+    acceptance_decided_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    acceptance_decided_at = db.Column(db.DateTime)
+    acceptance_decided_by = db.relationship("User", foreign_keys=[acceptance_decided_by_id])
+
     engagements = db.relationship("Engagement", backref="client", lazy=True, cascade="all, delete-orphan")
+
+    @property
+    def acceptance_status(self):
+        return self.acceptance_decision or "Pending"
+
+    @property
+    def is_accepted_as_client(self):
+        """True once the client has been accepted (with or without conditions) on the client's page. Every engagement that requires
+        acceptance stays locked until then (models.engagement_acceptance_cleared)."""
+        return self.acceptance_status in CLIENT_ACCEPT_CLEARING
 
     @property
     def has_tax_or_accounting_engagement(self):
@@ -2211,6 +2230,11 @@ def engagement_acceptance_cleared(engagement):
     """
     if not engagement.acceptance_required:
         return True
+    # d63: the decision to accept the CLIENT is made once on the client's page (after the Sanctions & AML vetting); until the client is
+    # accepted (or accepted with conditions) no engagement for them is cleared, whatever its own checklists and sign-offs say.
+    client = engagement.client
+    if client is not None and not client.is_accepted_as_client:
+        return False
     ca = engagement.client_acceptance
     if not ca or ca.decision != "Accepted":
         return False
@@ -7953,6 +7977,12 @@ class MessageRecipient(db.Model):
 
 CLIENT_ACCEPTANCE_DECISIONS = ["Pending", "Accepted", "Declined"]
 
+# The decision on the CLIENT (Client.acceptance_decision), made on the client's page. "Accepted with conditions" clears the gate like "Accepted"
+# but must carry the conditions in the notes. On each engagement's ClientAcceptance it is shown as Accepted / Declined / Pending.
+CLIENT_ACCEPT_DECISIONS = ["Pending", "Accepted", "Accepted with conditions", "Declined"]
+CLIENT_ACCEPT_CLEARING = ("Accepted", "Accepted with conditions")
+VETTING_DOCUMENT_TYPES = ["Screening print-out / search result", "Identity document check", "PEP check", "Source of funds / wealth", "Adverse media search", "Partner / MLRO note", "Other"]
+
 # Forensic Audit Risk Evaluation Matrix - used only on engagements of type
 # "Investigative Engagement" (see ClientAcceptance.risk_* fields/properties
 # below). Each tuple is (field_name, category_label, low_description,
@@ -8679,8 +8709,9 @@ COMPANY_DOCUMENT_TYPES = [
     "Share Register / Share Certificates",
     "CR8 - Special Resolution",
     "CR9 - Share Transfer Form",
+    "CR9 - Share Buy Back",
     "CR11 - Allotment of Shares",
-    "CR17 - Annual Report (AGM)",
+    "CR17 & Annual Return",
     "Beneficial Ownership Declaration",
     "Director/Shareholder ID Documents",
     "Other",
@@ -8690,15 +8721,16 @@ COMPANY_DOCUMENT_TYPES = [
 # the person giving up shares as well as the person receiving them; suggesting both as shareholders would put someone who no longer
 # holds shares on the list, so a person updates the shareholders by hand from it (the transferee takes the shares, the transferor's
 # holding falls or ends).
-COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE = {"CR8 - Special Resolution", "CR9 - Share Transfer Form", "CR11 - Allotment of Shares", "CR17 - Annual Report (AGM)"}
+COMPANY_DOCUMENT_TYPES_NOT_READ_FOR_PEOPLE = {"CR8 - Special Resolution", "CR9 - Share Transfer Form", "CR9 - Share Buy Back", "CR11 - Allotment of Shares", "CR17 & Annual Return"}
 # Why each is not read, and the badge shown on the list: (badge, why). CR8, CR11 and CR17 (d61) are filed the same way as the CR9: a resolution may
 # remove or appoint people, an allotment adds to what existing members hold, and the AGM declaration is signed by whoever were directors that day,
 # so suggesting everyone named as a director or shareholder could put the wrong people on the list. A person updates the key people by hand.
 COMPANY_DOCUMENT_NOT_READ_NOTES = {
     "CR8 - Special Resolution": ("Filed - not read for people", "a resolution can appoint, remove or name people, so reading it could put the wrong people on the list"),
     "CR9 - Share Transfer Form": ("Filed - update shareholders by hand", "a transfer names the person giving up shares as well as the one receiving them"),
+    "CR9 - Share Buy Back": ("Filed - update shareholders by hand", "a buy back cancels shares held by the person selling them, so the register needs a person's judgement"),
     "CR11 - Allotment of Shares": ("Filed - update shareholders by hand", "an allotment adds to what members already hold, so the register needs a person's judgement"),
-    "CR17 - Annual Report (AGM)": ("Filed - not read for people", "it is signed by whoever were directors that day, which may not be today's directors"),
+    "CR17 & Annual Return": ("Filed - not read for people", "it is signed by whoever were directors that day, which may not be today's directors"),
 }
 
 # Which Permanent File (P-series) FilingIndexSection a Company Document is
@@ -8725,8 +8757,9 @@ COMPANY_DOCUMENT_TYPE_TO_FILING_CODE = {
     "Share Register / Share Certificates": "P5000",
     "CR8 - Special Resolution": "P1000",
     "CR9 - Share Transfer Form": "P5000",
+    "CR9 - Share Buy Back": "P5000",
     "CR11 - Allotment of Shares": "P5000",
-    "CR17 - Annual Report (AGM)": "P1000",
+    "CR17 & Annual Return": "P1000",
     "Beneficial Ownership Declaration": "P5000",
     "Director/Shareholder ID Documents": "P5000",
     "Other": None,
@@ -9068,6 +9101,25 @@ class ClientSanctionsScreening(db.Model):
 
     def __repr__(self):
         return f"<ClientSanctionsScreening {self.individual_name!r} status={self.overall_status!r}>"
+
+
+class ClientVettingDocument(db.Model):
+    """Documentation kept with the Sanctions & AML vetting on the client's page: screening print-outs, identity and PEP checks, source of funds,
+    adverse media searches, the Partner/MLRO's note. Stored beside the company documents. Filed once per client, whatever engagements follow."""
+    __tablename__ = "client_vetting_document"
+    id = db.Column(db.Integer, primary_key=True)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    doc_type = db.Column(db.String(60), default="Other")
+    title = db.Column(db.String(200), nullable=False)
+    individual_name = db.Column(db.String(200))  # who it relates to, if one person
+    original_filename = db.Column(db.String(255), nullable=False)
+    stored_filename = db.Column(db.String(300), nullable=False)
+    notes = db.Column(db.Text)
+    uploaded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    uploaded_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    client = db.relationship("Client", backref=db.backref("vetting_documents", lazy=True, cascade="all, delete-orphan", order_by="ClientVettingDocument.uploaded_at.desc()"))
+    uploaded_by = db.relationship("User", foreign_keys=[uploaded_by_id])
 
 
 def screening_assessment_for(individuals):

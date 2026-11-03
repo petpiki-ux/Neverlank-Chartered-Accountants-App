@@ -16,6 +16,7 @@ from models import (
     ClientSanctionsScreening, ClientKeyPerson, screening_assessment_for,
     SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS, SANCTIONS_AUTO_SOURCES,
     REGULATORY_NOTICE_SOURCES, RegulatoryNotice, SanctionsListStatus,
+    VETTING_DOCUMENT_TYPES, CLIENT_ACCEPT_DECISIONS, PARTNER_SIGNOFF_ROLES,
 )
 from engagements import sync_substantive_procedures_if_started
 
@@ -224,6 +225,9 @@ def view_client(client_id):
     return render_template(
         "clients/detail.html", client=client, visible_engagements=visible_engagements,
         vetting_list=list(client.sanctions_screenings),
+        vetting_documents=list(client.vetting_documents), vetting_document_types=VETTING_DOCUMENT_TYPES, client_accept_decisions=CLIENT_ACCEPT_DECISIONS,
+        can_decide_acceptance=current_user.role in PARTNER_SIGNOFF_ROLES,
+        can_file_vetting_documents=user_has_permission(current_user, "manage_company_documents"),
         vetting_assessment=screening_assessment_for(client.sanctions_screenings),
         vetting_key_people=[p for p in confirmed_people if p.full_name not in {s.individual_name for s in client.sanctions_screenings}],
         can_vet=user_can_access_client(current_user, client),
@@ -530,3 +534,110 @@ def auto_screen_all_vetting(client_id):
     db.session.commit()
     flash(f"Auto-screened all {len(client.sanctions_screenings)} individual(s) - review any Potential Match below.", "success")
     return _to_vetting(client.id)
+
+
+# ---------- Vetting documentation and the decision to accept the client (d63) ----------
+# Both live on the client's page, under the Sanctions & AML Vetting list: the screening print-outs and other evidence are filed here once,
+# and the Partner records the decision to accept (or decline) the client here once. Each engagement's Client Acceptance tab only shows the
+# decision, read-only; an engagement that requires acceptance stays locked until the client is accepted (models.engagement_acceptance_cleared).
+
+_VETTING_DOC_EXTENSIONS = {"pdf", "png", "jpg", "jpeg", "doc", "docx", "xls", "xlsx", "txt"}
+
+
+def _vetting_docs_dir():
+    directory = current_app.config["COMPANY_DOCUMENTS_DATA_DIR"]
+    os.makedirs(directory, exist_ok=True)
+    return directory
+
+
+@clients_bp.route("/<int:client_id>/vetting/documents/upload", methods=["POST"])
+@login_required
+def upload_vetting_document(client_id):
+    from models import ClientVettingDocument, VETTING_DOCUMENT_TYPES
+    client = _vetting_client(client_id)
+    if not user_has_permission(current_user, "manage_company_documents"):
+        abort(403)
+    file = request.files.get("file")
+    if not file or not file.filename:
+        flash("Choose a file to upload.", "danger")
+        return _to_vetting(client.id)
+    original = secure_filename(file.filename)
+    ext = original.rsplit(".", 1)[-1].lower() if "." in original else ""
+    if ext not in _VETTING_DOC_EXTENSIONS:
+        flash("Only PDF, image, Word, Excel and text files can be filed with the vetting.", "danger")
+        return _to_vetting(client.id)
+    doc_type = request.form.get("doc_type", "").strip()
+    doc = ClientVettingDocument(
+        client_id=client.id, doc_type=doc_type if doc_type in VETTING_DOCUMENT_TYPES else "Other",
+        title=request.form.get("title", "").strip() or original, individual_name=request.form.get("individual_name", "").strip() or None,
+        original_filename=original, stored_filename="pending", notes=request.form.get("notes", "").strip() or None, uploaded_by_id=current_user.id)
+    db.session.add(doc)
+    db.session.flush()
+    doc.stored_filename = f"vetting{doc.id}_{uuid.uuid4().hex[:8]}_{original}"
+    file.save(os.path.join(_vetting_docs_dir(), doc.stored_filename))
+    db.session.commit()
+    flash(f"'{doc.title}' filed with the vetting.", "success")
+    return _to_vetting(client.id)
+
+
+@clients_bp.route("/vetting/documents/<int:doc_id>/download")
+@login_required
+def download_vetting_document(doc_id):
+    from models import ClientVettingDocument
+    doc = ClientVettingDocument.query.get_or_404(doc_id)
+    if not user_can_access_client(current_user, doc.client_id):
+        abort(403)
+    if not os.path.exists(os.path.join(_vetting_docs_dir(), doc.stored_filename)):
+        abort(404)
+    return send_from_directory(_vetting_docs_dir(), doc.stored_filename, as_attachment=True, download_name=doc.original_filename)
+
+
+@clients_bp.route("/vetting/documents/<int:doc_id>/delete", methods=["POST"])
+@login_required
+def delete_vetting_document(doc_id):
+    from models import ClientVettingDocument
+    doc = ClientVettingDocument.query.get_or_404(doc_id)
+    if not user_can_access_client(current_user, doc.client_id):
+        abort(403)
+    if not user_has_permission(current_user, "manage_company_documents"):
+        abort(403)
+    client_id = doc.client_id
+    path = os.path.join(_vetting_docs_dir(), doc.stored_filename)
+    if os.path.exists(path):
+        os.remove(path)
+    db.session.delete(doc)
+    db.session.commit()
+    flash("Vetting document removed.", "info")
+    return _to_vetting(client_id)
+
+
+@clients_bp.route("/<int:client_id>/acceptance-decision", methods=["POST"])
+@login_required
+def save_acceptance_decision(client_id):
+    """The decision to accept or decline the client, made once here after the vetting. Partner or Admin only."""
+    from models import CLIENT_ACCEPT_DECISIONS, CLIENT_ACCEPT_CLEARING, PARTNER_SIGNOFF_ROLES
+    from acceptance import sync_client_decision
+    client = _vetting_client(client_id)
+    if current_user.role not in PARTNER_SIGNOFF_ROLES:
+        abort(403)
+    decision = request.form.get("decision", "Pending").strip()
+    notes = request.form.get("decision_notes", "").strip()
+    back = lambda: redirect(url_for("clients.view_client", client_id=client.id, _anchor="client-decision"))
+    if decision not in CLIENT_ACCEPT_DECISIONS:
+        flash("Choose Pending, Accepted, Accepted with conditions or Declined.", "danger")
+        return back()
+    assessment = screening_assessment_for(client.sanctions_screenings)
+    if decision in ("Accepted with conditions", "Declined") and not notes:
+        flash(f"Say why in the decision notes - {'state the conditions' if decision != 'Declined' else 'give the reason for declining'}.", "danger")
+        return back()
+    if decision == "Accepted" and (assessment["hits"] or assessment["potential"]) and not notes:
+        flash("The vetting shows a hit or a potential match. Record in the decision notes how it was resolved before accepting the client.", "danger")
+        return back()
+    client.acceptance_decision = decision
+    client.acceptance_decision_notes = notes
+    client.acceptance_decided_by_id = current_user.id
+    client.acceptance_decided_at = datetime.utcnow()
+    sync_client_decision(client)
+    db.session.commit()
+    flash("Decision saved: " + decision + ("." if decision in CLIENT_ACCEPT_CLEARING or decision == "Pending" else ". Engagements for this client stay locked."), "success")
+    return back()
