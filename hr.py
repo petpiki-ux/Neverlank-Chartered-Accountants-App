@@ -21,7 +21,7 @@ from extensions import db
 from models import (
     PolicyDocument, TimeSheet, TimeEntry, TimeSheetUpload, CheckInRecord, User, Engagement, Client,
     EngagementTask, PersonalTask, PersonalSubtask, StaffAllocation, POLICY_CATEGORIES, REVIEWER_ROLES, TASK_STATUSES, TASK_CATEGORIES, resolve_task_category, effective_task_priority,
-    PayrollEmployee, LeaveType, LeaveBalance,
+    PayrollEmployee, LeaveType, LeaveBalance, LeaveRecord,
     user_has_permission, user_can_access_engagement, notify_task_assignment,
 )
 from config import Config
@@ -781,14 +781,152 @@ def list_leave_balances():
         )
         team_balances = [(emp, leave_calc.sync_all_balances_for_employee(emp)) for emp in employees]
 
+    # Recording leave: a reviewer picks any active staff member; everyone else records only their own.
+    can_manage = current_user.role in REVIEWER_ROLES
+    if can_manage:
+        record_employees = (PayrollEmployee.query.filter_by(scope="internal", is_active=True)
+                            .order_by(PayrollEmployee.full_name).all())
+    else:
+        record_employees = [my_employee] if my_employee else []
+    try:
+        year = int(request.args.get("year") or date.today().year)
+    except ValueError:
+        year = date.today().year
+    emp_filter = request.args.get("employee_id", "")
+    history = _leave_history(year, int(emp_filter) if emp_filter.isdigit() and can_manage else None,
+                             None if can_manage else (my_employee.id if my_employee else -1))
+
     return render_template(
         "hr/leave_balances.html",
         my_employee=my_employee,
         my_balances=my_balances,
         leave_provisions=leave_provisions,
         team_balances=team_balances,
-        can_manage=current_user.role in REVIEWER_ROLES,
+        can_manage=can_manage,
+        record_employees=record_employees,
+        record_leave_types=LeaveType.query.filter_by(is_active=True).order_by(LeaveType.order).all(),
+        history=history, year=year, emp_filter=emp_filter, today=date.today(),
+        current_employee_id=my_employee.id if my_employee else None,
     )
+
+
+def _leave_history(year, employee_id=None, only_employee_id=None):
+    """Every leave day-range in `year`, newest first: leave recorded on the Leave page (LeaveRecord) and leave captured on a timesheet
+    (TimeEntry). Each row is a dict: kind ('record' | 'timesheet'), id, employee, type, start, end, days, reason, by, can_delete_id."""
+    lo, hi = date(year, 1, 1), date(year, 12, 31)
+    rows = []
+    q = LeaveRecord.query.filter(LeaveRecord.start_date <= hi, LeaveRecord.end_date >= lo)
+    if employee_id:
+        q = q.filter_by(employee_id=employee_id)
+    if only_employee_id is not None:
+        q = q.filter_by(employee_id=only_employee_id)
+    for r in q.all():
+        rows.append({"kind": "record", "id": r.id, "employee": r.employee.full_name, "employee_id": r.employee_id,
+                     "type": r.leave_type.name, "start": r.start_date, "end": r.end_date, "days": r.days, "reason": r.reason or "",
+                     "by": r.recorded_by.name if r.recorded_by else "", "recorded_by_id": r.recorded_by_id})
+    te = (TimeEntry.query.join(TimeSheet, TimeEntry.timesheet_id == TimeSheet.id)
+          .filter(TimeEntry.leave_type_id.isnot(None), TimeEntry.work_date >= lo, TimeEntry.work_date <= hi))
+    for e in te.all():
+        emp = PayrollEmployee.query.filter_by(user_id=e.timesheet.user_id, scope="internal").first()
+        if not emp:
+            continue
+        if employee_id and emp.id != employee_id:
+            continue
+        if only_employee_id is not None and emp.id != only_employee_id:
+            continue
+        rows.append({"kind": "timesheet", "id": e.id, "employee": emp.full_name, "employee_id": emp.id, "type": e.leave_type.name,
+                     "start": e.work_date, "end": e.work_date, "days": e.leave_days or 0, "reason": "",
+                     "by": "Timesheet", "recorded_by_id": e.timesheet.user_id})
+    rows.sort(key=lambda r: (r["start"], r["employee"]), reverse=True)
+    return rows
+
+
+@hr_bp.route("/leave/record", methods=["POST"])
+@login_required
+def record_leave():
+    """Enter leave days for a staff member: a reviewer (Supervisor/Partner/Admin) for anyone, anyone else for themselves only. Days default
+    to the working days (Mon-Fri) between the two dates and can be typed over (0.5 for a half day, or to leave out a public holiday)."""
+    back = redirect(url_for("hr.list_leave_balances"))
+    can_manage = current_user.role in REVIEWER_ROLES
+    mine = PayrollEmployee.query.filter_by(user_id=current_user.id, scope="internal").first()
+    emp_id = request.form.get("employee_id", "")
+    employee = PayrollEmployee.query.get(int(emp_id)) if emp_id.isdigit() else (None if can_manage else mine)
+    if employee is None or employee.scope != "internal" or not employee.is_active:
+        flash("Choose the staff member.", "danger")
+        return back
+    if not can_manage and (mine is None or employee.id != mine.id):
+        abort(403)
+    leave_type = LeaveType.query.get(request.form.get("leave_type_id") or 0)
+    if leave_type is None or not leave_type.is_active:
+        flash("Choose a leave type.", "danger")
+        return back
+    try:
+        start = datetime.strptime(request.form.get("start_date", ""), "%Y-%m-%d").date()
+        end = datetime.strptime(request.form.get("end_date") or request.form.get("start_date", ""), "%Y-%m-%d").date()
+    except ValueError:
+        flash("Enter the first and last day of the leave.", "danger")
+        return back
+    if end < start:
+        flash("The last day cannot be before the first day.", "danger")
+        return back
+    if (end - start).days > 365:
+        flash("A single leave record cannot run longer than a year - split it.", "danger")
+        return back
+    typed = (request.form.get("days") or "").strip()
+    if typed:
+        try:
+            days = float(typed)
+        except ValueError:
+            days = 0
+    else:
+        days = float(leave_calc.weekdays_between(start, end))
+    if days <= 0:
+        flash("The leave comes to no working days - check the dates, or type the number of days.", "danger")
+        return back
+    if days > (end - start).days + 1:
+        flash("The days are more than the dates cover.", "danger")
+        return back
+    clash = LeaveRecord.query.filter(LeaveRecord.employee_id == employee.id, LeaveRecord.start_date <= end,
+                                     LeaveRecord.end_date >= start).first()
+    if clash:
+        flash(f"{employee.full_name} already has leave recorded from {clash.start_date.strftime('%d %b %Y')} to "
+              f"{clash.end_date.strftime('%d %b %Y')}. Delete that record first if it was a mistake.", "danger")
+        return back
+    problem = leave_calc.check_can_take(employee, leave_type, days, start)
+    if problem:
+        db.session.rollback()
+        flash(problem, "danger")
+        return back
+    db.session.add(LeaveRecord(employee_id=employee.id, leave_type_id=leave_type.id, start_date=start, end_date=end, days=days,
+                               reason=(request.form.get("reason") or "").strip()[:255], recorded_by_id=current_user.id))
+    msg = f"{days:g} day(s) of {leave_type.name} recorded for {employee.full_name}."
+    if leave_type.is_accumulative:
+        balance = leave_calc.get_or_create_balance(employee, leave_type)
+        balance.taken_days = round((balance.taken_days or 0.0) + days, 2)
+        msg += f" {balance.current_balance:.2f} day(s) remain."
+    db.session.commit()
+    flash(msg, "success")
+    return back
+
+
+@hr_bp.route("/leave/records/<int:record_id>/delete", methods=["POST"])
+@login_required
+def delete_leave_record(record_id):
+    """Remove a leave record entered here (a mistake, or leave that was cancelled); the days go back to the balance they came from."""
+    rec = LeaveRecord.query.get_or_404(record_id)
+    can_manage = current_user.role in REVIEWER_ROLES
+    mine = PayrollEmployee.query.filter_by(user_id=current_user.id, scope="internal").first()
+    if not can_manage and not (mine and rec.employee_id == mine.id and rec.recorded_by_id == current_user.id):
+        abort(403)
+    if rec.leave_type.is_accumulative:
+        balance = LeaveBalance.query.filter_by(employee_id=rec.employee_id, leave_type_id=rec.leave_type_id).first()
+        if balance:
+            balance.taken_days = round(max(0.0, (balance.taken_days or 0.0) - rec.days), 2)
+    name, days, kind = rec.employee.full_name, rec.days, rec.leave_type.name
+    db.session.delete(rec)
+    db.session.commit()
+    flash(f"{days:g} day(s) of {kind} removed for {name}.", "info")
+    return redirect(url_for("hr.list_leave_balances"))
 
 
 @hr_bp.route("/leave/balances/<int:balance_id>/brought-forward", methods=["POST"])

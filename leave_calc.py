@@ -33,7 +33,7 @@ instead - defined on the Leave Types screen and still capturable on a Time
 Sheet, but with no LeaveBalance row, accrual or cap kept per employee - see
 sync_all_balances_for_employee below and hr._add_leave_entry.
 """
-from datetime import date
+from datetime import date, timedelta
 
 from extensions import db
 from models import LeaveType, LeaveBalance
@@ -127,3 +127,34 @@ def provision_leave_types():
     makes available to capture on a Time Sheet, but never tracks a
     per-employee LeaveBalance for (no accrual, no running total, no cap)."""
     return LeaveType.query.filter_by(is_active=True, is_accumulative=False).order_by(LeaveType.order).all()
+
+
+def weekdays_between(start, end):
+    """Working days (Monday to Friday) from `start` to `end`, both included. 0 when the range is empty or backwards."""
+    if not start or not end or end < start:
+        return 0
+    days = (end - start).days + 1
+    full, extra = divmod(days, 7)
+    count = full * 5
+    for i in range(extra):
+        if (start + timedelta(days=full * 7 + i)).weekday() < 5:
+            count += 1
+    return count
+
+
+def check_can_take(employee, leave_type, days, on_date):
+    """Why `days` of `leave_type` cannot be taken by `employee` starting `on_date`, or None when it can: the minimum-service rule, and (for an
+    accumulative type, e.g. Annual/Vacation Leave) the available balance, synced first. Does not change anything."""
+    if leave_type.min_service_months_to_take:
+        served = months_between(employee.date_joined, on_date) if employee.date_joined else 0
+        if served < leave_type.min_service_months_to_take:
+            return (f"{leave_type.name} normally can't be taken until {employee.full_name} has completed "
+                    f"{leave_type.min_service_months_to_take} months of continuous service.")
+    if leave_type.is_accumulative:
+        balance = get_or_create_balance(employee, leave_type)
+        sync_leave_balance(employee, leave_type, balance)
+        if days > balance.current_balance + 1e-9:
+            return (f"Only {balance.current_balance:.2f} day(s) of {leave_type.name} are available for {employee.full_name} "
+                    f"(brought forward {balance.brought_forward or 0:.2f} + accrued {balance.accrued_days or 0:.2f} - taken "
+                    f"{balance.taken_days or 0:.2f}). Reduce the days, or set the opening balance first.")
+    return None

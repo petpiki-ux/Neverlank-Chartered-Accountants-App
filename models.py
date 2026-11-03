@@ -3330,6 +3330,28 @@ class LeaveBalance(db.Model):
         return f"<LeaveBalance employee={self.employee_id} type={self.leave_type_id} balance={self.current_balance}>"
 
 
+class LeaveRecord(db.Model):
+    """Leave taken by a staff member, entered directly on HR & Admin > Leave (by the staff member for themselves, or by a
+    Supervisor/Partner/Admin for anyone) - from `start_date` to `end_date`, `days` being the working days (Mon-Fri, or what the
+    person typed, e.g. 0.5 for a half day). For an accumulative leave type (Annual/Vacation) the days come off the employee's
+    LeaveBalance.taken_days when recorded and go back when the record is deleted (hr.record_leave / hr.delete_leave_record).
+    Leave captured on a timesheet (TimeEntry) is separate and still works; the Leave page lists both so nothing is missed."""
+    __tablename__ = "leave_record"
+    id = db.Column(db.Integer, primary_key=True)
+    employee_id = db.Column(db.Integer, db.ForeignKey("payroll_employee.id"), nullable=False)
+    leave_type_id = db.Column(db.Integer, db.ForeignKey("leave_type.id"), nullable=False)
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    days = db.Column(db.Float, nullable=False)
+    reason = db.Column(db.String(255))
+    recorded_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    employee = db.relationship("PayrollEmployee")
+    leave_type = db.relationship("LeaveType")
+    recorded_by = db.relationship("User", foreign_keys=[recorded_by_id])
+
+
 class StaffAllocation(db.Model):
     """A staff member booked onto an engagement for a specific date range,
     optionally at less than 100% of their time. Powers the HR & Admin >

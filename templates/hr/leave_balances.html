@@ -7,13 +7,94 @@
     <div class="subtitle">
       Annual, Sick, Special/Compassionate and Maternity leave, per the Labour Act [Chapter 28:01] -
       Annual/Vacation Leave accrues automatically and is tracked per employee; the others are statutory
-      provisions. Capture leave taken from your <a href="{{ url_for('hr.list_timesheets') }}">Time Sheet</a>.
+      provisions. Enter leave days below, or capture them from your <a href="{{ url_for('hr.list_timesheets') }}">Time Sheet</a>.
     </div>
   </div>
   <div>
     <a href="{{ url_for('hr.index') }}" class="btn secondary">Back to HR &amp; Admin</a>
     {% if can_manage %}<a href="{{ url_for('hr.leave_types') }}" class="btn secondary">Leave Types</a>{% endif %}
   </div>
+</div>
+
+
+<div class="card" id="record-leave">
+  <h2 style="margin-top:0;font-size:16px;">Record leave</h2>
+  {% if not record_employees %}
+  <div class="empty-state">No Payroll employee profile is linked to your login yet, so leave can't be recorded for you - ask an Admin/Partner to link one on Payroll &gt; Employees.</div>
+  {% else %}
+  <p class="muted" style="font-size:12px;margin-top:0;">
+    {% if can_manage %}Enter leave for any staff member.{% else %}Enter your own leave.{% endif %}
+    The days are worked out from the dates (Monday to Friday) - type over them for a half day or to leave out a public holiday.
+    Annual/Vacation Leave comes off the balance straight away and goes back if the record is deleted.
+  </p>
+  <form method="post" action="{{ url_for('hr.record_leave') }}" class="form-row" style="align-items:flex-end;flex-wrap:wrap;margin-bottom:0;">
+    <div style="min-width:200px;"><label for="rl_employee">Staff member</label>
+      <select id="rl_employee" name="employee_id" required>
+        {% for emp in record_employees %}<option value="{{ emp.id }}" {% if emp.id == current_employee_id %}selected{% endif %}>{{ emp.full_name }}</option>{% endfor %}
+      </select></div>
+    <div><label for="rl_type">Leave type</label>
+      <select id="rl_type" name="leave_type_id" required>
+        {% for lt in record_leave_types %}<option value="{{ lt.id }}">{{ lt.name }}</option>{% endfor %}
+      </select></div>
+    <div><label for="rl_start">First day</label><input type="date" id="rl_start" name="start_date" required></div>
+    <div><label for="rl_end">Last day</label><input type="date" id="rl_end" name="end_date" required></div>
+    <div><label for="rl_days">Days <span class="muted" style="font-weight:normal;">(auto)</span></label><input type="number" id="rl_days" name="days" step="0.5" min="0.5" style="width:100px;" placeholder="auto"></div>
+    <div style="flex:1;min-width:200px;"><label for="rl_reason">Reason / note</label><input id="rl_reason" name="reason" maxlength="255" placeholder="optional" style="width:100%;"></div>
+    <div><button type="submit" class="btn gold">Record leave</button></div>
+  </form>
+  <script>
+    (function () {
+      var s = document.getElementById("rl_start"), e = document.getElementById("rl_end"), d = document.getElementById("rl_days");
+      var typed = false;
+      d.addEventListener("input", function () { typed = d.value !== ""; });
+      function weekdays(a, b) {
+        var n = 0, cur = new Date(a + "T00:00:00"), last = new Date(b + "T00:00:00");
+        while (cur <= last) { var w = cur.getDay(); if (w !== 0 && w !== 6) n++; cur.setDate(cur.getDate() + 1); }
+        return n;
+      }
+      function update() {
+        if (s.value && !e.value) e.value = s.value;
+        if (s.value && e.value && e.value < s.value) e.value = s.value;
+        if (!typed && s.value && e.value) d.placeholder = String(weekdays(s.value, e.value));
+      }
+      s.addEventListener("change", update); e.addEventListener("change", update);
+    })();
+  </script>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;">
+    <h2 style="margin:0;font-size:16px;">Leave taken in {{ year }}</h2>
+    <form method="get" class="form-row" style="margin:0;align-items:flex-end;">
+      {% if can_manage %}<div><label for="f_emp">Staff member</label>
+        <select id="f_emp" name="employee_id" onchange="this.form.submit()"><option value="">Everyone</option>
+          {% for emp in record_employees %}<option value="{{ emp.id }}" {% if emp_filter == emp.id|string %}selected{% endif %}>{{ emp.full_name }}</option>{% endfor %}</select></div>{% endif %}
+      <div><label for="f_year">Year</label><input type="number" id="f_year" name="year" value="{{ year }}" style="width:90px;" onchange="this.form.submit()"></div>
+    </form>
+  </div>
+  {% if history %}
+  <table style="margin-top:10px;">
+    <thead><tr><th>Staff member</th><th>Leave type</th><th>From</th><th>To</th><th class="text-right">Days</th><th>Note</th><th>Entered by</th><th></th></tr></thead>
+    <tbody>
+      {% for r in history %}
+      <tr>
+        <td>{{ r.employee }}</td><td>{{ r.type }}</td>
+        <td>{{ r.start.strftime('%d %b %Y') }}</td><td>{{ r.end.strftime('%d %b %Y') }}</td>
+        <td class="text-right">{{ '%g'|format(r.days) }}</td>
+        <td class="muted" style="font-size:12px;">{{ r.reason or '' }}</td>
+        <td class="muted" style="font-size:12px;">{{ r.by }}</td>
+        <td class="text-right">{% if r.kind == 'record' and (can_manage or (r.employee_id == current_employee_id and r.recorded_by_id == current_user.id)) %}
+          <form method="post" action="{{ url_for('hr.delete_leave_record', record_id=r.id) }}" class="inline" onsubmit="return confirm('Delete this leave record? The days go back to the balance.');"><button type="submit" class="btn small secondary">Delete</button></form>
+          {% elif r.kind == 'timesheet' %}<span class="muted" style="font-size:11px;">on timesheet</span>{% endif %}</td>
+      </tr>
+      {% endfor %}
+      <tr><td colspan="4" style="font-weight:600;">Total days</td><td class="text-right" style="font-weight:600;">{{ '%g'|format(history|sum(attribute='days')) }}</td><td colspan="3"></td></tr>
+    </tbody>
+  </table>
+  {% else %}
+  <p class="muted" style="margin:10px 0 0;">No leave recorded for {{ year }}.</p>
+  {% endif %}
 </div>
 
 <div class="card" style="max-width:640px;">
