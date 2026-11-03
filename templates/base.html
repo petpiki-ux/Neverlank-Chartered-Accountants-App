@@ -12,66 +12,101 @@
 </head>
 <body>
   {% if current_user.is_authenticated %}
+  {% set finance_blueprints = ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'advances', 'credit_notes', 'statements', 'analytics', 'expenses', 'firmfs'] %}
+  {% set bp = request.blueprint %}
+  {% set ep = request.endpoint or '' %}
+  {% set can_cf = user_has_permission(current_user, 'manage_corporate_finance') %}
+  {% set can_wb = user_has_permission(current_user, 'manage_whistleblower') %}
+  {% set can_tr = user_has_permission(current_user, 'manage_training') %}
+  {% set can_coa = user_has_permission(current_user, 'manage_chart_of_accounts') %}
+  {% set can_users = user_has_permission(current_user, 'manage_users') %}
+  {% set can_backup = current_user.role in ('admin', 'partner') %}
+  {% set practice_on = bp in ['engagements', 'doc_templates', 'tickmarks', 'filing_index', 'qpd_dashboard'] and ep != 'engagements.dashboard' %}
+  {% set compliance_on = bp in ['scan', 'regulatory_notices', 'tax', 'zimra', 'valuations'] %}
+  {% set firm_on = (bp == 'hr' and ep != 'hr.project_board') or bp in ['whistleblower', 'training', 'standard_coa', 'users', 'backup'] %}
   <div class="topbar">
-    <div class="brand">
-      <img src="{{ url_for('static', filename='img/neverlank-logo.png') }}" alt="Neverlank">
-      Neverlank <span class="tag">Audit &middot; Assurance &middot; Corporate Finance</span>
+    <div class="topbar-main">
+      <a class="brand" href="{{ url_for('engagements.dashboard') }}">
+        <img src="{{ url_for('static', filename='img/neverlank-logo.png') }}" alt="Neverlank">
+        <span class="brand-text"><span class="brand-name">Neverlank</span><span class="tag">Audit &middot; Assurance &middot; Corporate Finance</span></span>
+      </a>
+      <div class="user-menu">
+        {% if open_check_in %}
+        <form method="post" action="{{ url_for('hr.check_out') }}" class="inline" title="Checked in at {{ (open_check_in.check_in_at|cat).strftime('%H:%M') }}">
+          <button type="submit" class="btn small danger">Check Out ({{ (open_check_in.check_in_at|cat).strftime('%H:%M') }})</button>
+        </form>
+        {% else %}
+        <form method="post" action="{{ url_for('hr.check_in') }}" class="inline">
+          <button type="submit" class="btn small gold">Check In</button>
+        </form>
+        {% endif %}
+        <a class="pill" href="{{ url_for('messages.inbox') }}">Messages{% if unread_message_count %} <span class="badge overdue">{{ unread_message_count }}</span>{% endif %}</a>
+        <a class="who" href="{{ url_for('auth.account') }}" title="Your account">
+          <span class="avatar">{% for w in (current_user.name or '?').split()[:2] %}{{ w[0]|upper }}{% endfor %}</span>
+          <span class="who-name">{{ current_user.name }}</span>
+        </a>
+        <a class="pill ghost" href="{{ url_for('auth.logout') }}">Log out</a>
+      </div>
     </div>
     <nav>
-      <a href="{{ url_for('engagements.dashboard') }}">Practice Dashboard</a>
-      <a href="{{ url_for('engagements.directory') }}">Clients &amp; Engagements</a>
-      <a href="{{ url_for('engagements.list_templates') }}">Checklist Templates</a>
-      <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a>
-      <a href="{{ url_for('tickmarks.list_tickmarks') }}">Tickmarks</a>
-      <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>
-      <a href="{{ url_for('scan.search_documents') }}">Search Documents</a>
-      <a href="{{ url_for('regulatory_notices.list_notices') }}">Regulatory Notices</a>
-      <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Updates</a>
-      <a href="{{ url_for('zimra.list_cases') }}">ZIMRA Matters{% if zimra_overdue_count %} <span class="badge overdue" title="ZIMRA letters past their response deadline">{{ zimra_overdue_count }}</span>{% endif %}{% if zimra_approval_count %} <span class="badge" style="background:#b8923a;color:#fff;" title="Letters to ZIMRA waiting for your approval">{{ zimra_approval_count }}</span>{% endif %}</a>
-      <a href="{{ url_for('valuations.list_certificates') }}"{% if request.blueprint == 'valuations' %} class="active"{% endif %}>Valuations</a>
-      <a href="{{ url_for('learning.index') }}"{% if request.blueprint == 'learning' %} class="active"{% endif %}>Firm Learning{% if learning_pending_count %} <span class="badge" style="background:#b8934a;color:#fff;" title="Lessons waiting for your decision">{{ learning_pending_count }}</span>{% endif %}</a>
-      <a href="{{ url_for('qpd_dashboard.dashboard') }}">QPD</a>
-      <a href="{{ url_for('hr.project_board') }}">Tasks{% if my_open_task_count %} <span class="badge overdue">{{ my_open_task_count }}</span>{% endif %}</a>
-      <a href="{{ url_for('daily_updates.my_update') }}"{% if request.blueprint == 'daily_updates' %} class="active"{% endif %}>Daily Update{% if daily_fire_count %} <span class="badge overdue" title="Urgent fires reported today">{{ daily_fire_count }}</span>{% endif %}</a>
-      <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
-      <a href="{{ url_for('engagements.queries_board') }}">Queries</a>
-      {% set finance_blueprints = ['quotations', 'invoicing', 'invoice_send', 'recurring', 'receipts', 'advances', 'credit_notes', 'statements', 'analytics', 'expenses', 'firmfs'] %}
-      <a href="{{ url_for('invoicing.list_invoices') }}"{% if request.blueprint in finance_blueprints %} class="active"{% endif %}>Finance{% if recurring_review_count or invoice_reminder_count %} <span class="badge overdue" title="Recurring invoices waiting for review and overdue-invoice reminders due">{{ recurring_review_count + invoice_reminder_count }}</span>{% endif %}</a>
-      {% if user_has_permission(current_user, 'manage_corporate_finance') %}
-      <a href="{{ url_for('corpfin.dashboard') }}" style="white-space:nowrap;"{% if request.blueprint == 'corpfin' %} class="active"{% endif %}>Corporate Finance</a>
-      {% endif %}
-      {% if user_has_permission(current_user, 'manage_whistleblower') %}
-      <a href="{{ url_for('whistleblower.dashboard') }}">Whistle-blower</a>
-      {% endif %}
-      {% if user_has_permission(current_user, 'manage_training') %}
-      <a href="{{ url_for('training.dashboard') }}">Training</a>
-      {% endif %}
-      {% if user_has_permission(current_user, 'manage_chart_of_accounts') %}
-      <a href="{{ url_for('standard_coa.list_accounts') }}">Chart of Accounts</a>
-      {% endif %}
-      {% if user_has_permission(current_user, 'manage_users') %}
-      <a href="{{ url_for('users.list_users') }}">Team</a>
-      {% endif %}
-      {% if current_user.role in ('admin', 'partner') %}
-      <a href="{{ url_for('backup.index') }}"{% if request.blueprint == 'backup' %} class="active"{% endif %}>Backup{% if backup_alert %} <span class="badge overdue" title="{{ backup_alert }}">!</span>{% endif %}</a>
-      {% endif %}
+      <a href="{{ url_for('engagements.dashboard') }}"{% if ep == 'engagements.dashboard' %} class="active"{% endif %}>Practice Dashboard</a>
+      <div class="nav-group{% if practice_on %} active{% endif %}">
+        <button type="button" class="nav-trigger" aria-haspopup="true" aria-expanded="false">Clients &amp; Work <span class="caret"></span></button>
+        <div class="nav-menu">
+          <a href="{{ url_for('engagements.directory') }}">Clients &amp; Engagements</a>
+          <a href="{{ url_for('engagements.list_templates') }}">Checklist Templates</a>
+          <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a>
+          <a href="{{ url_for('tickmarks.list_tickmarks') }}">Tickmarks</a>
+          <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>
+          <a href="{{ url_for('qpd_dashboard.dashboard') }}">QPD</a>
+        </div>
+      </div>
+      <div class="nav-group{% if compliance_on %} active{% endif %}">
+        <button type="button" class="nav-trigger" aria-haspopup="true" aria-expanded="false">Tax &amp; Compliance <span class="caret"></span>{% if zimra_overdue_count %}<span class="badge overdue" title="ZIMRA letters past their response deadline">{{ zimra_overdue_count }}</span>{% endif %}{% if zimra_approval_count %}<span class="badge" style="background:#b8923a;color:#fff;" title="Letters to ZIMRA waiting for your approval">{{ zimra_approval_count }}</span>{% endif %}</button>
+        <div class="nav-menu">
+          <a href="{{ url_for('zimra.list_cases') }}">ZIMRA Matters{% if zimra_overdue_count %} <span class="badge overdue" title="ZIMRA letters past their response deadline">{{ zimra_overdue_count }}</span>{% endif %}{% if zimra_approval_count %} <span class="badge" style="background:#b8923a;color:#fff;" title="Letters to ZIMRA waiting for your approval">{{ zimra_approval_count }}</span>{% endif %}</a>
+          <a href="{{ url_for('valuations.list_certificates') }}"{% if bp == 'valuations' %} class="active"{% endif %}>Valuations</a>
+          <a href="{{ url_for('tax.list_legislative_updates') }}">Legislative Updates</a>
+          <a href="{{ url_for('regulatory_notices.list_notices') }}">Regulatory Notices</a>
+          <a href="{{ url_for('scan.search_documents') }}">Search Documents</a>
+        </div>
+      </div>
+      <a href="{{ url_for('hr.project_board') }}"{% if ep == 'hr.project_board' %} class="active"{% endif %}>Tasks{% if my_open_task_count %} <span class="badge overdue">{{ my_open_task_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('daily_updates.my_update') }}"{% if bp == 'daily_updates' %} class="active"{% endif %}>Daily Update{% if daily_fire_count %} <span class="badge overdue" title="Urgent fires reported today">{{ daily_fire_count }}</span>{% endif %}</a>
+      <a href="{{ url_for('engagements.queries_board') }}"{% if ep == 'engagements.queries_board' %} class="active"{% endif %}>Queries</a>
+      <a href="{{ url_for('invoicing.list_invoices') }}"{% if bp in finance_blueprints %} class="active"{% endif %}>Finance{% if recurring_review_count or invoice_reminder_count %} <span class="badge overdue" title="Recurring invoices waiting for review and overdue-invoice reminders due">{{ recurring_review_count + invoice_reminder_count }}</span>{% endif %}</a>
+      {% if can_cf %}<a href="{{ url_for('corpfin.dashboard') }}"{% if bp == 'corpfin' %} class="active"{% endif %}>Corporate Finance</a>{% endif %}
+      <a href="{{ url_for('learning.index') }}"{% if bp == 'learning' %} class="active"{% endif %}>Firm Learning{% if learning_pending_count %} <span class="badge" style="background:#b8934a;color:#fff;" title="Lessons waiting for your decision">{{ learning_pending_count }}</span>{% endif %}</a>
+      <div class="nav-group nav-right{% if firm_on %} active{% endif %}">
+        <button type="button" class="nav-trigger" aria-haspopup="true" aria-expanded="false">Firm <span class="caret"></span>{% if can_backup and backup_alert %}<span class="badge overdue" title="{{ backup_alert }}">!</span>{% endif %}</button>
+        <div class="nav-menu">
+          <a href="{{ url_for('hr.index') }}">HR &amp; Admin</a>
+          {% if can_wb %}<a href="{{ url_for('whistleblower.dashboard') }}">Whistle-blower</a>{% endif %}
+          {% if can_tr %}<a href="{{ url_for('training.dashboard') }}">Training</a>{% endif %}
+          {% if can_coa %}<a href="{{ url_for('standard_coa.list_accounts') }}">Chart of Accounts</a>{% endif %}
+          {% if can_users %}<a href="{{ url_for('users.list_users') }}">Team</a>{% endif %}
+          {% if can_backup %}<a href="{{ url_for('backup.index') }}">Backup{% if backup_alert %} <span class="badge overdue" title="{{ backup_alert }}">!</span>{% endif %}</a>{% endif %}
+        </div>
+      </div>
     </nav>
-    <div class="user-menu">
-      {% if open_check_in %}
-      <form method="post" action="{{ url_for('hr.check_out') }}" class="inline" title="Checked in at {{ (open_check_in.check_in_at|cat).strftime('%H:%M') }}">
-        <button type="submit" class="btn small danger">Check Out ({{ (open_check_in.check_in_at|cat).strftime('%H:%M') }})</button>
-      </form>
-      {% else %}
-      <form method="post" action="{{ url_for('hr.check_in') }}" class="inline">
-        <button type="submit" class="btn small gold">Check In</button>
-      </form>
-      {% endif %}
-      <a href="{{ url_for('messages.inbox') }}">Messages{% if unread_message_count %} <span class="badge overdue">{{ unread_message_count }}</span>{% endif %}</a>
-      <span>{{ current_user.name }}</span>
-      <a href="{{ url_for('auth.account') }}">Account</a>
-      <a href="{{ url_for('auth.logout') }}">Log out</a>
-    </div>
   </div>
+  <script>
+    (function () {
+      var groups = document.querySelectorAll(".topbar .nav-group");
+      function closeAll(except) { groups.forEach(function (g) { if (g !== except) { g.classList.remove("open"); g.querySelector(".nav-trigger").setAttribute("aria-expanded", "false"); } }); }
+      groups.forEach(function (g) {
+        g.querySelector(".nav-trigger").addEventListener("click", function (e) {
+          e.stopPropagation();
+          var open = !g.classList.contains("open");
+          closeAll(g);
+          g.classList.toggle("open", open);
+          this.setAttribute("aria-expanded", open ? "true" : "false");
+        });
+      });
+      document.addEventListener("click", function () { closeAll(null); });
+      document.addEventListener("keydown", function (e) { if (e.key === "Escape") closeAll(null); });
+    })();
+  </script>
   {% endif %}
 
   <div class="container">
