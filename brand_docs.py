@@ -166,16 +166,25 @@ def pdf_signature_flowables(width=None, firm_name=None, align="LEFT", signed_on=
         return []
     firm_name = firm_name or firm_info().get("name", "")
     base = ParagraphStyle("mpsig", fontName="Helvetica", fontSize=9, leading=12, textColor=rgb_tuple(INK))
-    img = RLImage(io.BytesIO(data), width=36 * _mm, height=36 * _mm * 178 / 294)
-    img.hAlign = align
-    out = [Spacer(1, 2 * _mm), img,
-           Paragraph(f"<b>{escape(mp_full_name())}</b>", base),
-           Paragraph(escape(MP_TITLE), ParagraphStyle("mpsig2", parent=base, textColor=rgb_tuple(MUTED)))]
+    img = RLImage(io.BytesIO(data), width=27 * _mm, height=27 * _mm * 178 / 294)   # 27 mm wide: clearly a signature, not a banner
+    img.hAlign = "LEFT"
+    lines = [Paragraph(f"<b>{escape(mp_full_name())}</b>", base),
+             Paragraph(escape(MP_TITLE), ParagraphStyle("mpsig2", parent=base, textColor=rgb_tuple(MUTED)))]
     if firm_name:
-        out.append(Paragraph(f"For {escape(firm_name)}", ParagraphStyle("mpsig3", parent=base, textColor=rgb_tuple(MUTED))))
+        lines.append(Paragraph(f"For {escape(firm_name)}", ParagraphStyle("mpsig3", parent=base, textColor=rgb_tuple(MUTED))))
     if signed_on:
-        out.append(Paragraph(f"Signed {signed_on.strftime('%d %b %Y')}", ParagraphStyle("mpsig4", parent=base, textColor=rgb_tuple(MUTED))))
-    return out
+        lines.append(Paragraph(f"Signed {signed_on.strftime('%d %b %Y')}", ParagraphStyle("mpsig4", parent=base, textColor=rgb_tuple(MUTED))))
+    if str(align).upper() == "RIGHT":
+        # The whole block - image, rule, name, title - sits at the right as ONE block with everything left-aligned inside it, the same as the
+        # printed page. (The image used to be pushed to the right edge while the words stayed on the left.)
+        from reportlab.platypus import Table, TableStyle
+        box = Table([[img], [lines]], colWidths=[88 * _mm], hAlign="RIGHT")   # 88 mm = the width of the totals box above it
+        box.setStyle(TableStyle([("LEFTPADDING", (0, 0), (-1, -1), 0), ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                                 ("TOPPADDING", (0, 0), (-1, -1), 0), ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+                                 ("TOPPADDING", (0, 1), (0, 1), 3), ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                                 ("LINEABOVE", (0, 1), (0, 1), 0.9, rgb_tuple(NAVY))]))
+        return [Spacer(1, 2 * _mm), box]
+    return [Spacer(1, 2 * _mm), img] + lines
 
 
 def rgb_tuple(hex_colour):

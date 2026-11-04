@@ -1007,19 +1007,6 @@
 
   {% if client_acceptance %}{{ checklist_other(client_acceptance.checklist_items, known_prefixes, acceptance_checklist_responses) }}{% endif %}
 
-  <div class="card">
-    <h3 class="mt-0">Sanctions &amp; AML Vetting</h3>
-    <p class="muted" style="font-size:12px;">
-      Sanctions, PEP and AML vetting applies to every engagement for this client, so it is done once on the <strong>client's page</strong> rather than here:
-      directors, beneficial owners and authorised signatories{% if engagement.type == 'Investigative Engagement' %} (and any suspect, target or key witness){% endif %}
-      are screened against the UN, OFAC and EU sanctions lists and the RBZ and FIU adverse notices. This is a summary of that list; it is advisory and does not block the Decision below.
-    </p>
-    {% if client_acceptance and client_acceptance.screening_assessment %}
-    <div class="flash {{ client_acceptance.screening_assessment.level }}" style="margin-bottom:10px;">{{ client_acceptance.screening_assessment.label }}</div>
-    {% endif %}
-    <a class="btn small gold" href="{{ url_for('clients.view_client', client_id=engagement.client_id) }}#vetting">Open sanctions &amp; AML vetting on the client's page</a>
-  </div>
-
   {% if engagement.type == 'Investigative Engagement' %}
   <div class="card">
     <h3 class="mt-0">Forensic Audit Risk Evaluation Matrix</h3>
@@ -1066,7 +1053,7 @@
   </div>
   {% endif %}
 
-  <form method="post" action="{{ url_for('acceptance.save_acceptance_decision', engagement_id=engagement.id) }}">
+  <div>
     <div class="card">
       <h3 class="mt-0">Decision</h3>
       {% if client_acceptance %}
@@ -1110,19 +1097,15 @@
       </table>
       {% endif %}
       {% endif %}
-      <div class="form-row">
-        <div>
-          <label for="decision">Acceptance decision</label>
-          <select id="decision" name="decision">
-            {% for d in acceptance_decisions %}<option value="{{ d }}" {% if client_acceptance and client_acceptance.decision==d %}selected{% endif %}>{{ d }}</option>{% endfor %}
-          </select>
-        </div>
+      <div style="margin-top:6px;">
+        <strong>Decision to accept the client:</strong>
+        <span class="badge {{ 'status-Completed' if engagement.client.is_accepted_as_client else ('risk-High' if engagement.client.acceptance_status == 'Declined' else 'status-OnHold') }}">{{ engagement.client.acceptance_status }}</span>
+        {% if engagement.client.acceptance_decided_at %}<span class="muted" style="font-size:11.5px;">by {{ engagement.client.acceptance_decided_by.name if engagement.client.acceptance_decided_by else '-' }} on {{ (engagement.client.acceptance_decided_at|cat).strftime('%d %b %Y') }}</span>{% endif %}
+        {% if engagement.client.acceptance_decision_notes %}<div style="font-size:12.5px;white-space:pre-wrap;margin-top:4px;">{{ engagement.client.acceptance_decision_notes }}</div>{% endif %}
+        <p class="muted" style="font-size:12px;margin:6px 0 0;">The Sanctions &amp; AML vetting, its documentation and this decision are made once on the client's page, for every engagement. <a href="{{ url_for('clients.view_client', client_id=engagement.client_id, _anchor='client-decision') }}">Open them on the client's page</a>.</p>
       </div>
-      <label for="decision_notes">Decision notes</label>
-      <textarea id="decision_notes" name="decision_notes" rows="2">{{ client_acceptance.decision_notes if client_acceptance else '' }}</textarea>
-      <button type="submit" class="btn gold" style="margin-top:8px;">Save decision</button>
     </div>
-  </form>
+  </div>
 
   {% if client_acceptance %}
   <div class="card">

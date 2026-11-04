@@ -25,7 +25,7 @@ from werkzeug.utils import secure_filename
 
 from extensions import db
 from models import (
-    Engagement, Document, ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS,
+    Engagement, Document, ClientAcceptance, CLIENT_ACCEPTANCE_DECISIONS, CLIENT_ACCEPT_CLEARING,
     ClientAcceptanceChecklistItem, CLIENT_ACCEPTANCE_CHECKLIST_RESPONSES,
     DEFAULT_ACCEPTANCE_CHECKLIST_ITEMS, FORENSIC_ACCEPTANCE_CHECKLIST_ITEMS,
     BUSINESS_IT_ACCEPTANCE_CHECKLIST_ITEMS, SECRETARIAL_ACCEPTANCE_CHECKLIST_ITEMS, TAX_ACCEPTANCE_CHECKLIST_ITEMS,
@@ -45,10 +45,46 @@ def _ensure_access(engagement):
         abort(403)
 
 
+def engagement_decision_for(client):
+    """What an engagement's ClientAcceptance.decision shows for the client's decision (made on the client's page, d63):
+    Accepted and Accepted with conditions both read Accepted there; Declined and Pending as they are."""
+    status = client.acceptance_status if client is not None else "Pending"
+    return "Accepted" if status in CLIENT_ACCEPT_CLEARING else ("Declined" if status == "Declined" else "Pending")
+
+
+def _clear_signoffs(record):
+    record.reviewed_by_id = None
+    record.reviewed_at = None
+    record.partner_signed_by_id = None
+    record.partner_signed_at = None
+    record.partner_authorized_continue_by_id = None
+    record.partner_authorized_continue_at = None
+    record.partner_authorized_continue_notes = None
+
+
+def sync_client_decision(client):
+    """Copy the client's decision onto every engagement's Client Acceptance record (display and the sign-off rules read it there). A record
+    whose value changes loses its review / partner sign-off / continuation authorisation, like any other change to an acceptance. The caller commits."""
+    value = engagement_decision_for(client)
+    note = client.acceptance_decision_notes or ""
+    for eng in client.engagements:
+        rec = eng.client_acceptance
+        if rec is None:
+            continue
+        if rec.decision != value:
+            _clear_signoffs(rec)
+        rec.decision = value
+        rec.decision_notes = note
+
+
 def _get_or_create(engagement_id):
     record = ClientAcceptance.query.filter_by(engagement_id=engagement_id).first()
     if not record:
+        eng = Engagement.query.get(engagement_id)
         record = ClientAcceptance(engagement_id=engagement_id)
+        if eng is not None and eng.client is not None:
+            record.decision = engagement_decision_for(eng.client)
+            record.decision_notes = eng.client.acceptance_decision_notes or ""
         db.session.add(record)
         db.session.flush()
     return record
@@ -101,9 +137,7 @@ def save_client_acceptance(engagement_id):
     record.aml_kyc_completed = _bool("aml_kyc_completed")
     record.aml_kyc_notes = request.form.get("aml_kyc_notes", "").strip()
 
-    decision = request.form.get("decision", "Pending").strip()
-    record.decision = decision if decision in CLIENT_ACCEPTANCE_DECISIONS else "Pending"
-    record.decision_notes = request.form.get("decision_notes", "").strip()
+    # The accept / decline decision is no longer taken here: it is made once on the client's page (clients.save_acceptance_decision).
 
     _touch(record)
     db.session.commit()
@@ -392,16 +426,11 @@ def save_acceptance_tax_conflict_competence(engagement_id):
 @acceptance_bp.route("/<int:engagement_id>/acceptance/decision/save", methods=["POST"])
 @login_required
 def save_acceptance_decision(engagement_id):
+    """The decision to accept or decline the client is made once on the CLIENT's page (after the Sanctions & AML vetting), not per engagement."""
     engagement = Engagement.query.get_or_404(engagement_id)
     _ensure_access(engagement)
-    record = _get_or_create(engagement_id)
-    decision = request.form.get("decision", "Pending").strip()
-    record.decision = decision if decision in CLIENT_ACCEPTANCE_DECISIONS else "Pending"
-    record.decision_notes = request.form.get("decision_notes", "").strip()
-    _touch(record)
-    db.session.commit()
-    flash("Decision saved.", "success")
-    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="acceptance"))
+    flash("The decision to accept the client is made on the client's page, together with the Sanctions & AML vetting. Nothing was changed here.", "info")
+    return redirect(url_for("clients.view_client", client_id=engagement.client_id, _anchor="client-decision"))
 
 
 @acceptance_bp.route("/acceptance/<int:record_id>/flag/review", methods=["POST"])
@@ -555,7 +584,7 @@ def partner_sign_client_acceptance(record_id):
         flash("All six items (including the signed engagement letter) need to be filled in before the partner can sign off.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
     if record.decision == "Pending":
-        flash("Record a decision (Accepted or Declined) before signing off.", "danger")
+        flash("The client has not been accepted yet - record the decision on the client's page before signing off.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
     if record.completed_by_id == current_user.id:
         flash("You can't give the partner sign-off on a preparation you did yourself - ask another partner to sign off.", "danger")
@@ -604,7 +633,7 @@ def authorize_continue_client_acceptance(record_id):
     if current_user.role not in PARTNER_SIGNOFF_ROLES:
         abort(403)
     if record.decision != "Accepted":
-        flash("Record the decision as Accepted before authorising the team to continue.", "danger")
+        flash("Accept the client on the client's page before authorising the team to continue.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=record.engagement_id, tab="acceptance"))
     record.partner_authorized_continue_by_id = current_user.id
     record.partner_authorized_continue_at = datetime.utcnow()

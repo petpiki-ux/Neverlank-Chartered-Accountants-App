@@ -119,6 +119,35 @@ def _rename_consulting_service():
         db.session.commit()
 
 
+def _migrate_client_acceptance_decisions():
+    """One-time (idempotent) carry-over of the accept/decline decision to the client (d63). A client whose decision is still NULL gets
+    Accepted if any of its engagements was accepted (so engagements that are open today stay open), else Declined if one was declined and none
+    accepted, else Pending. The engagements' own sign-offs are untouched."""
+    from models import Client, ClientAcceptance, Engagement
+    pending = Client.query.filter(Client.acceptance_decision.is_(None)).all()
+    if not pending:
+        return
+    for c in pending:
+        recs = [r for e in c.engagements for r in [e.client_acceptance] if r is not None]
+        acc = [r for r in recs if r.decision == "Accepted"]
+        dec = [r for r in recs if r.decision == "Declined"]
+        if acc:
+            r = max(acc, key=lambda x: x.partner_signed_at or x.partner_authorized_continue_at or x.completed_at or datetime.min)
+            c.acceptance_decision = "Accepted"
+            c.acceptance_decision_notes = (r.decision_notes or "").strip() or "Carried over from the engagement's Client Acceptance decision."
+            c.acceptance_decided_by_id = r.partner_signed_by_id or r.partner_authorized_continue_by_id or r.completed_by_id
+            c.acceptance_decided_at = r.partner_signed_at or r.partner_authorized_continue_at or r.completed_at
+        elif dec:
+            r = dec[0]
+            c.acceptance_decision = "Declined"
+            c.acceptance_decision_notes = (r.decision_notes or "").strip() or "Carried over from the engagement's Client Acceptance decision."
+            c.acceptance_decided_by_id = r.completed_by_id
+            c.acceptance_decided_at = r.completed_at
+        else:
+            c.acceptance_decision = "Pending"
+    db.session.commit()
+
+
 def _migrate_screenings_to_client():
     """One-time (idempotent) move of sanctions / AML vetting from the engagement's Acceptance tab to the client.
 
@@ -229,7 +258,9 @@ def _add_missing_columns():
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
         "regulatory_notice": [("text_source", "VARCHAR(20)")],
-        "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("cover_primary", "VARCHAR(6)"), ("cover_accent", "VARCHAR(6)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER")],
+        "client": [("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("cover_primary", "VARCHAR(6)"), ("cover_accent", "VARCHAR(6)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER"),
+                   # d63: the decision to accept the client lives on the client (NULL = not yet carried over; see _migrate_client_acceptance_decisions)
+                   ("acceptance_decision", "VARCHAR(30)"), ("acceptance_decision_notes", "TEXT"), ("acceptance_decided_by_id", "INTEGER"), ("acceptance_decided_at", "DATETIME")],
         # last_seen_at - see models.User.is_online and this file's
         # _update_last_seen - drives the Messages "who's in the app" online
         # indicator.
@@ -1062,6 +1093,7 @@ def create_app():
         except Exception:
             db.session.rollback()
         _migrate_screenings_to_client()
+        _migrate_client_acceptance_decisions()
         # First-run convenience: seed an admin login + starter checklist
         # templates automatically so a freshly-installed copy works with zero
         # command-line steps.
