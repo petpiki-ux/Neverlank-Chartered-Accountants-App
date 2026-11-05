@@ -31,7 +31,7 @@ from collections import defaultdict
 from datetime import date
 
 from extensions import db
-from models import CashEntry, Expense, PayrollPeriod, PayrollTaxSettings, INVOICE_CURRENCIES
+from models import CashEntry, Expense, FirmAccount, FirmJournal, FirmJournalLine, PayrollPeriod, PayrollTaxSettings, INVOICE_CURRENCIES
 
 CENT = 0.005
 
@@ -133,6 +133,18 @@ def linked_medical(rows=None):
     return out
 
 
+def journal_deductions():
+    """Net credit (credits less debits) of the posted manual journals on Other payroll deductions payable: deductions the payroll pages do
+    not carry, for example medical aid taken off pay before the payroll was posted from the app (journalled against the opening balances).
+    They count as deducted, so a payment of them settles the payable instead of being an expense."""
+    acct = FirmAccount.query.filter_by(system_key=DED).first()
+    if acct is None:
+        return 0.0
+    rows = (db.session.query(FirmJournalLine).join(FirmJournal, FirmJournal.id == FirmJournalLine.journal_id)
+            .filter(FirmJournal.status == "posted", FirmJournalLine.account_id == acct.id).all())
+    return r2(sum((x.credit or 0.0) - (x.debit or 0.0) for x in rows))
+
+
 def medical_allocation(rows=None):
     """{expense id: (to_payable, to_expense, to_net)} in the bill's own currency, for every medical aid bill the payroll carries.
 
@@ -143,7 +155,7 @@ def medical_allocation(rows=None):
         Net salaries payable (to_net) - not a second expense;
       - any other medical aid bill (the employees' share, or one filed by hand): the payroll does not carry it, so the rest is an
         ordinary medical aid expense (to_expense).
-    Bills are taken oldest first against the deductions of all posted periods in the same currency, less what the Cash Book has already
+    Bills are taken oldest first against the deductions of all posted periods in the same currency (plus posted journals credited to the payable, in USD), less what the Cash Book has already
     paid under the medical aid heading."""
     rows = periods() if rows is None else rows
     bills = linked_medical(rows)
@@ -152,6 +164,7 @@ def medical_allocation(rows=None):
     cap = defaultdict(float)
     for r in rows:
         cap[r["currency"]] += r["ded"] or 0.0
+    cap["USD"] += journal_deductions()       # journals are kept in USD
     for p in payments(link_start(rows)):
         if p["key"] == DED:
             cap[p["currency"]] -= p["amount"]
@@ -268,7 +281,8 @@ def overlap_warnings(start):
             parts.append(f"{net:,.2f} (the employer's share, already in gross pay) settles 'Net salaries payable'")
         out.append(f"Medical aid bills in {cur} total {bills_total:,.2f} but the payslips took only {deducted:,.2f} off pay, and Other payroll deductions payable can only be cleared by what was deducted: "
                    + "; ".join(parts) + ". If a part of that really was deducted from staff, reopen the payroll period and enter it as a Deduction line "
-                   "(not an Allowance) marked as medical aid; once the payslips carry it, the bills settle the payable instead.")
+                   "(not an Allowance) marked as medical aid; once the payslips carry it, the bills settle the payable instead. Deductions from months before the payroll was in the app "
+                   "(for example August) can be journalled: credit Other payroll deductions payable, and a payment of them then settles the payable.")
     return out
 
 
