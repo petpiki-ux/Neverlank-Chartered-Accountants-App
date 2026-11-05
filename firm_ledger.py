@@ -597,6 +597,7 @@ def build_ledger(year_ends=None, include_journals=True):
     pay_rows = firm_payroll.periods()
     pay_start = firm_payroll.link_start(pay_rows)
     pay_medical = firm_payroll.linked_medical(pay_rows)
+    pay_alloc = firm_payroll.medical_allocation(pay_rows)      # {bill id: (clears the payable, ordinary expense)}: the payable is never driven into debit
     pay_salary = firm_payroll.salary_bills(pay_start)
     for r in pay_rows:
         cur = r["currency"]
@@ -629,8 +630,18 @@ def build_ledger(year_ends=None, include_journals=True):
                 debit = "PAY_NET"        # a salary payment filed in the Expense register: it pays off net salaries, it is not a second expense
             elif e["id"] in pay_medical:
                 debit = "PAY_DED"        # the cost is already in the payroll: this bill moves what was deducted from pay to the society's account
+            legs = [(debit, amt, 0, e["description"][:120])]
+            if debit == "PAY_DED":
+                native = e["amount"] or 0.0
+                to_pay, to_exp, to_net = pay_alloc.get(e["id"], (native, 0.0, 0.0))
+                if (to_exp > 0.004 or to_net > 0.004) and native:
+                    pay_amt = r2(amt * to_pay / native)
+                    net_amt = r2(amt * to_net / native)
+                    legs = [("PAY_DED", pay_amt, 0, e["description"][:120]),
+                            ("PAY_NET", net_amt, 0, "employer's share already in gross pay"),
+                            (key if L.account(key) else "EXP_OTHER", r2(amt - pay_amt - net_amt), 0, "part not covered by the payroll deductions")]
             L.post(e["date"], "Expense bill", f"EXP-{e['id']}", f"{e['supplier']} - {e['category']}",
-                   [(debit, amt, 0, e["description"][:120]), ("AP", 0, amt, e["supplier"])],
+                   legs + [("AP", 0, amt, e["supplier"])],
                    link=("expenses.edit_expense", {"expense_id": e["id"]}))
 
     # ---------------- bills settled from an advance paid earlier (no cash moves now)

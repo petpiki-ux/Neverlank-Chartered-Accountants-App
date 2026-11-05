@@ -566,6 +566,14 @@ def finalize_period(period_id):
     _ensure_payroll_access()
     period = PayrollPeriod.query.get_or_404(period_id)
     _ensure_period_access(period)
+    if period.status != "Finalized":
+        from firm_payroll import stale_payslips
+        bad = stale_payslips(period)
+        if bad:
+            who = ", ".join(x.employee.full_name if x.employee is not None and hasattr(x.employee, "full_name") else f"payslip {x.id}" for x, _, _ in bad[:5])
+            flash(f"Not finalized: {len(bad)} payslip(s) ({who}) have Deduction lines that are not in their totals (a line was added or removed after the last Recalculate). "
+                  "Click Recalculate on each of them first, so the deductions reach Other payroll deductions payable and the net pay.", "danger")
+            return redirect(url_for("payroll.view_period", period_id=period.id))
     period.status = "Finalized" if period.status != "Finalized" else "Draft"
     db.session.commit()
     flash(f"Period marked {period.status}.", "success")

@@ -206,6 +206,7 @@ def derive_period(period_start, period_end, zwg_rate):
     pay_rows = firm_payroll.periods()
     # medical aid bills posted from payroll, and salary payments filed in the Expense register: not a second expense (see firm_payroll.py)
     pay_medical = set(firm_payroll.linked_medical(pay_rows)) | set(firm_payroll.salary_bills(firm_payroll.link_start(pay_rows)))
+    pay_alloc = firm_payroll.medical_allocation(pay_rows)     # a medical aid bill the payroll deductions do not cover is an expense for the rest
     for cur in INVOICE_CURRENCIES:
         inv = analytics._invoice_rows(cur)
         exp = analytics._expense_rows(cur)
@@ -213,6 +214,9 @@ def derive_period(period_start, period_end, zwg_rate):
         owed_rows = analytics.outstanding_at(inv, period_end)
         unpaid = [dict(e, amount=analytics.exp_owed_on(e, period_end)) for e in exp if analytics.exp_owed_on(e, period_end) > 0]
         spend = [e for e in exp if period_start <= e["date"] <= period_end and e["id"] not in pay_medical]
+        for e in exp:
+            if period_start <= e["date"] <= period_end and e["id"] in pay_alloc and pay_alloc[e["id"]][1] > 0.004:
+                spend.append(dict(e, amount=pay_alloc[e["id"]][1]))
         advances = analytics.advances_held(cur, period_end)
         supp_adv = analytics.supplier_advances_held(cur, period_end)
         activity = any(abs(x) > 0.004 for x in (

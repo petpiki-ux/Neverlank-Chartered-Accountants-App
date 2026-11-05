@@ -133,6 +133,58 @@ def linked_medical(rows=None):
     return out
 
 
+def medical_allocation(rows=None):
+    """{expense id: (to_payable, to_expense, to_net)} in the bill's own currency, for every medical aid bill the payroll carries.
+
+    Other payroll deductions payable is a LIABILITY: it can only be cleared by what the payslips actually took off pay. A bill (or a run of
+    bills) that is more than the deductions posted is not covered by it, so only the covered part settles the payable and the account is
+    never driven into debit by bills. The rest depends on the bill:
+      - the employer's share posted from payroll: it is already in gross pay (and so in net pay) as an allowance, so the rest settles
+        Net salaries payable (to_net) - not a second expense;
+      - any other medical aid bill (the employees' share, or one filed by hand): the payroll does not carry it, so the rest is an
+        ordinary medical aid expense (to_expense).
+    Bills are taken oldest first against the deductions of all posted periods in the same currency, less what the Cash Book has already
+    paid under the medical aid heading."""
+    rows = periods() if rows is None else rows
+    bills = linked_medical(rows)
+    if not bills:
+        return {}
+    cap = defaultdict(float)
+    for r in rows:
+        cap[r["currency"]] += r["ded"] or 0.0
+    for p in payments(link_start(rows)):
+        if p["key"] == DED:
+            cap[p["currency"]] -= p["amount"]
+    out = {}
+    for e in sorted(Expense.query.filter(Expense.id.in_(list(bills))).all(), key=lambda x: (x.expense_date or date.min, 1 if (x.source_key or '').endswith(':employer') else 0, x.id)):   # on one date, what was taken off pay is cleared first
+        cur = e.currency or "USD"
+        amt = r2(e.amount)
+        take = min(amt, max(r2(cap[cur]), 0.0))
+        cap[cur] = r2(cap[cur] - take)
+        rest = r2(amt - take)
+        employer = (e.source_key or "").startswith("payroll_medical:") and (e.source_key or "").endswith(":employer")
+        out[e.id] = (r2(take), 0.0 if employer else rest, rest if employer else 0.0)
+    return out
+
+
+def medical_shortfall(rows=None):
+    """[(currency, bills total, deducted, treated as expense, settles net pay)] when the medical aid bills are more than the payroll deducted."""
+    rows = periods() if rows is None else rows
+    alloc = medical_allocation(rows)
+    if not alloc:
+        return []
+    cur_of = {e.id: (e.currency or "USD") for e in Expense.query.filter(Expense.id.in_(list(alloc))).all()}
+    out = []
+    for cur in sorted(set(cur_of.values())):
+        ids = [i for i, c in cur_of.items() if c == cur]
+        bills = r2(sum(sum(alloc[i]) for i in ids))
+        expense = r2(sum(alloc[i][1] for i in ids))
+        net = r2(sum(alloc[i][2] for i in ids))
+        if expense >= CENT or net >= CENT:
+            out.append((cur, bills, r2(sum(r["ded"] for r in rows if r["currency"] == cur)), expense, net))
+    return out
+
+
 def payments(start):
     """Cash book entries (money out) under the four payroll headings dated from the link start: [{date, heading, key, amount, currency}]."""
     if start is None:
@@ -155,6 +207,35 @@ def salary_bills(start):
             if not (e.source_key or "").startswith("payroll_medical:") and any(w in (e.category or "").lower() for w in SALARY_WORDS)}
 
 
+def stale_payslips(period):
+    """[(payslip, lines total, stored total)] for the payslips of one period whose Deduction lines are not in the totals the payslip carries:
+    a line was added or removed after the last Recalculate, so the deduction never reached Other payroll deductions payable. Payslips whose
+    figures were typed by hand are left alone."""
+    out = []
+    for x in period.payslips:
+        if not x.is_auto_calculated:
+            continue
+        lines = r2(sum((i.amount or 0.0) for i in x.items if i.category == "Deduction"))
+        stored = r2(x.other_deductions_total or 0.0)
+        if abs(lines - stored) >= CENT:
+            out.append((x, lines, stored))
+    return out
+
+
+def stale_warnings(rows=None):
+    """Notes for finalized, posted periods that hold payslips whose deduction lines were never recalculated."""
+    rows = periods() if rows is None else rows
+    out = []
+    for r in rows:
+        bad = stale_payslips(r["period"])
+        if bad:
+            names = ", ".join((x.employee.full_name if getattr(x, "employee", None) and hasattr(x.employee, "full_name") else f"payslip {x.id}") for x, _, _ in bad[:5])
+            more = f" and {len(bad) - 5} more" if len(bad) > 5 else ""
+            out.append(f"{r['name']}: {len(bad)} payslip(s) ({names}{more}) have Deduction lines worth {sum(b[1] for b in bad):,.2f} but the payslip totals carry {sum(b[2] for b in bad):,.2f}, "
+                       "so those deductions never reached 'Other payroll deductions payable'. Reopen the period, click Recalculate on each of those payslips, then finalize it again.")
+    return out
+
+
 def overlap_warnings(start):
     """Notes (not errors) when Expense-register bills are being treated as payments of what the payroll owes."""
     out = []
@@ -172,6 +253,16 @@ def overlap_warnings(start):
         out.append(f"{len(med)} medical aid bill(s) in the Expense register under {', '.join(repr(c) for c in cats)} (total {total:,.2f}) are dated {start.strftime('%d %b %Y')} or later. "
                    "The medical aid is already in the payroll (the employer's share in gross pay, the employees' share taken off pay), so these are not counted as a second expense: "
                    "each is treated as a payment of 'Other payroll deductions payable'. Check that account is not left in debit; if a bill is for something else, file it under another category.")
+    out.extend(stale_warnings())
+    for cur, bills_total, deducted, expense, net in medical_shortfall():
+        parts = []
+        if expense >= CENT:
+            parts.append(f"{expense:,.2f} is booked as an ordinary medical aid expense")
+        if net >= CENT:
+            parts.append(f"{net:,.2f} (the employer's share, already in gross pay) settles 'Net salaries payable'")
+        out.append(f"Medical aid bills in {cur} total {bills_total:,.2f} but the payslips took only {deducted:,.2f} off pay, and Other payroll deductions payable can only be cleared by what was deducted: "
+                   + "; ".join(parts) + ". If a part of that really was deducted from staff, reopen the payroll period and enter it as a Deduction line "
+                   "(not an Allowance) marked as medical aid; once the payslips carry it, the bills settle the payable instead.")
     return out
 
 
@@ -217,11 +308,14 @@ def statement_items(start, end, zwg_rate):
         acc[p["key"]] -= p["amount"] * f
     med = linked_medical(rows)
     if med:
+        alloc = medical_allocation(rows)
         for e in Expense.query.filter(Expense.id.in_(list(med))).all():
             if e.expense_date and e.expense_date <= end:
                 f = factor(e.currency, zwg_rate)
                 if f is not None:
-                    acc[DED] -= (e.amount or 0.0) * f
+                    a = alloc.get(e.id, (e.amount or 0.0, 0.0, 0.0))
+                    acc[DED] -= a[0] * f
+                    acc[NET] -= a[2] * f
     for e in salary_bills(pstart).values():
         if e.expense_date and e.expense_date <= end:
             f = factor(e.currency, zwg_rate)
@@ -271,7 +365,8 @@ def cash_line_notes():
     from models import SupplierPayment
     rows = periods()
     salary = salary_bills(link_start(rows))
-    medical = linked_medical(rows)
+    alloc = medical_allocation(rows)
+    medical = {i for i in linked_medical(rows) if (alloc.get(i, (0.0, 0.0, 0.0))[1] < CENT)}
     out = {}
     def mark(ids, badge, note):
         for i in ids:
@@ -287,7 +382,8 @@ def cash_line_notes():
 def expense_flags():
     """{expense id: "salary" | "medical"} for bills that are NOT an expense because the payroll carries the cost."""
     rows = periods()
-    out = {i: "medical" for i in linked_medical(rows)}
+    alloc = medical_allocation(rows)
+    out = {i: "medical" for i in linked_medical(rows) if (alloc.get(i, (0.0, 0.0, 0.0))[1] < CENT)}   # a bill the payroll does not fully cover stays an expense
     out.update({i: "salary" for i in salary_bills(link_start(rows))})
     return out
 
