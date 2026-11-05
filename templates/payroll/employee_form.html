@@ -115,6 +115,14 @@
     </div>
     <div class="form-row">
       <div>
+        <label for="medical_aid_employee">Medical aid - employee's deduction per pay period (0 = none)</label>
+        <input type="number" step="0.01" min="0" id="medical_aid_employee" name="medical_aid_employee" value="{{ '%.2f'|plainfmt(employee.medical_aid_employee or 0) if employee else '0.00' }}">
+        <div class="muted" style="font-size:10.5px;">Taken off the employee's pay and owed to the medical aid society. It is added to every payslip generated for this person as a Deduction (already marked as medical aid) and the payslip is calculated with it. Changing it does not alter payslips already generated.</div>
+      </div>
+      <div></div>
+    </div>
+    <div class="form-row">
+      <div>
         <label for="bank_name">Bank name</label>
         <input type="text" id="bank_name" name="bank_name" value="{{ employee.bank_name if employee else '' }}">
       </div>

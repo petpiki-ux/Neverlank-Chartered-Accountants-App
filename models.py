@@ -10657,6 +10657,8 @@ class PayrollEmployee(db.Model):
     bank_account_number = db.Column(db.String(50))
     pay_frequency = db.Column(db.String(20), default="Monthly")
     basic_salary = db.Column(db.Float, default=0.0)
+    # standing medical aid deduction (the employee's own share, taken off pay each pay period): added to every payslip generated for this person
+    medical_aid_employee = db.Column(db.Float, default=0.0)
     date_joined = db.Column(db.Date)
     date_left = db.Column(db.Date)
     is_active = db.Column(db.Boolean, default=True, nullable=False)

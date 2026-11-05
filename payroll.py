@@ -24,6 +24,7 @@ from models import (
     user_has_permission,
 )
 import payroll_calc
+import payroll_medical
 import payroll_documents
 import leave_calc
 
@@ -299,6 +300,7 @@ def new_employee():
             bank_account_number=request.form.get("bank_account_number", "").strip() or None,
             pay_frequency=request.form.get("pay_frequency", "Monthly"),
             basic_salary=_parse_float(request.form.get("basic_salary"), 0.0),
+            medical_aid_employee=max(_parse_float(request.form.get("medical_aid_employee"), 0.0), 0.0),
             date_joined=_parse_date(request.form.get("date_joined")),
             notes=request.form.get("notes", "").strip(),
             created_by_id=current_user.id,
@@ -334,6 +336,7 @@ def edit_employee(employee_id):
         employee.bank_account_number = request.form.get("bank_account_number", "").strip() or None
         employee.pay_frequency = request.form.get("pay_frequency", "Monthly")
         employee.basic_salary = _parse_float(request.form.get("basic_salary"), employee.basic_salary or 0.0)
+        employee.medical_aid_employee = max(_parse_float(request.form.get("medical_aid_employee"), employee.medical_aid_employee or 0.0), 0.0)
         employee.date_joined = _parse_date(request.form.get("date_joined"))
         employee.date_left = _parse_date(request.form.get("date_left"))
         employee.is_active = bool(request.form.get("is_active"))
@@ -551,6 +554,14 @@ def generate_payslips(period_id):
             **result,
         )
         db.session.add(payslip)
+        if (employee.medical_aid_employee or 0.0) > 0:
+            # the employee's standing medical aid deduction goes on the payslip already marked, and the totals include it
+            db.session.flush()
+            payroll_medical.set_employee_deduction(payslip, employee.medical_aid_employee)
+            db.session.flush()
+            db.session.refresh(payslip)
+            for key, value in payroll_calc.calculate_payslip(employee.basic_salary, payslip.items, settings, bands).items():
+                setattr(payslip, key, value)
         created += 1
     db.session.commit()
     if created:
@@ -652,6 +663,14 @@ def recalculate_payslip(payslip_id):
         flash("This payslip's period is finalized - reopen it first.", "danger")
         return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
 
+    _recalculate(payslip)
+    db.session.commit()
+    flash("Payslip recalculated from current salary, line items and tax settings.", "success")
+    return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
+
+
+def _recalculate(payslip):
+    """Recompute a payslip's figures from its basic salary, line items and the tax settings (caller commits)."""
     settings = _get_tax_settings()
     # This employee's OWN pay-frequency bands - see PayrollTaxBand's
     # docstring on why a Fortnightly/Weekly employee can't use the Monthly
@@ -663,8 +682,34 @@ def recalculate_payslip(payslip_id):
     payslip.is_auto_calculated = True
     payslip.generated_at = datetime.utcnow()
     payslip.generated_by_id = current_user.id
+
+
+@payroll_bp.route("/payslips/<int:payslip_id>/medical-aid", methods=["POST"])
+@login_required
+def set_payslip_medical_aid(payslip_id):
+    """Set the employee's medical aid deduction on this payslip: one marked Deduction line, and the payslip is recalculated straight away
+    (so the deduction reaches net pay and Other payroll deductions payable)."""
+    _ensure_payroll_access()
+    payslip = Payslip.query.get_or_404(payslip_id)
+    _ensure_payslip_access(payslip)
+    if payslip.period.status == "Finalized":
+        flash("This payslip's period is finalized - reopen it first.", "danger")
+        return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
+    amount = _parse_float(request.form.get("employee_share"), 0.0)
+    if amount < 0:
+        flash("The medical aid deduction cannot be negative.", "danger")
+        return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
+    if request.form.get("use_standing") and payslip.employee is not None:
+        amount = payslip.employee.medical_aid_employee or 0.0
+    res = payroll_medical.set_employee_deduction(payslip, amount)
+    if res == "many":
+        flash("This payslip has more than one medical aid deduction line: change or remove them in the list below.", "danger")
+        return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
+    db.session.flush()
+    db.session.refresh(payslip)
+    _recalculate(payslip)
     db.session.commit()
-    flash("Payslip recalculated from current salary, line items and tax settings.", "success")
+    flash(f"Medical aid deduction of {amount:,.2f} set and the payslip recalculated." if amount > 0 else "Medical aid deduction removed and the payslip recalculated.", "success")
     return redirect(url_for("payroll.view_payslip", payslip_id=payslip.id))
 
 

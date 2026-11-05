@@ -141,3 +141,35 @@ def out_of_date(period):
     tot = medical_lines(period)
     now = {"employer": tot["employer_total"], "employee": tot["employee_total"]}
     return [p for p, e in posted_bills(period).items() if abs(r2(e.amount) - now[p]) > CENT]
+
+
+# ---------------------------------------------------------------- the employee's own share as a payslip Deduction
+EMPLOYEE_LINE_LABEL = "Medical aid - employee's share"
+
+
+def employee_deduction_lines(payslip):
+    """The Deduction lines on a payslip already marked as the employee's medical aid share."""
+    return [i for i in payslip.items if i.category == "Deduction" and i.medical_aid == "employee"]
+
+
+def set_employee_deduction(payslip, amount):
+    """Make the payslip carry exactly `amount` as the employee's medical aid Deduction (marked, so the period page can post it to the
+    society). Creates, updates or removes the single marked line. Returns the line (None if removed / nothing to add). The caller recalculates
+    the payslip and commits. With several marked lines nothing is changed: returns the string 'many'."""
+    from models import PayslipItem
+    amount = r2(amount)
+    lines = employee_deduction_lines(payslip)
+    if len(lines) > 1:
+        return "many"
+    if lines:
+        if amount <= CENT:
+            db.session.delete(lines[0])
+            return None
+        lines[0].amount = amount
+        return lines[0]
+    if amount <= CENT:
+        return None
+    item = PayslipItem(payslip_id=payslip.id, category="Deduction", label=EMPLOYEE_LINE_LABEL, amount=amount,
+                       taxable=False, nssa_applicable=True, medical_aid="employee")
+    db.session.add(item)
+    return item

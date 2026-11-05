@@ -73,6 +73,28 @@
 </div>
 {% endif %}
 
+{% if not locked and payslip.employee %}
+{% set med_lines = payslip.items|selectattr('category', 'equalto', 'Deduction')|selectattr('medical_aid', 'equalto', 'employee')|list %}
+<div class="card" style="max-width:560px;">
+  <h2 style="margin-top:0;font-size:16px;">Medical aid deduction</h2>
+  <p class="muted" style="font-size:11.5px;">The employee's own medical aid, taken off pay and owed to the medical aid society. Saving adds (or changes) one Deduction line marked as medical aid and <strong>recalculates this payslip</strong>, so it reaches net pay and Other payroll deductions payable.</p>
+  {% if med_lines|length > 1 %}
+  <p class="muted" style="font-size:11.5px;">This payslip has {{ med_lines|length }} medical aid deduction lines: change or remove them in the list below.</p>
+  {% else %}
+  <form method="post" action="{{ url_for('payroll.set_payslip_medical_aid', payslip_id=payslip.id) }}" class="form-row" style="align-items:flex-end;">
+    <div>
+      <label for="employee_share">Employee's share</label>
+      <input type="number" step="0.01" min="0" id="employee_share" name="employee_share" value="{{ '%.2f'|plainfmt(med_lines[0].amount) if med_lines else '%.2f'|plainfmt(payslip.employee.medical_aid_employee or 0) }}">
+    </div>
+    <div><button type="submit" class="btn secondary">Save and recalculate</button></div>
+  </form>
+  {% if payslip.employee.medical_aid_employee and (not med_lines or med_lines[0].amount != payslip.employee.medical_aid_employee) %}
+  <p class="muted" style="font-size:10.5px;margin-top:4px;">{{ payslip.employee.full_name }}'s standing amount is {{ '%.2f'|format(payslip.employee.medical_aid_employee) }} (set on the employee's record).</p>
+  {% endif %}
+  {% endif %}
+</div>
+{% endif %}
+
 <div class="card" style="max-width:560px;">
   <h2 style="margin-top:0;font-size:16px;">Allowances, Deductions, Exempt Income &amp; Tax Credits</h2>
   <p class="muted" style="font-size:11.5px;">

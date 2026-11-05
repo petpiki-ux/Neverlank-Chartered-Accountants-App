@@ -545,6 +545,7 @@ def _add_missing_columns():
         # existing rows, not just new ones) - so an existing install picks
         # up the firm-confirmed 1.25% rate automatically, exactly like a fresh
         # install's column default would.
+        "payroll_employee": [("medical_aid_employee", "FLOAT DEFAULT 0")],
         "payroll_tax_settings": [("apwcs_pct", "FLOAT DEFAULT 1.25"), ("medical_aid_supplier_id", "INTEGER"), ("ledger_from", "DATE")],
         # nssa_applicable - see PayslipItem's docstring in models.py: lets an
         # Allowance/Exempt Income item (e.g. the EMPLOYER's own medical aid
