@@ -25,8 +25,9 @@
       <div><label for="entry_date">Date</label><input type="date" id="entry_date" name="entry_date" required value="{{ val('entry_date', entry.entry_date.isoformat() if entry else today.isoformat()) }}"></div>
       <div><label for="amount">Amount</label><input type="number" step="any" min="0" id="amount" name="amount" required value="{{ val('amount', entry.amount if entry else '') }}"></div>
       <div id="cat_wrap"><label for="category_in" id="cat_label">What was it for?</label>
-        {% set cur_cat = val('category_out', val('category', entry.category if entry else '')) if kind != 'in' else val('category_in', val('category', entry.category if entry else '')) %}
-        <select id="category_in" name="category_in" style="display:none;"><option value="">Choose...</option>{% for c in cats_in %}<option value="{{ c }}" {% if cur_cat == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+        {% set base_cat = ('acct:' ~ entry.ledger_account_id) if entry and entry.ledger_account_id else (entry.category if entry else '') %}
+        {% set cur_cat = val('category_out', val('category', base_cat)) if kind != 'in' else val('category_in', val('category', base_cat)) %}
+        <select id="category_in" name="category_in" style="display:none;"><option value="">Choose...</option>{% for c in cats_in %}<option value="{{ c }}" {% if cur_cat == c %}selected{% endif %}>{{ c }}</option>{% endfor %}{% for g, accts in bs_groups %}<optgroup label="Balance sheet - {{ g }} (not an expense)">{% for a in accts %}<option value="acct:{{ a.id }}" {% if cur_cat == 'acct:' ~ a.id %}selected{% endif %}>{{ a.code }} {{ a.name }}</option>{% endfor %}</optgroup>{% endfor %}</select>
         <select id="category_out" name="category_out" onchange="toggleKind()"><option value="">Choose the account it is charged to...</option>
           <optgroup label="Expense (goes to the Expense register and the income statement)">
             {% for c in expense_cats %}<option value="expense:{{ c }}" {% if cur_cat == 'expense:' ~ c %}selected{% endif %}>{{ c }}</option>{% endfor %}
@@ -35,6 +36,7 @@
           <optgroup label="Payroll - pays off what the staff payroll owes (not a supplier)">
             {% for h, acct in pay_heads %}<option value="{{ h }}" {% if cur_cat == h %}selected{% endif %}>{{ h }} - clears {{ acct }}</option>{% endfor %}
           </optgroup>
+{% for g, accts in bs_groups %}<optgroup label="Balance sheet - {{ g }} (not an expense)">{% for a in accts %}<option value="acct:{{ a.id }}" {% if cur_cat == 'acct:' ~ a.id %}selected{% endif %}>{{ a.code }} {{ a.name }}</option>{% endfor %}</optgroup>{% endfor %}
           <optgroup label="Other payment (cash book only)">
             {% for c in cats_out %}<option value="{{ c }}" {% if cur_cat == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
           </optgroup></select></div>
@@ -52,6 +54,7 @@
     <button class="btn gold" type="submit">{{ 'Save changes' if entry else 'Add to cash book' }}</button>
   </form>
   <p class="muted" style="font-size:12px;">Paying staff and what the payroll owes: pick one of the four <strong>Payroll</strong> choices - <strong>Salaries paid</strong> for net pay (clears Net salaries payable), <strong>PAYE and other taxes paid</strong> for ZIMRA, <strong>NSSA contributions paid</strong> for NSSA, and <strong>Medical aid and other deductions paid</strong> for the medical aid society (or any other deduction taken off pay; clears Other payroll deductions payable). Choose the payee under <strong>Paid to (supplier)</strong> (for example FBC Medical Aid): it is named on the entry and on the supplier's page, but the payment is still Dr the payroll payable / Cr cash. It is not a bill, not a supplier balance and not an expense; do not file medical aid paid over under a medical aid expense category. The expense itself comes from the finalized staff payroll, so do not also file these under a Salaries expense category.</p>
+  <p class="muted" style="font-size:12px;"><strong>Balance sheet accounts</strong> (assets, liabilities, equity): choose one when the money is not an expense, for example repaying a loan, paying a deposit or a prepayment, or money from or to an owner. Money out debits the account and credits the bank or cash account; money in does the reverse. It goes straight to the statements and the ledger, so do not also journal it or type it on the year-end page. Balance sheet accounts can be charged from USD cash book accounts only; to add accounts to this list, add them in the chart of accounts (Firm Finance &gt; Ledger).</p>
   <p class="muted" style="font-size:12px;margin-bottom:0;">A payment filed under an expense category (Fuel, Rent ...) is recorded in the Expense register as paid, so it appears in the income statement and cannot be entered twice. Any other entry here changes the bank or cash balance only. If it also affects the income statement or balance sheet (a loan, a dividend, share capital, bank charges), record that on the year-end page too; the year-end page lists these cash book movements to help.</p>
 </div>
 <script>
