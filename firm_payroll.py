@@ -253,6 +253,12 @@ def overlap_warnings(start):
         out.append(f"{len(med)} medical aid bill(s) in the Expense register under {', '.join(repr(c) for c in cats)} (total {total:,.2f}) are dated {start.strftime('%d %b %Y')} or later. "
                    "The medical aid is already in the payroll (the employer's share in gross pay, the employees' share taken off pay), so these are not counted as a second expense: "
                    "each is treated as a payment of 'Other payroll deductions payable'. Check that account is not left in debit; if a bill is for something else, file it under another category.")
+    posted = [e for e in Expense.query.filter(Expense.source_key.like("payroll_medical:%")).all() if e.id in linked_medical()]
+    if med and posted:
+        a, b = r2(sum(e.amount or 0.0 for e in posted)), r2(sum(e.amount or 0.0 for e in med.values()))
+        out.append(f"Possible double count: {len(posted)} medical aid bill(s) posted from payroll ({a:,.2f}) and {len(med)} filed by hand in the Expense register ({b:,.2f}) are both owed to the medical aid society, "
+                   f"so Trade payables shows {r2(a + b):,.2f}. If the hand-filed bill pays for the same months (for example one payment for several months), the society is owed only once: "
+                   "remove the bills posted from payroll (Payroll > the period > Remove the posted bill) or delete the hand-filed bill, whichever is the duplicate.")
     out.extend(stale_warnings())
     for cur, bills_total, deducted, expense, net in medical_shortfall():
         parts = []
