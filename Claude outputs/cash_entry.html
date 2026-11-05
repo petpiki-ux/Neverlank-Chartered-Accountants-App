@@ -1,0 +1,74 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Edit cash book entry' if entry else 'Cash book entry' }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{% macro val(name, default='') %}{{ form.get(name, default) if form else default }}{% endmacro %}
+{% set kind = (form.get('kind') if form else (entry.direction if entry else 'in')) %}
+<div class="page-header"><div><h1>{{ 'Edit entry' if entry else 'Cash book entry' }}</h1>
+  <div class="subtitle">For money the app has no other record of. Receipts, advances, refunds and paid expenses are already in the book: do not enter them again.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('firmfs.cash_book') }}">Back to the cash book</a></div></div>
+{% include "firmfs/_nav.html" %}
+<div class="card">
+  <form method="post">
+    <div class="form-row">
+      <div><label>What is it?</label>
+        <select name="kind" id="kind" onchange="toggleKind()">
+          <option value="in" {% if kind == 'in' %}selected{% endif %}>Money in</option>
+          <option value="out" {% if kind == 'out' %}selected{% endif %}>Money out</option>
+          {% if not entry or entry.transfer_id %}<option value="transfer" {% if kind == 'transfer' %}selected{% endif %}>Transfer between accounts</option>{% endif %}
+        </select></div>
+      <div><label id="acct_label">Account</label>
+        <select name="account_id" required>{% set _cur = (val('account_id', entry.account_id|string if entry else (preselect|string if preselect else ''))|trim) %}<option value="" {% if not _cur %}selected{% endif %}>Choose the account...</option>{% for a in accounts %}<option value="{{ a.id }}" {% if _cur == a.id|string %}selected{% endif %}>{{ a.name }} ({{ a.currency }})</option>{% endfor %}</select></div>
+      <div id="to_wrap" style="display:none;"><label>To account</label>
+        <select name="to_account_id"><option value="">Choose the account...</option>{% for a in accounts %}<option value="{{ a.id }}" {% if (val('to_account_id')|trim) == a.id|string %}selected{% endif %}>{{ a.name }} ({{ a.currency }})</option>{% endfor %}</select></div>
+    </div>
+    <div class="form-row">
+      <div><label for="entry_date">Date</label><input type="date" id="entry_date" name="entry_date" required value="{{ val('entry_date', entry.entry_date.isoformat() if entry else today.isoformat()) }}"></div>
+      <div><label for="amount">Amount</label><input type="number" step="any" min="0" id="amount" name="amount" required value="{{ val('amount', entry.amount if entry else '') }}"></div>
+      <div id="cat_wrap"><label for="category_in" id="cat_label">What was it for?</label>
+        {% set cur_cat = val('category_out', val('category', entry.category if entry else '')) if kind != 'in' else val('category_in', val('category', entry.category if entry else '')) %}
+        <select id="category_in" name="category_in" style="display:none;"><option value="">Choose...</option>{% for c in cats_in %}<option value="{{ c }}" {% if cur_cat == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select>
+        <select id="category_out" name="category_out" onchange="toggleKind()"><option value="">Choose the account it is charged to...</option>
+          <optgroup label="Expense (goes to the Expense register and the income statement)">
+            {% for c in expense_cats %}<option value="expense:{{ c }}" {% if cur_cat == 'expense:' ~ c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+            <option value="__new__" {% if cur_cat == '__new__' %}selected{% endif %}>+ Add a new expense category...</option>
+          </optgroup>
+          <optgroup label="Payroll - pays off what the staff payroll owes (not a supplier)">
+            {% for h, acct in pay_heads %}<option value="{{ h }}" {% if cur_cat == h %}selected{% endif %}>{{ h }} - clears {{ acct }}</option>{% endfor %}
+          </optgroup>
+          <optgroup label="Other payment (cash book only)">
+            {% for c in cats_out %}<option value="{{ c }}" {% if cur_cat == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
+          </optgroup></select></div>
+      <div id="new_cat_wrap" style="display:none;"><label for="new_category">New expense category</label><input type="text" id="new_category" name="new_category" maxlength="60" value="{{ val('new_category') }}" placeholder="e.g. Fuel"></div>
+      <div id="supplier_wrap" style="display:none;"><label for="supplier_id">Paid to (supplier)</label>
+        {% set cur_sup = (val('supplier_id', entry.supplier_id|string if entry and entry.supplier_id else ''))|trim %}
+        <select id="supplier_id" name="supplier_id"><option value="">Not a supplier / not named</option>{% for sp_ in suppliers %}<option value="{{ sp_.id }}" {% if cur_sup == sp_.id|string %}selected{% endif %}>{{ sp_.name }} ({{ sp_.code }})</option>{% endfor %}</select>
+        <div class="muted" style="font-size:11px;">Names the medical aid society or other payee. The payment only clears the payroll payable (Dr payable, Cr cash): it creates no bill and no expense, and the supplier's account is not affected.</div></div>
+      <div id="payee_wrap" style="display:none;"><label for="payee">Paid to</label><input type="text" id="payee" name="payee" maxlength="200" value="{{ val('payee') }}" placeholder="e.g. Puma Energy"></div>
+    </div>
+    <div class="form-row">
+      <div style="flex:2;min-width:260px;"><label for="description">Details</label><input type="text" id="description" name="description" maxlength="250" value="{{ val('description', entry.description if entry and entry.description else '') }}" placeholder="e.g. Director loan from P. Piki"></div>
+      <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" maxlength="120" value="{{ val('reference', entry.reference if entry and entry.reference else '') }}"></div>
+    </div>
+    <button class="btn gold" type="submit">{{ 'Save changes' if entry else 'Add to cash book' }}</button>
+  </form>
+  <p class="muted" style="font-size:12px;">Paying staff and what the payroll owes: pick one of the four <strong>Payroll</strong> choices - <strong>Salaries paid</strong> for net pay (clears Net salaries payable), <strong>PAYE and other taxes paid</strong> for ZIMRA, <strong>NSSA contributions paid</strong> for NSSA, and <strong>Medical aid and other deductions paid</strong> for the medical aid society (or any other deduction taken off pay; clears Other payroll deductions payable). Choose the payee under <strong>Paid to (supplier)</strong> (for example FBC Medical Aid): it is named on the entry and on the supplier's page, but the payment is still Dr the payroll payable / Cr cash. It is not a bill, not a supplier balance and not an expense; do not file medical aid paid over under a medical aid expense category. The expense itself comes from the finalized staff payroll, so do not also file these under a Salaries expense category.</p>
+  <p class="muted" style="font-size:12px;margin-bottom:0;">A payment filed under an expense category (Fuel, Rent ...) is recorded in the Expense register as paid, so it appears in the income statement and cannot be entered twice. Any other entry here changes the bank or cash balance only. If it also affects the income statement or balance sheet (a loan, a dividend, share capital, bank charges), record that on the year-end page too; the year-end page lists these cash book movements to help.</p>
+</div>
+<script>
+function toggleKind(){var k=document.getElementById('kind').value;
+  document.getElementById('to_wrap').style.display=(k==='transfer')?'block':'none';
+  document.getElementById('cat_wrap').style.display=(k==='transfer')?'none':'block';
+  document.getElementById('category_in').style.display=(k==='in')?'':'none';
+  document.getElementById('category_in').disabled=(k!=='in');
+  document.getElementById('category_out').style.display=(k==='out')?'':'none';
+  document.getElementById('category_out').disabled=(k!=='out');
+  var c=document.getElementById('category_out').value, exp=(k==='out')&&(c.indexOf('expense:')===0||c==='__new__');
+  document.getElementById('new_cat_wrap').style.display=(k==='out'&&c==='__new__')?'block':'none';
+  document.getElementById('payee_wrap').style.display=exp?'block':'none';
+  var heads={{ pay_head_names|tojson }};
+  document.getElementById('supplier_wrap').style.display=(k==='out'&&heads.indexOf(c)>=0)?'block':'none';
+  document.getElementById('supplier_id').disabled=!(k==='out'&&heads.indexOf(c)>=0);
+  document.getElementById('acct_label').textContent=(k==='transfer')?'From account':'Account';}
+toggleKind();
+</script>
+{% endblock %}
