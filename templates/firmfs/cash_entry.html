@@ -40,6 +40,9 @@
           <optgroup label="Other payment (cash book only)">
             {% for c in cats_out %}<option value="{{ c }}" {% if cur_cat == c %}selected{% endif %}>{{ c }}</option>{% endfor %}
           </optgroup></select></div>
+      {% if not bs_groups %}<div class="muted" style="flex-basis:100%;font-size:12px;color:var(--danger);">No balance sheet accounts are available to choose from. Add them in <a href="{{ url_for('firmfs.ledger_accounts') }}">the chart of accounts</a>, or
+        <form method="post" action="{{ url_for('firmfs.ledger_accounts_restore_balance_sheet') }}" style="display:inline;"><input type="hidden" name="next" value="{{ request.path }}"><button type="submit" class="btn small secondary">add the standard ones now</button></form>
+        (loans, deposits, prepayments, accruals, share capital ...).</div>{% endif %}
       <div id="new_cat_wrap" style="display:none;"><label for="new_category">New expense category</label><input type="text" id="new_category" name="new_category" maxlength="60" value="{{ val('new_category') }}" placeholder="e.g. Fuel"></div>
       <div id="supplier_wrap" style="display:none;"><label for="supplier_id">Paid to (supplier)</label>
         {% set cur_sup = (val('supplier_id', entry.supplier_id|string if entry and entry.supplier_id else ''))|trim %}

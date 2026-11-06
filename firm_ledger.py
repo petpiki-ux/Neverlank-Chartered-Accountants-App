@@ -382,6 +382,22 @@ def _natural(cat, dr, cr):
     return (dr - cr) if CAT[cat][4] == "debit" else (cr - dr)
 
 
+def restore_standard_balance_sheet_accounts():
+    """Adds the starter chart's own (non-system) asset, liability and equity accounts that are missing (matched by name), so the Cash Book
+    has balance sheet accounts to choose from. Existing accounts are never changed. Returns how many were added; the caller commits."""
+    have = {a.name.strip().lower() for a in FirmAccount.query.all()}
+    n = 0
+    for i, (code, name, typ, cat, key, note) in enumerate(STARTER_CHART):
+        if key or typ not in ("Asset", "Liability", "Equity") or name.strip().lower() in have or cat in ("retained_earnings",):
+            continue
+        use = code if not FirmAccount.query.filter_by(code=code).first() else _next_code(int(code), int(code) + 9)
+        db.session.add(FirmAccount(code=use, name=name, account_type=typ, fs_category=cat, description=note, order=i))
+        db.session.flush()
+        have.add(name.strip().lower())
+        n += 1
+    return n
+
+
 def cash_pick_refusal(a):
     """Why the Cash Book cannot charge an entry to this account (a sentence), or None. The Cash Book can charge a balance sheet account
     (an asset, liability or equity account); the accounts the app posts itself, cash and tax have their own routes."""
@@ -400,6 +416,7 @@ def cash_pick_refusal(a):
 
 def cash_pick_groups():
     """[(group label, [FirmAccount])] of the balance sheet accounts the Cash Book can be charged to, in code order."""
+    ensure_chart()      # a book that has never opened the Ledger still gets its chart, so there is something to choose
     groups = {"Asset": [], "Liability": [], "Equity": []}
     for a in FirmAccount.query.filter_by(is_active=True).order_by(FirmAccount.code).all():
         if cash_pick_refusal(a) is None and a.account_type in groups and a.system_key not in PAYROLL_KEY_HEADING:     # the payroll payables have their own Payroll group

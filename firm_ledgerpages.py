@@ -329,6 +329,15 @@ def ledger_account_delete(account_id):
     return redirect(url_for("firmfs.ledger_accounts"))
 
 
+@firmfs_bp.route("/ledger/accounts/restore-balance-sheet", methods=["POST"])
+@finance_required
+def ledger_accounts_restore_balance_sheet():
+    n = fl.restore_standard_balance_sheet_accounts()
+    db.session.commit()
+    flash(f"{n} standard balance sheet account(s) added (loans, deposits, prepayments, share capital ...)." if n else "All the standard balance sheet accounts are already in the chart.", "success" if n else "info")
+    return redirect(request.form.get("next") or url_for("firmfs.ledger_accounts"))
+
+
 @firmfs_bp.route("/ledger/accounts/sync", methods=["POST"])
 @finance_required
 def ledger_accounts_sync():
