@@ -4,13 +4,13 @@
 <div class="page-header">
   <div>
     <h1>Expense register</h1>
-    <div class="subtitle">The firm's own running costs &middot; {{ expenses|length }} record(s){% for c, v in totals.items() %} &middot; {{ money(v, c, 2) }}{% endfor %}</div>
+    <div class="subtitle">The firm's own running costs &middot; {{ expenses|length }} record(s){% for c, v in totals.items() %} &middot; {{ money(v, c, 2) }}{% endfor %}{% if pay_tags %} &middot; <span title="Salary and medical aid payments the payroll already carries">{{ pay_tags|length }} paid via payroll, not counted as expenses</span>{% endif %}</div>
   </div>
   <div>
     <a href="{{ url_for('analytics.dashboard') }}" class="btn secondary">Analytics</a>
     <a href="{{ url_for('suppliers.index') }}" class="btn secondary">Suppliers</a>
     <a href="{{ url_for('expenses.categories') }}" class="btn secondary">Categories</a>
-    <a href="{{ url_for('expenses.new_expense') }}" class="btn gold">+ Add expense</a>
+    <a href="{{ url_for('expenses.new_expense') }}" class="btn gold">+ Add bill / payment</a>
   </div>
 </div>
 <div class="card">
@@ -31,7 +31,7 @@
       <tr>
         <td>{{ e.expense_date.strftime('%d %b %Y') }}</td>
         <td>{{ e.supplier }}{% if e.reference %}<div class="muted" style="font-size:11.5px;">Ref {{ e.reference }}</div>{% endif %}</td>
-        <td>{{ e.category }}</td>
+        <td>{{ e.category }}{% if e.id in pay_tags %}<div><span class="badge status-Paid" title="{{ pay_tags[e.id][1] }}">{{ pay_tags[e.id][0] }}</span></div><div class="muted" style="font-size:11.5px;">{{ pay_tags[e.id][1] }}</div>{% endif %}</td>
         <td>{{ e.description or '' }}{% if e.client %}<div class="muted" style="font-size:11.5px;">For {{ e.client.name }}</div>{% endif %}</td>
         <td>
           {% if e.status == 'Paid' %}<span class="badge status-Paid">Paid</span>

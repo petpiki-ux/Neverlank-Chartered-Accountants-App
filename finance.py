@@ -330,7 +330,7 @@ def new_expense():
         db.session.flush()
         _store_cash_account(expense)
         db.session.commit()
-        flash("Expense recorded.", "success")
+        flash("Bill recorded.", "success")
         if request.form.get("add_another"):
             return redirect(url_for("expenses.new_expense"))
         return redirect(url_for("expenses.list_expenses"))
@@ -358,7 +358,7 @@ def edit_expense(expense_id):
             return render_template("expenses/form.html", expense=Expense.query.get(expense_id), form=request.form, **_form_context(expense))
         _store_cash_account(expense)
         db.session.commit()
-        flash("Expense updated.", "success")
+        flash("Bill updated.", "success")
         return redirect(url_for("expenses.list_expenses"))
     return render_template("expenses/form.html", expense=expense, form={}, **_form_context(expense))
 
@@ -395,7 +395,7 @@ def delete_expense(expense_id):
         cashbook.forget(f"supplierpay:{p.id}")
     db.session.delete(expense)
     db.session.commit()
-    flash("Expense deleted.", "info")
+    flash("Bill deleted.", "info")
     return redirect(url_for("expenses.list_expenses"))
 
 

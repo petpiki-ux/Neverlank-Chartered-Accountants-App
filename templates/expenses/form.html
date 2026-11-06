@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}{{ 'Edit' if expense else 'Add' }} expense - {{ firm_name }}{% endblock %}
+{% block title %}{{ 'Edit' if expense else 'Add' }} bill or payment - {{ firm_name }}{% endblock %}
 {% block content %}
 {% macro val(name, default='') %}{{ form.get(name) if form and form.get(name) is not none else (expense[name] if expense and expense[name] is not none else default) }}{% endmacro %}
 <div class="page-header">
-  <div><h1>{{ 'Edit expense' if expense else 'Add an expense' }}</h1>
-  <div class="subtitle">Enter the cost to the firm <strong>excluding</strong> any VAT you can claim back, so profit compares like with like with invoice revenue.</div></div>
+  <div><h1>{{ 'Edit bill or payment' if expense else 'Add a bill or payment' }}</h1>
+  <div class="subtitle">Record a bill or a payment made by the firm and say where it belongs. Under <strong>Category / account</strong> choose an <strong>Expense</strong> (it reduces profit; enter the amount <strong>excluding</strong> any VAT you can claim back) or a <strong>Balance sheet</strong> account (a liability, asset or equity item such as payroll payables, a loan or a deposit; it does not touch profit).</div></div>
   <div><a href="{{ url_for('expenses.list_expenses') }}" class="btn secondary">Back to register</a></div>
 </div>
 {% if not expense %}
@@ -34,8 +34,8 @@
         <div style="font-size:12px;margin-top:4px;"><a href="{{ url_for('suppliers.new_supplier') }}">+ New supplier</a> &middot; <a href="{{ url_for('suppliers.index') }}">Suppliers</a></div></div>
       <div class="form-group"><label for="supplier">Paid to (supplier name)</label>
         <input type="text" id="supplier" name="supplier" required maxlength="200" value="{{ val('supplier') }}" placeholder="e.g. Michael House Landlord"></div>
-      <div class="form-group"><label for="category">Category</label>
-        <select id="category" name="category">{% set cat = form.get('category') or (('bs:' ~ expense.ledger_account_id) if expense and expense.ledger_account_id else (expense.category if expense else '')) %}<optgroup label="Expense (goes to the income statement)">{% for c in categories %}<option {% if cat==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</optgroup>{% for g, accts in bs_groups %}<optgroup label="Balance sheet - {{ g }} (not an expense)">{% for a in accts %}<option value="bs:{{ a.id }}" {% if cat == 'bs:' ~ a.id %}selected{% endif %}>{{ a.code }} {{ a.name }}</option>{% endfor %}</optgroup>{% endfor %}</select>
+      <div class="form-group"><label for="category">Category / account</label>
+        <select id="category" name="category">{% set cat = form.get('category') or (('bs:' ~ expense.ledger_account_id) if expense and expense.ledger_account_id else (expense.category if expense else '')) %}<optgroup label="Expenses (reduce profit)">{% for c in categories %}<option {% if cat==c %}selected{% endif %}>{{ c }}</option>{% endfor %}</optgroup>{% for g, accts in bs_groups %}<optgroup label="Balance sheet - {{ g }} (does not affect profit)">{% for a in accts %}<option value="bs:{{ a.id }}" {% if cat == 'bs:' ~ a.id %}selected{% endif %}>{{ a.code }} {{ a.name }}</option>{% endfor %}</optgroup>{% endfor %}</select>
         <div class="muted" style="font-size:11.5px;margin-top:3px;">Choose a <strong>Balance sheet</strong> account (the payroll payables such as 2044 Other payroll deductions payable are under Liabilities) when this is not an expense (for example medical aid already in the payroll, a loan repayment or a deposit): the bill is charged to that account instead, and nothing reaches the income statement.</div>
         <div style="font-size:12px;margin-top:4px;"><a href="#" onclick="var b=document.getElementById('new_category_box');b.style.display=b.style.display==='none'?'block':'none';if(b.style.display==='block'){document.getElementById('new_category').focus();}return false;">+ New category</a> &middot; <a href="{{ url_for('expenses.categories') }}">Manage categories</a></div>
         <div id="new_category_box" style="display:{{ 'block' if form.get('new_category') else 'none' }};margin-top:4px;">
@@ -67,7 +67,7 @@
     </div>
     <div class="form-group"><label for="notes">Notes</label><textarea id="notes" name="notes" rows="2">{{ val('notes') }}</textarea></div>
     {% if expense and expense.supplier_payments %}<p class="muted" style="font-size:12px;">Payments have been recorded against this bill (see its supplier page), so its Paid / Unpaid status follows those payments.</p>{% endif %}
-    <button class="btn gold" type="submit">Save expense</button>
+    <button class="btn gold" type="submit">Save</button>
     {% if not expense %}<button class="btn secondary" type="submit" name="add_another" value="1">Save &amp; add another</button>{% endif %}
   </form>
 </div>
