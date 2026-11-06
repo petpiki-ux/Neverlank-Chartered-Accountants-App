@@ -213,7 +213,7 @@ def derive_period(period_start, period_end, zwg_rate):
         revenue = analytics._sum(inv, "net", period_start, period_end, "issue")
         owed_rows = analytics.outstanding_at(inv, period_end)
         unpaid = [dict(e, amount=analytics.exp_owed_on(e, period_end)) for e in exp if analytics.exp_owed_on(e, period_end) > 0]
-        spend = [e for e in exp if period_start <= e["date"] <= period_end and e["id"] not in pay_medical]
+        spend = [e for e in exp if period_start <= e["date"] <= period_end and e["id"] not in pay_medical and not e.get("ledger_account_id")]
         for e in exp:
             if period_start <= e["date"] <= period_end and e["id"] in pay_alloc and pay_alloc[e["id"]][1] > 0.004:
                 spend.append(dict(e, amount=pay_alloc[e["id"]][1]))
@@ -371,6 +371,11 @@ def build_column(ye, prev_end, classes, assets, prev_col=None):
     j_items, w_j = firm_ledger.journal_statement_items(ye, start, end, first=prev_end is None, from_book=from_book, tax_auto=tax_auto)
     warnings.extend(w_j)
     for code, name, amount in j_items:
+        add(code, name, amount)
+
+    bill_items, w_bill = firm_ledger.bill_account_statement_items(end, rate)
+    warnings.extend(w_bill)
+    for code, name, amount in bill_items:
         add(code, name, amount)
 
     cb_items, w_cb = firm_ledger.cash_account_statement_items(end, rate)

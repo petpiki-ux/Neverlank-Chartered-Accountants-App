@@ -414,6 +414,47 @@ def cash_pick_refusal(a):
     return None
 
 
+def expense_pick_groups():
+    """Like cash_pick_groups, plus the payroll payables (Other payroll deductions payable ...): the accounts a bill or payment in the Expense
+    register can be charged to instead of an expense category. [(group label, [FirmAccount])]."""
+    ensure_chart()
+    groups = {"Asset": [], "Liability": [], "Equity": []}
+    for a in FirmAccount.query.filter_by(is_active=True).order_by(FirmAccount.code).all():
+        if cash_pick_refusal(a) is None and a.account_type in groups:
+            groups[a.account_type].append(a)
+    names = {"Asset": "Assets", "Liability": "Liabilities", "Equity": "Equity"}
+    return [(names[k], v) for k, v in groups.items() if v]
+
+
+def bill_account_statement_items(end, rate):
+    """What Expense-register bills charged to a balance sheet account add to a year-end column: ([(fs_category, label, amount)], warnings).
+    The bill debits the account (cumulative to the year-end); what is owed and what was paid come from the usual payables and Cash Book figures."""
+    acc = defaultdict(float)
+    warnings, skipped = [], 0
+    q = (db.session.query(Expense, FirmAccount).join(FirmAccount, FirmAccount.id == Expense.ledger_account_id).filter(Expense.expense_date <= end))
+    for e, a in q.all():
+        cat = a.fs_category
+        if not cat or cat == EXCLUDED or cat not in CAT:
+            continue
+        cur = e.currency or "USD"
+        if cur == "USD":
+            usd = e.amount or 0.0
+        elif rate and rate > 0:
+            usd = (e.amount or 0.0) / rate
+        else:
+            skipped += 1
+            continue
+        acc[(cat, a.name)] += usd
+    if skipped:
+        warnings.append(f"{skipped} bill(s) charged to balance sheet accounts were left out: no ZWG rate is entered for this year-end.")
+    items = []
+    for (cat, name), dr in sorted(acc.items()):
+        amt = r2(_natural(cat, dr, 0.0))
+        if abs(amt) >= CENT:
+            items.append((cat, f"Bills charged to {name}", amt))
+    return items, warnings
+
+
 def cash_pick_groups():
     """[(group label, [FirmAccount])] of the balance sheet accounts the Cash Book can be charged to, in code order."""
     ensure_chart()      # a book that has never opened the Ledger still gets its chart, so there is something to choose
@@ -628,7 +669,7 @@ def build_ledger(year_ends=None, include_journals=True):
     inv_rows = {cur: analytics._invoice_rows(cur) for cur in INVOICE_CURRENCIES}
     exp_rows = {cur: analytics._expense_rows(cur) for cur in INVOICE_CURRENCIES}
     services = {r["service"] for rows in inv_rows.values() for r in rows}
-    categories = {r["category"] for rows in exp_rows.values() for r in rows}
+    categories = {r["category"] for rows in exp_rows.values() for r in rows if not r.get("ledger_account_id")}
     ensure_chart(services=services, categories=categories)
 
     L = Ledger(yes)
@@ -701,7 +742,9 @@ def build_ledger(year_ends=None, include_journals=True):
                 continue
             key = f"EXP:{e['category']}"
             debit = (key if L.account(key) else "EXP_OTHER")
-            if e["id"] in pay_salary:
+            if e.get("ledger_account_id") and e["ledger_account_id"] in L.accounts:
+                debit = e["ledger_account_id"]       # charged to a balance sheet account chosen on the bill: not an expense
+            elif e["id"] in pay_salary:
                 debit = "PAY_NET"        # a salary payment filed in the Expense register: it pays off net salaries, it is not a second expense
             elif e["id"] in pay_medical:
                 debit = "PAY_DED"        # the cost is already in the payroll: this bill moves what was deducted from pay to the society's account

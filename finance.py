@@ -13,6 +13,7 @@ from flask_login import login_required, current_user
 from extensions import db
 from models import visible_clients
 from models import (
+    FirmAccount,
     Client, Engagement, Expense, ExpenseCategory, Supplier, EXPENSE_CATEGORIES, EXPENSE_FALLBACK_CATEGORY, EXPENSE_STATUSES, INVOICE_CURRENCIES,
     user_has_permission, user_can_access_engagement,
 )
@@ -105,7 +106,7 @@ def ensure_categories():
             db.session.add(ExpenseCategory(name=name, order=i))
             have.add(name)
             added = True
-    for (name,) in db.session.query(Expense.category).distinct().all():
+    for (name,) in db.session.query(Expense.category).filter(Expense.ledger_account_id.is_(None)).distinct().all():     # a bill charged to a balance sheet account is not an expense category
         if name and name not in have:
             db.session.add(ExpenseCategory(name=name, order=100))
             have.add(name)
@@ -148,8 +149,10 @@ def add_category(raw, user):
 # ------------------------------------------------------------------ expenses
 
 def _form_context(expense=None):
+    import firm_ledger
     return dict(
-        categories=category_names(also=expense.category if expense is not None else None), statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
+        bs_groups=firm_ledger.expense_pick_groups(),
+        categories=category_names(also=expense.category if expense is not None and not expense.ledger_account_id else None), statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
         clients=visible_clients(current_user), today=date.today().isoformat(),
         supplier_list=Supplier.query.order_by(Supplier.name).all(),
     )
@@ -174,8 +177,18 @@ def _apply_form(expense):
     if not supplier or amount is None or amount < 0 or not when:
         return "Please enter the date, who it was paid to and a valid amount."
     category = f.get("category")
+    bs_account = None
+    if (category or "").startswith("bs:"):
+        import firm_ledger
+        try:
+            bs_account = FirmAccount.query.get(int(category[3:]))
+        except ValueError:
+            bs_account = None
+        why = firm_ledger.cash_pick_refusal(bs_account)
+        if why:
+            return why
     new_category = _clean_category_name(f.get("new_category"))
-    if new_category:
+    if new_category and bs_account is None:
         category, err = add_category(new_category, current_user)
         if err:
             return err
@@ -197,7 +210,12 @@ def _apply_form(expense):
     expense.expense_date = when
     expense.amount = amount
     valid = set(category_names(also=expense.category))
-    expense.category = category if category in valid else EXPENSE_FALLBACK_CATEGORY
+    if bs_account is not None:
+        expense.category = f"{bs_account.code} {bs_account.name}"[:60]
+        expense.ledger_account_id = bs_account.id
+    else:
+        expense.category = category if category in valid else EXPENSE_FALLBACK_CATEGORY
+        expense.ledger_account_id = None
     expense.currency = currency if currency in INVOICE_CURRENCIES else "USD"
     expense.status = status if status in EXPENSE_STATUSES else "Paid"
     expense.due_date = _parse_date(f.get("due_date"))
@@ -252,11 +270,16 @@ def list_expenses():
         except (ValueError, IndexError):
             month = ""
     expenses = q.order_by(Expense.expense_date.desc(), Expense.id.desc()).all()
+    import firm_payroll
+    flags = firm_payroll.expense_flags()
+    pay_tags = {i: firm_payroll.FLAG_TAGS[f] for i, f in flags.items()}      # bills the payroll carries: a payment of a liability, not an expense
     totals = {}
     for e in expenses:
+        if e.id in pay_tags:
+            continue
         totals[e.currency] = totals.get(e.currency, 0.0) + (e.amount or 0)
     return render_template(
-        "expenses/list.html", expenses=expenses, totals=totals, money=fmt_money,
+        "expenses/list.html", expenses=expenses, totals=totals, money=fmt_money, pay_tags=pay_tags,
         f_currency=currency, f_category=category, f_status=status, f_month=month, today=date.today(),
         categories=all_categories, statuses=EXPENSE_STATUSES, currencies=INVOICE_CURRENCIES,
     )

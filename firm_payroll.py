@@ -108,7 +108,7 @@ def medical_register_bills(start):
     if start is None:
         return {}
     return {e.id: e for e in Expense.query.filter(Expense.expense_date >= start).all()
-            if not (e.source_key or "").startswith("payroll_medical:") and any(w in (e.category or "").lower() for w in MEDICAL_WORDS)}
+            if not (e.source_key or "").startswith("payroll_medical:") and not e.ledger_account_id and any(w in (e.category or "").lower() for w in MEDICAL_WORDS)}
 
 
 def linked_medical(rows=None):
@@ -121,6 +121,8 @@ def linked_medical(rows=None):
     if not ids:
         return out
     for e in Expense.query.filter(Expense.source_key.like("payroll_medical:%")).all():
+        if e.ledger_account_id:
+            continue          # re-charged to a balance sheet account on the bill itself: that choice wins
         parts = (e.source_key or "").split(":")
         try:
             pid = int(parts[1])
@@ -217,7 +219,7 @@ def salary_bills(start):
     if start is None:
         return {}
     return {e.id: e for e in Expense.query.filter(Expense.expense_date >= start).all()
-            if not (e.source_key or "").startswith("payroll_medical:") and any(w in (e.category or "").lower() for w in SALARY_WORDS)}
+            if not (e.source_key or "").startswith("payroll_medical:") and not e.ledger_account_id and any(w in (e.category or "").lower() for w in SALARY_WORDS)}
 
 
 def stale_payslips(period):
@@ -405,10 +407,12 @@ def expense_flags():
     alloc = medical_allocation(rows)
     out = {i: "medical" for i in linked_medical(rows) if (alloc.get(i, (0.0, 0.0, 0.0))[1] < CENT)}   # a bill the payroll does not fully cover stays an expense
     out.update({i: "salary" for i in salary_bills(link_start(rows))})
+    out.update({e.id: "balance_sheet" for e in Expense.query.filter(Expense.ledger_account_id.isnot(None)).all()})
     return out
 
 
-FLAG_TAGS = {"salary": ("Paid via payroll", f"Not an expense: a payment of {PAYABLE_NAMES[NET]}"),
+FLAG_TAGS = {"balance_sheet": ("Balance sheet item", "Not an expense: charged to a balance sheet account"),
+             "salary": ("Paid via payroll", f"Not an expense: a payment of {PAYABLE_NAMES[NET]}"),
              "medical": ("Paid via payroll", f"Not a second expense: settles {PAYABLE_NAMES[DED]}")}
 
 

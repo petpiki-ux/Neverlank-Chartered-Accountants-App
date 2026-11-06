@@ -324,7 +324,7 @@ def _add_missing_columns():
         # tax computation lines posted from that schedule so a re-post replaces only them (prohibited_deductions.py)
         "gl_account": [("tax_expense_type", "VARCHAR(60)")],
         "firm_journal": [("alloc_key", "VARCHAR(120)")],
-        "expense": [("supplier_id", "INTEGER"), ("source_key", "VARCHAR(80)")],
+        "expense": [("supplier_id", "INTEGER"), ("source_key", "VARCHAR(80)"), ("ledger_account_id", "INTEGER")],
         "cash_entry": [("supplier_id", "INTEGER"), ("ledger_account_id", "INTEGER")],
         "supplier_payment": [("advance_id", "INTEGER")],
         "firm_fx_config": [("prefer", "VARCHAR(10)")],

@@ -10467,6 +10467,9 @@ class Expense(db.Model):
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
     supplier_id = db.Column(db.Integer, db.ForeignKey("supplier.id"))   # the Supplier master record, when linked
     source_key = db.Column(db.String(80))   # set when the app created the bill itself (e.g. payroll medical aid), so it is never posted twice
+    # a bill or payment that is NOT an expense: charged to this balance sheet account instead (Dr the account / Cr payables or cash), e.g. medical aid
+    # already in the payroll, a loan repayment, a deposit. Chosen under 'Balance sheet' in the form's Category list; `category` then holds the account's name.
+    ledger_account_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"))
     notes = db.Column(db.Text)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
