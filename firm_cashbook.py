@@ -10,8 +10,9 @@ from flask_login import current_user
 from extensions import db
 from models import (
     CashAccount, CashEntry, CashAssign, CashClear, CASH_ACCOUNT_KINDS, CASH_ENTRY_CATEGORIES, CASH_TRANSFER_CATEGORY,
-    INVOICE_CURRENCIES, PAYMENT_METHODS, FirmYearEnd, Expense,
+    INVOICE_CURRENCIES, PAYMENT_METHODS, FirmYearEnd, FirmAccount, Expense, Supplier,
 )
+import firm_payroll
 from finance import finance_required, _parse_date, _parse_float, category_names, add_category, _clean_category_name
 from firm_finance import firmfs_bp
 import cashbook
@@ -165,14 +166,17 @@ def _entry_form_context(entry=None, form=None):
     cats_out = [c for c in CASH_ENTRY_CATEGORIES if c in CASH_OUT_CATEGORIES]
     if entry is not None:
         pool = cats_in if entry.direction == "in" else cats_out
-        if entry.category not in pool:
+        if entry.category not in pool and not entry.ledger_account_id:
             pool.append(entry.category)   # an older entry keeps its own heading when edited
-    import firm_payroll
     pay_heads = [(h, firm_payroll.PAYABLE_NAMES[k]) for h, k in firm_payroll.PAYMENT_HEADINGS.items()]   # [(heading, ledger account it pays off)]
     cats_out = [c for c in cats_out if c not in firm_payroll.PAYMENT_HEADINGS]
     if entry is not None and entry.category in firm_payroll.PAYMENT_HEADINGS:
         cats_out = [c for c in cats_out]                                  # an older entry keeps its heading in the payroll group below
-    return dict(ye=None, active="cash", accounts=cashbook.accounts_in_order(active_only=True), entry=entry, form=form, pay_heads=pay_heads,
+    import firm_ledger
+    suppliers = Supplier.query.order_by(Supplier.name).all()
+    bs_groups = firm_ledger.cash_pick_groups()
+    return dict(ye=None, active="cash", accounts=cashbook.accounts_in_order(active_only=True), entry=entry, form=form, pay_heads=pay_heads, suppliers=suppliers,
+                pay_head_names=list(firm_payroll.PAYMENT_HEADINGS), bs_groups=bs_groups,
                 cats_in=cats_in, cats_out=cats_out, expense_cats=category_names(), today=date.today(), preselect=pre)
 
 
@@ -218,9 +222,32 @@ def _read_entry_form(editing=None):
             if name not in category_names():
                 return None, "Choose what the money was for."
             out["expense_category"] = name
-        elif cat in CASH_ENTRY_CATEGORIES:
+        elif (cat or "").startswith("acct:"):
+            import firm_ledger
+            try:
+                pick = FirmAccount.query.get(int(cat[5:]))
+            except ValueError:
+                pick = None
+            why = firm_ledger.cash_pick_refusal(pick)
+            if why:
+                return None, why
+            head = firm_ledger.PAYROLL_KEY_HEADING.get(pick.system_key)
+            if head:
+                cat = head                  # a payroll payable is cleared through its own heading
+            else:
+                if acct.currency != "USD":
+                    return None, "A balance sheet account can be charged from a USD cash book account only; for a ZWG account use a journal."
+                out["category"] = f"{pick.code} {pick.name}"[:60]
+                out["ledger_account"] = pick
+        if "category" not in out and cat in CASH_ENTRY_CATEGORIES:
             out["category"] = cat
-        else:
+            sid = request.form.get("supplier_id", type=int)
+            if kind == "out" and sid and cat in firm_payroll.PAYMENT_HEADINGS:
+                sup = Supplier.query.get(sid)
+                if sup is None:
+                    return None, "Choose the supplier from the list."
+                out["supplier"] = sup
+        elif "category" not in out and "expense_category" not in out and "expense_new" not in out:
             return None, "Choose what the money was for."
         if "category" not in out:
             payee = (request.form.get("payee") or "").strip()[:200]
@@ -273,9 +300,14 @@ def cash_entry_new():
                     return render_template("firmfs/cash_entry.html", **_entry_form_context(None, request.form))
                 flash(f"Paid {d['amount']:,.2f} to {d['payee']} recorded as an expense and taken from {d['acct'].name}.", "success")
             else:
+                sup, led = d.get("supplier"), d.get("ledger_account")
                 db.session.add(CashEntry(account_id=d["acct"].id, entry_date=d["on"], direction=d["kind"], amount=d["amount"], category=d["category"],
-                                         description=d["desc"], reference=d["ref"], created_by_id=current_user.id))
-                flash("Entry added to the cash book.", "success")
+                                         description=d["desc"], reference=d["ref"], supplier_id=sup.id if sup else None,
+                                         ledger_account_id=led.id if led else None, created_by_id=current_user.id))
+                if led:
+                    flash(f"Entry added to the cash book and charged to {led.label}, not to an expense.", "success")
+                else:
+                    flash(f"Entry added to the cash book" + (f": paid to {sup.name} and charged to {firm_payroll.PAYABLE_NAMES[firm_payroll.PAYMENT_HEADINGS[d['category']]]}, not to an expense." if sup else "."), "success")
             db.session.commit()
             return redirect(url_for("firmfs.cash_book", account=d["acct"].id))
     return render_template("firmfs/cash_entry.html", **_entry_form_context(None, request.form if request.method == "POST" else None))
@@ -312,6 +344,8 @@ def cash_entry_edit(entry_id):
                 db.session.delete(moved)
             en.account_id, en.entry_date, en.direction, en.amount = d["acct"].id, d["on"], d["kind"], d["amount"]
             en.category, en.description, en.reference = d["category"], d["desc"], d["ref"]
+            en.supplier_id = d["supplier"].id if d.get("supplier") else None
+            en.ledger_account_id = d["ledger_account"].id if d.get("ledger_account") else None
             db.session.commit()
             flash("Entry updated.", "success")
             return redirect(url_for("firmfs.cash_book", account=en.account_id))

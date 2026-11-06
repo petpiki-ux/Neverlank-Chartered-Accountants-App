@@ -120,8 +120,8 @@ def collect_transactions():
             "key": f"entry:{en.id}", "source": "Entry", "date": en.entry_date,
             "amount": r2(en.amount) if en.direction == "in" else -r2(en.amount),
             "currency": en.account.currency if en.account else "USD", "method": None, "ref": en.reference or "",
-            "description": en.description or en.category, "category": en.category, "link": None, "entry_id": en.id,
-            "fixed_account_id": en.account_id, "transfer_id": en.transfer_id,
+            "description": (f"{en.supplier.name} - " if getattr(en, "supplier", None) else "") + (en.description or en.category), "category": en.category, "link": None, "entry_id": en.id,
+            "fixed_account_id": en.account_id, "transfer_id": en.transfer_id, "ledger_account_id": en.ledger_account_id,
         })
     return out
 
@@ -308,8 +308,8 @@ def manual_summary(start, end):
     guide for figures that are entered rather than derived (loans, dividends, owner contributions ...)."""
     rows = defaultdict(lambda: {"in": 0.0, "out": 0.0})
     for en in CashEntry.query.filter(CashEntry.entry_date >= start, CashEntry.entry_date <= end).all():
-        if en.category == CASH_TRANSFER_CATEGORY:
-            continue
+        if en.category == CASH_TRANSFER_CATEGORY or en.ledger_account_id:
+            continue          # a transfer, or an entry already charged to a balance sheet account (so it needs no year-end entry)
         cur = en.account.currency if en.account else "USD"
         k = (en.category, cur)
         rows[k]["in" if en.direction == "in" else "out"] += en.amount or 0.0

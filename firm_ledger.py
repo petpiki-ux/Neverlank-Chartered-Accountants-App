@@ -36,7 +36,7 @@ from datetime import date, datetime, timedelta
 
 from extensions import db
 from models import (
-    CashAccount, ClientAdvance, Expense, FirmAccount, FirmJournal, FirmJournalLine, FirmPeriodLock, FirmYearEnd, Invoice, SupplierPayment,
+    CashAccount, CashEntry, ClientAdvance, Expense, FirmAccount, FirmJournal, FirmJournalLine, FirmPeriodLock, FirmYearEnd, Invoice, SupplierPayment,
     Receipt, INVOICE_CURRENCIES, FIRM_ACCOUNT_TYPES,
 )
 import analytics
@@ -127,6 +127,7 @@ STARTER_CHART = [
 ]
 SYSTEM_KEYS = {row[4] for row in STARTER_CHART if row[4]}
 # Accounts the statements derive themselves: a journal to one of these is a deliberate adjustment, so it carries a warning.
+PAYROLL_KEY_HEADING = {v: k for k, v in firm_payroll.PAYMENT_HEADINGS.items()}     # payable account key -> its Cash Book heading
 CONTROL_KEYS = {"AR", "AP", "ADV", "SUPP_ADV", "PPE_COST", "PPE_ACCDEP", "DEPR", "VAT_CTRL", "PAY_SAL", "PAY_ER", "PAY_ZIMRA", "PAY_NSSA", "PAY_NET", "PAY_DED"}
 # Accounts only the app may post to (their statement figure is calculated, or one account feeds two statement lines).
 JOURNAL_REFUSED_KEYS = {"TAX_PAY", "TAX_EXP_CUR", "TAX_EXP_DEF", "DTL", "DTA", "DISP_GL"}
@@ -379,6 +380,63 @@ def make_reversal(j, on, user):
 
 def _natural(cat, dr, cr):
     return (dr - cr) if CAT[cat][4] == "debit" else (cr - dr)
+
+
+def cash_pick_refusal(a):
+    """Why the Cash Book cannot charge an entry to this account (a sentence), or None. The Cash Book can charge a balance sheet account
+    (an asset, liability or equity account); the accounts the app posts itself, cash and tax have their own routes."""
+    if a is None or not a.is_active:
+        return "Choose an account from the list."
+    cat = a.fs_category
+    if not cat or cat == EXCLUDED or cat not in CAT or CAT[cat][2] != "SFP":
+        return f"{a.label} is not a balance sheet account."
+    if cat in ("cash", "retained_earnings") or cat in TAX_CODES:
+        return f"{a.label} cannot be chosen here (cash, tax and retained earnings have their own routes)."
+    k = a.system_key
+    if k and (is_control_key(k) and k not in PAYROLL_KEY_HEADING or k in JOURNAL_REFUSED_KEYS or k in SUSPENSE_KEYS):
+        return f"{a.label} is posted by the app from its own records; choose another account."
+    return None
+
+
+def cash_pick_groups():
+    """[(group label, [FirmAccount])] of the balance sheet accounts the Cash Book can be charged to, in code order."""
+    groups = {"Asset": [], "Liability": [], "Equity": []}
+    for a in FirmAccount.query.filter_by(is_active=True).order_by(FirmAccount.code).all():
+        if cash_pick_refusal(a) is None and a.account_type in groups and a.system_key not in PAYROLL_KEY_HEADING:     # the payroll payables have their own Payroll group
+            groups[a.account_type].append(a)
+    names = {"Asset": "Assets", "Liability": "Liabilities", "Equity": "Equity"}
+    return [(names[k], v) for k, v in groups.items() if v]
+
+
+def cash_account_statement_items(end, rate):
+    """What Cash Book entries charged to a balance sheet account add to a year-end column: ([(fs_category, label, amount)], warnings).
+    Money out debits the account, money in credits it (the cash side comes from the Cash Book itself). Cumulative to the year-end."""
+    acc = defaultdict(lambda: [0.0, 0.0])
+    warnings = []
+    skipped = 0
+    q = (db.session.query(CashEntry, FirmAccount).join(FirmAccount, FirmAccount.id == CashEntry.ledger_account_id)
+         .filter(CashEntry.entry_date <= end, CashEntry.transfer_id.is_(None)))
+    for en, a in q.all():
+        cat = a.fs_category
+        if not cat or cat == EXCLUDED or cat not in CAT:
+            continue
+        cur = en.account.currency if en.account else "USD"
+        if cur == "USD":
+            usd = en.amount or 0.0
+        elif rate and rate > 0:
+            usd = (en.amount or 0.0) / rate
+        else:
+            skipped += 1
+            continue
+        acc[(cat, a.name)][0 if en.direction == "out" else 1] += usd
+    if skipped:
+        warnings.append(f"{skipped} Cash Book entr(ies) charged to balance sheet accounts were left out: no ZWG rate is entered for this year-end.")
+    items = []
+    for (cat, name), (dr, cr) in sorted(acc.items()):
+        amt = r2(_natural(cat, dr, cr))
+        if abs(amt) >= CENT:
+            items.append((cat, f"Cash book - {name}", amt))
+    return items, warnings
 
 
 def journal_statement_items(ye, start, end, first, from_book, tax_auto):
@@ -692,8 +750,11 @@ def build_ledger(year_ends=None, include_journals=True):
         else:
             cat = t.get("category") or ""
             pay_key = firm_payroll.cash_key(cat, t["date"], pay_start) if src == "Entry" else None
+            ledger_acct = t.get("ledger_account_id") if src == "Entry" else None
             if pay_key:
                 contra = pay_key
+            elif ledger_acct and ledger_acct in L.accounts:
+                contra = ledger_acct         # charged to the balance sheet account chosen in the Cash Book
             elif cat == CASH_TRANSFER_CATEGORY:
                 contra = "CLR_TRANSFER"
             elif cat in ("QPD (provisional tax) paid", "Income tax paid"):

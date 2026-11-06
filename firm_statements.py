@@ -373,6 +373,11 @@ def build_column(ye, prev_end, classes, assets, prev_col=None):
     for code, name, amount in j_items:
         add(code, name, amount)
 
+    cb_items, w_cb = firm_ledger.cash_account_statement_items(end, rate)
+    warnings.extend(w_cb)
+    for code, name, amount in cb_items:
+        add(code, name, amount)
+
     tax = None
     if tax_auto:
         t_pre = {code: sum(x["amount"] for x in acc[code]) for code in ALL_CODES}

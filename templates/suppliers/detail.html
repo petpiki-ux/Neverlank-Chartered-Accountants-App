@@ -25,6 +25,17 @@
   <div class="kpi"><div class="kpi-label">Payment terms</div><div style="font-size:20px;font-weight:700;">{{ s.payment_terms_days }} days</div></div>
 </div>
 
+{% if payroll_paid %}
+<div class="card">
+  <h3 style="margin-top:0;">Paid from payroll liabilities</h3>
+  <p class="muted" style="font-size:12px;">Paid through the Cash Book under a Payroll heading (for example medical aid deducted from staff pay). These clear what the payroll owes (Dr the payroll payable, Cr cash): they are not bills, not expenses, and do not change what you owe this supplier.</p>
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Date</th><th>Heading</th><th>Details</th><th class="num">Amount</th></tr></thead><tbody>
+    {% for en in payroll_paid %}<tr><td>{{ en.entry_date.strftime('%d %b %Y') }}</td><td>{{ en.category }}</td><td>{{ en.description or '' }}{% if en.reference %} ({{ en.reference }}){% endif %}</td><td class="num">{{ en.account.currency if en.account else '' }} {{ '%.2f'|format(en.amount) }}</td></tr>{% endfor %}
+    </tbody></table></div>
+</div>
+{% endif %}
+
 <div class="card">
   <h3 style="margin-top:0;">Bills</h3>
   {% if bills %}

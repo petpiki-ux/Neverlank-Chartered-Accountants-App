@@ -11595,11 +11595,18 @@ class CashEntry(db.Model):
     description = db.Column(db.String(250))
     reference = db.Column(db.String(120))
     transfer_id = db.Column(db.String(36))
+    # a payment under a Payroll heading (Medical aid and other deductions paid ...) can name the supplier it went to (the medical aid society):
+    # it still only clears the payroll payable (Dr payable / Cr cash) - no bill, no expense, nothing owed on the supplier's account
+    supplier_id = db.Column(db.Integer, db.ForeignKey("supplier.id"))
+    # the balance sheet account (asset, liability or equity) the entry is charged to: Dr it / Cr cash for money out, the reverse for money in
+    ledger_account_id = db.Column(db.Integer, db.ForeignKey("firm_account.id"))
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    ledger_account = db.relationship("FirmAccount", foreign_keys=[ledger_account_id])
     account = db.relationship("CashAccount", backref=db.backref("entries", lazy=True))
     created_by = db.relationship("User")
+    supplier = db.relationship("Supplier", foreign_keys=[supplier_id], backref=db.backref("payroll_cash_payments", lazy=True))
 
 
 class CashAssign(db.Model):

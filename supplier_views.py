@@ -169,7 +169,7 @@ def set_status(supplier_id):
 @finance_required
 def delete_supplier(supplier_id):
     s = Supplier.query.get_or_404(supplier_id)
-    if s.bills or s.payments:
+    if s.bills or s.payments or s.payroll_cash_payments:
         flash("This supplier has bills or payments, so it cannot be deleted. Put it on hold or block it instead.", "danger")
         return redirect(url_for("suppliers.detail", supplier_id=s.id))
     db.session.delete(s)
@@ -192,8 +192,9 @@ def detail(supplier_id):
     pays = sorted([p for p in s.payments if not p.advance_id], key=lambda p: (p.payment_date, p.id), reverse=True)
     advances = sorted(s.advances, key=lambda a: (a.advance_date, a.id), reverse=True)
     clr, left_days = sp.clearance_state(s, today)
+    payroll_paid = sorted(s.payroll_cash_payments, key=lambda en: (en.entry_date, en.id), reverse=True)
     return render_template("suppliers/detail.html", **_ctx(
-        s=s, bills=view, pays=pays, advances=[{"a": a, "left": sp.advance_unapplied(a)} for a in advances], held=sp.unapplied_by_currency(s),
+        s=s, bills=view, pays=pays, payroll_paid=payroll_paid, advances=[{"a": a, "left": sp.advance_unapplied(a)} for a in advances], held=sp.unapplied_by_currency(s),
         net=sp.net_by_currency(s), owed=sp.balances_by_currency(s), spend=sp.year_spend(s, today), clearance=clr, clearance_days=left_days,
         statuses=SUPPLIER_STATUSES, status_help=SUPPLIER_STATUS_HELP, can_pay=sp.can_be_paid(s), can_bill=sp.can_receive_bills(s)))
 
