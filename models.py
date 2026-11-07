@@ -4546,6 +4546,7 @@ class DeferredTaxComputation(db.Model):
     # "auto": the PPE tax base is picked up from the Capital Allowance schedule class by class; "manual": the typed ppe_tax_base is used.
     # Blank on older rows: manual when a figure was typed, otherwise auto.
     ppe_tax_base_mode = db.Column(db.String(10))
+    prior_tax_rate_percent = db.Column(db.Float)        # the rate for the prior-year position; blank = the same rate
     notes = db.Column(db.Text)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
@@ -4586,6 +4587,8 @@ class DeferredTaxItem(db.Model):
     description = db.Column(db.String(200), nullable=False)
     accounting_amount = db.Column(db.Float, default=0.0)
     tax_base_amount = db.Column(db.Float, default=0.0)
+    prior_accounting_amount = db.Column(db.Float)       # the same difference a year earlier; both blank = not available
+    prior_tax_base_amount = db.Column(db.Float)
     order = db.Column(db.Integer, default=0)
 
     def __repr__(self):

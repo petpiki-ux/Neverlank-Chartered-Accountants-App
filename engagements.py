@@ -725,6 +725,10 @@ def view_engagement(engagement_id):
         import engagement_tax
         ca_ctx_for_dt = engagement_tax.capital_allowance_context(engagement)
         deferred_tax_ppe = engagement_tax.deferred_tax_ppe(ca_ctx_for_dt, ppe_movement, deferred_tax_computation)
+    deferred_tax_adj = None
+    if tab == "deferred_tax" and trial_balance and trial_balance.lines and deferred_tax_computation and deferred_tax_computation.tax_rate_percent is not None:
+        import deferred_tax_adj as _dta
+        deferred_tax_adj = _dta.position(engagement)
     dt_ppe_base = (deferred_tax_ppe["tax_base_total"] if deferred_tax_ppe is not None else (deferred_tax_computation.ppe_tax_base if deferred_tax_computation else None))
     deferred_tax_result = fin.build_deferred_tax_computation(
         deferred_tax_computation.tax_rate_percent if deferred_tax_computation else None,
@@ -1177,6 +1181,7 @@ def view_engagement(engagement_id):
         deferred_tax_other_items=deferred_tax_other_items,
         deferred_tax_result=deferred_tax_result,
         deferred_tax_ppe=deferred_tax_ppe,
+        deferred_tax_adj=deferred_tax_adj,
         deferred_tax_tb_net=deferred_tax_tb_net,
         deferred_tax_reconciliation=deferred_tax_reconciliation,
         tax_services=TAX_SERVICES,
@@ -5155,6 +5160,7 @@ def save_deferred_tax_computation(engagement_id):
     _ensure_engagement_access(engagement)
     record = _get_or_create_deferred_tax_computation(engagement_id)
     record.tax_rate_percent = _parse_float(request.form.get("tax_rate_percent"))
+    record.prior_tax_rate_percent = _parse_float(request.form.get("prior_tax_rate_percent"))
     record.ppe_tax_base_mode = "manual" if request.form.get("ppe_tax_base_mode") == "manual" else "auto"
     if record.ppe_tax_base_mode == "manual" or request.form.get("ppe_tax_base", "").strip():
         record.ppe_tax_base = _parse_float(request.form.get("ppe_tax_base"))
@@ -5185,6 +5191,8 @@ def add_deferred_tax_item(engagement_id):
         computation_id=record.id, description=description,
         accounting_amount=_parse_float(request.form.get("accounting_amount")) or 0.0,
         tax_base_amount=_parse_float(request.form.get("tax_base_amount")) or 0.0,
+        prior_accounting_amount=_parse_float(request.form.get("prior_accounting_amount")),
+        prior_tax_base_amount=_parse_float(request.form.get("prior_tax_base_amount")),
         order=order,
     ))
     db.session.commit()
@@ -5205,6 +5213,8 @@ def update_deferred_tax_item(item_id):
     item.description = description
     item.accounting_amount = _parse_float(request.form.get("accounting_amount")) or 0.0
     item.tax_base_amount = _parse_float(request.form.get("tax_base_amount")) or 0.0
+    item.prior_accounting_amount = _parse_float(request.form.get("prior_accounting_amount"))
+    item.prior_tax_base_amount = _parse_float(request.form.get("prior_tax_base_amount"))
     db.session.commit()
     flash("Temporary difference updated.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="deferred_tax"))

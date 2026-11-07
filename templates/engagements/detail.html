@@ -2840,6 +2840,7 @@
     <form method="post" action="{{ url_for('engagements.save_deferred_tax_computation', engagement_id=engagement.id) }}">
       <div class="form-row">
         <div><label for="dt_tax_rate_percent">Tax rate (%)</label><input type="number" step="0.01" id="dt_tax_rate_percent" name="tax_rate_percent" value="{{ deferred_tax_computation.tax_rate_percent if deferred_tax_computation and deferred_tax_computation.tax_rate_percent is not none else '' }}" placeholder="e.g. the current ZIMRA rate"></div>
+        <div><label for="dt_prior_tax_rate_percent">Prior-year tax rate (%) - blank = same rate</label><input type="number" step="0.01" id="dt_prior_tax_rate_percent" name="prior_tax_rate_percent" value="{{ deferred_tax_computation.prior_tax_rate_percent if deferred_tax_computation and deferred_tax_computation.prior_tax_rate_percent is not none else '' }}"></div>
       </div>
       {% set dtp = deferred_tax_ppe %}
       <div style="margin:6px 0 12px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:6px;">
@@ -2872,7 +2873,7 @@
     <h3 class="mt-0">Other temporary differences</h3>
     {% if deferred_tax_computation and deferred_tax_computation.items %}
     <table>
-      <thead><tr><th>Description</th><th class="text-right">Accounting amount</th><th class="text-right">Tax base</th><th></th></tr></thead>
+      <thead><tr><th>Description</th><th class="text-right">Accounting amount</th><th class="text-right">Tax base</th><th class="text-right">Prior year: accounting amount</th><th class="text-right">Prior year: tax base</th><th></th></tr></thead>
       <tbody>
       {% for item in deferred_tax_computation.items %}
         <form method="post" action="{{ url_for('engagements.update_deferred_tax_item', item_id=item.id) }}" class="inline">
@@ -2880,6 +2881,8 @@
           <td><input type="text" name="description" value="{{ item.description }}" style="width:100%;margin-bottom:0;"></td>
           <td><input type="number" step="0.01" name="accounting_amount" value="{{ item.accounting_amount }}" style="width:120px;margin-bottom:0;" class="text-right"></td>
           <td><input type="number" step="0.01" name="tax_base_amount" value="{{ item.tax_base_amount }}" style="width:120px;margin-bottom:0;" class="text-right"></td>
+          <td><input type="number" step="0.01" name="prior_accounting_amount" value="{{ item.prior_accounting_amount if item.prior_accounting_amount is not none else '' }}" style="width:120px;margin-bottom:0;" class="text-right" placeholder="-"></td>
+          <td><input type="number" step="0.01" name="prior_tax_base_amount" value="{{ item.prior_tax_base_amount if item.prior_tax_base_amount is not none else '' }}" style="width:120px;margin-bottom:0;" class="text-right" placeholder="-"></td>
           <td>
             <button type="submit" class="btn small secondary">Save</button>
             <button type="submit" formaction="{{ url_for('engagements.delete_deferred_tax_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
@@ -2896,6 +2899,8 @@
       <div style="flex:2;"><label for="dt_new_description">Description</label><input type="text" id="dt_new_description" name="description" placeholder="e.g. Provision for leave pay" required></div>
       <div><label for="dt_new_accounting_amount">Accounting amount</label><input type="number" step="0.01" id="dt_new_accounting_amount" name="accounting_amount" value="0"></div>
       <div><label for="dt_new_tax_base_amount">Tax base</label><input type="number" step="0.01" id="dt_new_tax_base_amount" name="tax_base_amount" value="0"></div>
+      <div><label for="dt_new_prior_accounting_amount">Prior year: accounting amount</label><input type="number" step="0.01" id="dt_new_prior_accounting_amount" name="prior_accounting_amount" placeholder="optional"></div>
+      <div><label for="dt_new_prior_tax_base_amount">Prior year: tax base</label><input type="number" step="0.01" id="dt_new_prior_tax_base_amount" name="prior_tax_base_amount" placeholder="optional"></div>
       <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add item</button></div>
     </form>
   </div>
@@ -2931,6 +2936,56 @@
       <strong>Trial balance reconciliation:</strong> the trial balance's net deferred tax liability/(asset) is {{ '%.2f'|format(deferred_tax_reconciliation.tb_net) }} against a computed net position of {{ '%.2f'|format(deferred_tax_reconciliation.computed) }}.
       {% if deferred_tax_reconciliation.ties_out %}Ties out to the trial balance.{% else %}Difference of {{ '%.2f'|format(deferred_tax_reconciliation.diff) }} - basis for a proposed adjustment to either the trial balance or this computation.{% endif %}
     </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if deferred_tax_adj %}
+  <div class="card" id="dt_journals">
+    <h3 class="mt-0">Compare with the trial balance and propose journals</h3>
+    {% if not deferred_tax_adj.ok %}
+    <p class="muted" style="font-size:12.5px;">{{ deferred_tax_adj.reason }}</p>
+    {% else %}
+    {% set P = deferred_tax_adj.prior %}{% set C = deferred_tax_adj.current %}
+    <p class="muted" style="font-size:12.5px;">The deferred tax this computation gives, against what the trial balance carries (after the other adjustments, without the journals proposed here). Net deferred tax liability/(asset). Confirm below to post the journal(s) as draft adjustments; they are reviewed and signed on the Finalisation tab.</p>
+    <table>
+      <thead><tr><th></th><th class="text-right">Prior year (start of the year)</th><th class="text-right">Current year (end of the year)</th></tr></thead>
+      <tbody>
+        <tr><td>Computed by this computation{% if deferred_tax_adj.prior_rate != deferred_tax_adj.rate %} (prior year at {{ '%.2f'|format(deferred_tax_adj.prior_rate) }}%){% endif %}</td><td class="text-right">{% if P %}{{ '%.2f'|format(P.computed) }}{% else %}not available{% endif %}</td><td class="text-right">{{ '%.2f'|format(C.computed) }}</td></tr>
+        <tr><td>Per the trial balance (liability {{ '%.2f'|format(C.tb_l) }} less asset {{ '%.2f'|format(C.tb_a) }} this year)</td><td class="text-right">{% if P %}{{ '%.2f'|format(P.tb_net) }}{% else %}-{% endif %}</td><td class="text-right">{{ '%.2f'|format(C.tb_net) }}</td></tr>
+        <tr><td><strong>Difference to be journalled</strong></td><td class="text-right"><strong>{% if P %}{{ '%.2f'|format(P.diff) }}{% else %}-{% endif %}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(C.diff) }}</strong></td></tr>
+      </tbody>
+    </table>
+    {% if deferred_tax_adj.computed_movement is defined %}
+    <p class="muted" style="font-size:12.5px;margin-top:8px;">Movement in the computed position over the year: {{ '%.2f'|format(deferred_tax_adj.computed_movement) }}. Deferred tax expense on trial balance lines named "deferred": {{ '%.2f'|format(deferred_tax_adj.tb_deferred_expense) }}.</p>
+    {% endif %}
+    {% for n in deferred_tax_adj.prior_notes %}<p style="font-size:12px;color:#b3261e;margin:4px 0;">{{ n }}</p>{% endfor %}
+    {% for w in deferred_tax_adj.warnings %}<p style="font-size:12px;color:#b3261e;margin:4px 0;">{{ w }}</p>{% endfor %}
+
+    {% if (P and P.lines) or C.lines or (P and P.existing) or C.existing %}
+    <form method="post" action="{{ url_for('dtadj.post_journals', engagement_id=engagement.id) }}" style="margin-top:10px;">
+      {% for blk, title, key, note in [(P, 'Prior-year journal ' ~ 'DT-PY', 'prior', 'Restates the comparatives (IAS 8) and this year\'s opening balances; the other side is retained earnings.'), (C, 'Current-year journal DT-CUR', 'current', 'The other side is the deferred tax expense (profit or loss).')] %}
+        {% if blk and (blk.lines or blk.existing) %}
+        <div style="margin:10px 0;padding:10px 12px;border:1px solid #e5e5e5;border-radius:6px;">
+          <label style="font-weight:600;"><input type="checkbox" name="post" value="{{ key }}" {% if blk.lines and not blk.in_sync %}checked{% endif %}> {{ title }}
+            {% if blk.existing and blk.in_sync %}<span class="badge status-Completed">Already posted and up to date</span>{% elif blk.existing and blk.lines %}<span class="badge">Posted - will be refreshed</span>{% elif blk.existing %}<span class="badge">Posted - no longer needed, confirming removes it</span>{% endif %}</label>
+          <div class="muted" style="font-size:12px;">{{ note }}</div>
+          {% if blk.lines %}
+          <table style="margin-top:6px;"><thead><tr><th>Account</th><th>Category</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead><tbody>
+          {% for l in blk.lines %}<tr><td>{{ l.account_name }}</td><td>{{ l.fs_category.replace('_', ' ') }}</td><td class="text-right">{% if l.debit %}{{ '%.2f'|format(l.debit) }}{% endif %}</td><td class="text-right">{% if l.credit %}{{ '%.2f'|format(l.credit) }}{% endif %}</td></tr>{% endfor %}
+          </tbody></table>
+          {% else %}<div class="muted" style="font-size:12px;">The trial balance agrees to the computation: no entry needed.</div>{% endif %}
+        </div>
+        {% endif %}
+      {% endfor %}
+      <div style="max-width:380px;"><label for="dt_oci">Of the current-year movement, taken to other comprehensive income (for example deferred tax on a revaluation)</label>
+        <input type="number" step="0.01" min="0" id="dt_oci" name="oci_amount" value="{{ deferred_tax_adj.oci or 0 }}"></div>
+      <button type="submit" class="btn gold" onclick="return confirm('Post the ticked journal(s) as draft adjustments on this trial balance?');">Confirm and post the ticked journal(s)</button>
+      <span class="muted" style="font-size:12px;margin-left:8px;">Post the prior-year journal first if both are ticked; the current-year journal already allows for it.</span>
+    </form>
+    {% else %}
+    <p style="margin-top:10px;"><strong>The trial balance agrees to the computation for both years.</strong> No journal is needed.</p>
+    {% endif %}
     {% endif %}
   </div>
   {% endif %}

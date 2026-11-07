@@ -547,7 +547,8 @@ def _add_missing_columns():
         # up the firm-confirmed 1.25% rate automatically, exactly like a fresh
         # install's column default would.
         "payroll_employee": [("medical_aid_employee", "FLOAT DEFAULT 0")],
-        "deferred_tax_computation": [("ppe_tax_base_mode", "VARCHAR(10)")],
+        "deferred_tax_computation": [("ppe_tax_base_mode", "VARCHAR(10)"), ("prior_tax_rate_percent", "FLOAT")],
+        "deferred_tax_item": [("prior_accounting_amount", "FLOAT"), ("prior_tax_base_amount", "FLOAT")],
         "payroll_tax_settings": [("apwcs_pct", "FLOAT DEFAULT 1.25"), ("medical_aid_supplier_id", "INTEGER"), ("ledger_from", "DATE")],
         # nssa_applicable - see PayslipItem's docstring in models.py: lets an
         # Allowance/Exempt Income item (e.g. the EMPLOYER's own medical aid
@@ -833,6 +834,7 @@ def create_app():
     from asset_recon import assetrecon_bp
     from tb_year_import import tbyear_bp
     from tb_align import tbalign_bp
+    from deferred_tax_adj import dtadj_bp
     from whistleblower import wb_bp, wb_public_bp
     from training import training_bp
 
@@ -886,6 +888,7 @@ def create_app():
     app.register_blueprint(assetrecon_bp)
     app.register_blueprint(tbyear_bp)
     app.register_blueprint(tbalign_bp)
+    app.register_blueprint(dtadj_bp)
     from backup import backup_bp, nav_state as _backup_nav_state, start_scheduler as _start_backups
     app.register_blueprint(backup_bp)
 
