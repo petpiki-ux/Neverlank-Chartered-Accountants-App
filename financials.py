@@ -743,6 +743,30 @@ def adjustment_effects(adj):
     return out
 
 
+def adjustment_line_effects(adj):
+    """The same effects as adjustment_effects(), line by line and with the adjustment line's account name:
+    [(period, category code, amount in the category's normal sign, account name)]. The notes use it to put an adjustment
+    on the account line it belongs to (a depreciation adjustment on the Depreciation line), never on a line of its own."""
+    prior = is_prior_adjustment(adj)
+    carry = prior and getattr(adj, "carry_to_current", True) is not False
+    out = []
+    for line in adj.lines:
+        cat = CATEGORY_BY_CODE.get(line.fs_category)
+        if not cat or cat["normal"] is None:
+            continue
+        debit = line.debit or 0.0
+        credit = line.credit or 0.0
+        amount = (debit - credit) if cat["normal"] == "debit" else (credit - debit)
+        name = (getattr(line, "account_name", None) or "").strip() or "Adjustment"
+        out.append(("prior" if prior else "current", cat["code"], amount, name))
+        if carry:
+            if cat["statement"] == "SFP":
+                out.append(("current", cat["code"], amount, name))
+            else:
+                out.append(("current", "retained_earnings", credit - debit, "Retained earnings brought forward (restated)"))
+    return out
+
+
 def apply_adjustments(totals, adjustments):
     """Layers audit adjustments (journal entries) on top of the preliminary
     trial balance's computed totals, to produce the FINAL/ADJUSTED totals the
@@ -1388,7 +1412,7 @@ def _round_note_rows(rows, codes, raw_totals, cur, pri):
                 max(rows, key=lambda r: abs(r[key]))[key] += diff
 
 
-def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_totals=None, ppe_movement_raw=None):
+def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_totals=None, ppe_movement_raw=None, adjustments=None):
     """Builds the numbered Notes to the Financial Statements: one breakdown
     note per IAS 1 category (or small group of categories - see
     NOTE_DEFINITIONS) with a non-nil current or prior balance, each listing
@@ -1451,6 +1475,21 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
                     "account_code": l.account_code, "account_name": l.account_name,
                     "current": current, "prior": prior,
                 })
+        # Audit adjustments (including the Asset Register's PPE-REG depreciation) go onto the account line they belong to: added to the
+        # trial balance line of the same name, or a line of that account's own when the trial balance has none. They are never shown as
+        # a separate "adjustment" line, and the lines then add up to the note total.
+        if adjustments:
+            by_name = {(r["account_name"] or "").strip().casefold(): r for r in account_rows}
+            for adj in adjustments:
+                for period, ecode, amount, name in adjustment_line_effects(adj):
+                    if ecode not in codes or abs(amount) < 1e-9:
+                        continue
+                    key = name.casefold()
+                    if key not in by_name:
+                        by_name[key] = {"account_code": "", "account_name": name, "current": 0.0, "prior": 0.0}
+                        account_rows.append(by_name[key])
+                    by_name[key][period] += amount
+            account_rows = [r for r in account_rows if not (_is_nil(r["current"]) and _is_nil(r["prior"]))]
         if raw_totals is not None:
             _round_note_rows(account_rows, codes, raw_totals, cur, pri)
 
@@ -1562,6 +1601,7 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     ppe_accounting_policy_text() above) are passed straight through to
     build_notes() - see there for what they change. Leaving both out (the
     default) leaves the PPE note exactly as it was before this feature."""
+    adjustments = list(adjustments) if adjustments else adjustments
     totals = compute_totals(lines)
     if adjustments:
         totals = apply_adjustments(totals, adjustments)
@@ -1577,7 +1617,8 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     if reporting_framework in ("full_ifrs", "ifrs_for_smes"):
         notes, note_number_by_category = build_notes(
             lines, totals, ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text,
-            raw_totals=raw_totals if whole_numbers else None, ppe_movement_raw=ppe_movement_raw if whole_numbers else None)
+            raw_totals=raw_totals if whole_numbers else None, ppe_movement_raw=ppe_movement_raw if whole_numbers else None,
+            adjustments=adjustments)
         _attach_note_numbers(pl, sfp, cf, note_number_by_category)
     else:
         notes = []
