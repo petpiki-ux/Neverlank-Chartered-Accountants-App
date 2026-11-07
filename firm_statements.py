@@ -383,6 +383,17 @@ def build_column(ye, prev_end, classes, assets, prev_col=None):
     for code, name, amount in cb_items:
         add(code, name, amount)
 
+    # Journals, bills and Cash Book entries posted to an account sit on that account's own line: lines of the same name in the same
+    # statement category are added together, so the notes show one line per account and no separate "journal" lines
+    for code in ALL_CODES:
+        merged = {}
+        for x in acc[code]:
+            if x["name"] in merged:
+                merged[x["name"]]["amount"] = r2(merged[x["name"]]["amount"] + x["amount"])
+            else:
+                merged[x["name"]] = dict(x)
+        acc[code] = [x for x in merged.values() if abs(x["amount"]) >= 0.005]
+
     tax = None
     if tax_auto:
         t_pre = {code: sum(x["amount"] for x in acc[code]) for code in ALL_CODES}

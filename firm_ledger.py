@@ -444,14 +444,14 @@ def bill_account_statement_items(end, rate):
         else:
             skipped += 1
             continue
-        acc[(cat, a.name)] += usd
+        acc[(cat, statement_label(a))] += usd
     if skipped:
         warnings.append(f"{skipped} bill(s) charged to balance sheet accounts were left out: no ZWG rate is entered for this year-end.")
     items = []
     for (cat, name), dr in sorted(acc.items()):
         amt = r2(_natural(cat, dr, 0.0))
         if abs(amt) >= CENT:
-            items.append((cat, f"Bills charged to {name}", amt))
+            items.append((cat, name, amt))
     return items, warnings
 
 
@@ -486,15 +486,25 @@ def cash_account_statement_items(end, rate):
         else:
             skipped += 1
             continue
-        acc[(cat, a.name)][0 if en.direction == "out" else 1] += usd
+        acc[(cat, statement_label(a))][0 if en.direction == "out" else 1] += usd
     if skipped:
         warnings.append(f"{skipped} Cash Book entr(ies) charged to balance sheet accounts were left out: no ZWG rate is entered for this year-end.")
     items = []
     for (cat, name), (dr, cr) in sorted(acc.items()):
         amt = r2(_natural(cat, dr, cr))
         if abs(amt) >= CENT:
-            items.append((cat, f"Cash book - {name}", amt))
+            items.append((cat, name, amt))
     return items, warnings
+
+
+def statement_label(a):
+    """The line an account's figures sit on in the statements and notes: the account's own name, so a journal, a bill or a Cash Book
+    entry posted to an account is added into that account's line (merged with the same-named line by the statements) and never shown
+    as a separate "Journals - ..." line. The payroll payables use the name payroll already gives their line."""
+    import firm_payroll
+    if a.system_key in firm_payroll.LINE_NAMES:
+        return firm_payroll.LINE_NAMES[a.system_key]
+    return a.name
 
 
 def journal_statement_items(ye, start, end, first, from_book, tax_auto):
@@ -529,8 +539,8 @@ def journal_statement_items(ye, start, end, first, from_book, tax_auto):
             if not ok and first:
                 before_first += 1
         if ok:
-            acc[(cat, a.name)][0] += ln.debit or 0.0
-            acc[(cat, a.name)][1] += ln.credit or 0.0
+            acc[(cat, statement_label(a))][0] += ln.debit or 0.0
+            acc[(cat, statement_label(a))][1] += ln.credit or 0.0
     warnings = []
     if ignored_cash:
         warnings.append(f"{ignored_cash} journal line(s) on cash accounts were ignored: cash comes from the Cash Book.")
@@ -543,7 +553,7 @@ def journal_statement_items(ye, start, end, first, from_book, tax_auto):
     for (cat, name), (dr, cr) in sorted(acc.items()):
         amt = r2(_natural(cat, dr, cr))
         if abs(amt) >= CENT:
-            items.append((cat, f"Journals - {name}", amt))
+            items.append((cat, name, amt))
     return items, warnings
 
 

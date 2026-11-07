@@ -41,6 +41,9 @@ PAYMENT_HEADINGS = {"Salaries paid": NET, "PAYE and other taxes paid": ZIMRA, "N
                     "Medical aid and other deductions paid": DED}
 PAYABLE_NAMES = {NET: "Net salaries payable", ZIMRA: "PAYE and AIDS levy payable", NSSA: "NSSA contributions payable",
                  DED: "Other payroll deductions payable"}
+# the statement line payroll gives each of its accounts: a journal, bill or Cash Book entry on the same account is added into that line
+LINE_NAMES = {SAL: "Salaries and wages (payroll)", ER: "Employer NSSA and APWCS contributions (payroll)",
+              **{k: v + " (payroll)" for k, v in PAYABLE_NAMES.items()}}
 SALARY_WORDS = ("salar", "wage", "payroll")
 MEDICAL_WORDS = ("medical aid", "medical scheme", "medical insurance")
 
@@ -348,12 +351,12 @@ def statement_items(start, end, zwg_rate):
     warnings.extend(overlap_warnings(pstart))
     items = []
     if abs(sal) >= CENT:
-        items.append(("admin_expenses", "Salaries and wages (payroll)", r2(sal)))
+        items.append(("admin_expenses", LINE_NAMES[SAL], r2(sal)))
     if abs(er) >= CENT:
-        items.append(("admin_expenses", "Employer NSSA and APWCS contributions (payroll)", r2(er)))
+        items.append(("admin_expenses", LINE_NAMES[ER], r2(er)))
     for key in (NET, ZIMRA, NSSA, DED):
         if abs(acc[key]) >= CENT:
-            items.append(("other_current_liabilities", PAYABLE_NAMES[key] + " (payroll)", r2(acc[key])))
+            items.append(("other_current_liabilities", LINE_NAMES[key], r2(acc[key])))
     return items, warnings, set(med)
 
 
