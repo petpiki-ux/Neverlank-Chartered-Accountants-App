@@ -717,10 +717,20 @@ def view_engagement(engagement_id):
         {"description": i.description, "accounting_amount": i.accounting_amount, "tax_base_amount": i.tax_base_amount}
         for i in (deferred_tax_computation.items if deferred_tax_computation else [])
     ]
+    # The PPE temporary difference is picked up automatically: carrying amounts from the Asset Register, tax bases from the Capital
+    # Allowance schedule, class by class (unless the preparer chose to type the tax base).
+    deferred_tax_ppe = None
+    ca_ctx_for_dt = None
+    if tab == "deferred_tax" and (engagement.has_tax_module or engagement.has_asset_schedules):
+        import engagement_tax
+        ca_ctx_for_dt = engagement_tax.capital_allowance_context(engagement)
+        deferred_tax_ppe = engagement_tax.deferred_tax_ppe(ca_ctx_for_dt, ppe_movement, deferred_tax_computation)
+    dt_ppe_base = (deferred_tax_ppe["tax_base_total"] if deferred_tax_ppe is not None else (deferred_tax_computation.ppe_tax_base if deferred_tax_computation else None))
     deferred_tax_result = fin.build_deferred_tax_computation(
         deferred_tax_computation.tax_rate_percent if deferred_tax_computation else None,
-        ppe_accounting_nbv, deferred_tax_computation.ppe_tax_base if deferred_tax_computation else None,
+        ppe_accounting_nbv, dt_ppe_base,
         deferred_tax_other_items,
+        ppe_rows=deferred_tax_ppe["rows"] if deferred_tax_ppe is not None else None,
     )
     deferred_tax_tb_net = (statements["totals"]["deferred_tax_liability"]["current"] - statements["totals"]["deferred_tax_asset"]["current"]) if statements else None
     deferred_tax_reconciliation = None
@@ -1034,13 +1044,15 @@ def view_engagement(engagement_id):
     tax_tab_context = {}
     if engagement.has_tax_module:
         import engagement_tax
-        if tab in ("capital_allowances", "deferred_tax", "income_tax"):
+        if tab == "deferred_tax" and ca_ctx_for_dt is not None:
+            tax_tab_context.update(ca_ctx_for_dt)
+        elif tab in ("capital_allowances", "deferred_tax", "income_tax"):
             tax_tab_context.update(engagement_tax.capital_allowance_context(engagement))
         if tab == "qpd":
             tax_tab_context.update(engagement_tax.qpd_context(engagement))
-    elif engagement.has_asset_schedules and tab == "capital_allowances":
+    elif engagement.has_asset_schedules and tab in ("capital_allowances", "deferred_tax"):
         import engagement_tax
-        tax_tab_context.update(engagement_tax.capital_allowance_context(engagement))
+        tax_tab_context.update(ca_ctx_for_dt if (tab == "deferred_tax" and ca_ctx_for_dt is not None) else engagement_tax.capital_allowance_context(engagement))
     # The Asset Register and Capital Allowances tabs: opening balances, additions, disposals and the schedules.
     if engagement.has_asset_schedules and tab in ("asset_register", "capital_allowances"):
         import asset_schedules
@@ -1164,6 +1176,7 @@ def view_engagement(engagement_id):
         ppe_accounting_nbv=ppe_accounting_nbv,
         deferred_tax_other_items=deferred_tax_other_items,
         deferred_tax_result=deferred_tax_result,
+        deferred_tax_ppe=deferred_tax_ppe,
         deferred_tax_tb_net=deferred_tax_tb_net,
         deferred_tax_reconciliation=deferred_tax_reconciliation,
         tax_services=TAX_SERVICES,
@@ -5142,7 +5155,9 @@ def save_deferred_tax_computation(engagement_id):
     _ensure_engagement_access(engagement)
     record = _get_or_create_deferred_tax_computation(engagement_id)
     record.tax_rate_percent = _parse_float(request.form.get("tax_rate_percent"))
-    record.ppe_tax_base = _parse_float(request.form.get("ppe_tax_base"))
+    record.ppe_tax_base_mode = "manual" if request.form.get("ppe_tax_base_mode") == "manual" else "auto"
+    if record.ppe_tax_base_mode == "manual" or request.form.get("ppe_tax_base", "").strip():
+        record.ppe_tax_base = _parse_float(request.form.get("ppe_tax_base"))
     record.notes = request.form.get("notes", "").strip()
     record.completed_by_id = current_user.id
     record.completed_at = datetime.utcnow()
@@ -5312,6 +5327,8 @@ def add_ppe_asset_class(engagement_id):
     if not name:
         flash("Please enter an asset class name.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab=_ppe_tab(engagement)))
+    import asset_schedules as _asched
+    name = _asched.canonical_class_name(name)
     order = PPEAssetClass.query.filter_by(engagement_id=engagement_id).count()
     db.session.add(PPEAssetClass(
         engagement_id=engagement_id, name=name,
@@ -5335,10 +5352,27 @@ def update_ppe_asset_class(class_id):
     if not name:
         flash("Please enter an asset class name.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
-    asset_class.name = name
+    import asset_schedules as _asched
+    name = _asched.canonical_class_name(name)                # 'Premises' / 'Land & Buildings' are called Land and Buildings
     asset_class.depreciation_method = request.form.get("depreciation_method") or "Straight-line"
     asset_class.rate_percent = _parse_float(request.form.get("rate_percent"))
     asset_class.useful_life_years = _parse_float(request.form.get("useful_life_years"))
+    same = [c for c in PPEAssetClass.query.filter_by(engagement_id=engagement.id).all()
+            if c.id != asset_class.id and c.name.strip().lower() == name.lower()]
+    if same:                                                  # the new name is a class this engagement already has: merge into it
+        keep = same[0]
+        moved = 0
+        for a in PPEAsset.query.filter_by(asset_class_id=asset_class.id).all():
+            a.asset_class_id = keep.id
+            moved += 1
+        if keep.rate_percent is None and asset_class.rate_percent is not None:
+            keep.rate_percent, keep.useful_life_years = asset_class.rate_percent, asset_class.useful_life_years
+        keep.tb_aliases = "|".join(sorted({k for k in ((keep.tb_aliases or "") + "|" + (asset_class.tb_aliases or "")).split("|") if k})) or None
+        db.session.delete(asset_class)
+        db.session.commit()
+        flash(f"'{name}' already existed, so the two classes were merged: {moved} asset(s) now sit under '{keep.name}'.", "success")
+        return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))
+    asset_class.name = name
     db.session.commit()
     flash("Asset class updated.", "success")
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab=_ppe_tab(engagement)))

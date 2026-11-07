@@ -2840,20 +2840,30 @@
     <form method="post" action="{{ url_for('engagements.save_deferred_tax_computation', engagement_id=engagement.id) }}">
       <div class="form-row">
         <div><label for="dt_tax_rate_percent">Tax rate (%)</label><input type="number" step="0.01" id="dt_tax_rate_percent" name="tax_rate_percent" value="{{ deferred_tax_computation.tax_rate_percent if deferred_tax_computation and deferred_tax_computation.tax_rate_percent is not none else '' }}" placeholder="e.g. the current ZIMRA rate"></div>
-        <div><label for="dt_ppe_tax_base">PPE - tax base (tax written-down value)</label><input type="number" step="0.01" id="dt_ppe_tax_base" name="ppe_tax_base" value="{{ deferred_tax_computation.ppe_tax_base if deferred_tax_computation and deferred_tax_computation.ppe_tax_base is not none else '' }}"></div>
+      </div>
+      {% set dtp = deferred_tax_ppe %}
+      <div style="margin:6px 0 12px;padding:10px 12px;border:1px solid #e5e5e5;border-radius:6px;">
+        <strong>Property, plant and equipment</strong>
+        <div class="muted" style="font-size:12.5px;margin:4px 0 6px;">Carrying amounts come from the Asset Register and tax bases from the Capital Allowance schedule, class by class. Nothing needs typing.</div>
+        {% set dt_mode = dtp.mode if dtp else ('manual' if deferred_tax_computation and deferred_tax_computation.ppe_tax_base is not none else 'auto') %}
+        <label style="display:block;font-weight:normal;"><input type="radio" name="ppe_tax_base_mode" value="auto" {% if dt_mode == 'auto' %}checked{% endif %}> Pick the tax base up automatically from the Capital Allowance schedule (recommended)</label>
+        <label style="display:block;font-weight:normal;"><input type="radio" name="ppe_tax_base_mode" value="manual" {% if dt_mode == 'manual' %}checked{% endif %}> Type the tax base myself (written-down value for tax)</label>
+        <div style="margin-top:6px;"><label for="dt_ppe_tax_base">Typed PPE tax base (used only when "Type the tax base myself" is chosen)</label><input type="number" step="0.01" id="dt_ppe_tax_base" name="ppe_tax_base" value="{{ deferred_tax_computation.ppe_tax_base if deferred_tax_computation and deferred_tax_computation.ppe_tax_base is not none else '' }}"></div>
       </div>
       <label for="dt_notes">Notes</label>
       <textarea id="dt_notes" name="notes">{{ deferred_tax_computation.notes if deferred_tax_computation else '' }}</textarea>
       <button type="submit" class="btn gold">Save</button>
     </form>
-    {% if engagement.has_tax_module %}
+    {% if deferred_tax_ppe %}
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid #e5e5e5;">
-      {% if ca_result %}
-      <p class="muted" style="font-size:12.5px;margin:0 0 8px;">The Capital Allowances schedule puts the tax value of the asset register at {{ ca_target_end.strftime('%d %b %Y') }} at <strong>{{ '%.2f'|format(ca_result.tax_value_end) }}</strong>.</p>
-      <form method="post" action="{{ url_for('engtax.use_tax_base', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Use it as the PPE tax base</button></form>
+      {% if deferred_tax_ppe.mode == 'auto' and deferred_tax_ppe.rows %}
+      <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Picked up from the Asset Register (carrying amount at {{ engagement.period_end.strftime('%d %b %Y') if engagement.period_end else 'the period end' }}) and the Capital Allowance schedule (tax value carried forward). The rows are in the computation below. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='asset_register' if engagement.has_asset_schedules else 'capital_allowances') }}">Asset Register</a> &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a></p>
+      {% elif deferred_tax_ppe.mode == 'auto' %}
+      <p class="flash danger" style="margin:0;">Nothing to pick up yet. {{ deferred_tax_ppe.ca_unavailable_reason }}</p>
       {% else %}
-      <p class="muted" style="font-size:12.5px;margin:0;">Add the client's assets on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a> tab and the tax value can be carried here as the PPE tax base.</p>
+      <p class="muted" style="font-size:12.5px;margin:0;">The typed tax base is used. Choose "Pick the tax base up automatically" above to use the Capital Allowance schedule{% if ca_result %} (its tax value at {{ ca_target_end.strftime('%d %b %Y') }} is {{ '%.2f'|format(ca_result.tax_value_end) }}){% endif %}.</p>
       {% endif %}
+      {% for w in deferred_tax_ppe.warnings %}<p style="font-size:12px;color:#b3261e;margin:6px 0 0;">{{ w }}</p>{% endfor %}
     </div>
     {% endif %}
   </div>
@@ -2913,7 +2923,7 @@
     <p class="flash danger" style="margin-top:10px;">No tax rate has been entered above yet - the deferred tax shown is nil until one is supplied.</p>
     {% endif %}
     {% else %}
-    <div class="empty-state">Enter the PPE tax base above and/or add other temporary differences to see the computation.</div>
+    <div class="empty-state">Add the assets to the Asset Register and Capital Allowances tabs (the PPE rows are picked up from them), and/or add other temporary differences, to see the computation.</div>
     {% endif %}
 
     {% if deferred_tax_reconciliation %}

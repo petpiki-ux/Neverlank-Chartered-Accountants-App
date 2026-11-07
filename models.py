@@ -4543,6 +4543,9 @@ class DeferredTaxComputation(db.Model):
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
     tax_rate_percent = db.Column(db.Float)
     ppe_tax_base = db.Column(db.Float)
+    # "auto": the PPE tax base is picked up from the Capital Allowance schedule class by class; "manual": the typed ppe_tax_base is used.
+    # Blank on older rows: manual when a figure was typed, otherwise auto.
+    ppe_tax_base_mode = db.Column(db.String(10))
     notes = db.Column(db.Text)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))

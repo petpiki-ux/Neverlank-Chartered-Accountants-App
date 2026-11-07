@@ -1122,7 +1122,7 @@ def build_income_tax_computation(profit_before_tax, lines, tax_loss_brought_forw
     }
 
 
-def build_deferred_tax_computation(tax_rate_percent, ppe_accounting_nbv, ppe_tax_base, other_items):
+def build_deferred_tax_computation(tax_rate_percent, ppe_accounting_nbv, ppe_tax_base, other_items, ppe_rows=None):
     """Nets every temporary difference into a single deferred tax asset/
     liability at `tax_rate_percent`. The PPE row (if both
     `ppe_accounting_nbv` - normally the Asset Register's own closing NBV,
@@ -1139,7 +1139,13 @@ def build_deferred_tax_computation(tax_rate_percent, ppe_accounting_nbv, ppe_tax
     temporary difference - net effect a deferred tax ASSET."""
     rate = (tax_rate_percent or 0.0) / 100.0
     rows = []
-    if ppe_accounting_nbv is not None and ppe_tax_base is not None:
+    if ppe_rows:
+        # property, plant and equipment class by class (carrying amount from the Asset Register, tax base from the Capital Allowance schedule)
+        for pr in ppe_rows:
+            diff = (pr["accounting_amount"] or 0.0) - (pr["tax_base_amount"] or 0.0)
+            rows.append({"description": pr["description"], "accounting_amount": pr["accounting_amount"] or 0.0,
+                         "tax_base_amount": pr["tax_base_amount"] or 0.0, "temporary_difference": diff, "deferred_tax": diff * rate})
+    elif ppe_accounting_nbv is not None and ppe_tax_base is not None:
         diff = ppe_accounting_nbv - ppe_tax_base
         rows.append({
             "description": "Property, plant and equipment", "accounting_amount": ppe_accounting_nbv,

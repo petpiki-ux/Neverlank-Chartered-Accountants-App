@@ -162,6 +162,60 @@ def posted_lines(result, depreciation):
     return lines
 
 
+def ppe_tax_base_mode(record):
+    """"auto" (picked up from the Capital Allowance schedule) or "manual" (the figure typed on the Deferred Tax tab)."""
+    m = getattr(record, "ppe_tax_base_mode", None) if record else None
+    if m in ("auto", "manual"):
+        return m
+    return "manual" if (record is not None and record.ppe_tax_base is not None) else "auto"
+
+
+def deferred_tax_ppe(ca_ctx, ppe_movement, record):
+    """What the Deferred Tax Computation takes for property, plant and equipment.
+
+    Carrying amounts come from the Asset Register's own movement schedule (closing net book value by class) and tax bases from the
+    Capital Allowance schedule (tax value carried forward by class), matched on the asset class. Returns
+    {"mode", "auto_available", "rows": [{"description", "accounting_amount", "tax_base_amount"}] or None, "tax_base_total", "warnings"}.
+    In manual mode, or when there is no schedule yet, rows is None and tax_base_total is the typed figure (None when nothing is typed)."""
+    mode = ppe_tax_base_mode(record)
+    ca = (ca_ctx or {}).get("ca_result")
+    out = {"mode": mode, "auto_available": bool(ca and ppe_movement), "rows": None,
+           "tax_base_total": record.ppe_tax_base if record is not None else None, "warnings": [], "ca_unavailable_reason": ""}
+    if not ca:
+        out["ca_unavailable_reason"] = "There is no Capital Allowance schedule yet: set the period end and add the assets (with their dates or tax values b/f)."
+    elif not ppe_movement:
+        out["ca_unavailable_reason"] = "The Asset Register has no assets yet, so there are no carrying amounts."
+    if mode != "auto" or not out["auto_available"]:
+        return out
+    tax_by_id, names = {}, {}
+    for r in ca["rows"]:
+        tax_by_id[r.get("class_id")] = tax_by_id.get(r.get("class_id"), 0.0) + (r.get("closing") or 0.0)
+        names.setdefault(r.get("class_id"), r.get("class_name") or "Unclassified")
+    rows, carry_ids = [], set()
+    for c in ppe_movement["by_class"]:
+        cid = c.get("class_id")
+        carry_ids.add(cid)
+        name = c.get("class_name") or names.get(cid) or "Unclassified"
+        carrying, base = r2(c["closing_nbv"]), r2(tax_by_id.get(cid, 0.0))
+        rows.append({"description": f"Property, plant and equipment - {name}", "accounting_amount": carrying, "tax_base_amount": base})
+        if abs(carrying) > 0.004 and abs(base) < 0.005 and cid not in tax_by_id:
+            out["warnings"].append(f"{name}: the Capital Allowance schedule has no assets in this class, so its tax base is nil. Check the asset classes on both tabs.")
+    for cid, base in tax_by_id.items():
+        if cid not in carry_ids and abs(base) > 0.004:
+            rows.append({"description": f"Property, plant and equipment - {names.get(cid, 'Unclassified')}", "accounting_amount": 0.0, "tax_base_amount": r2(base)})
+            out["warnings"].append(f"{names.get(cid, 'Unclassified')}: the Capital Allowance schedule has a tax value but the Asset Register shows no carrying amount for the class.")
+    out["rows"] = rows
+    out["tax_base_total"] = r2(sum(x["tax_base_amount"] for x in rows))
+    unverified = [c.name for c in (ca_ctx.get("ca_unverified") or [])]
+    if unverified:
+        out["warnings"].append("The allowance rules for " + ", ".join(unverified) + " have not been verified by a Partner or Admin yet, so these tax bases are provisional.")
+    if ca_ctx.get("ca_undated"):
+        out["warnings"].append(f"{len(ca_ctx['ca_undated'])} asset(s) have no date acquired and no tax value b/f, so they are not in the tax bases.")
+    if ca_ctx.get("ca_unclassified"):
+        out["warnings"].append(f"{len(ca_ctx['ca_unclassified'])} asset(s) have no asset class: they are in the schedule as Unclassified.")
+    return out
+
+
 @engtax_bp.route("/engagements/<int:engagement_id>/capital-allowances/rules/<int:class_id>", methods=["POST"])
 @login_required
 def save_rule(engagement_id, class_id):
@@ -268,10 +322,11 @@ def use_tax_base(engagement_id):
         rec = DeferredTaxComputation(engagement_id=eng.id)
         db.session.add(rec)
     rec.ppe_tax_base = r2(ctx["ca_result"]["tax_value_end"])
+    rec.ppe_tax_base_mode = "auto"
     rec.completed_by_id, rec.completed_at = current_user.id, datetime.utcnow()
     rec.reviewed_by_id = rec.reviewed_at = rec.partner_signed_by_id = rec.partner_signed_at = None
     db.session.commit()
-    flash(f"The PPE tax base of the Deferred Tax Computation is now {rec.ppe_tax_base:,.2f}, the tax value at the period end.", "success")
+    flash(f"The Deferred Tax Computation now takes the PPE tax base from the Capital Allowance schedule ({rec.ppe_tax_base:,.2f} at the period end).", "success")
     return _back(eng.id, "deferred_tax")
 
 
