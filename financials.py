@@ -128,6 +128,8 @@ _CATEGORY_SUGGESTION_RULES = [
     ("inventories", ["inventory", "inventories", "stock on hand", "finished goods", "raw materials", "work in progress", "merchandise"]),
     ("cash", ["vault", "petty cash", "cash on hand", "cash in hand", "cash float", "till float", "money market", "current account", "call account", "bank account", "bank balance", "bank -", "bank"]),
 
+    ("admin_expenses", ["fuel", "motor vehicle running", "motor vehicles running", "vehicle running", "motor vehicle repair", "motor vehicles - repair",
+                        "motor vehicle insurance", "vehicle licence", "vehicle license", "vehicle maintenance"]),
     ("ppe", ["property, plant", "property plant", "motor vehicle", "furniture and fittings", "furniture & fittings", "plant and machinery", "office equipment", "computer equipment", "land and buildings", "buildings", "fixed asset", "equipment"]),
     ("intangible_assets", ["goodwill", "intangible", "software licence", "software license", "patent", "trademark"]),
     ("investment_property", ["investment property"]),
@@ -1412,6 +1414,26 @@ def _round_note_rows(rows, codes, raw_totals, cur, pri):
                 max(rows, key=lambda r: abs(r[key]))[key] += diff
 
 
+_NAME_NOISE = {"charge", "for", "the", "year", "per", "asset", "register", "expense", "expenses", "of", "and", "adjustment", "movement"}
+
+def _name_words(name):
+    import re
+    return {w for w in re.sub(r"\([^)]*\)", " ", (name or "").casefold()).replace("-", " ").split() if w.isalpha() and w not in _NAME_NOISE}
+
+
+def _note_row_for_adjustment(account_rows, row_code, ecode, name):
+    """The note row an adjustment line belongs on: the row of the same account name; else the one row of the same category that shares a
+    significant word with it (a "Depreciation charge for the year (per Asset Register)" line belongs on the trial balance's Depreciation
+    line). None when there is no such row or it is ambiguous: the account then gets a line of its own."""
+    key = (name or "").strip().casefold()
+    for r in account_rows:
+        if (r["account_name"] or "").strip().casefold() == key:
+            return r
+    words = _name_words(name)
+    hits = [r for r in account_rows if row_code.get(id(r)) == ecode and words & _name_words(r["account_name"])]
+    return hits[0] if len(hits) == 1 else None
+
+
 def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_totals=None, ppe_movement_raw=None, adjustments=None):
     """Builds the numbered Notes to the Financial Statements: one breakdown
     note per IAS 1 category (or small group of categories - see
@@ -1479,16 +1501,22 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
         # trial balance line of the same name, or a line of that account's own when the trial balance has none. They are never shown as
         # a separate "adjustment" line, and the lines then add up to the note total.
         if adjustments:
-            by_name = {(r["account_name"] or "").strip().casefold(): r for r in account_rows}
+            row_code = {}
+            for code in codes:
+                for l in lines_by_category.get(code, []):
+                    for r in account_rows:
+                        if r["account_name"] == l.account_name and r["account_code"] == l.account_code:
+                            row_code.setdefault(id(r), code)
             for adj in adjustments:
                 for period, ecode, amount, name in adjustment_line_effects(adj):
                     if ecode not in codes or abs(amount) < 1e-9:
                         continue
-                    key = name.casefold()
-                    if key not in by_name:
-                        by_name[key] = {"account_code": "", "account_name": name, "current": 0.0, "prior": 0.0}
-                        account_rows.append(by_name[key])
-                    by_name[key][period] += amount
+                    row = _note_row_for_adjustment(account_rows, row_code, ecode, name)
+                    if row is None:
+                        row = {"account_code": "", "account_name": name, "current": 0.0, "prior": 0.0}
+                        account_rows.append(row)
+                        row_code[id(row)] = ecode
+                    row[period] += amount
             account_rows = [r for r in account_rows if not (_is_nil(r["current"]) and _is_nil(r["prior"]))]
         if raw_totals is not None:
             _round_note_rows(account_rows, codes, raw_totals, cur, pri)

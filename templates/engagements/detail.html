@@ -2141,6 +2141,9 @@
         </form>
       </div>
     </div>
+    {% if trial_balance and trial_balance.lines %}
+    <div style="margin:0 0 12px;"><a href="{{ url_for('tbalign.align_page', engagement_id=engagement.id) }}" class="btn secondary">Align accounts uploaded in different years</a> <span class="muted" style="font-size:12px;">Finds the same account spelt differently in the two years and offers to merge each pair into one line.</span></div>
+    {% endif %}
     {% if trial_balance %}
     <p class="muted" style="font-size:11.5px;">{% if trial_balance.source == 'upload' %}Last imported from '{{ trial_balance.original_filename }}'{% else %}Entered manually{% endif %}{% if trial_balance.completed_by %} by {{ trial_balance.completed_by.name }} on {{ (trial_balance.completed_at|cat).strftime('%d %b %Y') }}{% endif %}. Importing again replaces the accounts below with the new file's rows (any category you'd already set is kept for matching accounts).</p>
     {% endif %}

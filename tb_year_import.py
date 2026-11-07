@@ -327,11 +327,19 @@ def merge_year(tb, accounts, year_kind, client_id, lookup_mapping, std_sub):
         if (l.account_code or "").strip():
             by_code.setdefault(l.account_code.strip(), l)
         by_name.setdefault(fin.normalize_account_name(l.account_name), l)
+    from tb_align import name_key
+    by_key = {}
+    for l in tb.lines:
+        by_key.setdefault(name_key(l.account_name), []).append(l)       # the same account spelt a little differently
     touched, matched, added = set(), 0, 0
     for a in accounts:
         line = by_code.get(a["code"]) if a["code"] else None
         if line is None:
             line = by_name.get(fin.normalize_account_name(a["name"]))
+        if line is None:
+            same = [l for l in by_key.get(name_key(a["name"]), []) if l.id not in touched]
+            if len(same) == 1 and name_key(a["name"]):
+                line = same[0]
         if line is not None and line.id in touched:
             line = None                                     # two accounts matching one line: the second is added separately
         if line is None:

@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Align the trial balance - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Align accounts uploaded in different years</h1>
+  <div class="subtitle">{{ engagement.client.name }} - {{ engagement.title }}. When the two years come from different files, the same account can sit on two lines with slightly different names: one with only {{ engagement.period_end.year if engagement.period_end else 'current' }} figures and one with only the prior year's. Tick the pairs that really are one account and they become one line. Nothing is merged until you press the button.</div></div>
+  <div><a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}" class="btn secondary">Back to the trial balance</a></div>
+</div>
+<div class="card">
+  {% if pairs %}
+  <form method="post">
+    <div class="tbl-scroll"><table>
+      <thead><tr><th><input type="checkbox" id="all" onclick="document.querySelectorAll('.pr').forEach(function(c){c.checked=this.checked}.bind(this))" title="Tick all"></th>
+        <th>Current year line</th><th class="num">Current Dr / (Cr)</th><th>Prior year line</th><th class="num">Prior Dr / (Cr)</th><th>Why they look the same</th><th>Keep the name of</th></tr></thead>
+      <tbody>
+      {% for p in pairs %}
+        {% set c = p.cur %}{% set q = p.pri %}
+        <tr>
+          <td><input type="checkbox" class="pr" name="pair" value="{{ p.key }}" {% if p.strength == 'strong' and not p.warn %}checked{% endif %}></td>
+          <td>{{ c.account_name }}<div class="muted" style="font-size:11px;">{{ cat_label(c.fs_category) }}</div></td>
+          <td class="num">{{ '{:,.2f}'.format((c.current_debit or 0) - (c.current_credit or 0)) }}</td>
+          <td>{{ q.account_name }}<div class="muted" style="font-size:11px;">{{ cat_label(q.fs_category) }}</div></td>
+          <td class="num">{{ '{:,.2f}'.format((q.prior_debit or 0) - (q.prior_credit or 0)) }}</td>
+          <td>{{ p.why }}{% if p.warn %}<div style="font-size:11.5px;color:#b3261e;">{{ p.warn }}</div>{% endif %}</td>
+          <td><select name="keep_{{ p.key }}"><option value="cur">current year's</option><option value="pri">prior year's</option></select></td>
+        </tr>
+      {% endfor %}
+      </tbody></table></div>
+    <p class="muted" style="font-size:12px;">The kept line takes over the other line's figures and any code, standard account or category it lacks. Audit adjustments that name the removed line are renamed to the kept one. The trial balance's sign-offs are cleared, so it is reviewed again.</p>
+    <button class="btn gold" type="submit" onclick="return confirm('Merge the ticked pairs into one line each?');">Merge the ticked pairs</button>
+  </form>
+  {% else %}
+  <p>No lines to align: no line with only current figures has a matching line with only prior figures. Accounts that really are different (a new bank account, a new loan) are left as they are.</p>
+  {% endif %}
+</div>
+{% endblock %}
