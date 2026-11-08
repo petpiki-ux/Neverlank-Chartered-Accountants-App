@@ -182,10 +182,10 @@
         <td class="text-right">
           <form method="post" action="{{ url_for('hr.set_leave_brought_forward', balance_id=bal.id) }}" class="inline" style="display:inline-flex;gap:6px;align-items:center;flex-wrap:wrap;justify-content:flex-end;">
             <label class="muted" style="font-size:10.5px;margin:0;">Brought fwd
-              <input type="number" step="0.01" name="brought_forward" value="{{ bal.brought_forward or 0 }}" style="width:70px;">
+              <input type="number" data-nosep step="0.01" name="brought_forward" value="{{ bal.brought_forward or 0 }}" style="width:70px;">
             </label>
             <label class="muted" style="font-size:10.5px;margin:0;">Already taken
-              <input type="number" step="0.01" name="taken_days" value="{{ bal.taken_days or 0 }}" style="width:70px;">
+              <input type="number" data-nosep step="0.01" name="taken_days" value="{{ bal.taken_days or 0 }}" style="width:70px;">
             </label>
             <button type="submit" class="btn small secondary">Set</button>
           </form>

@@ -157,6 +157,7 @@ def new_client():
             email=request.form.get("email", "").strip(),
             phone=request.form.get("phone", "").strip(),
             address=request.form.get("address", "").strip(),
+            bankers=request.form.get("bankers", "").strip() or None,
             industry=_resolve_industry(request.form),
             company_number=company_number,
             tin_number=tin_number or None,
@@ -280,6 +281,7 @@ def edit_client(client_id):
         client.email = request.form.get("email", "").strip()
         client.phone = request.form.get("phone", "").strip()
         client.address = request.form.get("address", "").strip()
+        client.bankers = request.form.get("bankers", "").strip() or None
         old_industry = client.industry
         client.industry = _resolve_industry(request.form)
         client.company_number = company_number

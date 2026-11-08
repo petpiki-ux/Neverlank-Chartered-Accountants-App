@@ -872,9 +872,19 @@ def general_information_note(client, engagement):
     sentences = [f"{client.name} (\"the entity\") is a company incorporated in [jurisdiction of incorporation]."]
     if client.industry:
         sentences.append(f"The entity's principal activity is {client.industry.lower()}.")
+    bankers = bankers_list(client)
+    if bankers:
+        sentences.append("The entity's main banker is " + bankers[0] + "." if len(bankers) == 1 else
+                         "The entity's main bankers are " + ", ".join(bankers[:-1]) + " and " + bankers[-1] + ".")
     if engagement.period_end:
         sentences.append(f"These financial statements are for the year ended {engagement.period_end.strftime('%d %B %Y')}.")
     return " ".join(sentences)
+
+
+def bankers_list(client):
+    """The client's main bankers entered on the client page (one per line), as a clean list."""
+    raw = getattr(client, "bankers", None) or ""
+    return [b.strip() for b in raw.replace(";", "\n").splitlines() if b.strip()]
 
 
 # Seeded the first time the Finalisation tab's Directors' Statement is
@@ -1272,6 +1282,12 @@ def build_ppe_movement_schedule(asset_classes, assets, period_end):
     return {"by_class": by_class, "total": total}
 
 
+class _PolicyText(str):
+    """The flat policy sentence(s), plus `.parts` - the same policy broken into paragraphs and a table of the depreciation bases, for the
+    Word pack and the on-screen notes (a table reads far better than a run-on list of classes)."""
+    parts = None
+
+
 def ppe_accounting_policy_text(asset_classes):
     """Builds the Property, plant and equipment accounting policy note from
     the Depreciation policy working paper (models.PPEAssetClass, converted
@@ -1279,26 +1295,42 @@ def ppe_accounting_policy_text(asset_classes):
     "rate_percent", "useful_life_years"}, ...]) instead of the generic
     boilerplate in NOTE_DEFINITIONS, once at least one asset class has been
     defined. Returns None if `asset_classes` is empty, so the caller falls
-    back to the standard boilerplate untouched."""
+    back to the standard boilerplate untouched. The result is a str (one
+    flowing paragraph) carrying `.parts`: {"paragraphs", "table", "after"}."""
     if not asset_classes:
         return None
-    intro = (
-        "Property, plant and equipment are stated at cost less accumulated depreciation and any "
-        "accumulated impairment losses. Depreciation is charged so as to write down the cost of each "
-        "class of asset to its estimated residual value over its estimated useful life, on the "
-        "following bases:"
-    )
+    first = ("Property, plant and equipment are stated at cost less accumulated depreciation and any "
+             "accumulated impairment losses.")
+    second = ("Depreciation is charged so as to write down the cost of each class of asset to its estimated "
+              "residual value over its estimated useful life, on the following bases:")
+    after = "Useful lives and residual values are reviewed, and adjusted if appropriate, at each reporting date."
     bases = []
+    rows = []
     for c in asset_classes:
         method = c.get("depreciation_method") or "Straight-line"
         details = []
-        if c.get("rate_percent") is not None:
-            details.append(f"{c['rate_percent']:g}% per annum")
-        if c.get("useful_life_years") is not None:
-            details.append(f"{c['useful_life_years']:g} years")
+        rate = c.get("rate_percent")
+        life = c.get("useful_life_years")
+        if rate is not None:
+            details.append(f"{rate:g}% per annum")
+        if life is not None:
+            details.append(f"{life:g} years")
         detail_str = " (" + ", ".join(details) + ")" if details else ""
-        bases.append(f"{c.get('name', 'Unclassified')} - {method.lower()}{detail_str}")
-    return intro + " " + "; ".join(bases) + "."
+        name = c.get("name", "Unclassified")
+        bases.append(f"{name} - {method.lower()}{detail_str}")
+        rows.append([
+            name.strip().title() if name.strip().isupper() else name,
+            method[:1].upper() + method[1:],
+            f"{rate:g}%" if rate is not None else "\u2014",
+            f"{life:g} years" if life is not None else "\u2014",
+        ])
+    text = _PolicyText(first + " " + second + " " + "; ".join(bases) + ".")
+    text.parts = {
+        "paragraphs": [first, second],
+        "table": {"headers": ["Asset class", "Method", "Rate per annum", "Useful life"], "rows": rows},
+        "after": after,
+    }
+    return text
 
 
 # Checked in the order line items appear on the face of the primary
@@ -1543,7 +1575,8 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
             note["movement_total"] = reg_total
             note["total"] = {"current": reg_total["closing_nbv"], "prior": reg_total["opening_nbv"]}
             if ppe_policy_text:
-                note["policy"] = ppe_policy_text
+                note["policy"] = str(ppe_policy_text)
+                note["policy_parts"] = getattr(ppe_policy_text, "parts", None)
             # Always shown at the foot of the note - links the register's
             # own closing/opening NBV back to the trial balance's PPE
             # category total, on both years, whether or not they actually
@@ -1574,9 +1607,51 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
                     "register_current": reg_total["closing_nbv"], "register_prior": reg_total["opening_nbv"],
                 }
 
+        note["extra_tables"] = _movement_tables(codes, title, account_rows, cur, pri, adjustments)
         notes.append(note)
 
     return notes, note_number_by_category
+
+
+_LOAN_WORDS = ("shareholder", "shareholders", "director", "directors", "member", "members")
+
+
+def _is_owner_loan(name):
+    n = (name or "").casefold()
+    return "loan" in n and any(w in n for w in _LOAN_WORDS)
+
+
+def _movement_tables(codes, title, account_rows, cur, pri, adjustments):
+    """Roll-forward tables shown under a note's breakdown. Each is {"title", "headers", "rows": [[label, amounts...]], "total_last": bool}.
+    - Deferred tax: balance at the start of the year, the charge to profit or loss, the part recognised in other comprehensive income,
+      balance at the end of the year.
+    - Shareholder / director loan accounts (any note): per account, the opening balance (prior year closing), the net advances less
+      repayments for the year, the closing balance. The figures are those of the trial balance; the posting-level movement is in the ledger."""
+    tables = []
+    if "deferred_tax_liability" in codes or "deferred_tax_asset" in codes:
+        asset = "deferred_tax_asset" in codes
+        move = cur - pri
+        oci = 0.0
+        for adj in adjustments or []:
+            for period, ecode, amount, name in adjustment_line_effects(adj):
+                if period == "current" and ecode == "oci_items" and "deferred" in (name or "").casefold():
+                    oci += abs(amount)
+        oci = (min(oci, abs(move)) * (1 if move > 0 else -1)) if abs(move) >= 0.5 and oci else 0.0
+        pl_part = move - oci
+        rows = [["Balance at beginning of year", pri],
+                ["Credit to profit or loss" if asset else "Charge to profit or loss", pl_part]]
+        if abs(oci) >= 0.5:
+            rows.append(["Recognised in other comprehensive income", oci])
+        rows.append(["Balance at end of year", cur])
+        tables.append({"title": "Movement in deferred tax " + ("asset" if asset else "liability"), "headers": ["", "Current year"],
+                       "rows": rows, "total_last": True})
+    loans = [r for r in account_rows if _is_owner_loan(r["account_name"])]
+    if loans:
+        rows = [[r["account_name"], r["prior"], r["current"] - r["prior"], r["current"]] for r in loans]
+        tot = ["Total", sum(r[1] for r in rows), sum(r[2] for r in rows), sum(r[3] for r in rows)]
+        tables.append({"title": "Movement in shareholder loans", "headers": ["", "Opening balance", "Net advances / (repayments)", "Closing balance"],
+                       "rows": rows + [tot], "total_last": True})
+    return tables
 
 
 def _attach_note_numbers(pl, sfp, cf, note_number_by_category):

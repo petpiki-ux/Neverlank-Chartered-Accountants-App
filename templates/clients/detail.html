@@ -20,6 +20,7 @@
   <div class="form-row">
     <div><strong>Company number:</strong> {{ client.company_number or '—' }}</div>
     <div><strong>Address:</strong> {{ client.address or '—' }}</div>
+    <div><strong>Main bankers:</strong> {{ (client.bankers.splitlines()|select|join('; ')) if client.bankers else '—' }}</div>
   </div>
   <div class="form-row">
     <div><strong>TIN:</strong> {{ client.tin_number or '—' }}</div>

@@ -123,8 +123,33 @@ def _new_document(title, engagement, subtitle=None, doc=None):
     return doc
 
 
+def _bookmark(paragraph, name, doc):
+    """Wrap a paragraph's content in a Word bookmark (the Table of Contents page numbers refer to it)."""
+    from docx.oxml import OxmlElement
+    doc._bm_seq = getattr(doc, "_bm_seq", 100) + 1
+    start = OxmlElement("w:bookmarkStart")
+    start.set(qn("w:id"), str(doc._bm_seq))
+    start.set(qn("w:name"), name)
+    end = OxmlElement("w:bookmarkEnd")
+    end.set(qn("w:id"), str(doc._bm_seq))
+    p = paragraph._p
+    ppr = p.find(qn("w:pPr"))
+    if ppr is not None:
+        ppr.addnext(start)
+    else:
+        p.insert(0, start)
+    p.append(end)
+
+
 def _add_heading(doc, text, level=1):
-    return brand.heading(doc, text, level=level)
+    h = brand.heading(doc, text, level=level)
+    targets = getattr(doc, "_fs_toc", None)
+    if targets and level == 1:
+        for title in list(targets):
+            if text == title or (title == "Statement of Cash Flows" and text.startswith(title)):
+                _bookmark(h, targets.pop(title), doc)
+                break
+    return h
 
 
 def _style_table(table):
@@ -139,7 +164,24 @@ def _finish(doc):
     return buf
 
 
-def _statement_table(doc, title, headers, row_specs, level=1):
+def _statement_banner(doc, label):
+    """Under a statement's heading: the entity's name and the period the statement covers - "as at <date>" for the Statement of
+    Financial Position, "for the year ended <date>" for the others."""
+    ctx = getattr(doc, "_fs_ctx", None)
+    if not ctx:
+        return
+    name, period_end = ctx
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(0)
+    r = p.add_run(name or "")
+    r.bold = True
+    p = doc.add_paragraph()
+    p.paragraph_format.space_after = Pt(6)
+    r = p.add_run(("as at " if label == "as_at" else "for the year ended ") + _fmt_date(period_end))
+    r.italic = True
+
+
+def _statement_table(doc, title, headers, row_specs, level=1, period="year_ended", new_page=True):
     """Builds ONE continuous Word table for a whole financial statement -
     used for the Statement of Financial Position, the Statement of Profit
     or Loss, and the Statement of Cash Flows, matching how the Finalisation
@@ -152,7 +194,10 @@ def _statement_table(doc, title, headers, row_specs, level=1):
       {"cells": [...], "bold": bool, "muted": bool} - a normal/total/memo row,
         one string per column in `headers`' order
     """
+    if new_page:
+        doc.add_page_break()
     _add_heading(doc, title, level=level)
+    _statement_banner(doc, period)
     table = doc.add_table(rows=1, cols=len(headers))
     hdr_cells = table.rows[0].cells
     for i, h in enumerate(headers):
@@ -384,14 +429,51 @@ def _client_details_and_toc_page(doc, engagement, client_key_people, toc_section
     secretaries = [p for p in (client_key_people or []) if p.get("role") == "Company Secretary"]
     detail_row("Director(s)", ", ".join(p["full_name"] for p in directors) if directors else None)
     detail_row("Company Secretary", ", ".join(p["full_name"] for p in secretaries) if secretaries else None)
+    detail_row("Main bankers", "; ".join(fin.bankers_list(client)) if client else None)
     detail_row("Auditors", f"{FIRM_NAME}, {FIRM_ADDRESS}")
 
     doc.add_paragraph()
     _add_heading(doc, "Table of Contents", level=1)
-    for i, section_title in enumerate(toc_sections, start=1):
-        doc.add_paragraph(f"{i}.  {section_title}")
+    _toc_entries(doc, toc_sections)
 
     doc.add_page_break()
+
+
+def _toc_entries(doc, toc_sections):
+    """One line per section: the title, a dot leader and the page the section starts on. The page is a Word PAGEREF field to a bookmark on
+    the section's heading, so it is the real page of the finished document; Word fills the numbers in when the file is opened (the pack asks
+    for the fields to be updated), and F9 refreshes them after any edit."""
+    from docx.oxml import OxmlElement
+    from docx.enum.text import WD_TAB_ALIGNMENT, WD_TAB_LEADER
+    sec = doc.sections[0]
+    width = sec.page_width - sec.left_margin - sec.right_margin
+    targets = {}
+    for i, title in enumerate(toc_sections, start=1):
+        name = f"FS_TOC_{i}"
+        targets[title] = name
+        p = doc.add_paragraph()
+        p.paragraph_format.tab_stops.add_tab_stop(width, WD_TAB_ALIGNMENT.RIGHT, WD_TAB_LEADER.DOTS)
+        p.add_run(f"{i}.  {title}\t")
+        for kind, text in (("begin", None), ("instr", f" PAGEREF {name} \\h "), ("separate", None), ("text", "\u2013"), ("end", None)):
+            r = p.add_run()
+            if kind == "instr":
+                el = OxmlElement("w:instrText")
+                el.set(qn("xml:space"), "preserve")
+                el.text = text
+                r._r.append(el)
+            elif kind == "text":
+                r.text = text
+            else:
+                fc = OxmlElement("w:fldChar")
+                fc.set(qn("w:fldCharType"), kind)
+                r._r.append(fc)
+    doc._fs_toc = targets
+    # ask Word to refresh the fields (the page numbers) when the file is opened
+    settings = doc.settings.element
+    if settings.find(qn("w:updateFields")) is None:
+        uf = OxmlElement("w:updateFields")
+        uf.set(qn("w:val"), "true")
+        settings.append(uf)
 
 
 def _directors_statement_section(doc, directors_statement, engagement=None):
@@ -438,8 +520,12 @@ def _opinion_signoff(doc, report_date):
         p.paragraph_format.keep_with_next = i < len(lines) - 1
 
 
-def _audit_opinion_section(doc, audit_opinion):
+def _audit_opinion_section(doc, audit_opinion, engagement=None):
     is_audit = (audit_opinion.report_basis if audit_opinion else "audit") != "review"
+    # The auditor's / reviewer's report is the firm's own: it starts under the Neverlank letterhead. The financial statements that follow are the client's and are not.
+    client = engagement.client if engagement is not None else None
+    brand.letterhead_band(doc, "Independent Auditor's Report" if is_audit else "Independent Reviewer's Report",
+                          sub=(f"{client.name} - year ended {_fmt_date(engagement.period_end)}" if client else None))
     _add_heading(doc, "Independent Auditor's Report" if is_audit else "Independent Reviewer's Report", level=1)
     if not audit_opinion:
         doc.add_paragraph("Not yet prepared within the app.")
@@ -461,6 +547,31 @@ def _audit_opinion_section(doc, audit_opinion):
     doc.add_page_break()
 
 
+def _extra_note_tables(doc, note):
+    """The roll-forward tables under a note (movement in deferred tax, movement in shareholder loans): a small bold caption and a table."""
+    for t in note.get("extra_tables") or []:
+        cap = doc.add_paragraph()
+        cap.paragraph_format.keep_with_next = True
+        cap.add_run(t["title"]).bold = True
+        table = doc.add_table(rows=1, cols=len(t["headers"]))
+        for i, h in enumerate(t["headers"]):
+            table.rows[0].cells[i].text = h
+        _style_table(table)
+        last = len(t["rows"]) - 1
+        for k, r in enumerate(t["rows"]):
+            cells = table.add_row().cells
+            for i, v in enumerate(r):
+                cells[i].text = v if isinstance(v, str) else _fmt_whole(v)
+                if t.get("total_last") and (k == last or (k == 0 and len(t["headers"]) == 2)):
+                    for p in cells[i].paragraphs:
+                        for run in p.runs:
+                            run.bold = True
+        n = len(t["headers"])
+        _col_widths(doc, table, [0.56, 0.44] if n == 2 else [0.34, 0.22, 0.22, 0.22])
+        _right_align(table, first_col=1)
+        doc.add_paragraph()
+
+
 def build_financial_statements_docx(engagement, statements, financial_statements, directors_statement=None, audit_opinion=None, client_key_people=None):
     show_opinion = engagement.type in ("Audit", "Assurance")
 
@@ -480,19 +591,17 @@ def build_financial_statements_docx(engagement, statements, financial_statements
 
     _directors_statement_section(doc, directors_statement, engagement)
     if show_opinion:
-        _audit_opinion_section(doc, audit_opinion)
+        _audit_opinion_section(doc, audit_opinion, engagement)
 
-    doc = _new_document(
-        "Financial Statements",
-        engagement,
-        subtitle=f"Ref. {filing_reference('financials')}" + (" (draft - not yet fully mapped/reviewed)" if not financial_statements or not financial_statements.is_partner_signed else ""),
-        doc=doc,
-    )
+    # The financial statements are the client's, not the firm's: no Neverlank letterhead from here on (the auditor's report above carries it).
+    doc._fs_ctx = (engagement.client.name if engagement.client else "", engagement.period_end)
+    draft = not financial_statements or not financial_statements.is_partner_signed
 
     is_ifrs_framework = engagement.reporting_framework in ("full_ifrs", "ifrs_for_smes")
     if not is_ifrs_framework and financial_statements and financial_statements.basis_of_preparation:
         _add_heading(doc, "Basis of Preparation", level=2)
         doc.add_paragraph(financial_statements.basis_of_preparation)
+        doc.add_page_break()
 
     def two_col_table(title, rows, level=1):
         _add_heading(doc, title, level=level)
@@ -593,7 +702,10 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     # One continuous table, top to bottom, exactly matching the Finalisation
     # tab on screen - not a separate table per section with paragraph
     # breaks in between.
-    _statement_table(doc, "Statement of Financial Position", ["", "Note", "Current year", "Prior year"], sfp_specs)
+    if draft:
+        dp = doc.add_paragraph("Draft - not yet fully mapped/reviewed")
+        dp.runs[0].italic = True
+    _statement_table(doc, "Statement of Financial Position", ["", "Note", "Current year", "Prior year"], sfp_specs, period="as_at", new_page=False)
     bc = sfp["balance_check"]
     tie_note = "Ties out." if abs(bc["current"]) <= 0.01 and abs(bc["prior"]) <= 0.01 else "Non-zero - check every account is mapped to the right category and that the trial balance balances."
     doc.add_paragraph(f"Balance check (assets less equity and liabilities): current year {_fmt_whole(bc['current'])}, prior year {_fmt_whole(bc['prior'])}. {tie_note}").runs[0].italic = True
@@ -615,7 +727,9 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     pl_specs = [{"cells": _fs_row_cells(r), "bold": r.get("bold", False)} for r in statements["pl"]["rows"]]
     _statement_table(doc, "Statement of Profit or Loss and Other Comprehensive Income", ["", "Note", "Current year", "Prior year"], pl_specs)
 
+    doc.add_page_break()
     _add_heading(doc, "Statement of Changes in Equity", level=1)
+    _statement_banner(doc, "year_ended")
     eq_table = doc.add_table(rows=1, cols=4)
     hdr = eq_table.rows[0].cells
     hdr[0].text, hdr[1].text, hdr[2].text, hdr[3].text = "Component", "Opening", "Movement", "Closing"
@@ -678,6 +792,30 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         if policy_notes:
             _add_heading(doc, "3. Significant accounting policies", level=2)
             for i, note in enumerate(policy_notes, start=1):
+                parts = note.get("policy_parts")
+                if parts:
+                    # A policy with a table of bases (Property, plant and equipment): heading, short paragraphs, then the table.
+                    p = doc.add_paragraph()
+                    p.paragraph_format.keep_with_next = True
+                    run = p.add_run(f"({i}) {note['title']}")
+                    run.bold = True
+                    for para in parts["paragraphs"]:
+                        pp = doc.add_paragraph(para)
+                        pp.paragraph_format.keep_with_next = True
+                    tbl = parts["table"]
+                    t = doc.add_table(rows=1, cols=len(tbl["headers"]))
+                    for k, h in enumerate(tbl["headers"]):
+                        t.rows[0].cells[k].text = h
+                    _style_table(t)
+                    for r in tbl["rows"]:
+                        cells = t.add_row().cells
+                        for k, v in enumerate(r):
+                            cells[k].text = v
+                    _col_widths(doc, t, [0.40, 0.24, 0.18, 0.18])
+                    _right_align(t, first_col=2)
+                    ap = doc.add_paragraph(parts["after"])
+                    ap.paragraph_format.space_before = Pt(6)
+                    continue
                 p = doc.add_paragraph()
                 run = p.add_run(f"({i}) {note['title']}. ")
                 run.bold = True
@@ -686,6 +824,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         for note in statements["notes"]:
             if note.get("movement"):
                 movement_table(f"{note['number']}. {note['title']}", note, level=2)
+                _extra_note_tables(doc, note)
                 continue
             account_rows = [
                 {"label": (f"{a['account_code']} - " if a.get("account_code") else "") + a["account_name"],
@@ -693,6 +832,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
                 for a in note["accounts"]
             ] + [{"label": "Total", "current": note["total"]["current"], "prior": note["total"]["prior"], "bold": True}]
             two_col_table(f"{note['number']}. {note['title']}", account_rows, level=2)
+            _extra_note_tables(doc, note)
 
         next_num = (statements["notes"][-1]["number"] + 1) if statements["notes"] else 4
         closing_notes = [

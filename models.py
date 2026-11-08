@@ -1808,6 +1808,8 @@ class Client(db.Model):
     email = db.Column(db.String(120))
     phone = db.Column(db.String(50))
     address = db.Column(db.String(255))
+    # The entity's main bankers, one per line (entered on the client page; shown on the Financial Statements' Client Details page and in note 1).
+    bankers = db.Column(db.Text)
     industry = db.Column(db.String(120))
     # Company registration number (e.g. a companies-office registration
     # number). Optional - not every client is a registered company - but

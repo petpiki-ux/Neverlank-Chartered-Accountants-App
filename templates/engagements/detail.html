@@ -4936,7 +4936,17 @@
     {% if policy_notes %}
     <h4>3. Significant accounting policies</h4>
     {% for note in policy_notes %}
+    {% if note.policy_parts %}
+    <p><strong>({{ loop.index }}) {{ note.title }}</strong></p>
+    {% for para in note.policy_parts.paragraphs %}<p>{{ para }}</p>{% endfor %}
+    <table style="max-width:640px;">
+      <thead><tr>{% for h in note.policy_parts.table.headers %}<th{% if loop.index > 2 %} style="text-align:right;"{% endif %}>{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for r in note.policy_parts.table.rows %}<tr>{% for v in r %}<td{% if loop.index > 2 %} style="text-align:right;"{% endif %}>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table>
+    <p>{{ note.policy_parts.after }}</p>
+    {% else %}
     <p><strong>({{ loop.index }}) {{ note.title }}.</strong> {{ note.policy }}</p>
+    {% endif %}
     {% endfor %}
     {% endif %}
 
@@ -5015,6 +5025,15 @@
     {% else %}
     <p class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong> ({{ '%.0f'|format(note.total.prior) }} prior year)</p>
     {% endif %}
+    {% for xt in note.extra_tables or [] %}
+    <p style="margin:12px 0 4px;"><strong>{{ xt.title }}</strong></p>
+    <table style="max-width:{{ 520 if xt.headers|length == 2 else 760 }}px;">
+      <thead><tr>{% for h in xt.headers %}<th{% if loop.index > 1 %} class="text-right"{% endif %}>{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for r in xt.rows %}{% set is_b = xt.total_last and (loop.last or (loop.first and xt.headers|length == 2)) %}
+        <tr>{% for v in r %}<td{% if loop.index > 1 %} class="text-right"{% endif %}>{% if is_b %}<strong>{% endif %}{{ v if v is string else '%.0f'|format(v) }}{% if is_b %}</strong>{% endif %}</td>{% endfor %}</tr>{% endfor %}
+      </tbody>
+    </table>
+    {% endfor %}
     {% endfor %}
 
     {% set next_num = (statements.notes[-1].number + 1) if statements.notes else 4 %}
