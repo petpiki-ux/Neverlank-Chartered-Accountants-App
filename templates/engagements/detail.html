@@ -4952,7 +4952,33 @@
 
     {% for note in statements.notes %}
     <h4>{{ note.number }}. {{ note.title }}</h4>
-    {% if note.movement %}
+    {% macro fmtv(v) %}{% if v is none or v|abs < 0.5 %}-{% else %}{{ '%.0f'|format(v) }}{% endif %}{% endmacro %}
+    {% if note.share_layout %}
+    {% set sl = note.share_layout %}
+    <table style="max-width:640px;border:0;">
+      <thead><tr><th></th>{% for h in sl.headers %}<th class="text-right">{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for b in sl.blocks %}
+        <tr><td colspan="3" style="border:0;padding-top:10px;">{{ b.heading }}</td></tr>
+        <tr><td style="border:0;">{{ b.label }}</td>
+          <td class="text-right" style="border:0;border-bottom:4px double #222;">{{ fmtv(b.cur) }}</td>
+          <td class="text-right" style="border:0;border-bottom:4px double #222;">{{ fmtv(b.pri) }}</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% if sl.check %}<p class="muted" style="font-size:11.5px;color:#B02A2A;">Issued shares x nominal value differs from the share capital in the trial balance - check the share particulars on the client page.</p>{% endif %}
+    {% elif note.loan_layout and note.loan_layout.replaces_breakdown %}
+    {% set ll = note.loan_layout %}
+    <table style="max-width:640px;border:0;">
+      <thead><tr><th></th>{% for h in ll.headers %}<th class="text-right">{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        <tr><td colspan="3" style="border:0;"><strong>{{ ll.title }}</strong></td></tr>
+        {% for r in ll['rows'] %}<tr><td style="border:0;">{{ r[0] }}</td><td class="text-right" style="border:0;">{{ fmtv(r[1]) }}</td><td class="text-right" style="border:0;">{{ fmtv(r[2]) }}</td></tr>{% endfor %}
+        <tr><td style="border:0;"></td><td class="text-right" style="border:0;border-top:1px solid #222;border-bottom:4px double #222;">{{ fmtv(ll.closing[0]) }}</td><td class="text-right" style="border:0;border-top:1px solid #222;border-bottom:4px double #222;">{{ fmtv(ll.closing[1]) }}</td></tr>
+      </tbody>
+    </table>
+    <p>{{ ll.after }}</p>
+    {% elif note.movement %}
     <p class="muted" style="font-size:11.5px;">From the Asset Register (Substantive Procedures &gt; Property, Plant and Equipment) rather than the trial balance account list.</p>
     <table>
       <thead><tr><th>Asset class</th><th class="text-right">Opening NBV</th><th class="text-right">Additions</th><th class="text-right">Disposals</th><th class="text-right">Depreciation charge</th><th class="text-right">Closing NBV</th></tr></thead>
@@ -5024,6 +5050,18 @@
     </table>
     {% else %}
     <p class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong> ({{ '%.0f'|format(note.total.prior) }} prior year)</p>
+    {% endif %}
+    {% if note.loan_layout and not note.loan_layout.replaces_breakdown %}
+    {% set ll = note.loan_layout %}
+    <table style="max-width:640px;border:0;margin-top:10px;">
+      <thead><tr><th></th>{% for h in ll.headers %}<th class="text-right">{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>
+        <tr><td colspan="3" style="border:0;"><strong>{{ ll.title }}</strong></td></tr>
+        {% for r in ll['rows'] %}<tr><td style="border:0;">{{ r[0] }}</td><td class="text-right" style="border:0;">{{ fmtv(r[1]) }}</td><td class="text-right" style="border:0;">{{ fmtv(r[2]) }}</td></tr>{% endfor %}
+        <tr><td style="border:0;"></td><td class="text-right" style="border:0;border-top:1px solid #222;border-bottom:4px double #222;">{{ fmtv(ll.closing[0]) }}</td><td class="text-right" style="border:0;border-top:1px solid #222;border-bottom:4px double #222;">{{ fmtv(ll.closing[1]) }}</td></tr>
+      </tbody>
+    </table>
+    <p>{{ ll.after }}</p>
     {% endif %}
     {% for xt in note.extra_tables or [] %}
     <p style="margin:12px 0 4px;"><strong>{{ xt.title }}</strong></p>

@@ -1810,6 +1810,13 @@ class Client(db.Model):
     address = db.Column(db.String(255))
     # The entity's main bankers, one per line (entered on the client page; shown on the Financial Statements' Client Details page and in note 1).
     bankers = db.Column(db.Text)
+    # Presentation currency and share capital particulars (entered on the client page; used by the share capital and shareholder loan notes).
+    reporting_currency = db.Column(db.String(8))
+    share_class = db.Column(db.String(60))
+    authorised_shares = db.Column(db.Integer)
+    issued_shares = db.Column(db.Integer)
+    share_par_value = db.Column(db.Float)
+    shareholder_loan_terms = db.Column(db.Text)
     industry = db.Column(db.String(120))
     # Company registration number (e.g. a companies-office registration
     # number). Optional - not every client is a registered company - but

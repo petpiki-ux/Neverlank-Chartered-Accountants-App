@@ -258,7 +258,7 @@ def _add_missing_columns():
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
         "regulatory_notice": [("text_source", "VARCHAR(20)")],
-        "client": [("bankers", "TEXT"), ("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("cover_primary", "VARCHAR(6)"), ("cover_accent", "VARCHAR(6)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER"),
+        "client": [("bankers", "TEXT"), ("reporting_currency", "VARCHAR(8)"), ("share_class", "VARCHAR(60)"), ("authorised_shares", "INTEGER"), ("issued_shares", "INTEGER"), ("share_par_value", "FLOAT"), ("shareholder_loan_terms", "TEXT"), ("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("cover_primary", "VARCHAR(6)"), ("cover_accent", "VARCHAR(6)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER"),
                    # d63: the decision to accept the client lives on the client (NULL = not yet carried over; see _migrate_client_acceptance_decisions)
                    ("acceptance_decision", "VARCHAR(30)"), ("acceptance_decision_notes", "TEXT"), ("acceptance_decided_by_id", "INTEGER"), ("acceptance_decided_at", "DATETIME")],
         # last_seen_at - see models.User.is_online and this file's

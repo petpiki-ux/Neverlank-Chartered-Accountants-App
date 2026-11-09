@@ -547,6 +547,69 @@ def _audit_opinion_section(doc, audit_opinion, engagement=None):
     doc.add_page_break()
 
 
+def _dash(v):
+    """A figure in a free-form note table: whole numbers with thousands separators, brackets for negatives, a dash for nil / not known."""
+    return "-" if v is None or abs(v) < 0.5 else _fmt_whole(v)
+
+
+def _plain_note_table(doc, headers, fractions):
+    """A borderless table for the notes drawn like the firm's own working layouts (heading row of years and currency, labelled rows,
+    a single rule above a subtotal and a double rule under the total). Returns (table, add_row)."""
+    table = doc.add_table(rows=1, cols=len(headers))
+    for i, h in enumerate(headers):
+        c = table.rows[0].cells[i]
+        c.text = ""
+        parts = h.split(" ", 1)
+        p = c.paragraphs[0]
+        p.paragraph_format.space_before = Pt(0)
+        p.paragraph_format.space_after = Pt(2)
+        p.alignment = WD_ALIGN_PARAGRAPH.RIGHT if i else WD_ALIGN_PARAGRAPH.LEFT
+        if h:
+            p.add_run(parts[0]).bold = True
+            if len(parts) > 1:
+                p.add_run("\n" + parts[1]).bold = True
+
+    def add_row(cells, bold=False, rule=None):
+        row = table.add_row().cells
+        for i, v in enumerate(cells):
+            row[i].text = v
+            for p in row[i].paragraphs:
+                p.paragraph_format.space_before = Pt(0)
+                p.paragraph_format.space_after = Pt(2)
+                if i:
+                    p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
+                for r in p.runs:
+                    r.bold = bold
+            if i and rule == "single":
+                brand.cell_borders(row[i], top=("single", 6, "000000"))
+            if i and rule == "double":
+                brand.cell_borders(row[i], top=("single", 6, "000000"), bottom=("double", 6, "000000"))
+        return row
+    _col_widths(doc, table, fractions)
+    return table, add_row
+
+
+def _loan_note_layout(doc, lay):
+    table, add = _plain_note_table(doc, [""] + lay["headers"], [0.52, 0.24, 0.24])
+    add(["Shareholder Loans", "", ""], bold=True)
+    for label, c, p in lay["rows"]:
+        add([label, _dash(c), _dash(p)])
+    # the rule above the total sits on the last movement row's bottom edge: draw it as the total row's top border
+    add(["", _dash(lay["closing"][0]), _dash(lay["closing"][1])], rule="double")
+    para = doc.add_paragraph(lay["after"])
+    para.paragraph_format.space_before = Pt(8)
+
+
+def _share_capital_layout(doc, lay):
+    table, add = _plain_note_table(doc, [""] + lay["headers"], [0.52, 0.24, 0.24])
+    for k, b in enumerate(lay["blocks"]):
+        if k:
+            add(["", "", ""])
+        add([b["heading"], "", ""])
+        add([b["label"], _dash(b["cur"]), _dash(b["pri"])], rule="double")
+    doc.add_paragraph()
+
+
 def _extra_note_tables(doc, note):
     """The roll-forward tables under a note (movement in deferred tax, movement in shareholder loans): a small bold caption and a table."""
     for t in note.get("extra_tables") or []:
@@ -821,7 +884,17 @@ def build_financial_statements_docx(engagement, statements, financial_statements
                 run.bold = True
                 p.add_run(note["policy"])
 
+        import client_notes
+        client_notes.attach_client_notes(statements, engagement)
         for note in statements["notes"]:
+            if note.get("share_layout") or (note.get("loan_layout") and note["loan_layout"]["replaces_breakdown"]):
+                _add_heading(doc, f"{note['number']}. {note['title']}", level=2)
+                if note.get("share_layout"):
+                    _share_capital_layout(doc, note["share_layout"])
+                else:
+                    _loan_note_layout(doc, note["loan_layout"])
+                _extra_note_tables(doc, note)
+                continue
             if note.get("movement"):
                 movement_table(f"{note['number']}. {note['title']}", note, level=2)
                 _extra_note_tables(doc, note)
@@ -832,6 +905,8 @@ def build_financial_statements_docx(engagement, statements, financial_statements
                 for a in note["accounts"]
             ] + [{"label": "Total", "current": note["total"]["current"], "prior": note["total"]["prior"], "bold": True}]
             two_col_table(f"{note['number']}. {note['title']}", account_rows, level=2)
+            if note.get("loan_layout"):
+                _loan_note_layout(doc, note["loan_layout"])
             _extra_note_tables(doc, note)
 
         next_num = (statements["notes"][-1]["number"] + 1) if statements["notes"] else 4

@@ -90,6 +90,18 @@
     <textarea id="bankers" name="bankers" rows="3" placeholder="One bank per line, e.g. CBZ Bank Limited, Harare">{{ field('bankers') }}</textarea>
     <div class="muted" style="font-size:11.5px;margin:-8px 0 12px;">Shown on the Financial Statements (Client Details page and note 1).</div>
 
+    <h4 style="margin:16px 0 4px;">Financial statements particulars</h4>
+    <div class="form-row">
+      <div><label for="reporting_currency">Presentation currency</label><input type="text" id="reporting_currency" name="reporting_currency" maxlength="8" placeholder="USD" value="{{ field('reporting_currency') }}"></div>
+      <div><label for="share_class">Share class</label><input type="text" id="share_class" name="share_class" placeholder="Ordinary" value="{{ field('share_class') }}"></div>
+      <div><label for="authorised_shares">Authorised shares</label><input type="text" inputmode="numeric" id="authorised_shares" name="authorised_shares" value="{{ field('authorised_shares') }}"></div>
+      <div><label for="issued_shares">Issued shares</label><input type="text" inputmode="numeric" id="issued_shares" name="issued_shares" value="{{ field('issued_shares') }}"></div>
+      <div><label for="share_par_value">Nominal value per share</label><input type="text" inputmode="decimal" id="share_par_value" name="share_par_value" value="{{ field('share_par_value') }}"></div>
+    </div>
+    <label for="shareholder_loan_terms">Shareholder loan terms (printed under the loan note)</label>
+    <input type="text" id="shareholder_loan_terms" name="shareholder_loan_terms" placeholder="The loan is unsecured, interest free and has no fixed repayment terms." value="{{ field('shareholder_loan_terms') }}">
+    <div class="muted" style="font-size:11.5px;margin:-8px 0 12px;">Used by the Share capital and Shareholder loans notes of the Financial Statements.</div>
+
     <label for="notes">Notes</label>
     <textarea id="notes" name="notes">{{ field('notes') }}</textarea>
 

@@ -1625,8 +1625,7 @@ def _movement_tables(codes, title, account_rows, cur, pri, adjustments):
     """Roll-forward tables shown under a note's breakdown. Each is {"title", "headers", "rows": [[label, amounts...]], "total_last": bool}.
     - Deferred tax: balance at the start of the year, the charge to profit or loss, the part recognised in other comprehensive income,
       balance at the end of the year.
-    - Shareholder / director loan accounts (any note): per account, the opening balance (prior year closing), the net advances less
-      repayments for the year, the closing balance. The figures are those of the trial balance; the posting-level movement is in the ledger."""
+    (Shareholder loans are laid out by client_notes.attach_client_notes, which has the client's loan terms and prior-year opening.)"""
     tables = []
     if "deferred_tax_liability" in codes or "deferred_tax_asset" in codes:
         asset = "deferred_tax_asset" in codes
@@ -1645,12 +1644,6 @@ def _movement_tables(codes, title, account_rows, cur, pri, adjustments):
         rows.append(["Balance at end of year", cur])
         tables.append({"title": "Movement in deferred tax " + ("asset" if asset else "liability"), "headers": ["", "Current year"],
                        "rows": rows, "total_last": True})
-    loans = [r for r in account_rows if _is_owner_loan(r["account_name"])]
-    if loans:
-        rows = [[r["account_name"], r["prior"], r["current"] - r["prior"], r["current"]] for r in loans]
-        tot = ["Total", sum(r[1] for r in rows), sum(r[2] for r in rows), sum(r[3] for r in rows)]
-        tables.append({"title": "Movement in shareholder loans", "headers": ["", "Opening balance", "Net advances / (repayments)", "Closing balance"],
-                       "rows": rows + [tot], "total_last": True})
     return tables
 
 

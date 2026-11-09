@@ -126,6 +126,29 @@ def _search_visible_clients(q=""):
     return query.order_by(Client.name).all()
 
 
+def _share_fields(form):
+    """Share capital particulars and presentation currency from the client form (blank -> None)."""
+    def _int(name):
+        try:
+            return int(str(form.get(name, "")).replace(",", "").strip())
+        except ValueError:
+            return None
+    def _flt(name):
+        try:
+            return float(str(form.get(name, "")).replace(",", "").strip())
+        except ValueError:
+            return None
+    return {
+        "reporting_currency": (form.get("reporting_currency", "").strip().upper() or None),
+        "share_class": form.get("share_class", "").strip() or None,
+        "authorised_shares": _int("authorised_shares"),
+        "issued_shares": _int("issued_shares"),
+        "share_par_value": _flt("share_par_value"),
+        "shareholder_loan_terms": form.get("shareholder_loan_terms", "").strip() or None,
+    }
+
+
+
 @clients_bp.route("/")
 @login_required
 def list_clients():
@@ -158,6 +181,7 @@ def new_client():
             phone=request.form.get("phone", "").strip(),
             address=request.form.get("address", "").strip(),
             bankers=request.form.get("bankers", "").strip() or None,
+            **_share_fields(request.form),
             industry=_resolve_industry(request.form),
             company_number=company_number,
             tin_number=tin_number or None,
@@ -282,6 +306,8 @@ def edit_client(client_id):
         client.phone = request.form.get("phone", "").strip()
         client.address = request.form.get("address", "").strip()
         client.bankers = request.form.get("bankers", "").strip() or None
+        for _k, _v in _share_fields(request.form).items():
+            setattr(client, _k, _v)
         old_industry = client.industry
         client.industry = _resolve_industry(request.form)
         client.company_number = company_number
