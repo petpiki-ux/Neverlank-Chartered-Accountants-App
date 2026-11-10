@@ -852,7 +852,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         return cells
     cf_specs = [{"section": "Operating activities"}]
     for r in cf["operating_rows"]:
-        cf_specs.append({"cells": cf_row(r), "bold": r.get("bold", False), "muted": r.get("memo", False)})
+        cf_specs.append({"cells": cf_row(r), "bold": r.get("bold", False), "muted": r.get("memo", False) and not r.get("dep_merged")})
     cf_specs.append({"cells": cf_cells("Net cash from operating activities", cf["net_operating"], pr and pr["net_operating"]), "bold": True})
     cf_specs.append({"section": "Investing activities"})
     for r in cf["investing_rows"]:

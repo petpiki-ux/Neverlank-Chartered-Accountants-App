@@ -103,6 +103,9 @@ def match_label(label, candidates, taken=()):
 
 
 DEP_LABEL = "Depreciation and amortisation"      # an add-back line the prior year may have (this year's statement shows it as a memo only)
+EXCH_LABEL = "Exchange differences"                # sits directly under Profit before tax
+QUIET_HEADINGS = {"Net movement in intangible assets", "Net movement in investment property", "Net movement in long-term investments",
+                  "Net movement in other non-current assets"}      # no box on screen unless this year or last year has a figure
 FIN_LABEL, FIN_PAID_LABEL, TAX_PAID_LABEL = "Finance costs", "Finance costs paid", "Income tax paid"
 
 
@@ -116,6 +119,8 @@ def refine(section, label, amount, flip_exact=True):
         return section, label
     if "depreciation" in tk and "accumulated" not in raw:
         return "operating", DEP_LABEL
+    if "exchange" in tk or "forex" in raw:
+        return "operating", EXCH_LABEL
     if {"finance", "cost"} <= tk and not (tk & {"income", "lease"}):
         if _key(label) == _key(FIN_LABEL) and not flip_exact:
             return "operating", FIN_LABEL                 # typed on the add-back row itself: it stays there
@@ -147,12 +152,15 @@ def _rank_fn(std_sec):
     wc = pos.get(_key("(Increase)/decrease in inventories"))
     paid = pos.get(_key("Finance costs paid"))
     adj_end = pos.get(_key("Movement in deferred tax"))
+    pbt_pos = pos.get(_key(PBT_LABEL))
 
     def rank(row):
         k = _key(row["label"])
         if k in pos:
             return pos[k]
         low = k
+        if k == _key(EXCH_LABEL) and pbt_pos is not None:
+            return pbt_pos + 0.5
         if k == _key(DEP_LABEL) and adj_end is not None:
             return adj_end + 0.25
         if row.get("memo") and adj_end is not None:
@@ -198,8 +206,8 @@ def attach_prior_cash_flow(statements, engagement, editable=False):
         if l.section == "cash_open":
             continue
         l_sec, l_label = refine(l.section, l.label, l.amount, flip_exact=has_pos_fin)
-        if l_label == DEP_LABEL:
-            leftovers.append(("operating", DEP_LABEL, l.amount or 0.0))
+        if l_label in (DEP_LABEL, EXCH_LABEL):
+            leftovers.append(("operating", l_label, l.amount or 0.0))
             continue
         row = by_key.get((l_sec, _key(l_label)))
         if row is None:
@@ -224,10 +232,11 @@ def attach_prior_cash_flow(statements, engagement, editable=False):
         have = {(sec, _key(r["label"])) for sec, r in cur_rows} | {(sec, _key(lab)) for sec, lab, _ in leftovers}
         for sec, labels in std.items():
             for lab in labels:
-                if (sec, _key(lab)) not in have and _key(lab) != _key(PBT_LABEL):
+                if (sec, _key(lab)) not in have and _key(lab) != _key(PBT_LABEL) and lab not in QUIET_HEADINGS:
                     leftovers.append((sec, lab, 0.0))
-        if not any(lab == DEP_LABEL for _, lab, _ in leftovers):
-            leftovers.append(("operating", DEP_LABEL, 0.0))
+        for special in (DEP_LABEL, EXCH_LABEL):
+            if not any(lab == special for _, lab, _ in leftovers):
+                leftovers.append(("operating", special, 0.0))
     if pbt_prior is not None:
         if pbt_row is not None:
             placed[id(pbt_row)] = pbt_prior
@@ -241,6 +250,11 @@ def attach_prior_cash_flow(statements, engagement, editable=False):
         for lsec, label, amount in leftovers:
             if lsec != sec:
                 continue
+            if _key(label) == _key(DEP_LABEL):
+                memo = next((r for r in rows if r.get("memo") and "depreciation" in r["label"].casefold()), None)
+                if memo is not None:                      # one depreciation line: this year's memo line carries last year's add-back too
+                    memo["prior_dep"] = memo.get("prior_dep", 0.0) + amount
+                    continue
             hit = next((r for r in rows if r.get("prior_only") and _key(r["label"]) == _key(label)), None)
             if hit:
                 hit["prior"] += amount
@@ -263,7 +277,13 @@ def attach_prior_cash_flow(statements, engagement, editable=False):
         running = 0.0
         for r in rows:
             r["sec"] = sec
-            if r.get("memo"):
+            if r.get("memo") and "prior_dep" in r:
+                r["prior"] = r["prior_dep"]
+                r["dep_merged"] = True
+                r["save_label"] = DEP_LABEL
+                r["label"] = "Depreciation and amortisation (current year: memo only - see note)"
+                running += r["prior"]
+            elif r.get("memo"):
                 r["prior"] = None
             elif r.get("bold"):
                 r["prior"] = running

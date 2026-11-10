@@ -4903,13 +4903,13 @@
       <td class="text-right">{% if pri is not none %}{% if bold %}<strong>{{ '%.0f'|format(pri) }}</strong>{% else %}{{ '%.0f'|format(pri) }}{% endif %}{% endif %}</td></tr>
     {% endmacro %}
     {% macro cfrow(r) %}
-    <tr{% if r.memo %} class="muted"{% endif %}><td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}{% if r.prior_only and r.current == 0 and not r.bold %} <span class="muted" style="font-size:10.5px;">(not in this year)</span>{% endif %}</td><td>{{ r.note or '' }}</td>
+    <tr{% if r.memo and not r.dep_merged %} class="muted"{% endif %}><td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}{% if r.prior_only and r.current == 0 and r.prior and not r.bold %} <span class="muted" style="font-size:10.5px;">(last year only)</span>{% endif %}</td><td>{{ r.note or '' }}</td>
       <td class="text-right">{% if r.bold %}<strong>{{ '%.0f'|format(r.current) }}</strong>{% else %}{{ '%.0f'|format(r.current) }}{% endif %}</td>
       <td class="text-right">
         {% if r.bold %}<strong>{{ '%.0f'|format(r.prior) }}</strong>
-        {% elif r.memo %}
+        {% elif r.memo and not r.dep_merged %}
         {% elif r.linked %}{{ '%.0f'|format(r.prior) }} <span class="muted" style="font-size:10.5px;" title="From the prior-year income statement">(income statement)</span>
-        {% else %}<input type="hidden" name="row_sec" value="{{ r.sec }}"><input type="hidden" name="row_lab" value="{{ r.label }}"><input type="number" step="0.01" name="row_amt" value="{{ '%.2f'|plainfmt(r.prior) if r.prior and r.prior|abs >= 0.005 else '' }}" class="text-right" style="margin:0;width:128px;" aria-label="{{ r.label }} - prior year">
+        {% else %}<input type="hidden" name="row_sec" value="{{ r.sec }}"><input type="hidden" name="row_lab" value="{{ r.save_label or r.label }}"><input type="number" step="0.01" name="row_amt" value="{{ '%.2f'|plainfmt(r.prior) if r.prior and r.prior|abs >= 0.005 else '' }}" class="text-right" style="margin:0;width:128px;" aria-label="{{ r.label }} - prior year">
         {% endif %}
       </td></tr>
     {% endmacro %}
