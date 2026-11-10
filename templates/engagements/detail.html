@@ -4929,6 +4929,8 @@
   <div class="card" id="cf-prior">
     <h3 class="mt-0">Prior-year comparative cash flow</h3>
     <p class="muted" style="font-size:12px;">The trial balance cannot give last year's cash flow, so type it here from last year's signed financial statements. Use the same headings as this year's statement and each figure sits beside this year's; a heading this year does not have is added as its own line. Enter outflows with a minus sign, e.g. -1,200. Totals and the closing cash are worked out and checked against the cash in the trial balance.</p>
+    {% set _ppbt = cfp.pbt if cfp and cfp.pbt else none %}
+    <p style="font-size:12.5px;padding:8px 10px;background:#f1f6ee;border-left:3px solid #4a7c3a;max-width:760px;"><strong>Profit before tax (prior year)</strong> is taken from the prior-year income statement{% if _ppbt %}: <strong>{{ '{:,.0f}'.format(_ppbt.amount) }}</strong>{% endif %} - it is not typed or imported here, so it always agrees with the statement of profit or loss.{% if _ppbt and _ppbt.typed is not none and (_ppbt.typed - _ppbt.amount)|abs > 0.5 %} <span style="color:#b02a2a;">A figure of {{ '{:,.0f}'.format(_ppbt.typed) }} was entered or imported for it; that is ignored.</span>{% endif %}</p>
     {% set cfp_lines = cf_prior_lines or [] %}
     <form method="post" action="{{ url_for('cfprior.save', engagement_id=engagement.id) }}">
       <table style="max-width:760px;">
@@ -4950,7 +4952,7 @@
     </form>
     <form method="post" action="{{ url_for('cfprior.import_lines', engagement_id=engagement.id) }}" enctype="multipart/form-data" style="margin:14px 0;padding:12px;border:1px dashed #ccd;border-radius:6px;">
       <strong>Import last year's cash flow</strong>
-      <div class="muted" style="font-size:12px;margin:2px 0 8px;">From an Excel or CSV file (or paste the rows copied from Excel). Section headings (Operating / Investing / Financing activities) are used to place each line; when the sheet has a column headed with last year ({{ engagement.period_end.year - 1 if engagement.period_end else 'prior year' }}) that column is read, otherwise the last column of figures. Subtotals are left out and worked out here. This replaces the lines above.</div>
+      <div class="muted" style="font-size:12px;margin:2px 0 8px;">From an Excel or CSV file (or paste the rows copied from Excel). Section headings (Operating / Investing / Financing activities) are used to place each line; when the sheet has a column headed with last year ({{ engagement.period_end.year - 1 if engagement.period_end else 'prior year' }}) that column is read, otherwise the last column of figures. Names are matched to this year's headings (e.g. Taxation paid = Income tax paid) so the figures line up on the same row. Profit before tax and subtotals are left out - Profit before tax comes from the income statement and subtotals are worked out here. This replaces the lines above.</div>
       <input type="file" name="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt" style="margin-bottom:6px;">
       <textarea name="pasted" rows="4" placeholder="...or paste rows here: line name, then amount" style="margin-bottom:6px;"></textarea>
       <button type="submit" class="btn small secondary">Import</button>

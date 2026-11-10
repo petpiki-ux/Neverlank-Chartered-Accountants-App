@@ -50,9 +50,96 @@ def standard_labels(method="indirect"):
     return out
 
 
+
+_STOP = {"the", "of", "in", "and", "from", "to", "for", "on", "a", "an", "net", "year", "during", "other", "trade", "movement", "movements",
+         "change", "changes", "increase", "decrease", "loss", "profit_", "total", "by", "per", "as",
+         "proceeds", "received", "raised", "obtained", "repayment", "repayments", "repaid"}
+_SYN = {"taxation": "tax", "debtors": "receivables", "debtor": "receivables", "creditors": "payables", "creditor": "payables",
+        "stock": "inventories", "stocks": "inventories", "inventory": "inventories", "ppe": "property plant equipment",
+        "interest": "finance cost", "depreciation": "depreciation", "amortisation": "depreciation", "amortization": "depreciation",
+        "issued": "issue", "borrowings": "borrowing", "loans": "borrowing", "loan": "borrowing", "dividends": "dividend", "shares": "share", "costs": "cost",
+        "provisions": "provision", "payables": "payables", "receivables": "receivables", "liabilities": "liability", "assets": "asset"}
+
+
+def _tokens(label):
+    s = (label or "").casefold().replace("&", " and ")
+    s = re.sub(r"[^a-z0-9]+", " ", s)
+    out = []
+    for w in s.split():
+        for x in _SYN.get(w, w).split():
+            if x not in _STOP:
+                out.append(x)
+    return frozenset(out)
+
+
+def match_label(label, candidates, taken=()):
+    """The candidate heading that `label` means - a typed or imported line name against this year's headings: the same words (taxation = tax,
+    debtors = receivables, "Profit/(loss) before tax" = "Profit before tax"), or one name containing all the words of the other (three or more:
+    "Purchase of property, plant and equipment" is "Net movement in property, plant and equipment"). Exact (same words) wins; otherwise the
+    best, and only if clearly better than the runner-up. None when unsure."""
+    a = _tokens(label)
+    if not a:
+        return None
+    scored = []
+    for c in candidates:
+        if c in taken:
+            continue
+        b = _tokens(c)
+        if not b:
+            continue
+        if a == b:
+            return c
+        inter = len(a & b)
+        jac = inter / len(a | b)
+        contain = (a <= b or b <= a) and inter >= 3
+        scored.append((max(jac, 0.7 if contain else 0.0), c))
+    scored.sort(key=lambda x: -x[0])
+    if not scored or scored[0][0] < 0.6:
+        return None
+    if len(scored) > 1 and scored[1][0] >= scored[0][0] - 0.05:
+        return None
+    return scored[0][1]
+
+
+PBT_LABEL = "Profit before tax"          # linked to the prior-year income statement, never typed
+
+
+def _prior_pbt(statements):
+    """The prior year's profit before tax from the income statement, or None."""
+    for r in ((statements or {}).get("pl") or {}).get("rows", []):
+        if (r.get("label") or "").strip().casefold() == PBT_LABEL.casefold():
+            return r.get("prior")
+    return None
+
+
+def _rank_fn(std_sec):
+    """Position of a statement row among this year's headings of one section: the heading's place in the standard list, with the subtotal
+    rows ("... before working capital", "Cash generated from operations") and the depreciation memo line fitting between the groups."""
+    pos = {_key(l): i for i, l in enumerate(std_sec)}
+    wc = pos.get(_key("(Increase)/decrease in inventories"))
+    paid = pos.get(_key("Finance costs paid"))
+    adj_end = pos.get(_key("Movement in deferred tax"))
+
+    def rank(row):
+        k = _key(row["label"])
+        if k in pos:
+            return pos[k]
+        low = k
+        if row.get("memo") and adj_end is not None:
+            return adj_end + 0.5
+        if "before working capital" in low and wc is not None:
+            return wc - 0.5
+        if low.startswith("cash generated") and paid is not None:
+            return paid - 0.5
+        return None
+    return rank
+
+
 def attach_prior_cash_flow(statements, engagement):
-    """Adds the captured comparatives to statements["cf"]: row["prior"] on every row, prior-only rows for lines typed under a heading this
-    year does not have, cf["prior"] = the prior year's totals. Leaves cf["prior"] = None when nothing has been captured. Idempotent."""
+    """Adds the captured comparatives to statements["cf"]: row["prior"] on every row, prior-only rows for lines with no counterpart this
+    year, cf["prior"] = the prior year's totals. Each typed / imported line sits on the current-year row it means (same name, else the nearest
+    wording, in any section); Profit before tax is not typed at all: it is the prior-year profit before tax of the income statement.
+    Leaves cf["prior"] = None when nothing has been captured. Idempotent."""
     cf = (statements or {}).get("cf")
     if not cf or "prior" in cf:
         return statements
@@ -61,22 +148,73 @@ def attach_prior_cash_flow(statements, engagement):
         cf["prior"] = None
         return statements
     cash_open = sum(l.amount or 0.0 for l in lines if l.section == "cash_open")
+    keys = (("operating", "operating_rows"), ("investing", "investing_rows"), ("financing", "financing_rows"))
+    std = standard_labels(cf.get("method") or engagement.cash_flow_method or "indirect")
+    std_names = [n for ls in std.values() for n in ls]
+    std_section = {n: sec for sec, ls in std.items() for n in ls}
+    cur_rows = [(sec, r) for sec, key in keys for r in cf[key] if not r.get("bold") and not r.get("memo")]
+    cur_names = [r["label"] for _, r in cur_rows]
+    by_key = {}
+    for sec, r in cur_rows:
+        by_key.setdefault((sec, _key(r["label"])), r)
+    pbt_prior = _prior_pbt(statements)
+    typed_pbt = 0.0
+    placed = {}                                  # id(row) -> amount
+    leftovers = []                               # (section, label, amount) with no current-year row
+    for l in lines:
+        if l.section == "cash_open":
+            continue
+        row = by_key.get((l.section, _key(l.label)))
+        if row is None:
+            hit = match_label(l.label, cur_names)
+            row = next((r for _, r in cur_rows if r["label"] == hit), None) if hit else None
+        label, sec = l.label, l.section
+        if row is not None:
+            label = row["label"]
+        else:
+            hit = match_label(l.label, std_names)        # a heading this year has no row for (nil this year): still its own heading
+            if hit:
+                label, sec = hit, std_section[hit]
+        if _key(label) == _key(PBT_LABEL):
+            typed_pbt += l.amount or 0.0
+            continue                                      # linked to the income statement instead
+        if row is not None:
+            placed[id(row)] = placed.get(id(row), 0.0) + (l.amount or 0.0)
+        else:
+            leftovers.append((sec, label, l.amount or 0.0))
+    pbt_row = next((r for _, r in cur_rows if _key(r["label"]) == _key(PBT_LABEL)), None)
+    if pbt_prior is not None:
+        if pbt_row is not None:
+            placed[id(pbt_row)] = pbt_prior
+            pbt_row["linked"] = "income statement"
+        elif abs(pbt_prior) >= 0.5 and PBT_LABEL in std.get("operating", []):
+            leftovers.append(("operating", PBT_LABEL, pbt_prior))
     totals = {}
-    for sec, key in (("operating", "operating_rows"), ("investing", "investing_rows"), ("financing", "financing_rows")):
+    for sec, key in keys:
         rows = cf[key]
-        pool = {}
-        for l in lines:
-            if l.section == sec:
-                pool.setdefault(_key(l.label), []).append(l)
-        used = set()
-        for r in rows:
-            hit = pool.get(_key(r["label"]))
-            if hit and not r.get("bold") and not r.get("memo"):
-                r["prior"] = sum(x.amount or 0.0 for x in hit)
-                used.add(_key(r["label"]))
-        for k, hit in pool.items():
-            if k not in used:
-                rows.append({"label": hit[0].label, "current": 0.0, "prior": sum(x.amount or 0.0 for x in hit), "note": None, "prior_only": True})
+        rank = _rank_fn(std.get(sec, []))
+        for lsec, label, amount in leftovers:
+            if lsec != sec:
+                continue
+            hit = next((r for r in rows if r.get("prior_only") and _key(r["label"]) == _key(label)), None)
+            if hit:
+                hit["prior"] += amount
+                continue
+            new = {"label": label, "current": 0.0, "prior": amount, "note": None, "prior_only": True}
+            if _key(label) == _key(PBT_LABEL):
+                new["linked"] = "income statement"
+            mine = rank(new)
+            at = None
+            if mine is not None:
+                for k, r in enumerate(rows):
+                    rk = rank(r)
+                    if rk is not None and rk > mine:
+                        at = k
+                        break
+            if at is None:
+                rows.append(new)
+            else:
+                rows.insert(at, new)
         running = 0.0
         for r in rows:
             if r.get("memo"):
@@ -84,14 +222,15 @@ def attach_prior_cash_flow(statements, engagement):
             elif r.get("bold"):
                 r["prior"] = running
             else:
-                r["prior"] = r.get("prior") or 0.0
+                r["prior"] = placed.get(id(r), r.get("prior") or 0.0)
                 running += r["prior"]
         totals[sec] = running
     net = totals["operating"] + totals["investing"] + totals["financing"]
     close = cash_open + net
     cf["prior"] = {"net_operating": totals["operating"], "net_investing": totals["investing"], "net_financing": totals["financing"],
                    "net_movement": net, "cash_open": cash_open, "cash_close_computed": close,
-                   "cash_close_actual": cf["cash_open"], "variance": close - cf["cash_open"]}
+                   "cash_close_actual": cf["cash_open"], "variance": close - cf["cash_open"],
+                   "pbt": {"amount": pbt_prior, "typed": typed_pbt if abs(typed_pbt) >= 0.5 else None}}
     return statements
 
 
@@ -121,6 +260,8 @@ def seed(engagement_id):
         db.session.add(CashFlowPriorLine(engagement_id=engagement_id, section="cash_open", label=OPEN_LABEL, amount=0.0, sort_order=n)); n += 1; added += 1
     for sec, labels in standard_labels(engagement.cash_flow_method or "indirect").items():
         for label in labels:
+            if _key(label) == _key(PBT_LABEL):
+                continue                       # taken from the prior-year income statement
             if (sec, _key(label)) not in have:
                 db.session.add(CashFlowPriorLine(engagement_id=engagement_id, section=sec, label=label, amount=0.0, sort_order=n)); n += 1; added += 1
     db.session.commit()
@@ -274,11 +415,31 @@ def import_lines(engagement_id):
     if not lines:
         flash(info.get("reason") or "No cash flow lines were found: the sheet needs a column of line names and a column of amounts.", "danger")
         return _back(engagement_id)
+    # name each imported line as this year's heading it means, so it sits beside it (and in the same section)
+    std = standard_labels(engagement.cash_flow_method or "indirect")
+    names = [(sec, l) for sec, ls in std.items() for l in ls]
+    renamed = 0
+    fixed = []
+    for sec, label, amount in lines:
+        if sec != "cash_open":
+            hit = match_label(label, [n for _, n in names])
+            if hit:
+                if hit != label:
+                    renamed += 1
+                sec = next(s_ for s_, n in names if n == hit)
+                label = hit
+        fixed.append((sec, label, amount))
+    dropped_pbt = [a for sec_, l_, a in fixed if _key(l_) == _key(PBT_LABEL)]
+    lines = [x for x in fixed if _key(x[1]) != _key(PBT_LABEL)]          # profit before tax comes from the income statement
     CashFlowPriorLine.query.filter_by(engagement_id=engagement_id).delete()
     for i, (sec, label, amount) in enumerate(lines):
         db.session.add(CashFlowPriorLine(engagement_id=engagement_id, section=sec, label=label[:200], amount=amount, sort_order=i))
     db.session.commit()
     msg = f"Imported {len(lines)} line(s) from the amount column \"{info['column']}\"; the earlier lines were replaced."
+    if dropped_pbt:
+        msg += " Profit before tax was not imported: it is taken from the prior-year income statement."
+    if renamed:
+        msg += f" {renamed} line name(s) were matched to this year's headings so the figures sit beside this year's."
     if info["skipped"]:
         msg += f" Left out as subtotals (they are worked out): {', '.join(info['skipped'][:6])}{'...' if len(info['skipped']) > 6 else ''}."
     flash(msg + " Check the lines below and the tie-out to the trial balance, correct anything, and Save.", "success")
