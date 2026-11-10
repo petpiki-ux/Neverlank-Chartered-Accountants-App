@@ -4950,34 +4950,29 @@
     {% endfor %}
     {% endif %}
 
-    {% for note in statements.notes %}
-    <h4>{{ note.number }}. {{ note.title }}</h4>
+{% set yl = statements.year_labels or ['Current year', 'Prior year'] %}
     {% macro fmtv(v) %}{% if v is none or v|abs < 0.5 %}-{% else %}{{ '%.0f'|format(v) }}{% endif %}{% endmacro %}
-    {% if note.share_layout %}
-    {% set sl = note.share_layout %}
+    {% macro lines_table(ll) %}
     <table style="max-width:640px;border:0;">
-      <thead><tr><th></th>{% for h in sl.headers %}<th class="text-right">{{ h }}</th>{% endfor %}</tr></thead>
+      <thead><tr><th style="width:56%;"></th>{% for h in ll.headers %}<th class="text-right" style="width:22%;white-space:pre-line;">{{ h.replace(' ', '\n', 1) }}</th>{% endfor %}</tr></thead>
       <tbody>
-      {% for b in sl.blocks %}
-        <tr><td colspan="3" style="border:0;padding-top:10px;">{{ b.heading }}</td></tr>
-        <tr><td style="border:0;">{{ b.label }}</td>
-          <td class="text-right" style="border:0;border-bottom:4px double #222;">{{ fmtv(b.cur) }}</td>
-          <td class="text-right" style="border:0;border-bottom:4px double #222;">{{ fmtv(b.pri) }}</td></tr>
+      {% for ln in ll.lines %}
+        {% if ln.style == 'gap' %}<tr><td colspan="3" style="border:0;height:8px;"></td></tr>
+        {% elif ln.style == 'head' %}<tr><td colspan="3" style="border:0;"><strong>{{ ln.label }}</strong></td></tr>
+        {% else %}{% set deco = {'sub': 'border-top:1px solid #222;', 'total': 'border-top:1px solid #222;border-bottom:4px double #222;', 'double': 'border-bottom:4px double #222;'}.get(ln.style, '') %}
+        <tr><td style="border:0;">{{ ln.label }}</td><td class="text-right" style="border:0;{{ deco }}">{{ fmtv(ln.cur) }}</td><td class="text-right" style="border:0;{{ deco }}">{{ fmtv(ln.pri) }}</td></tr>
+        {% endif %}
       {% endfor %}
       </tbody>
     </table>
-    {% if sl.check %}<p class="muted" style="font-size:11.5px;color:#B02A2A;">Issued shares x nominal value differs from the share capital in the trial balance - check the share particulars on the client page.</p>{% endif %}
-    {% elif note.loan_layout and note.loan_layout.replaces_breakdown %}
-    {% set ll = note.loan_layout %}
-    <table style="max-width:640px;border:0;">
-      <thead><tr><th></th>{% for h in ll.headers %}<th class="text-right">{{ h }}</th>{% endfor %}</tr></thead>
-      <tbody>
-        <tr><td colspan="3" style="border:0;"><strong>{{ ll.title }}</strong></td></tr>
-        {% for r in ll['rows'] %}<tr><td style="border:0;">{{ r[0] }}</td><td class="text-right" style="border:0;">{{ fmtv(r[1]) }}</td><td class="text-right" style="border:0;">{{ fmtv(r[2]) }}</td></tr>{% endfor %}
-        <tr><td style="border:0;"></td><td class="text-right" style="border:0;border-top:1px solid #222;border-bottom:4px double #222;">{{ fmtv(ll.closing[0]) }}</td><td class="text-right" style="border:0;border-top:1px solid #222;border-bottom:4px double #222;">{{ fmtv(ll.closing[1]) }}</td></tr>
-      </tbody>
-    </table>
-    <p>{{ ll.after }}</p>
+    {% endmacro %}
+    {% for note in statements.notes %}
+    <h4>{{ note.number }}. {{ note.title }}</h4>
+    {% if note.share_layout or (note.loan_layout and note.loan_layout.replaces_breakdown) %}
+    {% set ll = note.share_layout or note.loan_layout %}
+    {{ lines_table(ll) }}
+    {% if ll.check %}<p class="muted" style="font-size:11.5px;color:#B02A2A;">Issued shares x nominal value differs from the share capital in the trial balance - check the share particulars on the client page.</p>{% endif %}
+    {% if ll.after %}<p>{{ ll.after }}</p>{% endif %}
     {% elif note.movement %}
     <p class="muted" style="font-size:11.5px;">From the Asset Register (Substantive Procedures &gt; Property, Plant and Equipment) rather than the trial balance account list.</p>
     <table>
@@ -5039,11 +5034,11 @@
     {% endif %}
     {% endif %}
     {% elif note.accounts %}
-    <table>
-      <thead><tr><th>Account</th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
+    <table style="max-width:640px;table-layout:fixed;">
+      <thead><tr><th style="width:56%;">Account</th><th class="text-right" style="white-space:pre-line;width:22%;">{{ yl[0].replace(' ', '\n', 1) }}</th><th class="text-right" style="white-space:pre-line;width:22%;">{{ yl[1].replace(' ', '\n', 1) }}</th></tr></thead>
       <tbody>
         {% for a in note.accounts %}
-        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}</td><td class="text-right">{{ '%.0f'|format(a.current) }}</td><td class="text-right">{{ '%.0f'|format(a.prior) }}</td></tr>
+        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}{% if a.adj %} <span class="muted" style="font-size:11px;" title="This line includes audit adjustments (see the Adjustments section above)">&mdash; {% if a.from_tb is defined and not a.from_tb %}not in the trial balance; {% endif %}journal {% for j in a.adj %}{{ j.ref }} ({{ 'prior' if j.period == 'prior' else 'current' }} {{ '%.0f'|format(j.amount) }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if a.adj %}</span>{% endif %}</td><td class="text-right">{{ '%.0f'|format(a.current) }}</td><td class="text-right">{{ '%.0f'|format(a.prior) }}</td></tr>
         {% endfor %}
         <tr><td><strong>Total</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.prior) }}</strong></td></tr>
       </tbody>
@@ -5052,23 +5047,15 @@
     <p class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong> ({{ '%.0f'|format(note.total.prior) }} prior year)</p>
     {% endif %}
     {% if note.loan_layout and not note.loan_layout.replaces_breakdown %}
-    {% set ll = note.loan_layout %}
-    <table style="max-width:640px;border:0;margin-top:10px;">
-      <thead><tr><th></th>{% for h in ll.headers %}<th class="text-right">{{ h }}</th>{% endfor %}</tr></thead>
-      <tbody>
-        <tr><td colspan="3" style="border:0;"><strong>{{ ll.title }}</strong></td></tr>
-        {% for r in ll['rows'] %}<tr><td style="border:0;">{{ r[0] }}</td><td class="text-right" style="border:0;">{{ fmtv(r[1]) }}</td><td class="text-right" style="border:0;">{{ fmtv(r[2]) }}</td></tr>{% endfor %}
-        <tr><td style="border:0;"></td><td class="text-right" style="border:0;border-top:1px solid #222;border-bottom:4px double #222;">{{ fmtv(ll.closing[0]) }}</td><td class="text-right" style="border:0;border-top:1px solid #222;border-bottom:4px double #222;">{{ fmtv(ll.closing[1]) }}</td></tr>
-      </tbody>
-    </table>
-    <p>{{ ll.after }}</p>
+    {{ lines_table(note.loan_layout) }}
+    <p>{{ note.loan_layout.after }}</p>
     {% endif %}
     {% for xt in note.extra_tables or [] %}
     <p style="margin:12px 0 4px;"><strong>{{ xt.title }}</strong></p>
-    <table style="max-width:{{ 520 if xt.headers|length == 2 else 760 }}px;">
-      <thead><tr>{% for h in xt.headers %}<th{% if loop.index > 1 %} class="text-right"{% endif %}>{{ h }}</th>{% endfor %}</tr></thead>
+    <table style="max-width:{{ 640 if xt.headers|length == 2 else 760 }}px;table-layout:fixed;">
+      <thead><tr>{% for h in xt.headers %}<th{% if loop.index > 1 %} class="text-right"{% endif %} style="white-space:pre-line;">{{ yl[0].replace(' ', '\n', 1) if h == 'Current year' else h }}</th>{% endfor %}{% if xt.headers|length == 2 %}<th></th>{% endif %}</tr></thead>
       <tbody>{% for r in xt.rows %}{% set is_b = xt.total_last and (loop.last or (loop.first and xt.headers|length == 2)) %}
-        <tr>{% for v in r %}<td{% if loop.index > 1 %} class="text-right"{% endif %}>{% if is_b %}<strong>{% endif %}{{ v if v is string else '%.0f'|format(v) }}{% if is_b %}</strong>{% endif %}</td>{% endfor %}</tr>{% endfor %}
+        <tr>{% for v in r %}<td{% if loop.index > 1 %} class="text-right"{% endif %}>{% if is_b %}<strong>{% endif %}{{ v if v is string else '%.0f'|format(v) }}{% if is_b %}</strong>{% endif %}</td>{% endfor %}{% if xt.headers|length == 2 %}<td></td>{% endif %}</tr>{% endfor %}
       </tbody>
     </table>
     {% endfor %}

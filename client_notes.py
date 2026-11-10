@@ -27,9 +27,9 @@ def year_headers(engagement, client):
     return [f"{y} {cur}" if y else f"Current year {cur}", f"{y - 1} {cur}" if y else f"Prior year {cur}"]
 
 
-def prior_owner_loan_opening(engagement):
-    """The shareholder loan balance at the start of the prior year = the closing balance in the client's previous engagement's trial
-    balance (current-year column), when there is one; None when there is not."""
+def prior_owner_loan_openings(engagement):
+    """Each shareholder loan account's balance at the start of the prior year = its closing balance in the client's previous engagement's
+    trial balance (current-year column): {account name (case-folded): amount}. None when there is no previous engagement / trial balance."""
     from models import Engagement, TrialBalance
     if not engagement.period_end or not engagement.client_id:
         return None
@@ -41,12 +41,54 @@ def prior_owner_loan_opening(engagement):
     tb = TrialBalance.query.filter_by(engagement_id=prev.id).first()
     if not tb or not tb.lines:
         return None
-    total, found = 0.0, False
+    out = {}
     for l in tb.lines:
         if l.fs_category in CATEGORY_BY_CODE and _is_owner_loan(l.account_name):
-            total += _signed_category_value(l.fs_category, l.current_debit, l.current_credit)
-            found = True
-    return whole(total) if found else None
+            key = (l.account_name or "").strip().casefold()
+            out[key] = out.get(key, 0.0) + _signed_category_value(l.fs_category, l.current_debit, l.current_credit)
+    return {k: whole(v) for k, v in out.items()}
+
+
+def prior_owner_loan_opening(engagement):
+    """Total of prior_owner_loan_openings(), or None."""
+    d = prior_owner_loan_openings(engagement)
+    return whole(sum(d.values())) if d else None
+
+
+def _loan_lines(loans, openings):
+    """Rows of the Shareholder Loans note. One loan account: Opening Balance, Shareholder Funding, closing. Several (one account per
+    shareholder): a block per shareholder, then the total of all of them. A line is {"label", "cur", "pri", "style"}, style one of
+    head (bold label), row, sub (single rule above the figures), total (single rule above, double below), gap."""
+    def block(name, cur_close, pri_close, pri_open, multi):
+        cur_open = pri_close
+        out = []
+        if multi:
+            out.append({"label": name, "cur": None, "pri": None, "style": "head"})
+        out.append({"label": "Opening Balance", "cur": cur_open, "pri": pri_open, "style": "row"})
+        out.append({"label": "Shareholder Funding", "cur": cur_close - cur_open,
+                    "pri": (pri_close - pri_open) if pri_open is not None else None, "style": "row"})
+        return out, cur_open
+    multi = len(loans) > 1
+    lines = [{"label": "Shareholder Loans", "cur": None, "pri": None, "style": "head"}]
+    tot = {"open_c": 0.0, "open_p": 0.0, "fund_c": 0.0, "fund_p": 0.0, "close_c": 0.0, "close_p": 0.0, "p_known": True}
+    for a in loans:
+        po = None if openings is None else openings.get((a["account_name"] or "").strip().casefold())
+        rows, cur_open = block(a["account_name"], a["current"], a["prior"], po, multi)
+        lines += rows
+        lines.append({"label": "", "cur": a["current"], "pri": a["prior"], "style": "total" if not multi else "sub"})
+        if multi:
+            lines.append({"label": "", "cur": None, "pri": None, "style": "gap"})
+        tot["open_c"] += cur_open; tot["fund_c"] += a["current"] - cur_open; tot["close_c"] += a["current"]; tot["close_p"] += a["prior"]
+        if po is None:
+            tot["p_known"] = False
+        else:
+            tot["open_p"] += po; tot["fund_p"] += a["prior"] - po
+    if multi:
+        lines.append({"label": "Total shareholder loans", "cur": None, "pri": None, "style": "head"})
+        lines.append({"label": "Opening Balance", "cur": tot["open_c"], "pri": tot["open_p"] if tot["p_known"] else None, "style": "row"})
+        lines.append({"label": "Shareholder Funding", "cur": tot["fund_c"], "pri": tot["fund_p"] if tot["p_known"] else None, "style": "row"})
+        lines.append({"label": "", "cur": tot["close_c"], "pri": tot["close_p"], "style": "total"})
+    return lines
 
 
 def attach_client_notes(statements, engagement, prior_opening="lookup"):
@@ -55,24 +97,19 @@ def attach_client_notes(statements, engagement, prior_opening="lookup"):
     client = engagement.client
     statements["_client_notes_done"] = True
     headers = year_headers(engagement, client)
+    statements["year_labels"] = headers
     for note in statements["notes"]:
         loans = [a for a in note.get("accounts") or [] if _is_owner_loan(a["account_name"])]
         if loans and not note.get("movement"):
             if prior_opening == "lookup":
                 try:
-                    prior_opening = prior_owner_loan_opening(engagement)
+                    prior_opening = prior_owner_loan_openings(engagement)
                 except Exception:
                     prior_opening = None
-            cur_close = sum(a["current"] for a in loans)
-            pri_close = sum(a["prior"] for a in loans)
-            cur_open = pri_close
-            pri_open = prior_opening
             terms = (getattr(client, "shareholder_loan_terms", None) or "").strip() or DEFAULT_LOAN_TERMS
             note["loan_layout"] = {
                 "title": "Shareholder Loans", "headers": headers,
-                "rows": [["Opening Balance", cur_open, pri_open],
-                         ["Shareholder Funding", cur_close - cur_open, (pri_close - pri_open) if pri_open is not None else None]],
-                "closing": [cur_close, pri_close], "after": terms,
+                "lines": _loan_lines(loans, prior_opening), "after": terms,
                 "replaces_breakdown": len(loans) == len(note["accounts"]),
             }
         if note["title"] == "Share capital":
@@ -91,9 +128,12 @@ def attach_client_notes(statements, engagement, prior_opening="lookup"):
                 a_cur = a_pri = whole(auth * par)
             note["share_layout"] = {
                 "headers": headers,
-                "blocks": [
-                    {"heading": "Authorised:", "label": f"{auth:,} {cls} Shares of {per}", "cur": a_cur, "pri": a_pri},
-                    {"heading": "Issued and fully paid:", "label": f"{issued:,} {cls} Shares of {per} issued", "cur": cur, "pri": pri},
+                "lines": [
+                    {"label": "Authorised:", "cur": None, "pri": None, "style": "head"},
+                    {"label": f"{auth:,} {cls} Shares of {per}", "cur": a_cur, "pri": a_pri, "style": "double"},
+                    {"label": "", "cur": None, "pri": None, "style": "gap"},
+                    {"label": "Issued and fully paid:", "cur": None, "pri": None, "style": "head"},
+                    {"label": f"{issued:,} {cls} Shares of {per} issued", "cur": cur, "pri": pri, "style": "double"},
                 ],
                 "check": abs(issued * par - cur) > 1.0,
             }

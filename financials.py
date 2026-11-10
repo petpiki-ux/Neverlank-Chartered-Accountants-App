@@ -1533,7 +1533,7 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
                     continue
                 account_rows.append({
                     "account_code": l.account_code, "account_name": l.account_name,
-                    "current": current, "prior": prior,
+                    "current": current, "prior": prior, "from_tb": True,
                 })
         # Audit adjustments (including the Asset Register's PPE-REG depreciation) go onto the account line they belong to: added to the
         # trial balance line of the same name, or a line of that account's own when the trial balance has none. They are never shown as
@@ -1551,10 +1551,12 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
                         continue
                     row = _note_row_for_adjustment(account_rows, row_code, ecode, name)
                     if row is None:
-                        row = {"account_code": "", "account_name": name, "current": 0.0, "prior": 0.0}
+                        row = {"account_code": "", "account_name": name, "current": 0.0, "prior": 0.0, "from_tb": False}
                         account_rows.append(row)
                         row_code[id(row)] = ecode
                     row[period] += amount
+                    # where the amount came from, so a line that is not in the trial balance can be traced to its journal
+                    row.setdefault("adj", []).append({"ref": (getattr(adj, "reference", None) or "adjustment"), "period": period, "amount": amount})
             account_rows = [r for r in account_rows if not (_is_nil(r["current"]) and _is_nil(r["prior"]))]
         if raw_totals is not None:
             _round_note_rows(account_rows, codes, raw_totals, cur, pri)

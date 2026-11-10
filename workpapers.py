@@ -547,6 +547,11 @@ def _audit_opinion_section(doc, audit_opinion, engagement=None):
     doc.add_page_break()
 
 
+def _years(doc):
+    """The two year headings of the statements and notes ("2025\nUSD", "2024\nUSD"); "Current year" / "Prior year" if not known."""
+    return tuple(getattr(doc, "_fs_years", None) or ("Current year", "Prior year"))
+
+
 def _dash(v):
     """A figure in a free-form note table: whole numbers with thousands separators, brackets for negatives, a dash for nil / not known."""
     return "-" if v is None or abs(v) < 0.5 else _fmt_whole(v)
@@ -580,48 +585,67 @@ def _plain_note_table(doc, headers, fractions):
                     p.alignment = WD_ALIGN_PARAGRAPH.RIGHT
                 for r in p.runs:
                     r.bold = bold
+                    r.font.size = Pt(9.5)
             if i and rule == "single":
                 brand.cell_borders(row[i], top=("single", 6, "000000"))
             if i and rule == "double":
-                brand.cell_borders(row[i], top=("single", 6, "000000"), bottom=("double", 6, "000000"))
+                brand.cell_borders(row[i], top=("single", 6, "000000"), bottom=("double", 12, "000000"))
+            if i and rule == "double_only":
+                brand.cell_borders(row[i], bottom=("double", 12, "000000"))
         return row
     _col_widths(doc, table, fractions)
+    brand.table_cell_margins(table)          # the same cell padding, centring and type size as the other note tables, so the figures line up
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+    for row in table.rows:
+        for c in row.cells:
+            for p in c.paragraphs:
+                for r in p.runs:
+                    r.font.size = Pt(9.5)
     return table, add_row
 
 
-def _loan_note_layout(doc, lay):
-    table, add = _plain_note_table(doc, [""] + lay["headers"], [0.52, 0.24, 0.24])
-    add(["Shareholder Loans", "", ""], bold=True)
-    for label, c, p in lay["rows"]:
-        add([label, _dash(c), _dash(p)])
-    # the rule above the total sits on the last movement row's bottom edge: draw it as the total row's top border
-    add(["", _dash(lay["closing"][0]), _dash(lay["closing"][1])], rule="double")
-    para = doc.add_paragraph(lay["after"])
-    para.paragraph_format.space_before = Pt(8)
-
-
-def _share_capital_layout(doc, lay):
-    table, add = _plain_note_table(doc, [""] + lay["headers"], [0.52, 0.24, 0.24])
-    for k, b in enumerate(lay["blocks"]):
-        if k:
+def _lines_layout(doc, lay):
+    """Draws a note laid out as `lay["lines"]` (see client_notes): label column and one figure column per year, the same widths as every
+    other note table so the two years line up from note to note."""
+    table, add = _plain_note_table(doc, [""] + lay["headers"], [0.56, 0.22, 0.22])
+    for ln in lay["lines"]:
+        st = ln["style"]
+        if st == "gap":
             add(["", "", ""])
-        add([b["heading"], "", ""])
-        add([b["label"], _dash(b["cur"]), _dash(b["pri"])], rule="double")
-    doc.add_paragraph()
+        elif st == "head":
+            add([ln["label"], "", ""], bold=True)
+        else:
+            rule = {"sub": "single", "total": "double", "double": "double_only"}.get(st)
+            add([ln["label"], _dash(ln["cur"]), _dash(ln["pri"])], rule=rule)
+    if lay.get("after"):
+        para = doc.add_paragraph(lay["after"])
+        para.paragraph_format.space_before = Pt(8)
+    else:
+        doc.add_paragraph()
+
+
+_loan_note_layout = _share_capital_layout = _lines_layout
 
 
 def _extra_note_tables(doc, note):
-    """The roll-forward tables under a note (movement in deferred tax, movement in shareholder loans): a small bold caption and a table."""
+    """The roll-forward tables under a note (movement in deferred tax): a small bold caption and a table. A one-year table keeps the
+    same column positions as the two-year note tables (label, current year, an empty prior-year column) so the figures line up."""
     for t in note.get("extra_tables") or []:
         cap = doc.add_paragraph()
         cap.paragraph_format.keep_with_next = True
         cap.add_run(t["title"]).bold = True
-        table = doc.add_table(rows=1, cols=len(t["headers"]))
-        for i, h in enumerate(t["headers"]):
-            table.rows[0].cells[i].text = h
+        headers = list(t["headers"])
+        pad = len(headers) == 2
+        if pad:
+            headers.append("")
+        table = doc.add_table(rows=1, cols=len(headers))
+        for i, h in enumerate(headers):
+            table.rows[0].cells[i].text = _years(doc)[0] if h == "Current year" else h
         _style_table(table)
         last = len(t["rows"]) - 1
         for k, r in enumerate(t["rows"]):
+            r = list(r) + ([""] if pad else [])
             cells = table.add_row().cells
             for i, v in enumerate(r):
                 cells[i].text = v if isinstance(v, str) else _fmt_whole(v)
@@ -629,8 +653,7 @@ def _extra_note_tables(doc, note):
                     for p in cells[i].paragraphs:
                         for run in p.runs:
                             run.bold = True
-        n = len(t["headers"])
-        _col_widths(doc, table, [0.56, 0.44] if n == 2 else [0.34, 0.22, 0.22, 0.22])
+        _col_widths(doc, table, [0.56, 0.22, 0.22] if len(headers) == 3 else [0.34, 0.22, 0.22, 0.22])
         _right_align(table, first_col=1)
         doc.add_paragraph()
 
@@ -658,6 +681,8 @@ def build_financial_statements_docx(engagement, statements, financial_statements
 
     # The financial statements are the client's, not the firm's: no Neverlank letterhead from here on (the auditor's report above carries it).
     doc._fs_ctx = (engagement.client.name if engagement.client else "", engagement.period_end)
+    import client_notes
+    doc._fs_years = [h.replace(" ", "\n", 1) for h in client_notes.year_headers(engagement, engagement.client)]
     draft = not financial_statements or not financial_statements.is_partner_signed
 
     is_ifrs_framework = engagement.reporting_framework in ("full_ifrs", "ifrs_for_smes")
@@ -671,8 +696,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         table = doc.add_table(rows=1, cols=3)
         hdr = table.rows[0].cells
         hdr[0].text = ""
-        hdr[1].text = "Current year"
-        hdr[2].text = "Prior year"
+        hdr[1].text, hdr[2].text = _years(doc)
         _style_table(table)
         for r in rows:
             row = table.add_row().cells
@@ -768,7 +792,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     if draft:
         dp = doc.add_paragraph("Draft - not yet fully mapped/reviewed")
         dp.runs[0].italic = True
-    _statement_table(doc, "Statement of Financial Position", ["", "Note", "Current year", "Prior year"], sfp_specs, period="as_at", new_page=False)
+    _statement_table(doc, "Statement of Financial Position", ["", "Note", *_years(doc)], sfp_specs, period="as_at", new_page=False)
     bc = sfp["balance_check"]
     tie_note = "Ties out." if abs(bc["current"]) <= 0.01 and abs(bc["prior"]) <= 0.01 else "Non-zero - check every account is mapped to the right category and that the trial balance balances."
     doc.add_paragraph(f"Balance check (assets less equity and liabilities): current year {_fmt_whole(bc['current'])}, prior year {_fmt_whole(bc['prior'])}. {tie_note}").runs[0].italic = True
@@ -788,7 +812,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         ).runs[0].italic = True
 
     pl_specs = [{"cells": _fs_row_cells(r), "bold": r.get("bold", False)} for r in statements["pl"]["rows"]]
-    _statement_table(doc, "Statement of Profit or Loss and Other Comprehensive Income", ["", "Note", "Current year", "Prior year"], pl_specs)
+    _statement_table(doc, "Statement of Profit or Loss and Other Comprehensive Income", ["", "Note", *_years(doc)], pl_specs)
 
     doc.add_page_break()
     _add_heading(doc, "Statement of Changes in Equity", level=1)
@@ -832,7 +856,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     cf_specs.append({"cells": ["Cash at beginning of year", "", _fmt_whole(cf["cash_open"])]})
     cf_specs.append({"cells": ["Cash at end of year (computed)", "", _fmt_whole(cf["cash_close_computed"])], "bold": True})
     cf_specs.append({"cells": ["Cash at end of year (per trial balance)", "", _fmt_whole(cf["cash_close_actual"])]})
-    _statement_table(doc, f"Statement of Cash Flows ({method_label}, current year)", ["", "Note", "Amount"], cf_specs)
+    _statement_table(doc, f"Statement of Cash Flows ({method_label}, current year)", ["", "Note", _years(doc)[0]], cf_specs)
     variance_note = "Ties out to the trial balance." if abs(cf["variance"]) <= 0.01 else f"Computed closing cash differs from the trial balance by {_fmt_whole(cf['variance'])} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust."
     doc.add_paragraph(variance_note).runs[0].italic = True
 
