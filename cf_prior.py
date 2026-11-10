@@ -151,3 +151,135 @@ def save(engagement_id):
     db.session.commit()
     flash(f"Prior-year cash flow saved ({kept} line(s)).", "success")
     return _back(engagement_id)
+
+
+# ------------------------------------------------------------------ import from Excel / CSV / pasted text
+
+_SUBTOTAL = re.compile(r"^\s*(net\s+(cash|increase|decrease)|cash\s+generated|total\b|cash\s+(and\s+cash\s+equivalents\s+)?at\s+(the\s+)?end|"
+                       r"(cash|cash\s+and\s+cash\s+equivalents)\s+(balance\s+)?(at\s+)?(the\s+)?(close|end)|closing\s+(cash|balance)|operating\s+cash\s+flow\s+before|"
+                       r"cash\s+flows?\s+from|\(?increase\)?\s*/?\s*\(?decrease\)?\s+in\s+cash\s*$)", re.I)
+_OPENING = re.compile(r"(cash|equivalents|balance).*(beginning|opening|start|b/?f|brought)|(beginning|opening).*(cash|balance)", re.I)
+_HEADING = re.compile(r"\b(operating|investing|financing)\b", re.I)
+
+
+def _is_amount(v):
+    from tb_year_import import to_num
+    return to_num(v)[0] is not None
+
+
+def _guess_section(label):
+    """For a line met before any section heading: investing / financing by its wording, else operating."""
+    if re.search(r"purchase|acquisition|disposal|proceeds from (the )?sale|property|plant|equipment|vehicle|intangible|investment", label, re.I):
+        return "investing"
+    if re.search(r"borrowing|loan|dividend|share (capital|issue)|shares issued|repayment|lease liabilit|debenture", label, re.I):
+        return "financing"
+    return "operating"
+
+
+def parse_rows(rows, prior_year=None):
+    """Lines found in a sheet of rows: (lines, info). A line is (section, label, amount). The label is the text column; the amount
+    column is the one headed with the prior year when there is one, else the last column of figures (not a "Note" column). Section headings
+    ("Operating activities" ...) switch the section; subtotals and closing cash are left out (they are worked out); the opening cash line goes
+    to cash_open. A line before any heading is placed under this year's heading of the same name, or operating."""
+    from tb_year_import import to_num
+    rows = [list(r) for r in rows if any(c is not None and str(c).strip() for c in r)]
+    width = max((len(r) for r in rows), default=0)
+    rows = [r + [None] * (width - len(r)) for r in rows]
+    header_idx, amt_col, used_header = None, None, None
+    def yearish(c):
+        return c is not None and re.search(r"\b(19|20)\d\d\b", str(c)) is not None and len(str(c)) <= 40
+    for i, r in enumerate(rows[:15]):
+        years = {j: str(c) for j, c in enumerate(r) if yearish(c)}
+        stray = [c for c in r if c is not None and not yearish(c) and _is_amount(c) and re.fullmatch(r"[\d.,()\s-]+", str(c).strip() or "x")]
+        if years and not stray:
+            header_idx = i
+            if prior_year:
+                for j, txt in years.items():
+                    if str(prior_year) in txt:
+                        amt_col, used_header = j, txt.strip()
+            break
+    body = rows[(header_idx + 1) if header_idx is not None else 0:]
+    notes_cols = set()
+    if header_idx is not None:
+        notes_cols = {j for j, c in enumerate(rows[header_idx]) if re.search(r"\bnotes?\b", str(c or ""), re.I)}
+    numeric = [sum(1 for r in body if r[j] is not None and _is_amount(r[j]) and not isinstance(r[j], bool)) for j in range(width)]
+    text = [sum(1 for r in body if isinstance(r[j], str) and r[j].strip() and not _is_amount(r[j])) for j in range(width)]
+    label_col = max(range(width), key=lambda j: text[j]) if width else 0
+    if amt_col is None:
+        cands = [j for j in range(width) if j != label_col and j not in notes_cols and numeric[j] >= max(1, len(body) // 5)]
+        amt_col = cands[-1] if cands else None
+        if amt_col is not None and header_idx is not None:
+            used_header = str(rows[header_idx][amt_col] or "").strip() or None
+    lines, skipped, section = [], [], None
+    std = {}
+    for sec, labels in standard_labels("indirect").items():
+        for l in labels:
+            std[_key(l)] = sec
+    if amt_col is None:
+        return [], {"column": None, "skipped": [], "reason": "No column of figures was found."}
+    for r in body:
+        label = str(r[label_col] or "").strip()
+        if not label:
+            continue
+        amount = to_num(r[amt_col])[0]
+        if amount is None:
+            m = _HEADING.search(label)
+            if m and len(label) < 60:
+                section = m.group(1).lower()
+            continue
+        if _OPENING.search(label):
+            lines.append(("cash_open", OPEN_LABEL, amount))
+            continue
+        if _SUBTOTAL.match(label):
+            skipped.append(label)
+            continue
+        sec = section or std.get(_key(label)) or _guess_section(label)
+        lines.append((sec, label, amount))
+    return lines, {"column": used_header or (f"column {amt_col + 1}"), "skipped": skipped, "reason": None}
+
+
+def rows_from_text(text):
+    """Pasted text (copied from Excel: tab separated; or ; or two-plus spaces) as rows."""
+    out = []
+    for ln in (text or "").splitlines():
+        if not ln.strip():
+            continue
+        parts = re.split(r"\t|;|\s{2,}", ln.strip())
+        out.append([p.strip() for p in parts])
+    return out
+
+
+@cfprior_bp.route("/<int:engagement_id>/cash-flow-prior/import", methods=["POST"])
+@login_required
+def import_lines(engagement_id):
+    engagement = _engagement(engagement_id)
+    from tb_year_import import load_sheets, choose_sheet
+    year = engagement.period_end.year - 1 if engagement.period_end else None
+    rows = None
+    f = request.files.get("file")
+    try:
+        if f and f.filename:
+            sheets = load_sheets(f.read(), f.filename)
+            name = choose_sheet(sheets, year) if len(sheets) > 1 else next(iter(sheets))
+            rows = sheets[name]
+        elif (request.form.get("pasted") or "").strip():
+            rows = rows_from_text(request.form["pasted"])
+    except Exception:
+        flash("That file could not be read. Use an Excel (.xlsx) or CSV file, or paste the rows.", "danger")
+        return _back(engagement_id)
+    if not rows:
+        flash("Choose a file or paste the rows first.", "info")
+        return _back(engagement_id)
+    lines, info = parse_rows(rows, year)
+    if not lines:
+        flash(info.get("reason") or "No cash flow lines were found: the sheet needs a column of line names and a column of amounts.", "danger")
+        return _back(engagement_id)
+    CashFlowPriorLine.query.filter_by(engagement_id=engagement_id).delete()
+    for i, (sec, label, amount) in enumerate(lines):
+        db.session.add(CashFlowPriorLine(engagement_id=engagement_id, section=sec, label=label[:200], amount=amount, sort_order=i))
+    db.session.commit()
+    msg = f"Imported {len(lines)} line(s) from the amount column \"{info['column']}\"; the earlier lines were replaced."
+    if info["skipped"]:
+        msg += f" Left out as subtotals (they are worked out): {', '.join(info['skipped'][:6])}{'...' if len(info['skipped']) > 6 else ''}."
+    flash(msg + " Check the lines below and the tie-out to the trial balance, correct anything, and Save.", "success")
+    return _back(engagement_id)

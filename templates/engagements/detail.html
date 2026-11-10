@@ -4948,6 +4948,13 @@
       <p><button type="button" class="btn small secondary" onclick="cfpAddRow()">Add a line</button>
          <button type="submit" class="btn gold">Save prior-year cash flow</button></p>
     </form>
+    <form method="post" action="{{ url_for('cfprior.import_lines', engagement_id=engagement.id) }}" enctype="multipart/form-data" style="margin:14px 0;padding:12px;border:1px dashed #ccd;border-radius:6px;">
+      <strong>Import last year's cash flow</strong>
+      <div class="muted" style="font-size:12px;margin:2px 0 8px;">From an Excel or CSV file (or paste the rows copied from Excel). Section headings (Operating / Investing / Financing activities) are used to place each line; when the sheet has a column headed with last year ({{ engagement.period_end.year - 1 if engagement.period_end else 'prior year' }}) that column is read, otherwise the last column of figures. Subtotals are left out and worked out here. This replaces the lines above.</div>
+      <input type="file" name="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt" style="margin-bottom:6px;">
+      <textarea name="pasted" rows="4" placeholder="...or paste rows here: line name, then amount" style="margin-bottom:6px;"></textarea>
+      <button type="submit" class="btn small secondary">Import</button>
+    </form>
     <form method="post" action="{{ url_for('cfprior.seed', engagement_id=engagement.id) }}">
       <button type="submit" class="btn small secondary">Add this year's headings as blank lines</button>
     </form>
