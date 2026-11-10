@@ -670,7 +670,7 @@ def view_engagement(engagement_id):
     if statements:
         import client_notes, cf_prior
         client_notes.attach_client_notes(statements, engagement)
-        cf_prior.attach_prior_cash_flow(statements, engagement)
+        cf_prior.attach_prior_cash_flow(statements, engagement, editable=True)
     # Directors' Statement, Audit Opinion / Review Report, Income Tax
     # Computation, Deferred Tax Computation - each queried only (never
     # created here); the "not saved yet" state is rendered with sensible

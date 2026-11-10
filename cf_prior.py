@@ -106,7 +106,7 @@ DEP_LABEL = "Depreciation and amortisation"      # an add-back line the prior ye
 FIN_LABEL, FIN_PAID_LABEL, TAX_PAID_LABEL = "Finance costs", "Finance costs paid", "Income tax paid"
 
 
-def refine(section, label, amount):
+def refine(section, label, amount, flip_exact=True):
     """The heading a typed / imported operating line really is, where the wording alone is ambiguous: finance costs / interest is the
     add-back (a positive amount) or the payment (a negative amount, or worded paid); any tax that is not deferred or before-tax is tax paid;
     a depreciation / amortisation charge is the add-back line. Returns (section, label)."""
@@ -117,6 +117,8 @@ def refine(section, label, amount):
     if "depreciation" in tk and "accumulated" not in raw:
         return "operating", DEP_LABEL
     if {"finance", "cost"} <= tk and not (tk & {"income", "lease"}):
+        if _key(label) == _key(FIN_LABEL) and not flip_exact:
+            return "operating", FIN_LABEL                 # typed on the add-back row itself: it stays there
         if re.search(r"\bpaid\b|payment", raw) or (amount or 0) < 0:
             return "operating", FIN_PAID_LABEL
         return "operating", FIN_LABEL
@@ -163,16 +165,18 @@ def _rank_fn(std_sec):
     return rank
 
 
-def attach_prior_cash_flow(statements, engagement):
+def attach_prior_cash_flow(statements, engagement, editable=False):
     """Adds the captured comparatives to statements["cf"]: row["prior"] on every row, prior-only rows for lines with no counterpart this
     year, cf["prior"] = the prior year's totals. Each typed / imported line sits on the current-year row it means (same name, else the nearest
     wording, in any section); Profit before tax is not typed at all: it is the prior-year profit before tax of the income statement.
-    Leaves cf["prior"] = None when nothing has been captured. Idempotent."""
+    Leaves cf["prior"] = None when nothing has been captured. Idempotent.
+    editable=True (the screen): every heading of the statement gets a row, with its section in row["sec"], so last year's figure can be typed
+    straight into the prior-year column; cf["prior"] is then always a dict ("empty" while nothing is saved)."""
     cf = (statements or {}).get("cf")
     if not cf or "prior" in cf:
         return statements
     lines = (CashFlowPriorLine.query.filter_by(engagement_id=engagement.id).order_by(CashFlowPriorLine.sort_order, CashFlowPriorLine.id).all())
-    if not lines:
+    if not lines and not editable:
         cf["prior"] = None
         return statements
     cash_open = sum(l.amount or 0.0 for l in lines if l.section == "cash_open")
@@ -189,10 +193,11 @@ def attach_prior_cash_flow(statements, engagement):
     typed_pbt = 0.0
     placed = {}                                  # id(row) -> amount
     leftovers = []                               # (section, label, amount) with no current-year row
+    has_pos_fin = any(l.section == "operating" and _key(l.label) == _key(FIN_LABEL) and (l.amount or 0) > 0 for l in lines)
     for l in lines:
         if l.section == "cash_open":
             continue
-        l_sec, l_label = refine(l.section, l.label, l.amount)
+        l_sec, l_label = refine(l.section, l.label, l.amount, flip_exact=has_pos_fin)
         if l_label == DEP_LABEL:
             leftovers.append(("operating", DEP_LABEL, l.amount or 0.0))
             continue
@@ -215,11 +220,19 @@ def attach_prior_cash_flow(statements, engagement):
         else:
             leftovers.append((sec, label, l.amount or 0.0))
     pbt_row = next((r for _, r in cur_rows if _key(r["label"]) == _key(PBT_LABEL)), None)
+    if editable:
+        have = {(sec, _key(r["label"])) for sec, r in cur_rows} | {(sec, _key(lab)) for sec, lab, _ in leftovers}
+        for sec, labels in std.items():
+            for lab in labels:
+                if (sec, _key(lab)) not in have and _key(lab) != _key(PBT_LABEL):
+                    leftovers.append((sec, lab, 0.0))
+        if not any(lab == DEP_LABEL for _, lab, _ in leftovers):
+            leftovers.append(("operating", DEP_LABEL, 0.0))
     if pbt_prior is not None:
         if pbt_row is not None:
             placed[id(pbt_row)] = pbt_prior
             pbt_row["linked"] = "income statement"
-        elif abs(pbt_prior) >= 0.5 and PBT_LABEL in std.get("operating", []):
+        elif (abs(pbt_prior) >= 0.5 or editable) and PBT_LABEL in std.get("operating", []):
             leftovers.append(("operating", PBT_LABEL, pbt_prior))
     totals = {}
     for sec, key in keys:
@@ -249,6 +262,7 @@ def attach_prior_cash_flow(statements, engagement):
                 rows.insert(at, new)
         running = 0.0
         for r in rows:
+            r["sec"] = sec
             if r.get("memo"):
                 r["prior"] = None
             elif r.get("bold"):
@@ -261,7 +275,7 @@ def attach_prior_cash_flow(statements, engagement):
     close = cash_open + net
     cf["prior"] = {"net_operating": totals["operating"], "net_investing": totals["investing"], "net_financing": totals["financing"],
                    "net_movement": net, "cash_open": cash_open, "cash_close_computed": close,
-                   "cash_close_actual": cf["cash_open"], "variance": close - cf["cash_open"],
+                   "cash_close_actual": cf["cash_open"], "variance": (close - cf["cash_open"]) if lines else 0.0, "empty": not lines,
                    "pbt": {"amount": pbt_prior, "typed": typed_pbt if abs(typed_pbt) >= 0.5 else None}}
     return statements
 
@@ -324,6 +338,33 @@ def save(engagement_id):
     db.session.commit()
     flash(f"Prior-year cash flow saved ({kept} line(s)).", "success")
     return _back(engagement_id)
+
+
+@cfprior_bp.route("/<int:engagement_id>/cash-flow-prior/save-inline", methods=["POST"])
+@login_required
+def save_inline(engagement_id):
+    """The prior-year column of the Statement of Cash Flows itself: one box per line (row_sec / row_lab / row_amt in step), the opening cash
+    (cash_open_amt) and any extra lines (x_sec / x_lab / x_amt). Replaces the saved lines; blank or zero boxes save nothing; Profit before tax
+    has no box (it comes from the income statement)."""
+    _engagement(engagement_id)
+    f = request.form
+    valid = {s for s, _ in SECTIONS}
+    items = list(zip(f.getlist("row_sec"), f.getlist("row_lab"), f.getlist("row_amt")))
+    items += list(zip(f.getlist("x_sec"), f.getlist("x_lab"), f.getlist("x_amt")))
+    CashFlowPriorLine.query.filter_by(engagement_id=engagement_id).delete()
+    kept = 0
+    op = parse_amount(f.get("cash_open_amt"))
+    if abs(op) > 0.004:
+        db.session.add(CashFlowPriorLine(engagement_id=engagement_id, section="cash_open", label=OPEN_LABEL, amount=op, sort_order=kept)); kept += 1
+    for sec, label, amt in items:
+        label = (label or "").strip()
+        amount = parse_amount(amt)
+        if sec not in valid or not label or abs(amount) < 0.004 or _key(label) == _key(PBT_LABEL):
+            continue
+        db.session.add(CashFlowPriorLine(engagement_id=engagement_id, section=sec, label=label[:200], amount=amount, sort_order=kept)); kept += 1
+    db.session.commit()
+    flash(f"Prior-year figures saved ({kept} line(s)). Totals and the closing cash are worked out and checked against the trial balance.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation") + "#cf-statement")
 
 
 # ------------------------------------------------------------------ import from Excel / CSV / pasted text

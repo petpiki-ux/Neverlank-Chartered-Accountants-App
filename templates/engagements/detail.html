@@ -4383,8 +4383,8 @@
 {% else %}
   {% if statements %}
   <div class="card" style="padding:10px 16px;">
-    <a href="#cf-prior"><strong>Prior-year cash flow (comparative)</strong></a>
-    <span class="muted" style="font-size:12.5px;"> - type last year's Statement of Cash Flows so it shows beside this year's
+    <a href="#cf-statement"><strong>Prior-year cash flow (comparative)</strong></a>
+    <span class="muted" style="font-size:12.5px;"> - type last year's figures straight into the prior-year column of the Statement of Cash Flows
       ({% if cf_prior_lines %}{{ cf_prior_lines|length }} line(s) saved{% else %}not entered yet{% endif %}).</span>
   </div>
   {% endif %}
@@ -4892,82 +4892,77 @@
     </table>
   </div>
 
-  <div class="card">
-    <h3 class="mt-0">Statement of Cash Flows ({{ cash_flow_method_labels.get(statements.cf.method, 'Indirect method') }}{% if not statements.cf.prior %}, current year{% endif %})</h3>
+  <div class="card" id="cf-statement">
     {% set cfp = statements.cf.prior %}
     {% set cfy = statements.year_labels or ['Current year', 'Prior year'] %}
-    <p class="muted" style="font-size:12px;">Investing activities are approximated as the net movement in each non-current asset's carrying value, so depreciation is not separately added back in operating activities (see the memo line below) - review against the fixed asset register and adjust for any disposals during the year. Shown for the current year only; a prior-year comparative needs the trial balance from two years back. Change the method used below in "Basis of preparation &amp; sign-off" - investing and financing activities, and every subtotal from "Cash generated from operations" onward, are identical either way (IAS 7 requires both methods to reconcile to the same net cash from operating activities).</p>
-    {% macro cfline(label, cur, pri, bold=False, note='', memo=False, two=False) %}
+    <h3 class="mt-0">Statement of Cash Flows ({{ cash_flow_method_labels.get(statements.cf.method, 'Indirect method') }})</h3>
+    <p class="muted" style="font-size:12px;">Type last year's figures straight into the <strong>{{ cfy[1].replace(' ', ' ', 1) }}</strong> column, from last year's signed financial statements (outflows with a minus sign, e.g. -1,200), then press <em>Save prior-year figures</em>. Profit before tax is taken from the prior-year income statement. Subtotals, the closing cash and the check against the prior-year cash in the trial balance are worked out when you save. Use the same headings as this year; a line this year does not have can be added below the statement. Investing activities this year are the net movement in each non-current asset's carrying value, so depreciation is not added back in this year's operating activities (see the memo line); last year's depreciation charge, when it was added back, goes on its own line. Change the method in "Basis of preparation &amp; sign-off" - investing and financing activities, and every subtotal from "Cash generated from operations" onward, are identical either way (IAS 7).</p>
+    {% macro cfline(label, cur, pri, bold=False, note='', memo=False) %}
     <tr{% if memo %} class="muted"{% endif %}><td>{% if bold %}<strong>{{ label }}</strong>{% else %}{{ label }}{% endif %}</td><td>{{ note or '' }}</td>
       <td class="text-right">{% if bold %}<strong>{{ '%.0f'|format(cur) }}</strong>{% else %}{{ '%.0f'|format(cur) }}{% endif %}</td>
-      {% if two %}<td class="text-right">{% if pri is not none %}{% if bold %}<strong>{{ '%.0f'|format(pri) }}</strong>{% else %}{{ '%.0f'|format(pri) }}{% endif %}{% endif %}</td>{% endif %}</tr>
+      <td class="text-right">{% if pri is not none %}{% if bold %}<strong>{{ '%.0f'|format(pri) }}</strong>{% else %}{{ '%.0f'|format(pri) }}{% endif %}{% endif %}</td></tr>
     {% endmacro %}
+    {% macro cfrow(r) %}
+    <tr{% if r.memo %} class="muted"{% endif %}><td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}{% if r.prior_only and r.current == 0 and not r.bold %} <span class="muted" style="font-size:10.5px;">(not in this year)</span>{% endif %}</td><td>{{ r.note or '' }}</td>
+      <td class="text-right">{% if r.bold %}<strong>{{ '%.0f'|format(r.current) }}</strong>{% else %}{{ '%.0f'|format(r.current) }}{% endif %}</td>
+      <td class="text-right">
+        {% if r.bold %}<strong>{{ '%.0f'|format(r.prior) }}</strong>
+        {% elif r.memo %}
+        {% elif r.linked %}{{ '%.0f'|format(r.prior) }} <span class="muted" style="font-size:10.5px;" title="From the prior-year income statement">(income statement)</span>
+        {% else %}<input type="hidden" name="row_sec" value="{{ r.sec }}"><input type="hidden" name="row_lab" value="{{ r.label }}"><input type="number" step="0.01" name="row_amt" value="{{ '%.2f'|plainfmt(r.prior) if r.prior and r.prior|abs >= 0.005 else '' }}" class="text-right" style="margin:0;width:128px;" aria-label="{{ r.label }} - prior year">
+        {% endif %}
+      </td></tr>
+    {% endmacro %}
+    <form method="post" action="{{ url_for('cfprior.save_inline', engagement_id=engagement.id) }}">
     <table>
-      <thead><tr><th></th><th>Note</th>{% if cfp %}<th class="text-right" style="white-space:pre-line;">{{ cfy[0].replace(' ', '\n', 1) }}</th><th class="text-right" style="white-space:pre-line;">{{ cfy[1].replace(' ', '\n', 1) }}</th>{% else %}<th class="text-right">Amount</th>{% endif %}</tr></thead>
+      <thead><tr><th></th><th>Note</th><th class="text-right" style="white-space:pre-line;">{{ cfy[0].replace(' ', '\n', 1) }}</th><th class="text-right" style="white-space:pre-line;">{{ cfy[1].replace(' ', '\n', 1) }}</th></tr></thead>
       <tbody>
-        <tr><td class="section-title" colspan="{{ 4 if cfp else 3 }}">Operating activities</td></tr>
-        {% for r in statements.cf.operating_rows %}{{ cfline(r.label, r.current, r.prior, r.bold, r.note, r.memo, two=cfp) }}{% endfor %}
-        {{ cfline('Net cash from operating activities', statements.cf.net_operating, cfp.net_operating if cfp else none, true, two=cfp) }}
-        <tr><td class="section-title" colspan="{{ 4 if cfp else 3 }}">Investing activities</td></tr>
-        {% for r in statements.cf.investing_rows %}{{ cfline(r.label, r.current, r.prior, false, r.note, two=cfp) }}{% endfor %}
-        {{ cfline('Net cash used in investing activities', statements.cf.net_investing, cfp.net_investing if cfp else none, true, two=cfp) }}
-        <tr><td class="section-title" colspan="{{ 4 if cfp else 3 }}">Financing activities</td></tr>
-        {% for r in statements.cf.financing_rows %}{{ cfline(r.label, r.current, r.prior, false, r.note, two=cfp) }}{% endfor %}
-        {{ cfline('Net cash from financing activities', statements.cf.net_financing, cfp.net_financing if cfp else none, true, two=cfp) }}
-        {{ cfline('Net increase/(decrease) in cash', statements.cf.net_movement, cfp.net_movement if cfp else none, true, two=cfp) }}
-        {{ cfline('Cash at beginning of year', statements.cf.cash_open, cfp.cash_open if cfp else none, two=cfp) }}
-        {{ cfline('Cash at end of year (computed)', statements.cf.cash_close_computed, cfp.cash_close_computed if cfp else none, true, two=cfp) }}
-        {{ cfline('Cash at end of year (per trial balance)', statements.cf.cash_close_actual, cfp.cash_close_actual if cfp else none, two=cfp) }}
+        <tr><td class="section-title" colspan="4">Operating activities</td></tr>
+        {% for r in statements.cf.operating_rows %}{{ cfrow(r) }}{% endfor %}
+        {{ cfline('Net cash from operating activities', statements.cf.net_operating, cfp.net_operating, true) }}
+        <tr><td class="section-title" colspan="4">Investing activities</td></tr>
+        {% for r in statements.cf.investing_rows %}{{ cfrow(r) }}{% endfor %}
+        {{ cfline('Net cash used in investing activities', statements.cf.net_investing, cfp.net_investing, true) }}
+        <tr><td class="section-title" colspan="4">Financing activities</td></tr>
+        {% for r in statements.cf.financing_rows %}{{ cfrow(r) }}{% endfor %}
+        {{ cfline('Net cash from financing activities', statements.cf.net_financing, cfp.net_financing, true) }}
+        {{ cfline('Net increase/(decrease) in cash', statements.cf.net_movement, cfp.net_movement, true) }}
+        <tr><td>Cash at beginning of year</td><td></td><td class="text-right">{{ '%.0f'|format(statements.cf.cash_open) }}</td>
+          <td class="text-right"><input type="number" step="0.01" name="cash_open_amt" value="{{ '%.2f'|plainfmt(cfp.cash_open) if cfp.cash_open and cfp.cash_open|abs >= 0.005 else '' }}" class="text-right" style="margin:0;width:128px;" aria-label="Cash at beginning of year - prior year"></td></tr>
+        {{ cfline('Cash at end of year (computed)', statements.cf.cash_close_computed, cfp.cash_close_computed, true) }}
+        {{ cfline('Cash at end of year (per trial balance)', statements.cf.cash_close_actual, cfp.cash_close_actual) }}
       </tbody>
     </table>
+    <details style="margin:10px 0;">
+      <summary style="cursor:pointer;font-size:12.5px;">Add a prior-year line that is not in this year's statement</summary>
+      <table style="max-width:700px;margin-top:6px;"><tbody id="cfx_rows"></tbody></table>
+      <button type="button" class="btn small secondary" onclick="cfxAddRow()">Add a line</button>
+    </details>
+    <p><button type="submit" class="btn gold">Save prior-year figures</button></p>
+    </form>
+    <script>
+      function cfxAddRow() {
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td style="width:22%;"><select name="x_sec" style="margin:0;"><option value="operating">Operating</option><option value="investing">Investing</option><option value="financing">Financing</option></select></td>'
+          + '<td><input type="text" name="x_lab" placeholder="Line name" style="margin:0;"></td><td style="width:26%;"><input type="number" step="0.01" name="x_amt" class="text-right" style="margin:0;" aria-label="Amount"></td>';
+        document.getElementById('cfx_rows').appendChild(tr);
+      }
+    </script>
     <p class="muted" style="font-size:11.5px;{% if statements.cf.variance|abs > 0.01 %}color:#b02a2a;{% endif %}">
-      {% if statements.cf.variance|abs > 0.01 %}Computed closing cash differs from the trial balance by {{ '%.0f'|format(statements.cf.variance) }} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust.{% else %}Ties out to the trial balance.{% endif %}
+      {% if statements.cf.variance|abs > 0.01 %}This year: computed closing cash differs from the trial balance by {{ '%.0f'|format(statements.cf.variance) }} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust.{% else %}This year ties out to the trial balance.{% endif %}
     </p>
-    {% if cfp %}<p class="muted" style="font-size:11.5px;{% if cfp.variance|abs > 0.01 %}color:#b02a2a;{% endif %}">Prior year: {% if cfp.variance|abs > 0.01 %}computed closing cash differs from the prior-year cash in the trial balance by {{ '%.0f'|format(cfp.variance) }} - check the amounts typed below.{% else %}ties out to the trial balance.{% endif %}</p>{% endif %}
+    {% if not cfp.empty %}<p class="muted" style="font-size:11.5px;{% if cfp.variance|abs > 0.01 %}color:#b02a2a;{% endif %}">Prior year: {% if cfp.variance|abs > 0.01 %}computed closing cash differs from the prior-year cash in the trial balance by {{ '%.0f'|format(cfp.variance) }} - check the figures typed above.{% else %}ties out to the trial balance.{% endif %}</p>
+    {% else %}<p class="muted" style="font-size:11.5px;">Prior year: not entered yet - the Word pack keeps a single column until you save prior-year figures.</p>{% endif %}
   </div>
 
   <div class="card" id="cf-prior">
-    <h3 class="mt-0">Prior-year comparative cash flow</h3>
-    <p class="muted" style="font-size:12px;">The trial balance cannot give last year's cash flow, so type it here from last year's signed financial statements. Use the same headings as this year's statement and each figure sits beside this year's; a heading this year does not have is added as its own line. Enter outflows with a minus sign, e.g. -1,200. Totals and the closing cash are worked out and checked against the cash in the trial balance.</p>
-    {% set _ppbt = cfp.pbt if cfp and cfp.pbt else none %}
-    <p style="font-size:12.5px;padding:8px 10px;background:#f1f6ee;border-left:3px solid #4a7c3a;max-width:760px;"><strong>Profit before tax (prior year)</strong> is taken from the prior-year income statement{% if _ppbt %}: <strong>{{ '{:,.0f}'.format(_ppbt.amount) }}</strong>{% endif %} - it is not typed or imported here, so it always agrees with the statement of profit or loss.{% if _ppbt and _ppbt.typed is not none and (_ppbt.typed - _ppbt.amount)|abs > 0.5 %} <span style="color:#b02a2a;">A figure of {{ '{:,.0f}'.format(_ppbt.typed) }} was entered or imported for it; that is ignored.</span>{% endif %}</p>
-    {% set cfp_lines = cf_prior_lines or [] %}
-    <form method="post" action="{{ url_for('cfprior.save', engagement_id=engagement.id) }}">
-      <table style="max-width:760px;">
-        <thead><tr><th style="width:22%;">Section</th><th>Line</th><th class="text-right" style="width:22%;">Amount</th><th style="width:8%;">Remove</th></tr></thead>
-        <tbody id="cfp_rows">
-        {% for l in cfp_lines %}
-        <tr>
-          <td><input type="hidden" name="line_key" value="{{ l.id }}"><select name="section" style="margin-bottom:0;">
-            {% for code, lab in [('cash_open', 'Opening cash'), ('operating', 'Operating'), ('investing', 'Investing'), ('financing', 'Financing')] %}<option value="{{ code }}"{% if l.section == code %} selected{% endif %}>{{ lab }}</option>{% endfor %}</select></td>
-          <td><input type="text" name="label" value="{{ l.label }}" style="margin-bottom:0;"></td>
-          <td><input type="number" step="0.01" name="amount" value="{{ '%.2f'|plainfmt(l.amount or 0) }}" class="text-right" style="margin-bottom:0;"></td>
-          <td><input type="checkbox" name="remove" value="{{ l.id }}"></td>
-        </tr>
-        {% endfor %}
-        </tbody>
-      </table>
-      <p><button type="button" class="btn small secondary" onclick="cfpAddRow()">Add a line</button>
-         <button type="submit" class="btn gold">Save prior-year cash flow</button></p>
-    </form>
-    <form method="post" action="{{ url_for('cfprior.import_lines', engagement_id=engagement.id) }}" enctype="multipart/form-data" style="margin:14px 0;padding:12px;border:1px dashed #ccd;border-radius:6px;">
-      <strong>Import last year's cash flow</strong>
-      <div class="muted" style="font-size:12px;margin:2px 0 8px;">From an Excel or CSV file (or paste the rows copied from Excel). Section headings (Operating / Investing / Financing activities) are used to place each line; when the sheet has a column headed with last year ({{ engagement.period_end.year - 1 if engagement.period_end else 'prior year' }}) that column is read, otherwise the last column of figures. Names are matched to this year's headings (e.g. Taxation paid = Income tax paid) so the figures line up on the same row. Finance costs are split into the add-back (positive) and the payment (negative), a depreciation charge is added back with the other adjustments, and prepayments go to other current assets. Profit before tax and subtotals are left out - Profit before tax comes from the income statement and subtotals are worked out here. This replaces the lines above.</div>
+    <h3 class="mt-0">Import last year's cash flow</h3>
+    <form method="post" action="{{ url_for('cfprior.import_lines', engagement_id=engagement.id) }}" enctype="multipart/form-data" style="margin:6px 0;padding:12px;border:1px dashed #ccd;border-radius:6px;">
+      <div class="muted" style="font-size:12px;margin:2px 0 8px;">Optional - from an Excel or CSV file (or paste the rows copied from Excel); the figures then appear in the prior-year column above to check and correct. Section headings (Operating / Investing / Financing activities) place each line; when the sheet has a column headed with last year ({{ engagement.period_end.year - 1 if engagement.period_end else 'prior year' }}) that column is read, otherwise the last column of figures. Names are matched to this year's headings (e.g. Taxation paid = Income tax paid) so the figures line up on the same row. Finance costs are split into the add-back (positive) and the payment (negative), a depreciation charge is added back with the other adjustments, and prepayments go to other current assets. Profit before tax and subtotals are left out - Profit before tax comes from the income statement and subtotals are worked out here. This replaces the figures already saved.</div>
       <input type="file" name="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt" style="margin-bottom:6px;">
       <textarea name="pasted" rows="4" placeholder="...or paste rows here: line name, then amount" style="margin-bottom:6px;"></textarea>
       <button type="submit" class="btn small secondary">Import</button>
     </form>
-    <form method="post" action="{{ url_for('cfprior.seed', engagement_id=engagement.id) }}">
-      <button type="submit" class="btn small secondary">Add this year's headings as blank lines</button>
-    </form>
-    <script>
-      function cfpAddRow() {
-        var tr = document.createElement('tr');
-        tr.innerHTML = '<td><input type="hidden" name="line_key" value=""><select name="section" style="margin-bottom:0;"><option value="operating">Operating</option><option value="investing">Investing</option><option value="financing">Financing</option><option value="cash_open">Opening cash</option></select></td>'
-          + '<td><input type="text" name="label" style="margin-bottom:0;"></td><td><input type="number" step="0.01" name="amount" value="0.00" class="text-right" style="margin-bottom:0;"></td><td></td>';
-        document.getElementById('cfp_rows').appendChild(tr);
-      }
-    </script>
   </div>
 
   {% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %}
