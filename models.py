@@ -11979,3 +11979,17 @@ class ValuationCertificate(MPSignedMixin, db.Model):
 
     client = db.relationship("Client", foreign_keys=[client_id])
     created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+
+
+class CashFlowPriorLine(db.Model):
+    """One line of the PRIOR-year comparative Statement of Cash Flows, captured by hand (the prior-year cash flow cannot be derived from the
+    trial balance, which only holds two years). `section` is operating / investing / financing, or cash_open (the single line holding cash at
+    the beginning of the prior year). The labels are the same as the current year's rows so each prior figure sits beside its current one."""
+    __tablename__ = "cash_flow_prior_line"
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, index=True)
+    section = db.Column(db.String(12), nullable=False)
+    label = db.Column(db.String(200), nullable=False)
+    amount = db.Column(db.Float, default=0.0)
+    sort_order = db.Column(db.Integer, default=0)

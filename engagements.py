@@ -668,8 +668,9 @@ def view_engagement(engagement_id):
         if trial_balance and trial_balance.lines else None
     )
     if statements:
-        import client_notes
+        import client_notes, cf_prior
         client_notes.attach_client_notes(statements, engagement)
+        cf_prior.attach_prior_cash_flow(statements, engagement)
     # Directors' Statement, Audit Opinion / Review Report, Income Tax
     # Computation, Deferred Tax Computation - each queried only (never
     # created here); the "not saved yet" state is rendered with sensible
@@ -1108,6 +1109,7 @@ def view_engagement(engagement_id):
         suggested_categories=suggested_categories,
         financial_statements=financial_statements,
         statements=statements,
+        cf_prior_lines=__import__("cf_prior").lines_for(engagement.id),
         reporting_frameworks=REPORTING_FRAMEWORKS,
         reporting_framework_labels=REPORTING_FRAMEWORK_LABELS,
         general_information_note=fin.general_information_note(engagement.client, engagement),
@@ -5854,8 +5856,9 @@ def generate_financial_statements_docx(engagement_id):
         reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,
         ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text, whole_numbers=True,
     )
-    import client_notes
+    import client_notes, cf_prior
     client_notes.attach_client_notes(statements, engagement)
+    cf_prior.attach_prior_cash_flow(statements, engagement)
     financial_statements = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
     directors_statement = DirectorsStatement.query.filter_by(engagement_id=engagement_id).first()
     audit_opinion = AuditOpinion.query.filter_by(engagement_id=engagement_id).first()

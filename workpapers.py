@@ -838,27 +838,40 @@ def build_financial_statements_docx(engagement, statements, financial_statements
     _right_align(eq_table, first_col=1)
     doc.add_paragraph()
 
+    import cf_prior
+    cf_prior.attach_prior_cash_flow(statements, engagement)
     cf = statements["cf"]
     method_label = CASH_FLOW_METHOD_LABELS.get(cf["method"], "Indirect method")
+    pr = cf.get("prior")                    # the prior-year comparatives typed in by hand, or None
+    def cf_cells(label, cur, pri, note=""):
+        return [label, note, _fmt_whole(cur)] + ([_fmt_whole(pri)] if pr else [])
+    def cf_row(r):
+        cells = _fs_row_cells(r, with_prior=False)
+        if pr:
+            cells.append(_fmt_whole(r.get("prior") or 0) if r.get("prior") is not None else "")
+        return cells
     cf_specs = [{"section": "Operating activities"}]
     for r in cf["operating_rows"]:
-        cf_specs.append({"cells": _fs_row_cells(r, with_prior=False), "bold": r.get("bold", False), "muted": r.get("memo", False)})
-    cf_specs.append({"cells": ["Net cash from operating activities", "", _fmt_whole(cf["net_operating"])], "bold": True})
+        cf_specs.append({"cells": cf_row(r), "bold": r.get("bold", False), "muted": r.get("memo", False)})
+    cf_specs.append({"cells": cf_cells("Net cash from operating activities", cf["net_operating"], pr and pr["net_operating"]), "bold": True})
     cf_specs.append({"section": "Investing activities"})
     for r in cf["investing_rows"]:
-        cf_specs.append({"cells": _fs_row_cells(r, with_prior=False)})
-    cf_specs.append({"cells": ["Net cash used in investing activities", "", _fmt_whole(cf["net_investing"])], "bold": True})
+        cf_specs.append({"cells": cf_row(r)})
+    cf_specs.append({"cells": cf_cells("Net cash used in investing activities", cf["net_investing"], pr and pr["net_investing"]), "bold": True})
     cf_specs.append({"section": "Financing activities"})
     for r in cf["financing_rows"]:
-        cf_specs.append({"cells": _fs_row_cells(r, with_prior=False)})
-    cf_specs.append({"cells": ["Net cash from financing activities", "", _fmt_whole(cf["net_financing"])], "bold": True})
-    cf_specs.append({"cells": ["Net increase/(decrease) in cash", "", _fmt_whole(cf["net_movement"])], "bold": True})
-    cf_specs.append({"cells": ["Cash at beginning of year", "", _fmt_whole(cf["cash_open"])]})
-    cf_specs.append({"cells": ["Cash at end of year (computed)", "", _fmt_whole(cf["cash_close_computed"])], "bold": True})
-    cf_specs.append({"cells": ["Cash at end of year (per trial balance)", "", _fmt_whole(cf["cash_close_actual"])]})
-    _statement_table(doc, f"Statement of Cash Flows ({method_label}, current year)", ["", "Note", _years(doc)[0]], cf_specs)
+        cf_specs.append({"cells": cf_row(r)})
+    cf_specs.append({"cells": cf_cells("Net cash from financing activities", cf["net_financing"], pr and pr["net_financing"]), "bold": True})
+    cf_specs.append({"cells": cf_cells("Net increase/(decrease) in cash", cf["net_movement"], pr and pr["net_movement"]), "bold": True})
+    cf_specs.append({"cells": cf_cells("Cash at beginning of year", cf["cash_open"], pr and pr["cash_open"])})
+    cf_specs.append({"cells": cf_cells("Cash at end of year (computed)", cf["cash_close_computed"], pr and pr["cash_close_computed"]), "bold": True})
+    cf_specs.append({"cells": cf_cells("Cash at end of year (per trial balance)", cf["cash_close_actual"], pr and pr["cash_close_actual"])})
+    _statement_table(doc, f"Statement of Cash Flows ({method_label}{'' if pr else ', current year'})",
+                     ["", "Note", *(_years(doc) if pr else _years(doc)[:1])], cf_specs)
     variance_note = "Ties out to the trial balance." if abs(cf["variance"]) <= 0.01 else f"Computed closing cash differs from the trial balance by {_fmt_whole(cf['variance'])} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust."
     doc.add_paragraph(variance_note).runs[0].italic = True
+    if pr and abs(pr["variance"]) > 0.01:
+        doc.add_paragraph(f"Prior-year comparatives: computed closing cash differs from the prior-year cash in the trial balance by {_fmt_whole(pr['variance'])} - check the comparative amounts typed in on the Finalisation tab.").runs[0].italic = True
 
     notes_started = False
     if is_ifrs_framework:
