@@ -1469,7 +1469,19 @@ def _note_row_for_adjustment(account_rows, row_code, ecode, name):
             return r
     words = _name_words(name)
     hits = [r for r in account_rows if row_code.get(id(r)) == ecode and words & _name_words(r["account_name"])]
-    return hits[0] if len(hits) == 1 else None
+    if len(hits) == 1:
+        return hits[0]
+    # A shareholder / director loan journal belongs on the trial balance's shareholder loan account, even when other loan accounts (a bank
+    # loan) share the word "loan": the one owner-loan row of the category, or else the owner-loan row that shares the most words with it.
+    if _is_owner_loan(name):
+        owner = [r for r in account_rows if row_code.get(id(r)) == ecode and _is_owner_loan(r["account_name"])]
+        if len(owner) == 1:
+            return owner[0]
+        if owner:
+            ranked = sorted(owner, key=lambda r: -len(words & _name_words(r["account_name"])))
+            if len(words & _name_words(ranked[0]["account_name"])) > len(words & _name_words(ranked[1]["account_name"])):
+                return ranked[0]
+    return None
 
 
 def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_totals=None, ppe_movement_raw=None, adjustments=None):
@@ -1681,6 +1693,36 @@ def _attach_note_numbers(pl, sfp, cf, note_number_by_category):
                 row["note"] = ", ".join(str(n) for n in numbers)
 
 
+def _route_owner_loan_journals(lines, adjustments):
+    """A journal line on a shareholder / director loan account belongs on the loan account the trial balance carries, whatever statement
+    line the journal happened to map it to: it is moved to the category of the trial balance's loan account (when that is one category on
+    the statement of financial position), so it adjusts the loan on the face and in the note (Shareholder Funding) instead of sitting
+    as a line of its own. Works on light copies; the stored journals are untouched."""
+    from types import SimpleNamespace
+    homes = {l.fs_category for l in lines
+             if l.fs_category in CATEGORY_BY_CODE and _is_owner_loan(l.account_name) and CATEGORY_BY_CODE[l.fs_category]["statement"] == "SFP"}
+    if len(homes) != 1:
+        return adjustments
+    home = next(iter(homes))
+    out = []
+    for adj in adjustments:
+        new_lines, moved = [], False
+        for ln in adj.lines:
+            cat = CATEGORY_BY_CODE.get(ln.fs_category)
+            if _is_owner_loan(getattr(ln, "account_name", None)) and cat and cat["statement"] == "SFP" and ln.fs_category != home:
+                new_lines.append(SimpleNamespace(account_name=ln.account_name, fs_category=home, debit=ln.debit, credit=ln.credit))
+                moved = True
+            else:
+                new_lines.append(ln)
+        if moved:
+            out.append(SimpleNamespace(
+                reference=getattr(adj, "reference", None), description=getattr(adj, "description", None),
+                applies_to=getattr(adj, "applies_to", "current"), carry_to_current=getattr(adj, "carry_to_current", True), lines=new_lines))
+        else:
+            out.append(adj)
+    return out
+
+
 def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs", cash_flow_method="indirect",
                           ppe_movement=None, ppe_policy_text=None, whole_numbers=False):
     """`adjustments`, when given (a TrialBalance's .adjustments), are applied
@@ -1706,6 +1748,8 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     build_notes() - see there for what they change. Leaving both out (the
     default) leaves the PPE note exactly as it was before this feature."""
     adjustments = list(adjustments) if adjustments else adjustments
+    if adjustments:
+        adjustments = _route_owner_loan_journals(lines, adjustments)
     totals = compute_totals(lines)
     if adjustments:
         totals = apply_adjustments(totals, adjustments)
