@@ -4918,13 +4918,13 @@
       <thead><tr><th></th><th>Note</th><th class="text-right" style="white-space:pre-line;">{{ cfy[0].replace(' ', '\n', 1) }}</th><th class="text-right" style="white-space:pre-line;">{{ cfy[1].replace(' ', '\n', 1) }}</th></tr></thead>
       <tbody>
         <tr><td class="section-title" colspan="4">Operating activities</td></tr>
-        {% for r in statements.cf.operating_rows %}{{ cfrow(r) }}{% endfor %}
+        {% for r in statements.cf.operating_rows %}{% if not r.nil %}{{ cfrow(r) }}{% endif %}{% endfor %}
         {{ cfline('Net cash from operating activities', statements.cf.net_operating, cfp.net_operating, true) }}
         <tr><td class="section-title" colspan="4">Investing activities</td></tr>
-        {% for r in statements.cf.investing_rows %}{{ cfrow(r) }}{% endfor %}
+        {% for r in statements.cf.investing_rows %}{% if not r.nil %}{{ cfrow(r) }}{% endif %}{% endfor %}
         {{ cfline('Net cash used in investing activities', statements.cf.net_investing, cfp.net_investing, true) }}
         <tr><td class="section-title" colspan="4">Financing activities</td></tr>
-        {% for r in statements.cf.financing_rows %}{{ cfrow(r) }}{% endfor %}
+        {% for r in statements.cf.financing_rows %}{% if not r.nil %}{{ cfrow(r) }}{% endif %}{% endfor %}
         {{ cfline('Net cash from financing activities', statements.cf.net_financing, cfp.net_financing, true) }}
         {{ cfline('Net increase/(decrease) in cash', statements.cf.net_movement, cfp.net_movement, true) }}
         <tr><td>Cash at beginning of year</td><td></td><td class="text-right">{{ '%.0f'|format(statements.cf.cash_open) }}</td>
@@ -4933,6 +4933,17 @@
         {{ cfline('Cash at end of year (per trial balance)', statements.cf.cash_close_actual, cfp.cash_close_actual) }}
       </tbody>
     </table>
+    {% set nil_rows = [] %}
+    {% for r in statements.cf.operating_rows + statements.cf.investing_rows + statements.cf.financing_rows %}{% if r.nil and not r.memo or r.nil and r.dep_merged %}{% set _ = nil_rows.append(r) %}{% endif %}{% endfor %}
+    {% if nil_rows %}
+    <details style="margin:10px 0;">
+      <summary style="cursor:pointer;font-size:12.5px;">{{ nil_rows|length }} heading(s) with no figure in either year are left out - open to type last year's figure for one of them</summary>
+      <table style="max-width:700px;margin-top:6px;"><tbody>
+        {% for r in nil_rows %}<tr><td style="width:22%;" class="muted">{{ {'operating': 'Operating', 'investing': 'Investing', 'financing': 'Financing'}.get(r.sec, r.sec) }}</td><td>{{ r.save_label or r.label }}</td>
+          <td style="width:26%;"><input type="hidden" name="row_sec" value="{{ r.sec }}"><input type="hidden" name="row_lab" value="{{ r.save_label or r.label }}"><input type="number" step="0.01" name="row_amt" value="" class="text-right" style="margin:0;" aria-label="{{ r.label }} - prior year"></td></tr>{% endfor %}
+      </tbody></table>
+    </details>
+    {% endif %}
     <details style="margin:10px 0;">
       <summary style="cursor:pointer;font-size:12.5px;">Add a prior-year line that is not in this year's statement</summary>
       <table style="max-width:700px;margin-top:6px;"><tbody id="cfx_rows"></tbody></table>

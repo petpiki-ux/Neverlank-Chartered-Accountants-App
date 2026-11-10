@@ -173,6 +173,11 @@ def _rank_fn(std_sec):
     return rank
 
 
+def is_nil(r):
+    """A statement line with nothing in either year (shown as a dash): left out of the statement. Subtotals and the linked Profit before tax stay."""
+    return not r.get("bold") and not r.get("linked") and abs(r.get("current") or 0.0) < 0.5 and abs(r.get("prior") or 0.0) < 0.5
+
+
 def attach_prior_cash_flow(statements, engagement, editable=False):
     """Adds the captured comparatives to statements["cf"]: row["prior"] on every row, prior-only rows for lines with no counterpart this
     year, cf["prior"] = the prior year's totals. Each typed / imported line sits on the current-year row it means (same name, else the nearest
@@ -290,6 +295,7 @@ def attach_prior_cash_flow(statements, engagement, editable=False):
             else:
                 r["prior"] = placed.get(id(r), r.get("prior") or 0.0)
                 running += r["prior"]
+            r["nil"] = is_nil(r)
         totals[sec] = running
     net = totals["operating"] + totals["investing"] + totals["financing"]
     close = cash_open + net

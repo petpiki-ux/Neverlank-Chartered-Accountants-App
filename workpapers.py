@@ -852,14 +852,20 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         return cells
     cf_specs = [{"section": "Operating activities"}]
     for r in cf["operating_rows"]:
+        if cf_prior.is_nil(r):
+            continue                                  # nothing in either year
         cf_specs.append({"cells": cf_row(r), "bold": r.get("bold", False), "muted": r.get("memo", False) and not r.get("dep_merged")})
     cf_specs.append({"cells": cf_cells("Net cash from operating activities", cf["net_operating"], pr and pr["net_operating"]), "bold": True})
     cf_specs.append({"section": "Investing activities"})
     for r in cf["investing_rows"]:
+        if cf_prior.is_nil(r):
+            continue
         cf_specs.append({"cells": cf_row(r)})
     cf_specs.append({"cells": cf_cells("Net cash used in investing activities", cf["net_investing"], pr and pr["net_investing"]), "bold": True})
     cf_specs.append({"section": "Financing activities"})
     for r in cf["financing_rows"]:
+        if cf_prior.is_nil(r):
+            continue
         cf_specs.append({"cells": cf_row(r)})
     cf_specs.append({"cells": cf_cells("Net cash from financing activities", cf["net_financing"], pr and pr["net_financing"]), "bold": True})
     cf_specs.append({"cells": cf_cells("Net increase/(decrease) in cash", cf["net_movement"], pr and pr["net_movement"]), "bold": True})
