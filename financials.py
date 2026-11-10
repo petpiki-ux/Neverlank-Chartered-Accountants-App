@@ -1324,6 +1324,11 @@ def ppe_accounting_policy_text(asset_classes):
             f"{rate:g}%" if rate is not None else "\u2014",
             f"{life:g} years" if life is not None else "\u2014",
         ])
+    # a class with neither a rate nor a useful life (nothing to disclose) is left out of the table and the sentence, unless that is every class
+    keep = [i for i, r in enumerate(rows) if r[2] != "\u2014" or r[3] != "\u2014"]
+    if keep and len(keep) < len(rows):
+        rows = [rows[i] for i in keep]
+        bases = [bases[i] for i in keep]
     text = _PolicyText(first + " " + second + " " + "; ".join(bases) + ".")
     text.parts = {
         "paragraphs": [first, second],
