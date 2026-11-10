@@ -58,7 +58,8 @@ _SYN = {"taxation": "tax", "debtors": "receivables", "debtor": "receivables", "c
         "stock": "inventories", "stocks": "inventories", "inventory": "inventories", "ppe": "property plant equipment",
         "interest": "finance cost", "depreciation": "depreciation", "amortisation": "depreciation", "amortization": "depreciation",
         "issued": "issue", "borrowings": "borrowing", "loans": "borrowing", "loan": "borrowing", "dividends": "dividend", "shares": "share", "costs": "cost",
-        "provisions": "provision", "payables": "payables", "receivables": "receivables", "liabilities": "liability", "assets": "asset"}
+        "prepayments": "current asset", "prepayment": "current asset", "prepaid": "current asset", "deposits": "current asset", "deposit": "current asset",
+        "charges": "cost", "charge": "cost", "provisions": "provision", "payables": "payables", "receivables": "receivables", "liabilities": "liability", "assets": "asset"}
 
 
 def _tokens(label):
@@ -101,6 +102,31 @@ def match_label(label, candidates, taken=()):
     return scored[0][1]
 
 
+DEP_LABEL = "Depreciation and amortisation"      # an add-back line the prior year may have (this year's statement shows it as a memo only)
+FIN_LABEL, FIN_PAID_LABEL, TAX_PAID_LABEL = "Finance costs", "Finance costs paid", "Income tax paid"
+
+
+def refine(section, label, amount):
+    """The heading a typed / imported operating line really is, where the wording alone is ambiguous: finance costs / interest is the
+    add-back (a positive amount) or the payment (a negative amount, or worded paid); any tax that is not deferred or before-tax is tax paid;
+    a depreciation / amortisation charge is the add-back line. Returns (section, label)."""
+    raw = (label or "").casefold()
+    tk = _tokens(label)
+    if section != "operating":
+        return section, label
+    if "depreciation" in tk and "accumulated" not in raw:
+        return "operating", DEP_LABEL
+    if {"finance", "cost"} <= tk and not (tk & {"income", "lease"}):
+        if re.search(r"\bpaid\b|payment", raw) or (amount or 0) < 0:
+            return "operating", FIN_PAID_LABEL
+        return "operating", FIN_LABEL
+    if {"deferred", "tax"} <= tk and "paid" not in tk:
+        return "operating", "Movement in deferred tax"
+    if "tax" in tk and not (tk & {"deferred", "profit", "before", "liability", "asset"}):
+        return "operating", TAX_PAID_LABEL
+    return section, label
+
+
 PBT_LABEL = "Profit before tax"          # linked to the prior-year income statement, never typed
 
 
@@ -125,6 +151,8 @@ def _rank_fn(std_sec):
         if k in pos:
             return pos[k]
         low = k
+        if k == _key(DEP_LABEL) and adj_end is not None:
+            return adj_end + 0.25
         if row.get("memo") and adj_end is not None:
             return adj_end + 0.5
         if "before working capital" in low and wc is not None:
@@ -164,15 +192,19 @@ def attach_prior_cash_flow(statements, engagement):
     for l in lines:
         if l.section == "cash_open":
             continue
-        row = by_key.get((l.section, _key(l.label)))
+        l_sec, l_label = refine(l.section, l.label, l.amount)
+        if l_label == DEP_LABEL:
+            leftovers.append(("operating", DEP_LABEL, l.amount or 0.0))
+            continue
+        row = by_key.get((l_sec, _key(l_label)))
         if row is None:
-            hit = match_label(l.label, cur_names)
+            hit = match_label(l_label, cur_names)
             row = next((r for _, r in cur_rows if r["label"] == hit), None) if hit else None
-        label, sec = l.label, l.section
+        label, sec = l_label, l_sec
         if row is not None:
             label = row["label"]
         else:
-            hit = match_label(l.label, std_names)        # a heading this year has no row for (nil this year): still its own heading
+            hit = match_label(l_label, std_names)        # a heading this year has no row for (nil this year): still its own heading
             if hit:
                 label, sec = hit, std_section[hit]
         if _key(label) == _key(PBT_LABEL):
@@ -422,6 +454,8 @@ def import_lines(engagement_id):
     fixed = []
     for sec, label, amount in lines:
         if sec != "cash_open":
+            sec, label = refine(sec, label, amount)
+        if sec != "cash_open" and label != DEP_LABEL:
             hit = match_label(label, [n for _, n in names])
             if hit:
                 if hit != label:
