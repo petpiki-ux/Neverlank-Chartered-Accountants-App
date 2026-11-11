@@ -1,0 +1,78 @@
+{% extends "corpfin/vm_base.html" %}
+{% block tab %}
+{% set locked = vm.is_final %}
+<form method="post" action="{{ url_for('corpfin.vm_save_settings', vm_id=vm.id) }}" class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;"><h3 style="margin:0;">Settings</h3>
+    {% if not locked %}<button class="btn gold" type="submit">Save settings</button>{% endif %}</div>
+  <div class="form-row">
+    <div style="flex:2;"><label>Valuation model name</label><input type="text" name="name" value="{{ vm.name }}" maxlength="200" {% if locked %}readonly{% endif %}></div>
+    <div><label>Reporting currency</label><select name="currency" {% if locked %}disabled{% endif %}>{% for c in currencies %}<option {% if vm.currency == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div><label>Valuation date</label><input type="date" name="valuation_date" value="{{ vm.valuation_date.isoformat() if vm.valuation_date else '' }}" {% if locked %}readonly{% endif %}></div>
+    <div><label>Engagement</label><select name="engagement_id" {% if locked %}disabled{% endif %}><option value="">None</option>
+      {% for e in engagements %}<option value="{{ e.id }}" {% if vm.engagement_id == e.id %}selected{% endif %}>{{ e.title }}</option>{% endfor %}</select></div>
+  </div>
+  <div class="form-row">
+    <div><label>Basis of value</label><select name="basis_of_value" {% if locked %}disabled{% endif %}>{% for b in bases %}<option {% if d.basis_of_value == b %}selected{% endif %}>{{ b }}</option>{% endfor %}{% if d.basis_of_value not in bases %}<option selected>{{ d.basis_of_value }}</option>{% endif %}</select></div>
+    <div><label>Premise of value</label><input type="text" name="premise" value="{{ d.premise }}" maxlength="80" {% if locked %}readonly{% endif %}></div>
+    <div style="flex:2;"><label>Valuation standard followed (optional)</label><input type="text" name="standard" value="{{ d.standard }}" maxlength="300" placeholder="e.g. International Valuation Standards (IVS)" {% if locked %}readonly{% endif %}></div>
+  </div>
+  <div><label>Purpose of the valuation</label><input type="text" name="purpose" value="{{ d.purpose }}" maxlength="600" {% if locked %}readonly{% endif %}></div>
+
+  <h4 style="margin:14px 0 4px;">Exchange rates to {{ cur }}</h4>
+  <p class="cf-sub">How many {{ cur }} one unit of each currency buys at the valuation date (for example 1 EUR = 1.08 USD). A component or item in a currency with no rate stays out of the total and is flagged.</p>
+  {% if fx_needed %}
+  <div class="form-row">{% for code in fx_needed %}
+    <div style="max-width:170px;"><label>1 {{ code }} = ? {{ cur }}</label><input type="number" step="any" min="0" name="fx_{{ code }}" value="{{ d.fx.get(code)|vmnum }}" {% if locked %}readonly{% endif %}></div>
+  {% endfor %}</div>
+  {% else %}<p class="muted">Every component is in {{ cur }}, so no rates are needed.</p>{% endif %}
+
+  <h4 style="margin:14px 0 4px;">Wording for the report</h4>
+  <div class="form-row">
+    <div><label>Scope and approach</label><textarea name="nar_scope" rows="5" {% if locked %}readonly{% endif %}>{{ d.narrative.scope }}</textarea></div>
+    <div><label>Key assumptions</label><textarea name="nar_assumptions" rows="5" {% if locked %}readonly{% endif %}>{{ d.narrative.assumptions }}</textarea></div>
+    <div><label>Limiting conditions</label><textarea name="nar_limiting" rows="5" {% if locked %}readonly{% endif %}>{{ d.narrative.limiting }}</textarea></div>
+  </div>
+</form>
+
+<div class="card">
+  <h3 style="margin-top:0;">Report, signature and filing</h3>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_excel', vm_id=vm.id) }}">Excel (live formulas)</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_pdf', vm_id=vm.id) }}" target="_blank">PDF report</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_docx', vm_id=vm.id) }}">Word report</a>
+    {% if vm.engagement_id %}
+    <form method="post" action="{{ url_for('corpfin.vm_file', vm_id=vm.id) }}" class="inline"><button class="btn gold" type="submit" title="Saves the Excel, PDF and Word versions as Working Papers on the engagement">File in Working Papers</button></form>
+    {% else %}<span class="muted">Link an engagement above to file the report in Working Papers.</span>{% endif %}
+    {% if mp_is_signer(current_user) %}
+      {% if mp_signed(vm) %}
+      <form method="post" action="{{ url_for('mpsign.unsign', kind='valuation_model', doc_id=vm.id) }}" class="inline" onsubmit="return confirm('Remove your signature from this report?');"><button class="btn secondary" type="submit">Remove signature</button></form>
+      {% elif mp_can_sign(vm)[0] %}
+      <form method="post" action="{{ url_for('mpsign.sign', kind='valuation_model', doc_id=vm.id) }}" class="inline" onsubmit="return confirm('Sign this valuation report as Managing Partner? The signature shows on the PDF and Word report until anything in the model changes.');"><button class="btn" type="submit" style="background:#b8934a;color:#fff;">Sign as Managing Partner</button></form>
+      {% else %}<span class="muted" title="{{ mp_can_sign(vm)[1] }}">Cannot be signed yet: {{ mp_can_sign(vm)[1] }}</span>{% endif %}
+    {% endif %}
+  </div>
+  {% if mp_signed(vm) %}<p class="cf-sub" style="margin-top:8px;">Signed by the Managing Partner on {{ vm.mp_signed_at.strftime('%d %B %Y') }}. Changing anything in the model removes the signature until it is signed again; filed copies are not changed.</p>{% elif vm.mp_signed_at %}<p class="cf-sub" style="margin-top:8px;color:#b3261e;">The model changed after it was signed, so the signature no longer shows. It has to be signed again.</p>{% endif %}
+  {% if filed %}
+  <p class="cf-sub" style="margin-top:10px;">Filed in Working Papers:</p>
+  <ul style="margin:0;">{% for x in filed %}<li><a href="{{ url_for('engagements.download_document', doc_id=x.id) }}">{{ x.original_filename }}</a> <span class="muted">v{{ x.version }}, {{ x.uploaded_at.strftime('%d %b %Y %H:%M') if x.uploaded_at else '' }}</span></li>{% endfor %}</ul>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Status</h3>
+  <p class="cf-sub">Finalising locks the model, and files the Excel, PDF and Word reports in the engagement's Working Papers. Only a Partner or Admin can finalise or reopen.</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    {% if user_is_signoff and not locked %}<form method="post" action="{{ url_for('corpfin.vm_status', vm_id=vm.id) }}" class="inline" onsubmit="return confirm('Mark this valuation model Final and lock it?');"><button class="btn gold" type="submit">Mark Final</button></form>{% endif %}
+    {% if not locked %}<form method="post" action="{{ url_for('corpfin.vm_delete', vm_id=vm.id) }}" class="inline" onsubmit="return confirm('Delete this valuation model? This cannot be undone.');"><button class="btn secondary" type="submit">Delete</button></form>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h3 style="margin-top:0;">Source register</h3>
+  {% if d.components %}
+  <table class="cf-table"><thead><tr><th>Component</th><th>Method</th><th>Valuation date</th><th>Source</th></tr></thead><tbody>
+  {% for c in d.components %}<tr><td>{{ c.name }}</td><td>{{ c.method }}</td><td>{{ c.date }}</td><td>{{ c.source.label or 'typed in' }}{% if c.source.at %} <span class="muted">({{ c.source.at }})</span>{% endif %}</td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="muted">No components yet.</p>{% endif %}
+</div>
+{% endblock %}

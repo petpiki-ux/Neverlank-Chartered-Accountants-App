@@ -1,0 +1,43 @@
+{% extends "corpfin/vm_base.html" %}
+{% block tab %}
+<form method="post" action="{{ url_for('corpfin.vm_import_apply', vm_id=vm.id) }}" class="card">
+  <h3 style="margin-top:0;">Check what was read{% if src_name %} from {{ src_name }}{% endif %}</h3>
+  <p class="cf-sub">Nothing is added until you confirm. Correct any figure, untick what you do not want, and choose whether each valuation is a <strong>new component</strong> or <strong>updates one already in the model</strong>.
+    Values are in the component's own currency, whole units. Method used: <strong>{{ {'template':'Excel template','excel':'Excel workbook','ai':'AI reader','text':'built-in text reader','saved':'saved valuation'}.get(method, method) }}</strong>.</p>
+  {% for n in notes %}<div class="flash warning">{{ n }}</div>{% endfor %}
+  <input type="hidden" name="n" value="{{ cands|length }}"><input type="hidden" name="stored" value="{{ stored }}"><input type="hidden" name="src_name" value="{{ src_name }}"><input type="hidden" name="method" value="{{ method }}">
+  <style>
+.vm-grid { table-layout: fixed; width: 2060px; }
+.vm-grid td, .vm-grid th { vertical-align: top; white-space: normal; }
+.vm-grid th { text-align: left; } .vm-grid th.n { text-align: right; }
+.vm-grid input:not([type=checkbox]), .vm-grid select { display: block; }
+.vm-grid input[type=text], .vm-grid input[type=number], .vm-grid input[type=date], .vm-grid select { width: 100%; box-sizing: border-box; }
+.vm-grid input[type=number], .vm-grid input.n { text-align: right; }
+</style>
+<div class="tbl-scroll"><table class="cf-table vm-grid">
+    <colgroup><col style="width:44px"><col style="width:200px"><col style="width:210px"><col style="width:150px"><col style="width:150px"><col style="width:78px"><col style="width:130px"><col style="width:140px"><col style="width:125px"><col style="width:125px"><col style="width:125px"><col style="width:110px"><col style="width:70px"><col style="width:76px"><col style="width:70px"><col style="width:76px"><col style="width:160px"></colgroup>
+    <thead><tr><th>Add</th><th>As</th><th>Component</th><th>Type</th><th>Method</th><th>Cur</th><th>Basis</th><th>Valuation date</th>
+      <th class="n">Low</th><th class="n">Adopted</th><th class="n">High</th><th class="n">Net debt</th><th class="n">Own %</th><th class="n">Minority %</th><th class="n">DLOM %</th><th class="n">Control %</th><th>Found at</th></tr></thead>
+    <tbody>
+    {% for c in cands %}{% set i = loop.index0 %}{% set k = c.comp %}
+      <tr>
+        <td><input type="checkbox" name="c{{ i }}_use" style="width:auto;" {% if c.selected %}checked{% endif %}></td>
+        <td><select name="c{{ i }}_target"><option value="new">New component</option>{% for e in existing %}<option value="{{ e.id }}" {% if e.name|lower == k.name|lower %}selected{% endif %}>Update: {{ e.name }}</option>{% endfor %}</select></td>
+        <td><input type="text" name="c{{ i }}_name" value="{{ k.name }}"><input type="text" name="c{{ i }}_notes" value="{{ k.notes }}" style="font-size:11px;margin-top:2px;"></td>
+        <td><select name="c{{ i }}_type">{% for t in VM_TYPES %}<option {% if k.type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}{% if k.type not in VM_TYPES %}<option selected>{{ k.type }}</option>{% endif %}</select></td>
+        <td><input type="text" name="c{{ i }}_method" value="{{ k.method }}" list="vm-methods"></td>
+        <td><input type="text" name="c{{ i }}_currency" value="{{ k.currency }}" maxlength="6"></td>
+        <td><select name="c{{ i }}_basis">{% for b, lbl in VM_BASES %}<option value="{{ b }}" {% if k.basis == b %}selected{% endif %}>{{ lbl.split(' (')[0] }}</option>{% endfor %}</select></td>
+        <td><input type="date" name="c{{ i }}_date" value="{{ k.date }}"></td>
+        {% for f in ('low','adopted','high','net_debt') %}<td><input type="number" step="0.01" name="c{{ i }}_{{ f }}" value="{{ k[f]|vmnum }}"></td>{% endfor %}
+        {% for f in ('ownership_pct','minority_pct','dlom_pct','control_pct') %}<td><input type="number" step="any" min="0" name="c{{ i }}_{{ f }}" value="{{ k[f]|vmnum }}"></td>{% endfor %}
+        <td style="font-size:11px;"><input type="hidden" name="c{{ i }}_where" value="{{ c.where }}">{{ c.where }}<div class="muted">{{ c.confidence }} confidence</div></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <datalist id="vm-methods">{% for m in VM_METHODS %}<option value="{{ m }}">{% endfor %}</datalist>
+  <div style="margin-top:12px;display:flex;gap:8px;"><button class="btn gold" type="submit">Add to the valuation model</button>
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_tab', vm_id=vm.id, tab='components') }}">Cancel</a></div>
+</form>
+{% endblock %}

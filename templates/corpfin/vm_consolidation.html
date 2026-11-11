@@ -1,0 +1,61 @@
+{% extends "corpfin/vm_base.html" %}
+{% block tab %}
+<div class="card">
+  <h3 style="margin-top:0;">Consolidation &mdash; {{ cur }}</h3>
+  <p class="cf-sub">Each component's value is converted to {{ cur }}, multiplied by the group's ownership % and adjusted for control, minority and marketability. Then the holding-company items and group adjustments are applied.</p>
+  {% if res.rows %}
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Component</th><th class="n">Adopted (own currency)</th><th class="n">Rate</th><th class="n">Equity 100% ({{ cur }})</th><th class="n">Own %</th><th class="n">Adjust.</th>
+      <th class="n">Low</th><th class="n">Adopted</th><th class="n">High</th><th class="n">% of total</th></tr></thead>
+    <tbody>
+    {% for r in res.rows %}{% set c = r.c %}
+      <tr {% if r.problem %}class="memo"{% endif %}>
+        <td>{{ c.name }}<div class="muted" style="font-size:11px;">{{ c.type }}{% if c.method %} &middot; {{ c.method }}{% endif %} &middot; {{ 'enterprise value less net debt' if c.basis == 'enterprise' else 'equity value' }}{% if c.date %} &middot; {{ c.date }}{% endif %}</div></td>
+        {% if r.adjusted %}
+        <td class="n">{{ c.currency }} {{ r.equity_local[1]|cfn }}</td>
+        <td class="n">{{ '%.4f'|format(r.rate) }}</td>
+        <td class="n">{{ r.equity[1]|cfn }}</td>
+        <td class="n">{{ '%g'|format(c.ownership_pct) }}%</td>
+        <td class="n">{{ '%.1f'|format(r.factor * 100) }}%</td>
+        <td class="n">{{ r.adjusted[0]|cfn }}</td><td class="n"><strong>{{ r.adjusted[1]|cfn }}</strong></td><td class="n">{{ r.adjusted[2]|cfn }}</td>
+        <td class="n">{{ '%.1f'|format(r.share) if r.share is not none else '' }}</td>
+        {% else %}
+        <td colspan="9" style="color:#b3261e;">{% if r.problem == 'excluded' %}Excluded from the total{% elif r.problem == 'no value' %}No value entered{% else %}No exchange rate for {{ c.currency }}{% endif %}</td>
+        {% endif %}
+      </tr>
+    {% endfor %}
+      <tr class="total"><td colspan="6">Sum of the parts</td><td class="n">{{ res.parts[0]|cfn }}</td><td class="n">{{ res.parts[1]|cfn }}</td><td class="n">{{ res.parts[2]|cfn }}</td><td class="n">100.0</td></tr>
+      {% if res.holding_rows %}<tr class="head"><td colspan="10">Holding-company items and eliminations</td></tr>{% endif %}
+      {% for h in res.holding_rows %}
+      <tr><td colspan="6" style="padding-left:18px;">{{ h.h.label }}<span class="muted" style="font-size:11px;"> &middot; {{ {'add':'added','deduct':'deducted','eliminate':'eliminated','capcost':'capitalised cost'}[h.h.kind] }}</span></td>
+        {% if h.effect %}<td class="n">{{ h.effect[0]|cfn }}</td><td class="n">{{ h.effect[1]|cfn }}</td><td class="n">{{ h.effect[2]|cfn }}</td>{% else %}<td colspan="3" style="color:#b3261e;">no rate for {{ h.h.currency }}</td>{% endif %}<td></td></tr>
+      {% endfor %}
+      {% if res.holding_rows %}<tr class="total"><td colspan="6">Group equity value before group adjustments</td><td class="n">{{ res.pre[0]|cfn }}</td><td class="n">{{ res.pre[1]|cfn }}</td><td class="n">{{ res.pre[2]|cfn }}</td><td></td></tr>{% endif %}
+      {% if res.group_factor != 1 %}<tr><td colspan="6" style="padding-left:18px;">Group adjustments (control {{ '%g'|format(d.group.control_pct) }}%, minority {{ '%g'|format(d.group.minority_pct) }}%, DLOM {{ '%g'|format(d.group.dlom_pct) }}%) &mdash; factor {{ '%.4f'|format(res.group_factor) }}</td>
+        <td class="n">{{ (res.group_equity[0] - res.pre[0])|cfn }}</td><td class="n">{{ (res.group_equity[1] - res.pre[1])|cfn }}</td><td class="n">{{ (res.group_equity[2] - res.pre[2])|cfn }}</td><td></td></tr>{% endif %}
+      <tr class="grand"><td colspan="6">Group equity value</td><td class="n">{{ res.group_equity[0]|cfn }}</td><td class="n">{{ res.group_equity[1]|cfn }}</td><td class="n">{{ res.group_equity[2]|cfn }}</td><td></td></tr>
+      {% if d.group.stake_pct != 100 %}<tr class="grand"><td colspan="6">Value of a {{ '%g'|format(d.group.stake_pct) }}% stake</td><td class="n">{{ res.stake[0]|cfn }}</td><td class="n">{{ res.stake[1]|cfn }}</td><td class="n">{{ res.stake[2]|cfn }}</td><td></td></tr>{% endif %}
+      {% if res.per_share %}<tr><td colspan="6">Value per share ({{ '{:,.0f}'.format(d.group.shares) }} shares)</td><td class="n">{{ '{:,.4f}'.format(res.per_share[0]) }}</td><td class="n">{{ '{:,.4f}'.format(res.per_share[1]) }}</td><td class="n">{{ '{:,.4f}'.format(res.per_share[2]) }}</td><td></td></tr>{% endif %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="empty-state">No components yet. Add them on the <a href="{{ url_for('corpfin.vm_tab', vm_id=vm.id, tab='components') }}">Components</a> tab.</div>
+  {% endif %}
+</div>
+
+{% if res.count %}
+<div class="card">
+  <h3 style="margin-top:0;">Valuation ranges</h3>
+  <p class="cf-sub">Each bar runs from the low to the high value ({{ cur }}); the marker is the adopted value.</p>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th style="min-width:220px;">Component</th><th class="n">Low</th><th class="n">Adopted</th><th class="n">High</th><th style="min-width:340px;">Range</th></tr></thead>
+    <tbody>
+    {% for b in bars %}
+      <tr class="{{ 'total' if b.kind != 'component' }}"><td>{{ b.label }}</td><td class="n">{{ b.low|cfn }}</td><td class="n">{{ b.mid|cfn }}</td><td class="n">{{ b.high|cfn }}</td>
+        <td><div class="cf-range"><div class="bar" style="left:{{ '%.1f'|plainfmt(b.left) }}%;width:{{ '%.1f'|plainfmt(b.width) }}%;{% if b.kind != 'component' %}background:var(--gold, #b8934a);{% endif %}"></div><div class="mid" style="left:{{ '%.1f'|plainfmt(b.mid_at) }}%;"></div></div></td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+{% endif %}
+{% endblock %}

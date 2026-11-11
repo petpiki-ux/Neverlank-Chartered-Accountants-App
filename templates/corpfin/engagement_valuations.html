@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}Valuation Models - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{{ svc.service_header(engagement) }}
+{{ svc.service_tabs(engagement, 'valuations') }}
+
+{% if not unlocked %}
+<div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before building valuation models here.</div></div>
+{% else %}
+<div class="card" style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+  <div>
+    <strong>Group valuation for {{ engagement.client.name }}</strong>
+    <div class="muted" style="font-size:12px;">Upload the valuation of each subsidiary, business unit or asset and consolidate them: ownership %, discounts and premiums, currencies, holding-company items. Excel, PDF and Word output, filed in Working Papers.</div>
+  </div>
+  <div><a class="btn gold" href="{{ url_for('corpfin.vm_new', client_id=engagement.client_id, engagement_id=engagement.id) }}">New valuation model</a></div>
+</div>
+<div class="card">
+  {% if rows %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Number</th><th>Valuation model</th><th>Valuation date</th><th class="text-right">Components</th><th class="text-right">Group equity (adopted)</th><th>Range</th><th>Status</th><th></th></tr></thead>
+    <tbody>
+    {% for r in rows %}{% set v = r.vm %}
+      <tr>
+        <td><a href="{{ url_for('corpfin.vm_home', vm_id=v.id) }}">{{ v.vm_number }}</a></td>
+        <td>{{ v.name }}</td>
+        <td>{{ v.valuation_date.strftime('%d %b %Y') if v.valuation_date else '' }}</td>
+        <td class="text-right">{{ r.res.count if r.res else '-' }}</td>
+        <td class="text-right">{% if r.res %}{{ v.currency }} {{ r.res.group_equity[1]|cfn }}{% endif %}</td>
+        <td>{% if r.res %}{{ r.res.group_equity[0]|cfn }} &ndash; {{ r.res.group_equity[2]|cfn }}{% endif %}</td>
+        <td><span class="badge status-{{ v.status }}">{{ v.status }}</span></td>
+        <td class="text-right"><a class="btn small secondary" href="{{ url_for('corpfin.vm_home', vm_id=v.id) }}">Open</a></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <div class="empty-state">No valuation models on this engagement yet.</div>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

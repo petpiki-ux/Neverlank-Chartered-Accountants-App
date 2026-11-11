@@ -93,6 +93,8 @@ def content_key(doc):
         import valuation_docs
         parts = [doc.reference, doc.valuation_date, doc.certificate_date, doc.currency, doc.area_ha, doc.low_value, doc.adopted_value,
                  doc.high_value] + [getattr(doc, f, None) for f in valuation_docs.TEXT_FIELDS]
+    elif cls == "CFValuationModel":
+        parts = [doc.vm_number, doc.currency, doc.valuation_date, doc.name, hashlib.sha1((doc.data_json or "").encode("utf-8")).hexdigest()]
     else:
         number = next((getattr(doc, a) for a in ("invoice_number", "quote_number", "credit_note_number", "receipt_number", "advance_number", "number")
                        if getattr(doc, a, None)), "")

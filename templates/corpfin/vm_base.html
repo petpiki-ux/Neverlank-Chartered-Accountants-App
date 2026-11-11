@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% import "services/_tabs.html" as svc with context %}
+{% block title %}{{ vm.vm_number }} {{ vm.name }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>{{ vm.name }} <span class="badge status-{{ vm.status }}" style="vertical-align:middle;">{{ vm.status }}</span>{% if mp_signed(vm) %} <span class="badge status-Approved" style="vertical-align:middle;">Signed</span>{% endif %}</h1>
+    <div class="subtitle">{{ vm.vm_number }} &middot; {{ vm.client.name }}{% if vm.engagement %} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=vm.engagement_id) }}">{{ vm.engagement.title }}</a>{% endif %}
+      &middot; Valuation model &middot; {{ d.basis_of_value }} as at {{ vm.valuation_date.strftime('%d %B %Y') if vm.valuation_date else 'no date' }} &middot; {{ cur }}</div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_excel', vm_id=vm.id) }}" title="Consolidation with live formulas">Excel (live formulas)</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_pdf', vm_id=vm.id) }}" target="_blank">PDF report</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_docx', vm_id=vm.id) }}">Word report</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.engagement_valuations', engagement_id=vm.engagement_id) if vm.engagement_id else url_for('corpfin.dashboard') }}">All valuation models</a>
+  </div>
+</div>
+{% if vm.engagement and vm.engagement.is_corporate_finance %}{{ svc.service_tabs(vm.engagement, 'valuations') }}{% endif %}
+
+<div class="tabs">
+  {% for key, label in VM_TABS %}<a href="{{ url_for('corpfin.vm_tab', vm_id=vm.id, tab=key) }}" class="{{ 'active' if tab == key }}">{{ label }}{% if key == 'components' %} ({{ d.components|length }}){% endif %}</a>{% endfor %}
+</div>
+
+{% if vm.is_final %}
+<div class="cf-banner">This valuation model is <strong>Final</strong> and locked{% if vm.finalised_by %} (finalised by {{ vm.finalised_by.name }}{% if vm.finalised_at %} on {{ vm.finalised_at.strftime('%d %b %Y') }}{% endif %}){% endif %}.{% if user_is_signoff %}
+  <form method="post" action="{{ url_for('corpfin.vm_status', vm_id=vm.id) }}" class="inline" onsubmit="return confirm('Reopen this valuation model for editing?');"><button class="btn small secondary">Reopen</button></form>{% else %} A Partner can reopen it.{% endif %}</div>
+{% endif %}
+
+<div class="kpi-grid">
+  <div class="kpi"><div class="kpi-label">Group equity value (adopted)</div><div class="kpi-value">{{ cur }} {{ res.group_equity[1]|cfn }}</div>
+    <div class="kpi-sub">Range {{ res.group_equity[0]|cfn }} &ndash; {{ res.group_equity[2]|cfn }}</div></div>
+  <div class="kpi"><div class="kpi-label">Sum of the components</div><div class="kpi-value">{{ res.parts[1]|cfn }}</div><div class="kpi-sub">{{ res.count }} component{{ 's' if res.count != 1 }} in the total</div></div>
+  {% if d.group.stake_pct != 100 %}<div class="kpi"><div class="kpi-label">Stake valued ({{ '%g'|format(d.group.stake_pct) }}%)</div><div class="kpi-value">{{ res.stake[1]|cfn }}</div><div class="kpi-sub">Range {{ res.stake[0]|cfn }} &ndash; {{ res.stake[2]|cfn }}</div></div>{% endif %}
+  {% if res.per_share %}<div class="kpi"><div class="kpi-label">Value per share</div><div class="kpi-value">{{ '{:,.4f}'.format(res.per_share[1]) }}</div><div class="kpi-sub">{{ '{:,.0f}'.format(d.group.shares) }} shares</div></div>{% endif %}
+</div>
+{% for w in res.warnings %}<div class="flash warning">{{ w }}</div>{% endfor %}
+
+{% block tab %}{% endblock %}
+{% endblock %}

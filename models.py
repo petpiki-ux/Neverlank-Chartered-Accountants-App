@@ -11293,6 +11293,44 @@ class CFProject(db.Model):
         return _json_load(self.narrative_json, {})
 
 
+class CFValuationModel(MPSignedMixin, db.Model):
+    """A group / sum-of-the-parts valuation made of COMPONENT valuations (uploaded, imported from the app's own valuations, or typed),
+    consolidated with ownership %, discounts and premiums, currency conversion, holding-company items and group adjustments. The
+    arithmetic is in cf_valmodel.py; this row holds who / what / when and the data (one JSON document). The Managing Partner can
+    sign the report; changing the data after signing drops the signature (brand_docs.content_key)."""
+    __tablename__ = "cf_valuation_model"
+    id = db.Column(db.Integer, primary_key=True)
+    vm_number = db.Column(db.String(30), unique=True, nullable=False)
+    client_id = db.Column(db.Integer, db.ForeignKey("client.id"), nullable=False)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"))
+    name = db.Column(db.String(200), nullable=False)
+    currency = db.Column(db.String(6), nullable=False, default="USD")
+    valuation_date = db.Column(db.Date)
+    status = db.Column(db.String(20), nullable=False, default="Draft")
+    data_json = db.Column(db.Text)
+
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    finalised_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    finalised_at = db.Column(db.DateTime)
+
+    client = db.relationship("Client", backref=db.backref("cf_valuation_models", lazy=True, cascade="all, delete-orphan", order_by="CFValuationModel.id.desc()"))
+    engagement = db.relationship("Engagement", backref=db.backref("cf_valuation_models", lazy=True, order_by="CFValuationModel.id.desc()"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    updated_by = db.relationship("User", foreign_keys=[updated_by_id])
+    finalised_by = db.relationship("User", foreign_keys=[finalised_by_id])
+
+    @property
+    def is_final(self):
+        return self.status == "Final"
+
+    @property
+    def data(self):
+        return _json_load(self.data_json, {})
+
+
 class CFMgmtPack(db.Model):
     """A monthly management accounts reporting pack for a client: actuals (trial balance upload, manual capture or modelled from
     the prior year's accounts), budget (from a forecast model or typed in) and prior-year comparatives, all held in one JSON

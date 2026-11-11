@@ -1,0 +1,56 @@
+{% extends "corpfin/vm_base.html" %}
+{% block tab %}
+{% set locked = vm.is_final %}
+<form method="post" action="{{ url_for('corpfin.vm_save_group', vm_id=vm.id) }}">
+<div class="card">
+  <h3 style="margin-top:0;">Group adjustments and the stake valued</h3>
+  <p class="cf-sub">Applied to the group equity value after the holding-company items: control premium, then minority discount, then marketability discount (DLOM). The stake % is the share of the group being valued (100% for the whole group).</p>
+  <div class="form-row">
+    <div><label>Control premium %</label><input type="number" step="any" name="g_control_pct" value="{{ d.group.control_pct|vmnum }}" {% if locked %}readonly{% endif %}></div>
+    <div><label>Minority discount %</label><input type="number" step="any" name="g_minority_pct" value="{{ d.group.minority_pct|vmnum }}" {% if locked %}readonly{% endif %}></div>
+    <div><label>DLOM %</label><input type="number" step="any" name="g_dlom_pct" value="{{ d.group.dlom_pct|vmnum }}" {% if locked %}readonly{% endif %}></div>
+    <div><label>Stake valued %</label><input type="number" step="any" name="g_stake_pct" value="{{ d.group.stake_pct|vmnum }}" {% if locked %}readonly{% endif %}></div>
+    <div><label>Shares in issue (optional)</label><input type="number" step="1" name="g_shares" value="{{ d.group.shares|vmnum }}" {% if locked %}readonly{% endif %}></div>
+  </div>
+</div>
+
+<div class="card" id="items">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+    <h3 style="margin:0;">Holding-company items and eliminations</h3>
+    {% if not locked %}<button class="btn gold" type="submit" name="action" value="save">Save</button>{% endif %}
+  </div>
+  <p class="cf-sub">Things that sit above the components. Enter amounts as positives: <em>additions</em> increase the group value, the others reduce it. A capitalised central cost is the annual cost multiplied by a multiple (for example head-office costs &times; 5).
+    Use <em>eliminations</em> for cross-holdings and intercompany balances that would otherwise be counted twice. Leave low and high blank to use the adopted figure.</p>
+  <input type="hidden" name="n" value="{{ d.holding|length }}">
+  {% if d.holding %}
+  <style>.vm-grid { table-layout: fixed; width: 1380px; } .vm-grid td, .vm-grid th { vertical-align: top; white-space: normal; }
+.vm-grid th { text-align: left; } .vm-grid th.n { text-align: right; }
+.vm-grid input:not([type=checkbox]), .vm-grid select { display: block; } .vm-grid input[type=text], .vm-grid input[type=number], .vm-grid select { width: 100%; box-sizing: border-box; } .vm-grid input[type=number] { text-align: right; }</style>
+  <div class="tbl-scroll"><table class="cf-table vm-grid">
+    <colgroup><col style="width:240px"><col style="width:300px"><col style="width:78px"><col style="width:130px"><col style="width:130px"><col style="width:130px"><col style="width:130px"><col style="width:90px"><col style="width:40px"></colgroup>
+    <thead><tr><th style="min-width:220px;">Item</th><th style="min-width:230px;">Treatment</th><th>Cur</th><th class="n">Low</th><th class="n">Adopted</th><th class="n">High</th><th class="n">Annual cost</th><th class="n">Multiple</th><th></th></tr></thead>
+    <tbody>
+    {% for h in d.holding %}{% set i = loop.index0 %}
+      <tr>
+        <td><input type="hidden" name="h{{ i }}_id" value="{{ h.id }}"><input type="text" name="h{{ i }}_label" value="{{ h.label }}" {% if locked %}readonly{% endif %}>
+            <input type="text" name="h{{ i }}_notes" value="{{ h.notes }}" placeholder="Notes" style="font-size:11px;margin-top:2px;" {% if locked %}readonly{% endif %}></td>
+        <td><select name="h{{ i }}_kind" {% if locked %}disabled{% endif %}>{% for k, lbl in VM_HOLDING_KINDS %}<option value="{{ k }}" {% if h.kind == k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></td>
+        <td><input type="text" name="h{{ i }}_currency" value="{{ h.currency or cur }}" maxlength="6" {% if locked %}readonly{% endif %}></td>
+        {% for f in ('low','adopted','high','annual') %}<td><input type="number" step="0.01" name="h{{ i }}_{{ f }}" value="{{ h[f]|vmnum if h[f] else '' }}" {% if locked %}readonly{% endif %}></td>{% endfor %}<td><input type="number" step="any" name="h{{ i }}_multiple" value="{{ h.multiple|vmnum if h.multiple else '' }}" {% if locked %}readonly{% endif %}></td>
+        <td>{% if not locked %}<button type="submit" name="action" value="delete:{{ h.id }}" class="btn small secondary" onclick="return confirm('Remove this item?');">&times;</button>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<div class="empty-state">No holding-company items yet.</div>{% endif %}
+  {% if not locked %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px;">
+    <button class="btn secondary small" type="submit" name="action" value="add:add">+ Asset (cash, investments)</button>
+    <button class="btn secondary small" type="submit" name="action" value="add:deduct">+ Liability (debt)</button>
+    <button class="btn secondary small" type="submit" name="action" value="add:eliminate">+ Elimination</button>
+    <button class="btn secondary small" type="submit" name="action" value="add:capcost">+ Capitalised central costs</button>
+  </div>
+  {% endif %}
+</div>
+</form>
+{% endblock %}

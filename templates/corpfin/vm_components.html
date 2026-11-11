@@ -1,0 +1,97 @@
+{% extends "corpfin/vm_base.html" %}
+{% block tab %}
+{% set locked = vm.is_final %}
+{% if not locked %}
+<div class="card">
+  <h3 style="margin-top:0;">Bring in component valuations</h3>
+  <p class="cf-sub">Upload the valuation of each subsidiary, business unit or asset. You will see what was read &mdash; and can correct it &mdash; before it joins the model.
+    {% if ai_on is defined and ai_on %}<span class="badge status-Approved">AI reader on</span>{% else %}<span class="badge">Built-in reader</span>{% endif %}</p>
+  <div class="form-row" style="align-items:flex-start;">
+    <form method="post" action="{{ url_for('corpfin.vm_import_read', vm_id=vm.id) }}" enctype="multipart/form-data" style="flex:2;min-width:300px;">
+      <label>Upload a valuation (Excel, Word or PDF)</label>
+      <input type="file" name="file" accept=".xlsx,.xlsm,.docx,.pdf,.csv,.txt">
+      <details style="margin:6px 0;"><summary style="cursor:pointer;" class="muted">Or paste the valuation conclusion</summary>
+        <textarea name="text" rows="4" placeholder="e.g. The fair value of the claim is US$1,000,000, within a range of US$500,000 to US$2,000,000."></textarea></details>
+      <button class="btn gold" type="submit" style="margin-top:6px;">Read the valuation</button>
+    </form>
+    <div style="flex:1;min-width:240px;">
+      <label>Excel template</label>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;">
+        <a class="btn secondary small" href="{{ url_for('corpfin.vm_template', vm_id=vm.id) }}">Download blank template</a>
+        {% if d.components %}<a class="btn secondary small" href="{{ url_for('corpfin.vm_components_excel', vm_id=vm.id) }}" title="Your components in the template layout - correct them in Excel and upload again">Export current components</a>{% endif %}
+      </div>
+      <p class="cf-sub" style="margin-top:6px;">One row per component. Complete it for each entity (or send it to the people who hold the valuations) and upload it back. Uploading a revised file can update components that are already here.</p>
+    </div>
+  </div>
+  {% if saved_models or saved_certs %}
+  <form method="post" action="{{ url_for('corpfin.vm_import_saved', vm_id=vm.id) }}" style="margin-top:10px;border-top:1px solid var(--border);padding-top:10px;">
+    <label>Valuations already in the app for {{ vm.client.name }}</label>
+    <div style="display:flex;flex-wrap:wrap;gap:6px 22px;margin:4px 0 8px;">
+      {% for m in saved_models %}{% for v in m.valuations %}
+      <label style="font-weight:normal;"><input type="checkbox" name="pick" value="m:{{ m.id }}:{{ v.id }}" style="width:auto;"> Forecast model {{ m.model_number }} &ndash; {{ v.name }}{% if v.valuation_date %} ({{ v.valuation_date.strftime('%d %b %Y') }}){% endif %}</label>
+      {% endfor %}{% endfor %}
+      {% for c in saved_certs %}
+      <label style="font-weight:normal;"><input type="checkbox" name="pick" value="c:{{ c.id }}" style="width:auto;"> Valuation certificate {{ c.reference }} &ndash; {{ c.currency }} {{ '{:,.0f}'.format(c.adopted_value) }}</label>
+      {% endfor %}
+    </div>
+    <button class="btn secondary small" type="submit">Review &amp; add the ticked valuations</button>
+  </form>
+  {% endif %}
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('corpfin.vm_save_components', vm_id=vm.id) }}" class="card" id="components">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;">
+    <h3 style="margin:0;">Components</h3>
+    {% if not locked %}<div style="display:flex;gap:8px;"><button class="btn gold" type="submit" name="action" value="save">Save components</button>
+      <button class="btn secondary" type="submit" name="action" value="add">+ Add component</button></div>{% endif %}
+  </div>
+  <p class="cf-sub">Values are in each component's own currency, whole units. <strong>Basis</strong>: choose Enterprise value when the figure is before debt &mdash; the net debt is then deducted.
+    <strong>Own %</strong> is the group's interest. Adjustments apply in order: control premium, then minority discount, then DLOM.</p>
+  <input type="hidden" name="n" value="{{ d.components|length }}">
+  {% if d.components %}
+  <style>
+.vm-grid { table-layout: fixed; width: 1900px; }
+.vm-grid td, .vm-grid th { vertical-align: top; white-space: normal; }
+.vm-grid th { text-align: left; } .vm-grid th.n { text-align: right; }
+.vm-grid input:not([type=checkbox]), .vm-grid select { display: block; }
+.vm-grid input[type=text], .vm-grid input[type=number], .vm-grid input[type=date], .vm-grid select { width: 100%; box-sizing: border-box; }
+.vm-grid input[type=number], .vm-grid input.n { text-align: right; }
+</style>
+<div class="tbl-scroll"><table class="cf-table vm-grid">
+    <colgroup><col style="width:36px"><col style="width:220px"><col style="width:150px"><col style="width:150px"><col style="width:78px"><col style="width:130px"><col style="width:140px"><col style="width:125px"><col style="width:125px"><col style="width:125px"><col style="width:110px"><col style="width:70px"><col style="width:76px"><col style="width:70px"><col style="width:76px"><col style="width:190px"><col style="width:40px"></colgroup>
+    <thead><tr><th>In</th><th>Component</th><th>Type</th><th>Method</th><th>Cur</th><th>Basis</th><th>Valuation date</th>
+      <th class="n">Low</th><th class="n">Adopted</th><th class="n">High</th><th class="n">Net debt</th><th class="n">Own %</th><th class="n">Minority %</th><th class="n">DLOM %</th><th class="n">Control %</th><th>Source</th><th></th></tr></thead>
+    <tbody>
+    {% for c in d.components %}{% set i = loop.index0 %}{% set row = res.rows[i] %}
+      <tr {% if row.problem in ('no value','no rate') %}style="background:#fdf1dc;"{% endif %}>
+        <td><input type="hidden" name="c{{ i }}_id" value="{{ c.id }}"><input type="checkbox" name="c{{ i }}_include" style="width:auto;" {% if c.include %}checked{% endif %} {% if locked %}disabled{% endif %}></td>
+        <td><input type="text" name="c{{ i }}_name" value="{{ c.name }}" {% if locked %}readonly{% endif %}>
+            <input type="text" name="c{{ i }}_notes" value="{{ c.notes }}" placeholder="Notes" style="font-size:11px;margin-top:2px;" {% if locked %}readonly{% endif %}></td>
+        <td><select name="c{{ i }}_type" {% if locked %}disabled{% endif %}>{% for t in VM_TYPES %}<option {% if c.type == t %}selected{% endif %}>{{ t }}</option>{% endfor %}{% if c.type not in VM_TYPES %}<option selected>{{ c.type }}</option>{% endif %}</select></td>
+        <td><input type="text" name="c{{ i }}_method" value="{{ c.method }}" list="vm-methods" {% if locked %}readonly{% endif %}></td>
+        <td><input type="text" name="c{{ i }}_currency" value="{{ c.currency }}" maxlength="6" {% if locked %}readonly{% endif %}></td>
+        <td><select name="c{{ i }}_basis" {% if locked %}disabled{% endif %}>{% for k, lbl in VM_BASES %}<option value="{{ k }}" {% if c.basis == k %}selected{% endif %}>{{ lbl.split(' (')[0] }}</option>{% endfor %}</select></td>
+        <td><input type="date" name="c{{ i }}_date" value="{{ c.date }}" {% if locked %}readonly{% endif %}></td>
+        {% for k in ('low','adopted','high','net_debt') %}<td><input type="number" step="0.01" name="c{{ i }}_{{ k }}" value="{{ c[k]|vmnum }}" {% if locked %}readonly{% endif %}></td>{% endfor %}
+        {% for k in ('ownership_pct','minority_pct','dlom_pct','control_pct') %}<td><input type="number" step="any" min="0" name="c{{ i }}_{{ k }}" value="{{ c[k]|vmnum }}" {% if locked %}readonly{% endif %}></td>{% endfor %}
+        <td style="font-size:11px;max-width:200px;">{% if c.source.label %}{{ c.source.label }}{% if c.source.at %}<div class="muted">{{ c.source.at }}</div>{% endif %}{% else %}<span class="muted">typed in</span>{% endif %}
+          {% if row.problem == 'no value' %}<div style="color:#b3261e;">no value</div>{% elif row.problem == 'no rate' %}<div style="color:#b3261e;">no rate for {{ c.currency }}</div>{% endif %}</td>
+        <td>{% if not locked %}<button type="submit" name="action" value="delete:{{ c.id }}" class="btn small secondary" onclick="return confirm('Remove this component?');" title="Remove">&times;</button>{% endif %}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <datalist id="vm-methods">{% for m in VM_METHODS %}<option value="{{ m }}">{% endfor %}</datalist>
+  {% else %}
+  <div class="empty-state">No components yet. Upload a valuation above, bring in a saved valuation, or <strong>+ Add component</strong> and type the figures.</div>
+  {% endif %}
+</form>
+
+{% if d.import_log %}
+<details class="card"><summary style="cursor:pointer;font-weight:600;">Import history</summary>
+  <table class="cf-table"><thead><tr><th>When</th><th>By</th><th>Source</th><th>File</th><th class="n">Added</th><th class="n">Updated</th></tr></thead><tbody>
+  {% for l in d.import_log|reverse %}<tr><td>{{ l.at }}</td><td>{{ l.by }}</td><td>{{ l.method }}</td><td>{{ l.file }}</td><td class="n">{{ l.added }}</td><td class="n">{{ l.replaced }}</td></tr>{% endfor %}
+  </tbody></table></details>
+{% endif %}
+{% endblock %}

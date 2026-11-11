@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}New valuation model - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>New valuation model</h1>
+  <div class="subtitle">A group / sum-of-the-parts valuation: bring in the valuation of each subsidiary, business unit or asset and consolidate them.</div></div>
+  <div><a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">Back</a></div>
+</div>
+<form method="post" class="card">
+  <div class="form-row">
+    <div><label for="client_id">Client *</label>
+      <select id="client_id" name="client_id" required onchange="filterEng()">
+        <option value="">Choose...</option>
+        {% for c in clients %}<option value="{{ c.id }}" {% if form.get('client_id') == c.id|string %}selected{% endif %}>{{ c.name }}</option>{% endfor %}
+      </select></div>
+    <div><label for="engagement_id">Engagement (optional - needed to file the report in Working Papers)</label>
+      <select id="engagement_id" name="engagement_id">
+        <option value="">None</option>
+        {% for e in engagements %}<option value="{{ e.id }}" data-client="{{ e.client_id }}" {% if form.get('engagement_id') == e.id|string %}selected{% endif %}>{{ e.title }} ({{ e.type }})</option>{% endfor %}
+      </select></div>
+  </div>
+  <div class="form-row">
+    <div><label for="name">Valuation model name *</label><input type="text" id="name" name="name" required maxlength="200" value="{{ form.get('name', '') }}" placeholder="e.g. Group valuation - 31 December 2026"></div>
+    <div><label for="currency">Reporting currency</label>
+      <select id="currency" name="currency">{% for c in currencies %}<option {% if form.get('currency', 'USD') == c %}selected{% endif %}>{{ c }}</option>{% endfor %}</select></div>
+    <div><label for="valuation_date">Valuation date</label><input type="date" id="valuation_date" name="valuation_date" value="{{ form.get('valuation_date', today) }}"></div>
+  </div>
+  <div class="form-row">
+    <div><label for="basis_of_value">Basis of value</label>
+      <select id="basis_of_value" name="basis_of_value">{% for b in bases %}<option {% if form.get('basis_of_value', 'Fair value') == b %}selected{% endif %}>{{ b }}</option>{% endfor %}</select></div>
+    <div style="flex:2;"><label for="purpose">Purpose of the valuation</label><input type="text" id="purpose" name="purpose" maxlength="600" value="{{ form.get('purpose', '') }}" placeholder="e.g. company reorganisation, share sale, financial reporting"></div>
+  </div>
+  <button class="btn gold" type="submit">Create valuation model</button>
+</form>
+<script>
+function filterEng() {
+  var c = document.getElementById('client_id').value, sel = document.getElementById('engagement_id');
+  for (var i = 0; i < sel.options.length; i++) {
+    var o = sel.options[i], k = o.getAttribute('data-client');
+    o.hidden = !!k && !!c && k !== c; o.disabled = o.hidden;
+  }
+  if (sel.selectedOptions.length && sel.selectedOptions[0].disabled) sel.value = '';
+}
+filterEng();
+</script>
+{% endblock %}

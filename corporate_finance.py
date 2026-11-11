@@ -26,7 +26,7 @@ import cf_tools as T
 import cf_report as R
 from extensions import db
 from models import (
-    Client, Engagement, CFModel, CFScenario, CFValuation, CFProject, CFMgmtPack, CF_STATUSES,
+    Client, Engagement, CFModel, CFScenario, CFValuation, CFProject, CFMgmtPack, CFValuationModel, CF_STATUSES,
     user_has_permission, user_can_access_client, user_can_access_engagement, visible_clients,
     engagement_acceptance_cleared,
 )
@@ -262,7 +262,8 @@ def dashboard():
     clients, models, projects = _visible_models(client_filter)
     ids = [c.id for c in clients if not client_filter or c.id == client_filter]
     packs = [p for p in (CFMgmtPack.query.filter(CFMgmtPack.client_id.in_(ids)).order_by(CFMgmtPack.updated_at.desc()).all() if ids else []) if _can_see(p)]
-    return render_template("corpfin/dashboard.html", clients=clients, models=models, projects=projects, packs=packs, client_filter=client_filter)
+    vms = [v for v in (CFValuationModel.query.filter(CFValuationModel.client_id.in_(ids)).order_by(CFValuationModel.updated_at.desc()).all() if ids else []) if _can_see(v)]
+    return render_template("corpfin/dashboard.html", clients=clients, models=models, projects=projects, packs=packs, vms=vms, client_filter=client_filter)
 
 
 # =========================================================================== engagement workspace
@@ -1380,3 +1381,4 @@ def loan_excel():
 # Management accounts packs and the financial-statements loader live in their own module; importing it here (after everything
 # above is defined) adds its routes to this same blueprint.
 import corporate_finance_ma  # noqa: E402,F401
+import corporate_finance_vm  # noqa: E402,F401

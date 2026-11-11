@@ -11,7 +11,7 @@ from flask_login import current_user, login_required
 
 import brand_docs
 from extensions import db
-from models import ClientAdvance, CreditNote, Invoice, Quotation, Receipt, ValuationCertificate, WorkpaperNarrative, ZimraReply
+from models import CFValuationModel, ClientAdvance, CreditNote, Invoice, Quotation, Receipt, ValuationCertificate, WorkpaperNarrative, ZimraReply
 
 mpsign_bp = Blueprint("mpsign", __name__, url_prefix="/sign")
 
@@ -24,6 +24,7 @@ KINDS = {
     "advance": (ClientAdvance, "advance receipt", lambda d: url_for("advances.view_advance", advance_id=d.id)),
     "zimra_reply": (ZimraReply, "letter", lambda d: url_for("zimra.view_reply", reply_id=d.id)),
     "valuation": (ValuationCertificate, "valuation certificate", lambda d: url_for("valuations.view_certificate", cert_id=d.id)),
+    "valuation_model": (CFValuationModel, "valuation model report", lambda d: url_for("corpfin.vm_tab", vm_id=d.id, tab="report")),
     "report_to_management": (WorkpaperNarrative, "Report to Management letter",
                              lambda d: url_for("engagements.view_engagement", engagement_id=d.engagement_id, tab="finalisation")),
 }
@@ -49,6 +50,13 @@ def can_sign(doc):
         left = valuation_docs.unresolved(doc)
         if left:
             return False, f"{len(left)} [CONFIRM: ...] placeholder(s) are still in the certificate. Complete them first."
+    if type(doc).__name__ == "CFValuationModel":
+        import cf_valmodel
+        res = cf_valmodel.consolidate(doc.data, doc.currency, doc.valuation_date)
+        if not res["count"]:
+            return False, "The valuation model has no component with a value yet."
+        if not res["complete"]:
+            return False, "The valuation model is incomplete (a component has no value or no exchange rate). Fix it before signing."
     if type(doc).__name__ == "WorkpaperNarrative" and doc.kind != "report_to_management":
         return False, "Only the Report to Management letter carries the signature."
     if not brand_docs.signature_bytes():
