@@ -254,7 +254,7 @@ def _add_missing_columns():
         "document": [
             ("reference", "VARCHAR(100)"), ("substantive_area_id", "INTEGER"), ("filing_index_id", "INTEGER"),
             ("is_generated", "BOOLEAN DEFAULT 0"), ("workpaper_kind", "VARCHAR(40)"),
-            ("is_current_version", "BOOLEAN DEFAULT 1"),
+            ("is_current_version", "BOOLEAN DEFAULT 1"), ("in_app", "BOOLEAN DEFAULT 0"),
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
         "regulatory_notice": [("text_source", "VARCHAR(20)")],
@@ -835,6 +835,7 @@ def create_app():
     from tb_year_import import tbyear_bp
     from tb_align import tbalign_bp
     from cf_prior import cfprior_bp
+    from wp_editor import wpedit_bp
     from deferred_tax_adj import dtadj_bp
     from whistleblower import wb_bp, wb_public_bp
     from training import training_bp
@@ -890,6 +891,7 @@ def create_app():
     app.register_blueprint(tbyear_bp)
     app.register_blueprint(tbalign_bp)
     app.register_blueprint(cfprior_bp)
+    app.register_blueprint(wpedit_bp)
     app.register_blueprint(dtadj_bp)
     from backup import backup_bp, nav_state as _backup_nav_state, start_scheduler as _start_backups
     app.register_blueprint(backup_bp)

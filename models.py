@@ -2560,6 +2560,8 @@ class Document(db.Model):
     is_generated = db.Column(db.Boolean, default=False)
     workpaper_kind = db.Column(db.String(40))
     is_current_version = db.Column(db.Boolean, default=True)
+    # True for a working paper made or opened in the app's own editor (Working Papers tab): it is edited in place, no download needed.
+    in_app = db.Column(db.Boolean, default=False)
     reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     reviewed_at = db.Column(db.DateTime)
     partner_signed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))

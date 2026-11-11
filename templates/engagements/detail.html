@@ -471,7 +471,7 @@
     </tbody>
   </table>
   {% else %}
-  <p class="muted" style="font-size:11.5px;margin-top:6px;">Not generated yet - nothing filed under Documents for this working paper.</p>
+  <p class="muted" style="font-size:11.5px;margin-top:6px;">Not generated yet - nothing filed under Working Papers for this working paper.</p>
   {% endif %}
 {% endmacro %}
 <div class="page-header">
@@ -516,7 +516,7 @@
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='registry_forms') }}" class="{% if tab=='registry_forms' %}active{% endif %}">Registry Forms{% if registry_filings %} ({{ registry_filings|length }}){% endif %}</a>
   {% endif %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='checklist') }}" class="{% if tab=='checklist' %}active{% endif %}">Checklist ({{ engagement.checklist_progress }}%)</a>
-  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Documents ({{ engagement.documents|length }})</a>
+  <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}" class="{% if tab=='documents' %}active{% endif %}">Working Papers ({{ engagement.documents|length }})</a>
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='tasks') }}" class="{% if tab=='tasks' %}active{% endif %}">Tasks ({{ engagement.tasks|length }})</a>
   {% if engagement.has_asset_schedules %}
   <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='asset_register') }}" class="{% if tab=='asset_register' %}active{% endif %}">Asset Register{% if ppe_assets %} ({{ ppe_assets|length }}){% endif %}</a>
@@ -2482,9 +2482,9 @@
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
 {% else %}
   <div class="card">
-    <h3 class="mt-0">Templates for this engagement <span class="badge type-{{ engagement.type|replace(' ', '') }}">{{ engagement.type }}</span></h3>
+    <h3 class="mt-0">Generate a working paper <span class="badge type-{{ engagement.type|replace(' ', '') }}">{{ engagement.type }}</span></h3>
     {% if matching_templates %}
-    <p class="muted" style="font-size:12.5px;">Automatically matched to this engagement's type. Download, fill in, then upload the completed file below to keep it with the engagement.</p>
+    <p class="muted" style="font-size:12.5px;">Pick a template and press <strong>Generate</strong>: a copy is made for {{ engagement.client.name }}, the client, period and (where the paper asks for them) figures from the trial balance are filled in, and it opens here in the app for you to work in - no download needed. It is filed below, and saves as you type.</p>
     <table>
       <thead><tr><th>Ref</th><th>Template</th><th>Format</th><th></th></tr></thead>
       <tbody>
@@ -2493,7 +2493,10 @@
           <td class="muted">{{ tpl.ref_code }}</td>
           <td>{{ tpl.title }}{% if tpl.description %}<div class="muted" style="font-size:11.5px;">{{ tpl.description }}</div>{% endif %}</td>
           <td>{{ 'Excel' if tpl.file_ext == 'xlsx' else 'Word' }}</td>
-          <td class="text-right"><a href="{{ url_for('doc_templates.download_template', template_id=tpl.id) }}" class="btn small secondary">Download</a></td>
+          <td class="text-right">
+            <form method="post" action="{{ url_for('wpedit.generate', engagement_id=engagement.id, template_id=tpl.id) }}" class="inline"><button type="submit" class="btn small gold">Generate</button></form>
+            <a href="{{ url_for('doc_templates.download_template', template_id=tpl.id) }}" class="btn small secondary" title="Blank copy of the template">Blank copy</a>
+          </td>
         </tr>
       {% endfor %}
       </tbody>
@@ -2504,7 +2507,7 @@
   </div>
 
   <div class="card">
-    <h3 class="mt-0">Upload working paper / document</h3>
+    <h3 class="mt-0">Upload a working paper / document</h3>
     <form method="post" action="{{ url_for('engagements.upload_document', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
       <div><label for="file">File *</label><input type="file" id="file" name="file" required></div>
       <div><label for="category">Category</label><input type="text" id="category" name="category" placeholder="e.g. Working Papers" value="General"></div>
@@ -2531,10 +2534,24 @@
           <td>v{{ d.version }}</td>
           <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
           <td>{{ (d.uploaded_at|cat).strftime('%d %b %Y %H:%M') }}</td>
-          <td>
+          <td style="white-space:nowrap;">
+            {% if d.original_filename.lower().endswith(('.docx', '.xlsx')) %}<a href="{{ url_for('wpedit.open_doc', doc_id=d.id) }}" class="btn small gold" title="{{ 'Work in this paper in the app' if d.in_app else 'Opens an editable copy as a new version; this upload stays unchanged' }}">{{ 'Open' if d.in_app else 'Open in app' }}</a>{% endif %}
             <a href="{{ url_for('engagements.download_document', doc_id=d.id) }}" class="btn small secondary">Download</a>
             {% if user_has_permission(current_user, 'delete_documents') %}
             <form method="post" action="{{ url_for('engagements.delete_document', doc_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
+            {% endif %}
+            {% if d.is_generated and d.workpaper_kind and d.workpaper_kind.startswith('template_') %}
+            <div style="font-size:11px;margin-top:4px;">
+              {% if d.is_reviewed %}<span class="badge status-Completed">Reviewed</span> {{ d.reviewed_by.name }}
+              {% elif current_user.role in ('supervisor', 'partner', 'admin') and d.uploaded_by_id != current_user.id %}<form method="post" action="{{ url_for('engagements.review_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small secondary" style="font-size:10.5px;">Mark reviewed</button></form>
+              {% else %}<span class="muted">Awaiting review</span>{% endif %}
+              {% if d.is_reviewed and current_user.role in ('supervisor', 'partner', 'admin') %}<form method="post" action="{{ url_for('engagements.unreview_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small secondary" style="font-size:10.5px;">&times;</button></form>{% endif %}
+              <br>
+              {% if d.is_partner_signed %}<span class="badge status-Completed">Partner signed</span> {{ d.partner_signed_by.name }}
+                {% if current_user.role in ('partner', 'admin') %}<form method="post" action="{{ url_for('engagements.partner_unsign_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small secondary" style="font-size:10.5px;">&times;</button></form>{% endif %}
+              {% elif current_user.role in ('partner', 'admin') and d.uploaded_by_id != current_user.id %}<form method="post" action="{{ url_for('engagements.partner_sign_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small gold" style="font-size:10.5px;">Partner sign-off</button></form>
+              {% else %}<span class="muted">Not partner signed</span>{% endif %}
+            </div>
             {% endif %}
           </td>
         </tr>
@@ -2542,7 +2559,7 @@
       </tbody>
     </table>
     {% else %}
-    <div class="empty-state">No documents uploaded yet.</div>
+    <div class="empty-state">No working papers yet - generate one from a template above, or upload a file.</div>
     {% endif %}
   </div>
 
@@ -3045,7 +3062,7 @@
       <a href="{{ url_for('tax.act_contents', code='cgt') }}">Capital Gains Tax Act</a> (<a href="{{ url_for('tax.cgt_act_check') }}">beside the app's CGT material</a>).
     </p>
     <p class="muted" style="font-size:11.5px;">
-      The Tax Risk Register below reuses the same likelihood x impact register as everywhere else in this app; the Execution Plan (one section per tax head) {% if engagement.is_tax_advisory_type %}is the next card below{% else %}lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas{% endif %}; CIT/Deferred Tax computations are their own tabs (<a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a>{% if engagement.has_tax_module %}, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='qpd') }}">Provisional Tax (QPD)</a>{% endif %}); and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Documents</a> tab, tagged with a Filing Index reference like any other working paper.
+      The Tax Risk Register below reuses the same likelihood x impact register as everywhere else in this app; the Execution Plan (one section per tax head) {% if engagement.is_tax_advisory_type %}is the next card below{% else %}lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas{% endif %}; CIT/Deferred Tax computations are their own tabs (<a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='income_tax') }}">Income Tax Computation</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a>{% if engagement.has_tax_module %}, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a>, <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='qpd') }}">Provisional Tax (QPD)</a>{% endif %}); and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Working Papers</a> tab, tagged with a Filing Index reference like any other working paper.
     </p>
   </div>
 
@@ -3798,7 +3815,7 @@
       {% if not engagement.accounting_service_list %}<span class="muted">none explicitly ticked - shown because this is a dedicated {{ engagement.type }} engagement.</span>{% endif %}
     </p>
     <p class="muted" style="font-size:11.5px;">
-      The Accounting Risk Register below reuses the same likelihood x impact register as everywhere else in this app; {% if engagement.is_tax_advisory_type %}{% else %}the write-up/close-out Execution Plan (one section per work area) lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas; {% endif %}once the General Ledger is rolled up below, the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab's mapping and the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}">Finalisation</a> tab's financial statements take over unchanged from there; and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Documents</a> tab, tagged with a Filing Index reference like any other working paper.
+      The Accounting Risk Register below reuses the same likelihood x impact register as everywhere else in this app; {% if engagement.is_tax_advisory_type %}{% else %}the write-up/close-out Execution Plan (one section per work area) lives on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='substantive') }}">Substantive Procedures</a> tab, alongside this engagement's other areas; {% endif %}once the General Ledger is rolled up below, the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab's mapping and the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}">Finalisation</a> tab's financial statements take over unchanged from there; and supporting documents belong on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='documents') }}">Working Papers</a> tab, tagged with a Filing Index reference like any other working paper.
     </p>
   </div>
 
@@ -4585,7 +4602,7 @@
 
   <div class="card">
     <h3 class="mt-0">Working papers</h3>
-    <p class="muted" style="font-size:12.5px;">Generate working papers directly from the data already captured on this engagement - each one is FILED under Documents (following the firm's Filing Index reference where one applies) rather than downloaded straight away; download the filed copy whenever you actually need the file. Regenerating keeps every earlier version on file rather than replacing it. References (see the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>): {% if engagement.type != 'Business Intelligence and IT Engagements' %}{{ filing_reference('financials') }} (financial statements), N1000 (trial balance &amp; adjustments), {% endif %}{{ filing_reference('rep_letter') }} (management representation letter), {{ filing_reference('report_to_management') }} (report to management), {{ filing_reference('finalisation') }} (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report - no filing-index code, outside the scope of the audit filing policy){% elif engagement.type == 'Business Intelligence and IT Engagements' %}, ITR-1 (IT &amp; Cyber Assurance Report - no filing-index code, outside the scope of the audit filing policy){% endif %}.</p>
+    <p class="muted" style="font-size:12.5px;">Generate working papers directly from the data already captured on this engagement - each one is FILED under Working Papers (following the firm's Filing Index reference where one applies) rather than downloaded straight away; download the filed copy whenever you actually need the file. Regenerating keeps every earlier version on file rather than replacing it. References (see the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>): {% if engagement.type != 'Business Intelligence and IT Engagements' %}{{ filing_reference('financials') }} (financial statements), N1000 (trial balance &amp; adjustments), {% endif %}{{ filing_reference('rep_letter') }} (management representation letter), {{ filing_reference('report_to_management') }} (report to management), {{ filing_reference('finalisation') }} (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report - no filing-index code, outside the scope of the audit filing policy){% elif engagement.type == 'Business Intelligence and IT Engagements' %}, ITR-1 (IT &amp; Cyber Assurance Report - no filing-index code, outside the scope of the audit filing policy){% endif %}.</p>
 
     {% if engagement.type != 'Business Intelligence and IT Engagements' %}
     <h4 class="mt-0" style="margin-bottom:4px;">Financial statements (Word, Ref. {{ filing_reference('financials') }})</h4>
@@ -5719,7 +5736,7 @@
   <div class="card">
     <h3 class="mt-0">Working papers</h3>
     <p class="muted" style="font-size:12.5px;">
-      Generate the whole programme above as a working paper, with each area's reference code carried through - it's filed under Documents (Ref. {{ filing_reference('substantive') }}) rather than downloaded immediately; download the filed copy whenever you need the file.
+      Generate the whole programme above as a working paper, with each area's reference code carried through - it's filed under Working Papers (Ref. {{ filing_reference('substantive') }}) rather than downloaded immediately; download the filed copy whenever you need the file.
     </p>
     <h4 class="mt-0" style="margin-bottom:4px;">{% if engagement.type == 'Investigative Engagement' %}Investigative procedures programme{% elif engagement.type == 'Business Intelligence and IT Engagements' %}IT &amp; cyber assurance procedures programme{% elif engagement.type == 'Secretarial' %}Secretarial Execution Plan{% else %}Substantive procedures programme{% endif %} (Word)</h4>
     <form method="post" action="{{ url_for('engagements.generate_substantive_procedures_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>

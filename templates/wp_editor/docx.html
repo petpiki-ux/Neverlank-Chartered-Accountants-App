@@ -1,0 +1,184 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.original_filename }} - Working Papers - {{ firm_name }}{% endblock %}
+{% block content %}
+<style>
+  .wp-bar { position: sticky; top: 0; z-index: 20; background: #fff; border: 1px solid #d9dde3; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .wp-bar .sep { width: 1px; height: 22px; background: #d9dde3; margin: 0 4px; }
+  .wp-bar button, .wp-bar a.tb { font: inherit; font-size: 12.5px; padding: 4px 9px; border: 1px solid #c8ced6; background: #f7f8fa; border-radius: 5px; cursor: pointer; color: #1b2a41; text-decoration: none; margin: 0; }
+  .wp-bar button:hover, .wp-bar a.tb:hover { background: #eaeef3; }
+  .wp-bar button:disabled { opacity: .45; cursor: default; }
+  .wp-status { margin-left: auto; font-size: 12px; color: #5b6573; }
+  .wp-status.err { color: #b02a2a; font-weight: 600; }
+  .wp-desk { background: #e9ecf1; padding: 22px 12px; border-radius: 8px; overflow-x: auto; }
+  .wp-page { background: #fff; margin: 0 auto; padding: 44px 48px 60px; box-shadow: 0 2px 12px rgba(0,0,0,.18); min-height: 700px; font-family: Calibri, Arial, sans-serif; font-size: 11pt; color: #111; box-sizing: content-box; }
+  .wp-p { outline: none; white-space: pre-wrap; word-wrap: break-word; min-height: 1.2em; border-radius: 2px; }
+  .wp-p:hover { background: rgba(212, 175, 55, .07); }
+  .wp-p:focus { background: rgba(212, 175, 55, .13); box-shadow: 0 0 0 1px rgba(212, 175, 55, .55); }
+  .wp-p.ro, .wp-p[contenteditable=false] { background: none !important; box-shadow: none !important; }
+  .wp-p[data-list]::before { content: "\2022"; position: absolute; margin-left: -14px; }
+  .wp-p[data-list] { position: relative; }
+  .wp-t { border-collapse: collapse; table-layout: fixed; margin: 4px 0; }
+  .wp-t td { padding: 3px 6px; vertical-align: top; overflow-wrap: anywhere; }
+  .wp-t td:focus-within { background: rgba(212, 175, 55, .05); }
+  .wp-hf { opacity: .75; }
+  .wp-locked-note { background: #fff4d6; border: 1px solid #e3c978; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+  @media print { .wp-bar, .wp-desk { box-shadow: none; } }
+</style>
+
+<div class="page-header">
+  <div>
+    <h1 style="margin-bottom:2px;">{{ doc.original_filename }}</h1>
+    <div class="subtitle">{{ engagement.client.name }} - {{ engagement.title }} &middot; v{{ doc.version }}{% if doc.reference %} &middot; {{ doc.reference }}{% endif %}</div>
+  </div>
+</div>
+
+{% if locked %}<div class="wp-locked-note">This working paper is signed off by the partner, so it is read-only. Remove the partner sign-off on the Working Papers tab to change it.</div>{% endif %}
+
+<div class="wp-bar" id="wpbar">
+  <a class="tb" href="{{ back }}" title="Back to the Working Papers tab">&larr; Working Papers</a>
+  <span class="sep"></span>
+  <button type="button" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+  <button type="button" data-cmd="italic" title="Italic (Ctrl+I)"><i>I</i></button>
+  <button type="button" data-cmd="underline" title="Underline (Ctrl+U)"><u>U</u></button>
+  <button type="button" data-cmd="undo" title="Undo (Ctrl+Z)">&#8630;</button>
+  <button type="button" data-cmd="redo" title="Redo (Ctrl+Y)">&#8631;</button>
+  <span class="sep"></span>
+  <button type="button" id="b-row-add" title="Add a table row below the one you are in">+ Row</button>
+  <button type="button" id="b-row-del" title="Delete the table row you are in">&minus; Row</button>
+  <button type="button" id="b-par-add" title="Add a paragraph below the one you are in">+ Paragraph</button>
+  <button type="button" id="b-par-del" title="Delete the paragraph you are in">&minus; Paragraph</button>
+  <span class="sep"></span>
+  <a class="tb" href="{{ url_for('engagements.download_document', doc_id=doc.id) }}" title="Download this version as a Word file">Download .docx</a>
+  <span class="wp-status" id="wpstatus">Opened - changes save automatically</span>
+</div>
+
+<div class="wp-desk"><div class="wp-page" id="wppage" style="width:{{ page_width|round|int }}px;">{{ body|safe }}</div></div>
+
+<script>
+(function () {
+  var SAVE_URL = {{ url_for('wpedit.save', doc_id=doc.id)|tojson }}, OP_URL = {{ url_for('wpedit.op', doc_id=doc.id)|tojson }};
+  var LOCKED = {{ 'true' if locked else 'false' }};
+  var page = document.getElementById('wppage'), statusEl = document.getElementById('wpstatus');
+  var dirty = {}, timer = null, saving = false, again = false, last = null;
+
+  function setStatus(t, err) { statusEl.textContent = t; statusEl.className = 'wp-status' + (err ? ' err' : ''); }
+  if (LOCKED) {
+    page.querySelectorAll('.wp-p').forEach(function (p) { p.setAttribute('contenteditable', 'false'); });
+    document.querySelectorAll('#wpbar button').forEach(function (b) { b.disabled = true; });
+    setStatus('Read-only (partner signed)');
+  }
+
+  function hex(rgb) { var m = /rgba?\((\d+),\s*(\d+),\s*(\d+)/.exec(rgb || ''); if (!m) return null; return [1, 2, 3].map(function (i) { return ('0' + (+m[i]).toString(16)).slice(-2); }).join(''); }
+  function plainText(node) {      // text of a node, <br> and block breaks as newlines
+    var out = '';
+    node.childNodes.forEach(function (n) {
+      if (n.nodeType === 3) out += n.nodeValue;
+      else if (n.nodeName === 'BR') out += '\n';
+      else if (n.nodeType === 1) { var t = plainText(n); out += (/^(DIV|P)$/.test(n.nodeName) && out && !/\n$/.test(out) ? '\n' : '') + t; }
+    });
+    return out;
+  }
+  function regular(p) {            // every child is one of the original run spans, untouched
+    var seen = {};
+    for (var i = 0; i < p.childNodes.length; i++) {
+      var n = p.childNodes[i];
+      if (n.nodeType === 3) { if (n.nodeValue.trim() !== '') return false; continue; }
+      if (n.nodeName !== 'SPAN' || n.getAttribute('data-r') === null || seen[n.getAttribute('data-r')]) return false;
+      seen[n.getAttribute('data-r')] = 1;
+      for (var j = 0; j < n.children.length; j++) if (n.children[j].nodeName !== 'BR') return false;
+    }
+    return true;
+  }
+  function segments(p) {
+    var segs = [];
+    function push(t, el) {
+      if (t === '') return;
+      var cs = getComputedStyle(el);
+      var s = { t: t, b: parseInt(cs.fontWeight, 10) >= 600 || cs.fontWeight === 'bold', i: cs.fontStyle === 'italic', u: (cs.textDecorationLine || '').indexOf('underline') >= 0, c: hex(cs.color), s: Math.round(parseFloat(cs.fontSize) * 0.75 * 2) / 2 };
+      var L = segs[segs.length - 1];
+      if (L && L.b === s.b && L.i === s.i && L.u === s.u && L.c === s.c && L.s === s.s) L.t += t; else segs.push(s);
+    }
+    (function walk(node) {
+      node.childNodes.forEach(function (n) {
+        if (n.nodeType === 3) push(n.nodeValue, n.parentElement);
+        else if (n.nodeName === 'BR') push('\n', node.nodeType === 1 ? node : p);
+        else if (n.nodeType === 1 && !n.classList.contains('pic')) { if (/^(DIV|P)$/.test(n.nodeName) && segs.length) push('\n', node); walk(n); }
+      });
+    })(p);
+    return segs;
+  }
+  function change(p) {
+    var path = p.getAttribute('data-path');
+    if (regular(p)) {
+      var runs = {};
+      p.querySelectorAll(':scope > span.wr:not(.pic)').forEach(function (s) { runs[s.getAttribute('data-r')] = plainText(s); });
+      return { path: path, runs: runs };
+    }
+    return { path: path, segments: segments(p) };
+  }
+
+  function queue(p) { dirty[p.getAttribute('data-path')] = p; setStatus('Unsaved changes...'); clearTimeout(timer); timer = setTimeout(flush, 1200); }
+  function flush(sync) {
+    clearTimeout(timer);
+    var keys = Object.keys(dirty);
+    if (!keys.length) return Promise.resolve(true);
+    if (saving) { again = true; return Promise.resolve(false); }
+    var changes = keys.map(function (k) { return change(dirty[k]); });
+    dirty = {};
+    saving = true; setStatus('Saving...');
+    return fetch(SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ changes: changes }), keepalive: !!sync })
+      .then(function (r) { return r.json().then(function (j) { return { r: r, j: j }; }); })
+      .then(function (x) {
+        saving = false;
+        if (!x.j.ok) { setStatus(x.j.error || 'Could not save', true); return false; }
+        setStatus('All changes saved ' + (x.j.saved_at || ''));
+        if (again || Object.keys(dirty).length) { again = false; return flush(); }
+        return true;
+      })
+      .catch(function () { saving = false; setStatus('Could not save - check your connection', true); keys.forEach(function (k) { dirty[k] = dirty[k] || page.querySelector('[data-path="' + k + '"]'); }); return false; });
+  }
+
+  page.addEventListener('input', function (e) { var p = e.target.closest && e.target.closest('.wp-p'); if (p && !LOCKED) queue(p); });
+  page.addEventListener('focusin', function (e) { var p = e.target.closest && e.target.closest('.wp-p'); if (p && p.getAttribute('contenteditable') === 'true') last = p; });
+  page.addEventListener('paste', function (e) {
+    var p = e.target.closest && e.target.closest('.wp-p'); if (!p) return;
+    e.preventDefault();
+    var t = (e.clipboardData || window.clipboardData).getData('text/plain');
+    document.execCommand('insertText', false, t);
+  });
+  page.addEventListener('keydown', function (e) {
+    var p = e.target.closest && e.target.closest('.wp-p'); if (!p) return;
+    if (e.key === 'Enter') { e.preventDefault(); document.execCommand('insertLineBreak'); return; }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      var all = Array.prototype.slice.call(page.querySelectorAll('.wp-p[contenteditable=true]'));
+      var i = all.indexOf(p), nx = all[i + (e.shiftKey ? -1 : 1)];
+      if (nx) { nx.focus(); var r = document.createRange(); r.selectNodeContents(nx); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r); }
+    }
+  });
+  document.querySelectorAll('#wpbar [data-cmd]').forEach(function (b) {
+    b.addEventListener('mousedown', function (e) { e.preventDefault(); });
+    b.addEventListener('click', function () { if (!LOCKED) { document.execCommand(b.getAttribute('data-cmd')); if (last) queue(last); } });
+  });
+
+  function structural(op) {
+    if (!last) { setStatus('Click in the paper first', true); return; }
+    var path = last.getAttribute('data-path');
+    flush().then(function () {
+      return fetch(OP_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ op: op, path: path }) }).then(function (r) { return r.json(); });
+    }).then(function (j) {
+      if (!j.ok) { setStatus(j.message || j.error || 'Not done', true); return; }
+      try { sessionStorage.setItem('wp_scroll_' + location.pathname, String(window.scrollY)); } catch (e) {}
+      location.reload();
+    });
+  }
+  document.getElementById('b-row-add').onclick = function () { if (!LOCKED) structural('row_add'); };
+  document.getElementById('b-row-del').onclick = function () { if (!LOCKED && confirm('Delete this table row?')) structural('row_delete'); };
+  document.getElementById('b-par-add').onclick = function () { if (!LOCKED) structural('para_add'); };
+  document.getElementById('b-par-del').onclick = function () { if (!LOCKED && confirm('Delete this paragraph?')) structural('para_delete'); };
+  try { var y = sessionStorage.getItem('wp_scroll_' + location.pathname); if (y) { sessionStorage.removeItem('wp_scroll_' + location.pathname); window.scrollTo(0, +y); } } catch (e) {}
+  window.addEventListener('pagehide', function () { flush(true); });
+  window.addEventListener('beforeunload', function (e) { if (Object.keys(dirty).length || saving) { e.preventDefault(); e.returnValue = ''; } });
+})();
+</script>
+{% endblock %}

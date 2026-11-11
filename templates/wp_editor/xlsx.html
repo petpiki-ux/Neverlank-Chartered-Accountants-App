@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+{% block title %}{{ doc.original_filename }} - Working Papers - {{ firm_name }}{% endblock %}
+{% block content %}
+<style>
+  .wp-bar { position: sticky; top: 0; z-index: 20; background: #fff; border: 1px solid #d9dde3; border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; box-shadow: 0 1px 4px rgba(0,0,0,.06); }
+  .wp-bar .sep { width: 1px; height: 22px; background: #d9dde3; margin: 0 4px; }
+  .wp-bar button, .wp-bar a.tb { font: inherit; font-size: 12.5px; padding: 4px 9px; border: 1px solid #c8ced6; background: #f7f8fa; border-radius: 5px; cursor: pointer; color: #1b2a41; text-decoration: none; margin: 0; }
+  .wp-bar a.tb:hover, .wp-bar button:hover { background: #eaeef3; }
+  .wp-status { margin-left: auto; font-size: 12px; color: #5b6573; }
+  .wp-status.err { color: #b02a2a; font-weight: 600; }
+  .xl-fx { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; font-size: 13px; }
+  .xl-fx .ref { width: 64px; text-align: center; font-weight: 600; border: 1px solid #c8ced6; border-radius: 4px; padding: 4px; background: #f7f8fa; }
+  .xl-fx input { flex: 1; margin: 0; padding: 4px 8px; font-family: Consolas, monospace; font-size: 13px; }
+  .xl-scroll { overflow: auto; max-height: 72vh; background: #fff; border: 1px solid #c8ced6; border-radius: 6px; }
+  table.xl { border-collapse: collapse; table-layout: fixed; font-family: Calibri, Arial, sans-serif; font-size: 11pt; background: #fff; }
+  table.xl th { position: sticky; top: 0; background: #eef0f3; border: 1px solid #d3d7dd; font-weight: 600; font-size: 12px; color: #5b6573; z-index: 2; padding: 2px; }
+  table.xl th.rn { position: sticky; left: 0; top: auto; z-index: 1; width: 36px; min-width: 36px; }
+  table.xl th.corner { top: 0; left: 0; z-index: 3; }
+  table.xl td { border: 1px solid #eceef1; padding: 2px 5px; height: 22px; overflow: hidden; white-space: nowrap; text-overflow: clip; outline: none; vertical-align: bottom; }
+  table.xl td.wr { white-space: pre-wrap; }
+  table.xl td:focus { outline: 2px solid #1a73e8; outline-offset: -2px; background: #fff !important; overflow: visible; }
+  table.xl td.err { color: #b02a2a; }
+  .xl-tabs { display: flex; gap: 4px; margin-top: 8px; }
+  .xl-tabs button { font: inherit; font-size: 12.5px; padding: 4px 12px; border: 1px solid #c8ced6; background: #f7f8fa; border-radius: 5px 5px 0 0; cursor: pointer; }
+  .xl-tabs button.on { background: #fff; font-weight: 600; border-bottom-color: #fff; }
+  .wp-locked-note { background: #fff4d6; border: 1px solid #e3c978; border-radius: 6px; padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+</style>
+
+<div class="page-header">
+  <div>
+    <h1 style="margin-bottom:2px;">{{ doc.original_filename }}</h1>
+    <div class="subtitle">{{ engagement.client.name }} - {{ engagement.title }} &middot; v{{ doc.version }}{% if doc.reference %} &middot; {{ doc.reference }}{% endif %}</div>
+  </div>
+</div>
+{% if locked %}<div class="wp-locked-note">This working paper is signed off by the partner, so it is read-only. Remove the partner sign-off on the Working Papers tab to change it.</div>{% endif %}
+
+<div class="wp-bar" id="wpbar">
+  <a class="tb" href="{{ back }}" title="Back to the Working Papers tab">&larr; Working Papers</a>
+  <span class="sep"></span>
+  <span style="font-size:12.5px;color:#5b6573;">Click a cell and type; formulas (=B13+B15) calculate as you type. Blue text cells are for your figures.</span>
+  <a class="tb" href="{{ url_for('engagements.download_document', doc_id=doc.id) }}" style="margin-left:8px;">Download .xlsx</a>
+  <span class="wp-status" id="wpstatus">Opened - changes save automatically</span>
+</div>
+
+<div class="xl-fx"><span class="ref" id="xref">A1</span><input type="text" id="xbar" autocomplete="off" placeholder="Value or formula" {% if locked %}disabled{% endif %}></div>
+<div class="xl-scroll"><table class="xl" id="xl"></table></div>
+<div class="xl-tabs" id="xtabs"></div>
+
+<script id="xmodel" type="application/json">{{ model|tojson }}</script>
+<script>
+(function () {
+  var MODEL = JSON.parse(document.getElementById('xmodel').textContent);
+  var SAVE_URL = {{ url_for('wpedit.save', doc_id=doc.id)|tojson }};
+  var LOCKED = {{ 'true' if locked else 'false' }};
+  var statusEl = document.getElementById('wpstatus');
+  function setStatus(t, err) { statusEl.textContent = t; statusEl.className = 'wp-status' + (err ? ' err' : ''); }
+
+  // ---------- helpers
+  function colName(n) { var s = ''; while (n > 0) { var m = (n - 1) % 26; s = String.fromCharCode(65 + m) + s; n = Math.floor((n - 1) / 26); } return s; }
+  function colNum(s) { var n = 0; for (var i = 0; i < s.length; i++) n = n * 26 + s.charCodeAt(i) - 64; return n; }
+  function splitRef(r) { var m = /^\$?([A-Z]{1,3})\$?(\d+)$/.exec(r); return m ? [colNum(m[1]), +m[2]] : null; }
+  var EPOCH = Date.UTC(1899, 11, 30);
+  function isoToSerial(s) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(s); if (!m) return null; return Math.round((Date.UTC(+m[1], +m[2] - 1, +m[3]) - EPOCH) / 86400000); }
+  function serialToIso(n) { return new Date(EPOCH + Math.round(n) * 86400000).toISOString().slice(0, 10); }
+  function dmy(iso) { var m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso); return m ? m[3] + '/' + m[2] + '/' + m[1] : iso; }
+  function parseDate(t) {
+    t = t.trim();
+    var m = /^(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})$/.exec(t);
+    if (m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+    return /^\d{4}-\d{2}-\d{2}$/.test(t) ? t : null;
+  }
+
+  // ---------- formula evaluator
+  function XErr(code) { this.code = code; }
+  var TOKEN = /\s*(?:(\d+\.?\d*(?:[eE][+-]?\d+)?|\.\d+)|("(?:[^"]|"")*")|(\$?[A-Z]{1,3}\$?\d+(?::\$?[A-Z]{1,3}\$?\d+)?)(?![A-Za-z0-9_(])|([A-Za-z_][A-Za-z0-9_.]*)(?=\s*\()|(TRUE|FALSE)\b|(<=|>=|<>|[-+*\/^&=<>(),%]))/y;
+  function tokenize(src) {
+    var out = [], pos = 0, m;
+    while (pos < src.length) {
+      TOKEN.lastIndex = pos;
+      m = TOKEN.exec(src);
+      if (!m) { if (/^\s*$/.test(src.slice(pos))) break; throw new XErr('#NAME?'); }
+      pos = TOKEN.lastIndex;
+      if (m[1] !== undefined) out.push({ t: 'num', v: parseFloat(m[1]) });
+      else if (m[2] !== undefined) out.push({ t: 'str', v: m[2].slice(1, -1).replace(/""/g, '"') });
+      else if (m[3] !== undefined) out.push({ t: 'ref', v: m[3].replace(/\$/g, '') });
+      else if (m[4] !== undefined) out.push({ t: 'fn', v: m[4].toUpperCase() });
+      else if (m[5] !== undefined) out.push({ t: 'bool', v: m[5] === 'TRUE' });
+      else out.push({ t: 'op', v: m[6] });
+    }
+    return out;
+  }
+  function Sheet(sh) {
+    this.sh = sh; this.raw = {}; this.cache = {}; this.busy = {};
+    var self = this;
+    Object.keys(sh.cells).forEach(function (k) { var c = sh.cells[k]; if (c.v !== undefined) self.raw[k] = { v: c.v, k: c.k }; });
+  }
+  Sheet.prototype.get = function (ref) {
+    if (Object.prototype.hasOwnProperty.call(this.cache, ref)) { var c = this.cache[ref]; if (c instanceof XErr) throw c; return c; }
+    var r = this.raw[ref], val;
+    if (!r || r.v === undefined || r.v === null || r.v === '') val = null;
+    else if (r.k === 'f') {
+      if (this.busy[ref]) throw new XErr('#REF!');
+      this.busy[ref] = 1;
+      try { val = evalTokens(this, tokenize(String(r.v).slice(1))); }
+      catch (e) {
+        delete this.busy[ref];
+        var err = e instanceof XErr ? e : new XErr('#VALUE!');
+        this.cache[ref] = err; throw err;
+      }
+      delete this.busy[ref];
+    } else if (r.k === 'd') val = isoToSerial(String(r.v));
+    else val = r.v;
+    this.cache[ref] = val;
+    return val;
+  };
+  Sheet.prototype.range = function (a, b) {
+    var p = splitRef(a), q = splitRef(b), out = [];
+    for (var r = Math.min(p[1], q[1]); r <= Math.max(p[1], q[1]); r++) for (var c = Math.min(p[0], q[0]); c <= Math.max(p[0], q[0]); c++) out.push(this.get(colName(c) + r));
+    return out;
+  };
+  function num(v) {
+    if (v === null || v === '' || v === undefined) return 0;
+    if (typeof v === 'boolean') return v ? 1 : 0;
+    if (typeof v === 'number') return v;
+    var n = Number(String(v).replace(/,/g, ''));
+    if (isNaN(n)) throw new XErr('#VALUE!');
+    return n;
+  }
+  function flat(args) { var o = []; args.forEach(function (a) { o = o.concat(Array.isArray(a) ? a : [a]); }); return o; }
+  function nums(args) { return flat(args).filter(function (v) { return typeof v === 'number'; }); }
+  function one(v) { return Array.isArray(v) ? v[0] : v; }
+  var FN = {
+    SUM: function (a) { return nums(a).reduce(function (s, x) { return s + x; }, 0); },
+    AVERAGE: function (a) { var n = nums(a); if (!n.length) throw new XErr('#DIV/0!'); return n.reduce(function (s, x) { return s + x; }, 0) / n.length; },
+    MIN: function (a) { var n = nums(a); return n.length ? Math.min.apply(null, n) : 0; },
+    MAX: function (a) { var n = nums(a); return n.length ? Math.max.apply(null, n) : 0; },
+    COUNT: function (a) { return nums(a).length; },
+    ABS: function (a) { return Math.abs(num(one(a[0]))); },
+    ROUND: function (a) { var d = Math.pow(10, a[1] === undefined ? 0 : num(a[1])), x = num(one(a[0])); return Math.sign(x) * Math.round(Math.abs(x) * d + 1e-9) / d; },
+    ROUNDUP: function (a) { var d = Math.pow(10, num(a[1] || 0)), x = num(one(a[0])); return Math.sign(x) * Math.ceil(Math.abs(x) * d - 1e-9) / d; },
+    ROUNDDOWN: function (a) { var d = Math.pow(10, num(a[1] || 0)), x = num(one(a[0])); return Math.sign(x) * Math.floor(Math.abs(x) * d + 1e-9) / d; },
+    INT: function (a) { return Math.floor(num(one(a[0]))); },
+    SQRT: function (a) { var x = num(one(a[0])); if (x < 0) throw new XErr('#NUM!'); return Math.sqrt(x); },
+    AND: function (a) { return flat(a).every(function (v) { return !!v; }); },
+    OR: function (a) { return flat(a).some(function (v) { return !!v; }); },
+    NOT: function (a) { return !one(a[0]); },
+    CONCATENATE: function (a) { return flat(a).map(function (v) { return v === null ? '' : String(v); }).join(''); },
+    TODAY: function () { return Math.floor((Date.now() - EPOCH) / 86400000); },
+    YEAR: function (a) { return new Date(EPOCH + num(one(a[0])) * 86400000).getUTCFullYear(); },
+    ISBLANK: function (a) { return one(a[0]) === null; },
+    ISNUMBER: function (a) { return typeof one(a[0]) === 'number'; }
+  };
+  function evalTokens(sheet, toks) {
+    var i = 0;
+    function eat(v) { var t = toks[i]; if (t && t.t === 'op' && t.v === v) { i++; return true; } return false; }
+    function cmp() {
+      var l = cat();
+      for (;;) {
+        var t = toks[i]; if (!t || t.t !== 'op' || ['=', '<>', '<', '>', '<=', '>='].indexOf(t.v) < 0) return l;
+        i++; var a = one(l), b = one(cat());
+        if (typeof a === 'string' && typeof b === 'string') { a = a.toLowerCase(); b = b.toLowerCase(); }
+        if (a === null) a = typeof b === 'string' ? '' : 0;
+        if (b === null) b = typeof a === 'string' ? '' : 0;
+        l = t.v === '=' ? a === b : t.v === '<>' ? a !== b : t.v === '<' ? a < b : t.v === '>' ? a > b : t.v === '<=' ? a <= b : a >= b;
+      }
+    }
+    function cat() { var l = add(); while (eat('&')) { var r = one(add()); l = (one(l) === null ? '' : String(one(l))) + (r === null ? '' : String(r)); } return l; }
+    function add() { var l = mul(); for (;;) { if (eat('+')) l = num(one(l)) + num(one(mul())); else if (eat('-')) l = num(one(l)) - num(one(mul())); else return l; } }
+    function mul() {
+      var l = pow();
+      for (;;) {
+        if (eat('*')) l = num(one(l)) * num(one(pow()));
+        else if (eat('/')) { var d = num(one(pow())); if (d === 0) throw new XErr('#DIV/0!'); l = num(one(l)) / d; }
+        else return l;
+      }
+    }
+    function pow() { var l = unary(); while (eat('^')) l = Math.pow(num(one(l)), num(one(unary()))); return l; }
+    function unary() { if (eat('-')) return -num(one(unary())); if (eat('+')) return unary(); return post(); }
+    function post() { var v = primary(); while (eat('%')) v = num(one(v)) / 100; return v; }
+    function argSlices() {          // after the "(" of a function: the token slices of its arguments; leaves i after the ")"
+      var depth = 0, start = i, out = [];
+      for (; i < toks.length; i++) {
+        var t = toks[i];
+        if (t.t === 'op' && t.v === '(') depth++;
+        else if (t.t === 'op' && t.v === ')') { if (depth === 0) { if (i > start || out.length) out.push(toks.slice(start, i)); i++; return out; } depth--; }
+        else if (t.t === 'op' && t.v === ',' && depth === 0) { out.push(toks.slice(start, i)); start = i + 1; }
+      }
+      throw new XErr('#VALUE!');
+    }
+    function primary() {
+      var t = toks[i++];
+      if (!t) throw new XErr('#VALUE!');
+      if (t.t === 'num' || t.t === 'str' || t.t === 'bool') return t.v;
+      if (t.t === 'ref') {
+        if (t.v.indexOf(':') >= 0) { var ab = t.v.split(':'); return sheet.range(ab[0], ab[1]); }
+        return sheet.get(t.v);
+      }
+      if (t.t === 'fn') {
+        if (!eat('(')) throw new XErr('#NAME?');
+        var sl = argSlices(), name = t.v;
+        if (name === 'IF') {
+          var c = one(evalTokens(sheet, sl[0]));
+          if (c) return sl[1] ? evalTokens(sheet, sl[1]) : true;
+          return sl[2] ? evalTokens(sheet, sl[2]) : false;
+        }
+        if (name === 'IFERROR') {
+          try { return evalTokens(sheet, sl[0]); } catch (e) { if (!(e instanceof XErr)) throw e; return sl[1] ? evalTokens(sheet, sl[1]) : ''; }
+        }
+        if (!FN[name]) throw new XErr('#NAME?');
+        return FN[name](sl.map(function (s) { return evalTokens(sheet, s); }));
+      }
+      if (t.t === 'op' && t.v === '(') { var v = cmp(); eat(')'); return v; }
+      throw new XErr('#VALUE!');
+    }
+    if (!toks.length) return null;
+    var v = one(cmp());
+    return v;
+  }
+
+  // ---------- display
+  function fmtNum(x, nf) {
+    var parts = nf.split(';'), section = parts[0], paren = false;
+    if (x < 0 && parts.length > 1) { section = parts[1]; x = Math.abs(x); paren = /\(/.test(section); }
+    var pctSign = /%/.test(section);
+    if (pctSign) x = x * 100;
+    var dec = (/\.(0+)/.exec(section) || [0, ''])[1].length;
+    var s = Math.abs(x).toFixed(dec);
+    if (/#,##0|0,0/.test(section)) { var ip = s.split('.'); ip[0] = ip[0].replace(/\B(?=(\d{3})+(?!\d))/g, ','); s = ip.join('.'); }
+    var body = (/\$/.test(section) ? '$' : '') + s + (pctSign ? '%' : '');
+    if (paren) return '(' + body + ')';
+    return (x < 0 ? '-' : '') + body;
+  }
+  function isDateFmt(nf) { var f = nf.replace(/"[^"]*"|\[[^\]]*\]|\\./g, ''); return /[dmy]/i.test(f) && !/[#0]/.test(f) && nf !== 'General'; }
+  function display(val, cell) {
+    if (val === null || val === undefined) return '';
+    if (val instanceof XErr) return val.code;
+    var nf = (cell && cell.nf) || 'General';
+    if (typeof val === 'boolean') return val ? 'TRUE' : 'FALSE';
+    if (typeof val === 'number') {
+      if ((cell && cell.k === 'd') || isDateFmt(nf)) return dmy(serialToIso(val));
+      if (nf === 'General') return Number.isInteger(val) ? String(val) : String(Math.round(val * 1e9) / 1e9);
+      return fmtNum(val, nf);
+    }
+    return String(val);
+  }
+
+  // ---------- grid
+  var tbl = document.getElementById('xl'), tabs = document.getElementById('xtabs'), bar = document.getElementById('xbar'), xref = document.getElementById('xref');
+  var cur = 0, sheets = MODEL.sheets.map(function (s) { return new Sheet(s); });
+  var pending = {}, timer = null, saving = false, current = null;
+
+  function cellModel(sh, ref) { return sh.sh.cells[ref] || (sh.sh.cells[ref] = {}); }
+  function rawText(sh, ref) { var r = sh.raw[ref]; if (!r) return ''; return r.k === 'd' ? dmy(String(r.v)) : String(r.v); }
+  function build() {
+    var sh = sheets[cur], m = sh.sh, covered = {}, spans = {};
+    m.merges.forEach(function (rg) {
+      var ab = rg.split(':'), p = splitRef(ab[0]), q = splitRef(ab[1] || ab[0]);
+      spans[colName(p[0]) + p[1]] = { cs: q[0] - p[0] + 1, rs: q[1] - p[1] + 1 };
+      for (var r = p[1]; r <= q[1]; r++) for (var c = p[0]; c <= q[0]; c++) if (r !== p[1] || c !== p[0]) covered[colName(c) + r] = 1;
+    });
+    var h = '<colgroup><col style="width:36px">';
+    m.widths.forEach(function (w) { h += '<col style="width:' + w + 'px">'; });
+    h += '</colgroup><tr><th class="corner rn"></th>';
+    for (var c = 1; c <= m.cols; c++) h += '<th>' + colName(c) + '</th>';
+    h += '</tr>';
+    for (var r = 1; r <= m.rows; r++) {
+      h += '<tr' + (m.heights[r - 1] ? ' style="height:' + m.heights[r - 1] + 'px"' : '') + '><th class="rn">' + r + '</th>';
+      for (c = 1; c <= m.cols; c++) {
+        var ref = colName(c) + r;
+        if (covered[ref]) continue;
+        var cm = m.cells[ref] || {}, sp = spans[ref], st = [];
+        if (cm.bg) st.push('background:' + cm.bg);
+        if (cm.b) st.push('font-weight:700');
+        if (cm.i) st.push('font-style:italic');
+        if (cm.c) st.push('color:' + cm.c);
+        if (cm.sz) st.push('font-size:' + cm.sz + 'pt');
+        if (cm.va) st.push('vertical-align:' + (cm.va === 'center' ? 'middle' : cm.va));
+        if (cm.bd) { if (cm.bd.indexOf('l') >= 0) st.push('border-left:1px solid #555'); if (cm.bd.indexOf('r') >= 0) st.push('border-right:1px solid #555'); if (cm.bd.indexOf('t') >= 0) st.push('border-top:1px solid #555'); if (cm.bd.indexOf('b') >= 0) st.push('border-bottom:1px solid #555'); }
+        h += '<td data-ref="' + ref + '"' + (sp ? ' colspan="' + sp.cs + '" rowspan="' + sp.rs + '"' : '') + (cm.wr ? ' class="wr"' : '') + (LOCKED ? '' : ' contenteditable="true"') + ' style="' + st.join(';') + '"></td>';
+      }
+      h += '</tr>';
+    }
+    tbl.innerHTML = h;
+    paint();
+    tabs.innerHTML = '';
+    if (sheets.length > 1) sheets.forEach(function (s, k) { var b = document.createElement('button'); b.textContent = s.sh.name; if (k === cur) b.className = 'on'; b.onclick = function () { commit(); current = null; cur = k; build(); }; tabs.appendChild(b); });
+  }
+  function paint() {
+    var sh = sheets[cur]; sh.cache = {};
+    tbl.querySelectorAll('td[data-ref]').forEach(function (td) {
+      if (td === current) return;
+      var ref = td.getAttribute('data-ref'), cm = sh.sh.cells[ref] || {}, r = sh.raw[ref], val = null;
+      try { val = r ? sh.get(ref) : null; td.classList.remove('err'); }
+      catch (e) { val = e instanceof XErr ? e : new XErr('#VALUE!'); td.classList.add('err'); }
+      td.textContent = display(val, { nf: cm.nf, k: r && r.k });
+      td.style.textAlign = cm.al || ((r && (r.k === 'n' || r.k === 'f' || r.k === 'd') && typeof val !== 'string') ? 'right' : 'left');
+    });
+  }
+  function typed(sh, ref, text) {
+    var cm = cellModel(sh, ref);
+    if (text === '') { delete sh.raw[ref]; return; }
+    if (text.charAt(0) === '=') { sh.raw[ref] = { v: text, k: 'f' }; return; }
+    var d = parseDate(text);
+    if (d) { sh.raw[ref] = { v: d, k: 'd' }; if (!cm.nf || cm.nf === 'General') cm.nf = 'dd/mm/yyyy'; return; }
+    var s = text.replace(/[,$\s]/g, ''), pct = /%$/.test(s); if (pct) s = s.slice(0, -1);
+    if (/^[-+]?\d+(\.\d+)?$/.test(s) || /^\(\d+(\.\d+)?\)$/.test(s)) {
+      var n = parseFloat(s.replace(/[()]/g, '')); if (/^\(/.test(s)) n = -n; if (pct) n /= 100;
+      sh.raw[ref] = { v: n, k: 'n' }; return;
+    }
+    sh.raw[ref] = { v: text, k: 's' };
+  }
+  function commit() {
+    var td = current; if (!td || !td.dataset.editing) return;
+    delete td.dataset.editing;
+    var sh = sheets[cur], ref = td.getAttribute('data-ref'), text = td.textContent.replace(/ /g, ' ');
+    if (text !== td.dataset.before) {
+      typed(sh, ref, text);
+      pending[sh.sh.name + '!' + ref] = { sheet: sh.sh.name, cell: ref, value: text };
+      queue();
+    }
+  }
+  tbl.addEventListener('focusin', function (e) {
+    var td = e.target.closest && e.target.closest('td[data-ref]'); if (!td || td === current) return;
+    var prev = current;
+    if (prev) { commit(); }
+    current = td;
+    if (prev) paint();
+    var sh = sheets[cur], ref = td.getAttribute('data-ref'), txt = rawText(sh, ref);
+    xref.textContent = ref;
+    td.textContent = txt; td.dataset.before = txt; td.dataset.editing = '1';
+    bar.value = txt;
+    var r = document.createRange(); r.selectNodeContents(td); var s = window.getSelection(); s.removeAllRanges(); s.addRange(r);
+  });
+  tbl.addEventListener('input', function (e) { var td = e.target.closest && e.target.closest('td[data-ref]'); if (td) bar.value = td.textContent; });
+  tbl.addEventListener('focusout', function (e) {
+    var td = e.target.closest && e.target.closest('td[data-ref]');
+    if (td && td === current && !(e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('td[data-ref]'))) { commit(); current = null; paint(); }
+  });
+  tbl.addEventListener('keydown', function (e) {
+    var td = e.target.closest && e.target.closest('td[data-ref]'); if (!td) return;
+    var p = splitRef(td.getAttribute('data-ref')), dc = 0, dr = 0;
+    if (e.key === 'Enter') { e.preventDefault(); dr = e.shiftKey ? -1 : 1; }
+    else if (e.key === 'Tab') { e.preventDefault(); dc = e.shiftKey ? -1 : 1; }
+    else if (e.key === 'ArrowDown') { e.preventDefault(); dr = 1; }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); dr = -1; }
+    else if (e.key === 'Escape') { td.textContent = td.dataset.before; delete td.dataset.editing; current = null; td.blur(); paint(); return; }
+    else return;
+    var m = sheets[cur].sh, c = p[0], r = p[1], nx = null, guard = 0;
+    while (!nx && guard++ < 60) {
+      c += dc; r += dr;
+      if (c < 1 || r < 1 || c > m.cols || r > m.rows) break;
+      nx = tbl.querySelector('td[data-ref="' + colName(c) + r + '"]');
+    }
+    if (nx) nx.focus();
+  });
+  bar.addEventListener('input', function () { if (current) current.textContent = bar.value; });
+  bar.addEventListener('keydown', function (e) { if (e.key === 'Enter' && current) { e.preventDefault(); var t = current; commit(); t.blur(); } });
+  tbl.addEventListener('paste', function (e) { e.preventDefault(); document.execCommand('insertText', false, (e.clipboardData || window.clipboardData).getData('text/plain').replace(/\r?\n/g, ' ').replace(/\t/g, ' ')); });
+
+  // ---------- saving
+  function queue() { setStatus('Unsaved changes...'); clearTimeout(timer); timer = setTimeout(flush, 900); setTimeout(paint, 30); }
+  function flush(sync) {
+    var keys = Object.keys(pending); if (!keys.length) return;
+    if (saving) { timer = setTimeout(flush, 600); return; }
+    var changes = keys.map(function (k) { return pending[k]; }); pending = {};
+    saving = true; setStatus('Saving...');
+    fetch(SAVE_URL, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ changes: changes }), keepalive: !!sync })
+      .then(function (r) { return r.json(); })
+      .then(function (j) { saving = false; if (!j.ok) { setStatus(j.error || 'Could not save', true); return; } setStatus('All changes saved ' + (j.saved_at || '')); if (Object.keys(pending).length) flush(); })
+      .catch(function () { saving = false; changes.forEach(function (c) { pending[c.sheet + '!' + c.cell] = c; }); setStatus('Could not save - check your connection', true); });
+  }
+  window.addEventListener('pagehide', function () { commit(); flush(true); });
+  window.addEventListener('beforeunload', function (e) { if (Object.keys(pending).length || saving) { e.preventDefault(); e.returnValue = ''; } });
+  if (LOCKED) setStatus('Read-only (partner signed)');
+  build();
+})();
+</script>
+{% endblock %}
