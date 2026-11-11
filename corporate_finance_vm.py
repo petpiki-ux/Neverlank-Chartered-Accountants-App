@@ -21,6 +21,7 @@ from werkzeug.utils import secure_filename
 
 import cf_valmodel as V
 import cf_valimport as VI
+import cf_valreport as RP
 from extensions import db
 from invoicing import next_sequence_number
 from models import (Client, Engagement, CFModel, CFValuationModel, Document, ValuationCertificate, user_can_access_client,
@@ -28,7 +29,8 @@ from models import (Client, Engagement, CFModel, CFValuationModel, Document, Val
 from corporate_finance import (corpfin_bp, _guard, _can_see, _is_signoff_role, _engagement_choices, _valid_engagement, _commit_with_number,
                                _advisory_engagement_or_404, _acceptance_open, _run, _safe_name, CURRENCIES, XLSX_MIME)
 
-VM_TABS = [("components", "Components"), ("consolidation", "Consolidation"), ("group", "Holding items & group"), ("report", "Settings & report")]
+VM_TABS = [("components", "Components"), ("consolidation", "Consolidation"), ("group", "Holding items & group"), ("goingconcern", "Going-concern value"),
+           ("writer", "Report writer"), ("report", "Settings & report")]
 BASIS_OF_VALUE = ["Fair value", "Fair market value", "Market value", "Investment value", "Liquidation value", "Other"]
 MAX_UPLOAD = 15 * 1024 * 1024
 UPLOAD_EXT = ("xlsx", "xlsm", "docx", "pdf", "csv", "txt")
@@ -38,7 +40,8 @@ DOCX_MIME = "application/vnd.openxmlformats-officedocument.wordprocessingml.docu
 
 @corpfin_bp.context_processor
 def _vm_ctx():
-    return {"VM_TABS": VM_TABS, "VM_TYPES": V.COMPONENT_TYPES, "VM_BASES": V.BASES, "VM_METHODS": V.METHODS, "VM_HOLDING_KINDS": V.HOLDING_KINDS}
+    return {"VM_TABS": VM_TABS, "VM_TYPES": V.COMPONENT_TYPES, "VM_BASES": V.BASES, "VM_METHODS": V.METHODS, "VM_HOLDING_KINDS": V.HOLDING_KINDS, "VM_GC_KINDS": V.GC_KINDS,
+            "VM_GC_STAGES": V.GC_STAGES, "VM_GC_HINTS": V.GC_STAGE_HINT, "VM_GC_YEARS": V.GC_MAX_YEARS}
 
 
 @corpfin_bp.app_template_filter("vmnum")
@@ -185,7 +188,13 @@ def vm_tab(vm_id, tab):
     if tab == "components":
         ctx["saved_models"], ctx["saved_certs"] = _saved_sources(vm)
         ctx["ai_on"] = VI.ai_available()
+    if tab == "writer":
+        ctx["sections"] = RP.ordered_sections(d)
+        ctx["ai_on"] = RP.ai_available()
+        ctx["ready"] = RP.report_ready(d)
+        ctx["ph"] = {sid: RP.placeholders(st["text"]) for sid, _, st in ctx["sections"]}
     if tab == "report":
+        ctx["ready"] = RP.report_ready(d)
         ctx["engagements"] = _engagement_choices([vm.client])
         ctx["filed"] = ([x for x in vm.engagement.documents if x.workpaper_kind == "valuation_model" and x.reference == vm.vm_number and x.is_current_version]
                         if vm.engagement else [])
@@ -436,6 +445,127 @@ def vm_save_group(vm_id):
     return redirect(url_for("corpfin.vm_tab", vm_id=vm.id, tab="group") + ("#items" if action != "save" else ""))
 
 
+# =========================================================================== going-concern and development value
+
+@corpfin_bp.route("/valuation-models/<int:vm_id>/goingconcern/save", methods=["POST"])
+def vm_save_gc(vm_id):
+    vm = _vm_or_404(vm_id)
+    if _vm_locked(vm):
+        return _back(vm, "goingconcern")
+    d = _data(vm)
+    form = request.form
+    try:
+        n = int(form.get("n") or 0)
+    except ValueError:
+        n = 0
+    items = []
+    for i in range(n):
+        if f"g{i}_id" not in form:
+            continue
+        items.append({"id": form.get(f"g{i}_id") or None, "label": form.get(f"g{i}_label"), "kind": form.get(f"g{i}_kind"), "currency": form.get(f"g{i}_currency"),
+                      "low": form.get(f"g{i}_low"), "adopted": form.get(f"g{i}_adopted"), "high": form.get(f"g{i}_high"),
+                      "cash_flows": [form.get(f"g{i}_cf{j}") for j in range(V.GC_MAX_YEARS)], "rate_pct": form.get(f"g{i}_rate_pct"),
+                      "rate_range": form.get(f"g{i}_rate_range") or 1, "growth_pct": form.get(f"g{i}_growth_pct"), "mid_year": f"g{i}_mid_year" in form,
+                      "probability_pct": form.get(f"g{i}_probability_pct"), "include": f"g{i}_include" in form, "notes": form.get(f"g{i}_notes")})
+    action = form.get("action", "save")
+    if action.startswith("delete:"):
+        gone = action.split(":", 1)[1]
+        items = [x for x in items if x["id"] != gone]
+    elif action.startswith("add:"):
+        kind = action.split(":", 1)[1]
+        label = {"dcf": "Production plan (DCF)", "synergy": "Synergies between the assets", "development": "Development / expansion option",
+                 "other_add": "Other addition", "capex": "Capex still to be spent", "rampup": "Ramp-up losses and working capital",
+                 "overlap": "Value already inside the component values", "other_deduct": "Other deduction"}.get(kind, "Item")
+        items.append({"label": label, "kind": kind, "currency": vm.currency, "probability_pct": 100, "include": True, "mid_year": True,
+                      "rate_range": 1, "notes": ""})
+    d["goingconcern"] = {"enabled": "gc_enabled" in form, "stage": form.get("gc_stage") or "", "basis": form.get("gc_basis") or "", "items": items}
+    _save(vm, d)
+    flash("Item added - fill it in." if action.startswith("add:") else ("Item removed." if action.startswith("delete:") else "Going-concern value saved."), "success")
+    return redirect(url_for("corpfin.vm_tab", vm_id=vm.id, tab="goingconcern") + ("#items" if action != "save" else ""))
+
+
+# =========================================================================== report writer
+
+def _now():
+    return datetime.utcnow().strftime("%Y-%m-%d %H:%M")
+
+
+@corpfin_bp.route("/valuation-models/<int:vm_id>/writer/save", methods=["POST"])
+def vm_writer_save(vm_id):
+    """Save the inputs (background, audience, instructions) and every section's text and on/off switch."""
+    vm = _vm_or_404(vm_id)
+    if _vm_locked(vm):
+        return _back(vm, "writer")
+    d = _data(vm)
+    form = request.form
+    rp = d["report"]
+    rp["background"] = form.get("background") or ""
+    rp["audience"] = form.get("audience") or ""
+    rp["instructions"] = form.get("instructions") or ""
+    for sid in RP.IDS:
+        if f"text_{sid}" not in form:
+            continue
+        new = (form.get(f"text_{sid}") or "").replace("\r\n", "\n").strip()
+        old = rp["sections"].get(sid) or {"text": "", "origin": "", "include": True, "at": "", "flags": []}
+        changed = new != (old["text"] or "").strip()
+        rp["sections"][sid] = {"text": new, "origin": ("edited" if (changed and new) else old["origin"]) if new else "", "include": f"inc_{sid}" in form,
+                               "at": _now() if changed else old["at"], "flags": [] if changed else old["flags"]}
+    _save(vm, d)
+    flash("Report text saved.", "success")
+    return redirect(url_for("corpfin.vm_tab", vm_id=vm.id, tab="writer"))
+
+
+@corpfin_bp.route("/valuation-models/<int:vm_id>/writer/draft/<section_id>", methods=["POST"])
+def vm_writer_draft(vm_id, section_id):
+    """Draft ONE section and store it. JSON in, JSON out, so the page can draft the sections one after another with a progress bar (each AI call
+    takes several seconds, so drafting is not done in one long request). mode=ai uses Claude when a key is set and falls back to the built-in drafter."""
+    vm = _vm_or_404(vm_id)
+    if vm.is_final:
+        return Response(json.dumps({"ok": False, "error": "This valuation model is Final and locked."}), status=403, mimetype="application/json")
+    if section_id not in RP.TITLES:
+        abort(404)
+    d = _data(vm)
+    F = RP.facts(vm)
+    # inputs typed on the page but not yet saved travel with the request so the draft uses them
+    for k in ("background", "audience", "instructions"):
+        if k in request.form:
+            d["report"][k] = request.form.get(k) or ""
+            F["rp"][k] = d["report"][k]
+    skeleton = RP.draft_template(section_id, F)
+    mode = request.form.get("mode") or "ai"
+    text, origin, note = skeleton, "template", ""
+    if mode == "ai":
+        if RP.ai_available():
+            ai_text, err = RP.ai_draft(section_id, F, skeleton)
+            if ai_text:
+                text, origin = ai_text, "ai"
+            else:
+                note = "The AI writer could not draft this section (" + (err or "no text") + "), so the built-in draft was used."
+                current_app.logger.warning("valuation report AI draft failed: %s", err)
+        else:
+            note = "The AI writer is not switched on (no ANTHROPIC_API_KEY), so the built-in draft was used."
+    flags = RP.unverified_numbers(text, F, skeleton) if origin == "ai" else []
+    old = d["report"]["sections"].get(section_id) or {}
+    inc = old.get("include", section_id != "goingconcern" or d["goingconcern"]["enabled"])
+    d["report"]["sections"][section_id] = {"text": text, "origin": origin, "include": inc, "at": _now(), "flags": [f"not in the model: {x}" for x in flags]}
+    d["report"]["generated_at"] = _now()
+    _save(vm, d)
+    return Response(json.dumps({"ok": True, "text": text, "origin": origin, "include": inc, "flags": d["report"]["sections"][section_id]["flags"],
+                                "placeholders": RP.placeholders(text), "note": note}), mimetype="application/json")
+
+
+@corpfin_bp.route("/valuation-models/<int:vm_id>/writer/clear/<section_id>", methods=["POST"])
+def vm_writer_clear(vm_id, section_id):
+    vm = _vm_or_404(vm_id)
+    if _vm_locked(vm):
+        return _back(vm, "writer")
+    if section_id in RP.TITLES:
+        d = _data(vm)
+        d["report"]["sections"].pop(section_id, None)
+        _save(vm, d)
+    return redirect(url_for("corpfin.vm_tab", vm_id=vm.id, tab="writer") + f"#s-{section_id}")
+
+
 # =========================================================================== settings, status, delete
 
 @corpfin_bp.route("/valuation-models/<int:vm_id>/settings", methods=["POST"])
@@ -555,17 +685,37 @@ def vm_docx(vm_id):
     return Response(_builders().build_docx(vm, signed=_sig(vm)), mimetype=DOCX_MIME, headers={"Content-Disposition": f'attachment; filename="{_fn(vm, "docx")}"'})
 
 
+@corpfin_bp.route("/valuation-models/<int:vm_id>/report.pdf")
+def vm_report_pdf(vm_id):
+    vm = _vm_or_404(vm_id)
+    import cf_valreport_export as RX
+    return Response(RX.build_report_pdf(vm, signed=_sig(vm)), mimetype="application/pdf",
+                    headers={"Content-Disposition": f'inline; filename="{vm.vm_number}_Valuation_report_{_safe_name(vm.name)}.pdf"'})
+
+
+@corpfin_bp.route("/valuation-models/<int:vm_id>/report.docx")
+def vm_report_docx(vm_id):
+    vm = _vm_or_404(vm_id)
+    import cf_valreport_export as RX
+    return Response(RX.build_report_docx(vm, signed=_sig(vm)), mimetype=DOCX_MIME,
+                    headers={"Content-Disposition": f'attachment; filename="{vm.vm_number}_Valuation_report_{_safe_name(vm.name)}.docx"'})
+
+
 def file_into_working_papers(vm):
     """Save the Excel, PDF and Word versions as Working Papers on the engagement (a later filing replaces the earlier as current). Returns the count."""
     if not vm.engagement_id:
         raise ValueError("This valuation model is not linked to an engagement.")
     X = _builders()
     signed = _sig(vm)
-    files = [("xlsx", X.build_excel(vm)), ("pdf", X.build_pdf(vm, signed=signed)), ("docx", X.build_docx(vm, signed=signed))]
+    files = [("xlsx", X.build_excel(vm), "Valuation Model"), ("pdf", X.build_pdf(vm, signed=signed), "Valuation Model"),
+             ("docx", X.build_docx(vm, signed=signed), "Valuation Model")]
+    if RP.report_ready(V.normalise(vm.data, vm.currency))[0]:
+        import cf_valreport_export as RX
+        files += [("pdf", RX.build_report_pdf(vm, signed=signed), "Valuation Report"), ("docx", RX.build_report_docx(vm, signed=signed), "Valuation Report")]
     client = re.sub(r'[\\/:*?"<>|\r\n]+', "", vm.client.name)
     n = 0
-    for ext, data in files:
-        name = f"{vm.vm_number} Valuation Model - {client}.{ext}"[:180]
+    for ext, data, kind_name in files:
+        name = f"{vm.vm_number} {kind_name} - {client}.{ext}"[:180]
         stored = f"eng{vm.engagement_id}_vm_{uuid.uuid4().hex[:10]}_{secure_filename(name) or 'valuation.' + ext}"
         with open(os.path.join(current_app.config["UPLOAD_FOLDER"], stored), "wb") as fh:
             fh.write(data)

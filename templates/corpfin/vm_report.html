@@ -40,6 +40,8 @@
     <a class="btn secondary" href="{{ url_for('corpfin.vm_excel', vm_id=vm.id) }}">Excel (live formulas)</a>
     <a class="btn secondary" href="{{ url_for('corpfin.vm_pdf', vm_id=vm.id) }}" target="_blank">PDF report</a>
     <a class="btn secondary" href="{{ url_for('corpfin.vm_docx', vm_id=vm.id) }}">Word report</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_report_pdf', vm_id=vm.id) }}" target="_blank" title="The written valuation report from the Report writer tab">Full valuation report (PDF)</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_report_docx', vm_id=vm.id) }}">Full valuation report (Word)</a>
     {% if vm.engagement_id %}
     <form method="post" action="{{ url_for('corpfin.vm_file', vm_id=vm.id) }}" class="inline"><button class="btn gold" type="submit" title="Saves the Excel, PDF and Word versions as Working Papers on the engagement">File in Working Papers</button></form>
     {% else %}<span class="muted">Link an engagement above to file the report in Working Papers.</span>{% endif %}
@@ -51,6 +53,8 @@
       {% else %}<span class="muted" title="{{ mp_can_sign(vm)[1] }}">Cannot be signed yet: {{ mp_can_sign(vm)[1] }}</span>{% endif %}
     {% endif %}
   </div>
+  {% if ready[0] %}<p class="cf-sub" style="margin-top:8px;">The written report has {{ ready[2] }} section{{ 's' if ready[2] != 1 }}{% if ready[1] %} and <strong style="color:#8a2a24;">{{ ready[1] }} placeholder{{ 's' if ready[1] != 1 }} still to complete</strong> &mdash; finish them on the <a href="{{ url_for('corpfin.vm_tab', vm_id=vm.id, tab='writer') }}">Report writer</a> tab before signing{% endif %}. It is filed in Working Papers with the Excel, PDF and Word model.</p>
+  {% else %}<p class="cf-sub" style="margin-top:8px;">The <a href="{{ url_for('corpfin.vm_tab', vm_id=vm.id, tab='writer') }}">Report writer</a> tab drafts the full written report; once drafted it is filed with the model.</p>{% endif %}
   {% if mp_signed(vm) %}<p class="cf-sub" style="margin-top:8px;">Signed by the Managing Partner on {{ vm.mp_signed_at.strftime('%d %B %Y') }}. Changing anything in the model removes the signature until it is signed again; filed copies are not changed.</p>{% elif vm.mp_signed_at %}<p class="cf-sub" style="margin-top:8px;color:#b3261e;">The model changed after it was signed, so the signature no longer shows. It has to be signed again.</p>{% endif %}
   {% if filed %}
   <p class="cf-sub" style="margin-top:10px;">Filed in Working Papers:</p>

@@ -1,0 +1,142 @@
+{% extends "corpfin/vm_base.html" %}
+{% block tab %}
+{% set locked = vm.is_final %}
+<style>
+  .rw-sec { border: 1px solid var(--line, #dfe5ee); border-radius: 8px; margin-bottom: 12px; background: #fff; }
+  .rw-sec.off { opacity: .65; }
+  .rw-top { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; padding: 10px 14px; border-bottom: 1px solid var(--line, #dfe5ee); background: #f7f9fc; border-radius: 8px 8px 0 0; }
+  .rw-top h4 { margin: 0; font-size: 14px; }
+  .rw-body { padding: 10px 14px 12px; }
+  .rw-body textarea { width: 100%; box-sizing: border-box; min-height: 120px; font-family: inherit; font-size: 13.5px; line-height: 1.5; }
+  .rw-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eef2f8; color: #1f3a5f; margin-left: 6px; }
+  .rw-tag.ai { background: #e8f3ea; color: #1b5e2f; } .rw-tag.edited { background: #fff3d6; color: #7a5a00; } .rw-tag.warn { background: #fbeceb; color: #8a2a24; }
+  .rw-bar { height: 8px; background: #e6ebf3; border-radius: 4px; overflow: hidden; margin-top: 8px; display: none; }
+  .rw-bar div { height: 100%; width: 0; background: var(--gold, #b8934a); transition: width .3s; }
+  .rw-note { font-size: 12px; color: #5b6b80; }
+</style>
+<form method="post" action="{{ url_for('corpfin.vm_writer_save', vm_id=vm.id) }}" id="rwForm">
+<div class="card">
+  <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap;"><h3 style="margin:0;">Valuation report writer</h3>
+    {% if not locked %}<button class="btn gold" type="submit">Save report text</button>{% endif %}</div>
+  <p class="cf-sub">Drafts the full valuation report &mdash; instructions and scope, basis of value, approach and methodology, component valuations, consolidation, going-concern value, discounts, range and sensitivity,
+    assumptions, risks, conclusion and limiting conditions &mdash; in the register of a formal valuation report. Every figure comes from this model. Sections can be edited, switched off, or redrafted one at a time.
+    Anything the model cannot know is left as a highlighted <strong>[&#9679;]</strong> for you to complete.</p>
+  {% if ai_on %}<div class="flash success" style="margin:6px 0;">AI writer is on: each section is rewritten by Claude from this model's figures, then checked &mdash; any figure in the text that is not in the model is flagged.</div>
+  {% else %}<div class="flash warning" style="margin:6px 0;">The AI writer is not switched on (no <code>ANTHROPIC_API_KEY</code> on the server), so the built-in drafter writes each section from the model. It needs no key and always works; the AI version adds sharper reasoning and polish.</div>{% endif %}
+  <div class="form-row">
+    <div style="flex:1;"><label>Report is addressed to / intended users</label><input type="text" name="audience" id="rwAudience" value="{{ d.report.audience }}" maxlength="300" placeholder="e.g. the Board of Directors of &hellip;" {% if locked %}readonly{% endif %}></div>
+  </div>
+  <div><label>Background to the company and its assets (facts you want the report to state)</label>
+    <textarea name="background" id="rwBackground" rows="5" placeholder="History and ownership, what each asset is and where it is, licences, stage of development, key contracts, management, funding &hellip; The report states only what you write here." {% if locked %}readonly{% endif %}>{{ d.report.background }}</textarea></div>
+  <div><label>Extra instructions for the writer (optional)</label>
+    <input type="text" name="instructions" id="rwInstr" value="{{ d.report.instructions }}" maxlength="2000" placeholder="e.g. emphasise the sensitivity to coal price; keep the executive summary to one page" {% if locked %}readonly{% endif %}></div>
+  {% if not locked %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:12px;">
+    <button type="button" class="btn" id="rwAll" data-mode="ai" style="background:#1f3a5f;color:#fff;">{{ 'Draft the whole report with AI' if ai_on else 'Draft the whole report' }}</button>
+    {% if ai_on %}<button type="button" class="btn secondary" id="rwAllT" data-mode="template">Draft with the built-in drafter</button>{% endif %}
+    <label style="font-size:12.5px;display:flex;gap:5px;align-items:center;"><input type="checkbox" id="rwOver"> Also overwrite sections I have edited</label>
+    <span class="rw-note" id="rwStatus"></span>
+  </div>
+  <div class="rw-bar" id="rwBar"><div></div></div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_report_pdf', vm_id=vm.id) }}" target="_blank">Full report (PDF)</a>
+    <a class="btn secondary" href="{{ url_for('corpfin.vm_report_docx', vm_id=vm.id) }}">Full report (Word)</a>
+    <span class="rw-note">{% if ready[0] %}{{ ready[2] }} section{{ 's' if ready[2] != 1 }} in the report{% if ready[1] %} &middot; <strong style="color:#8a2a24;">{{ ready[1] }} placeholder{{ 's' if ready[1] != 1 }} still to complete</strong> (highlighted in the document){% else %} &middot; no placeholders left{% endif %}.{% else %}Draft the sections first.{% endif %}
+      Save any edits before downloading.</span>
+  </div>
+</div>
+
+{% for sid, title, st in sections %}
+<div class="rw-sec {{ 'off' if not st.include }}" id="s-{{ sid }}" data-sid="{{ sid }}">
+  <div class="rw-top">
+    <h4>{{ loop.index }}. {{ title }}
+      <span class="rw-tag {{ st.origin }}" id="tag-{{ sid }}">{{ {'ai':'AI draft','template':'Built-in draft','edited':'Edited'}.get(st.origin, 'Not drafted') }}</span>
+      {% if ph[sid] %}<span class="rw-tag warn" id="ph-{{ sid }}">{{ ph[sid] }} to complete</span>{% else %}<span id="ph-{{ sid }}"></span>{% endif %}
+      <span id="fl-{{ sid }}">{% if st.flags %}<span class="rw-tag warn" title="{{ st.flags|join('; ') }}">{{ st.flags|length }} figure{{ 's' if st.flags|length != 1 }} to check</span>{% endif %}</span></h4>
+    <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      <label style="font-size:12px;display:flex;gap:5px;align-items:center;"><input type="checkbox" name="inc_{{ sid }}" {% if st.include %}checked{% endif %} {% if locked %}disabled{% endif %}> In report</label>
+      {% if not locked %}
+      <button type="button" class="btn small secondary rw-one" data-sid="{{ sid }}" data-mode="ai">{{ 'Redraft with AI' if ai_on else 'Redraft' }}</button>
+      {% if ai_on %}<button type="button" class="btn small secondary rw-one" data-sid="{{ sid }}" data-mode="template">Built-in</button>{% endif %}
+      {% endif %}
+    </div>
+  </div>
+  <div class="rw-body">
+    <textarea name="text_{{ sid }}" id="text-{{ sid }}" data-origin="{{ st.origin }}" placeholder="Not drafted yet - use Redraft, or write it yourself." {% if locked %}readonly{% endif %}>{{ st.text }}</textarea>
+    <div class="rw-note" id="note-{{ sid }}">{% if st.at %}Last drafted or edited {{ st.at }} UTC.{% endif %} Blank line = new paragraph; a line starting with &ldquo;### &rdquo; is a sub-heading; lines starting with &ldquo;- &rdquo; are bullets.</div>
+  </div>
+</div>
+{% endfor %}
+{% if not locked %}<div style="margin:8px 0 24px;"><button class="btn gold" type="submit">Save report text</button></div>{% endif %}
+</form>
+
+<script>
+(function () {
+  var URL = {{ url_for('corpfin.vm_writer_draft', vm_id=vm.id, section_id='SID')|tojson }};
+  var ids = {{ sections|map(attribute=0)|list|tojson }};
+  var labels = {ai: 'AI draft', template: 'Built-in draft', edited: 'Edited'};
+  function el(i) { return document.getElementById(i); }
+  function grow(t) { t.style.height = 'auto'; t.style.height = Math.max(120, t.scrollHeight + 4) + 'px'; }
+  document.querySelectorAll('.rw-body textarea').forEach(function (t) {
+    grow(t);
+    t.addEventListener('input', function () { grow(t); if (t.value.trim()) { t.dataset.origin = 'edited'; setTag(t.id.slice(5), 'edited'); } });
+  });
+  function setTag(sid, origin) {
+    var tag = el('tag-' + sid); tag.textContent = labels[origin] || 'Not drafted'; tag.className = 'rw-tag ' + origin;
+  }
+  function inputs() {
+    var fd = new FormData();
+    ['audience', 'background', 'instructions'].forEach(function (n) { var e = document.querySelector('[name=' + n + ']'); if (e) fd.append(n, e.value); });
+    return fd;
+  }
+  function draftOne(sid, mode) {
+    var fd = inputs(); fd.append('mode', mode);
+    return fetch(URL.replace('SID', sid), { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json().catch(function () { return { ok: false, error: 'Unexpected reply from the server (status ' + r.status + ').' }; }); })
+      .then(function (j) {
+        if (!j.ok) { throw new Error(j.error || 'Could not draft this section.'); }
+        var t = el('text-' + sid); t.value = j.text; t.dataset.origin = j.origin; grow(t); setTag(sid, j.origin);
+        var ph = el('ph-' + sid); ph.className = j.placeholders ? 'rw-tag warn' : ''; ph.textContent = j.placeholders ? j.placeholders + ' to complete' : '';
+        var fl = el('fl-' + sid); fl.innerHTML = '';
+        if (j.flags && j.flags.length) { var s = document.createElement('span'); s.className = 'rw-tag warn'; s.title = j.flags.join('; '); s.textContent = j.flags.length + ' figure' + (j.flags.length === 1 ? '' : 's') + ' to check'; fl.appendChild(s); }
+        el('note-' + sid).textContent = (j.note ? j.note + ' ' : '') + 'Drafted just now.';
+        var box = el('s-' + sid); if (j.include === false) { box.classList.add('off'); }
+        return j;
+      });
+  }
+  document.querySelectorAll('.rw-one').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var sid = b.dataset.sid, t = el('text-' + sid);
+      if (t.value.trim() && t.dataset.origin === 'edited' && !confirm('This section has your edits. Replace it with a new draft?')) { return; }
+      var old = b.textContent; b.disabled = true; b.textContent = 'Drafting...';
+      draftOne(sid, b.dataset.mode).catch(function (e) { alert(e.message); }).then(function () { b.disabled = false; b.textContent = old; });
+    });
+  });
+  function runAll(mode, btn) {
+    var over = el('rwOver').checked, list = ids.filter(function (sid) {
+      var t = el('text-' + sid); return over || !(t.value.trim() && t.dataset.origin === 'edited');
+    });
+    if (!list.length) { alert('Every section has your edits. Tick "Also overwrite sections I have edited" to redraft them.'); return; }
+    var bar = el('rwBar'), fill = bar.firstElementChild, st = el('rwStatus'); bar.style.display = 'block'; fill.style.width = '0';
+    document.querySelectorAll('#rwAll, #rwAllT, .rw-one').forEach(function (b) { b.disabled = true; });
+    var i = 0, failed = 0, notes = [];
+    (function next() {
+      if (i >= list.length) {
+        st.textContent = 'Done: ' + (list.length - failed) + ' of ' + list.length + ' sections drafted.' + (notes.length ? ' ' + notes[0] : '');
+        document.querySelectorAll('#rwAll, #rwAllT, .rw-one').forEach(function (b) { b.disabled = false; });
+        return;
+      }
+      var sid = list[i]; st.textContent = 'Drafting section ' + (i + 1) + ' of ' + list.length + '...';
+      draftOne(sid, mode).then(function (j) { if (j.note && notes.indexOf(j.note) < 0) { notes.push(j.note); } })
+        .catch(function (e) { failed++; notes.push(e.message); })
+        .then(function () { i++; fill.style.width = Math.round(i / list.length * 100) + '%'; next(); });
+    })();
+  }
+  ['rwAll', 'rwAllT'].forEach(function (id) { var b = el(id); if (b) { b.addEventListener('click', function () { runAll(b.dataset.mode, b); }); } });
+})();
+</script>
+{% endblock %}

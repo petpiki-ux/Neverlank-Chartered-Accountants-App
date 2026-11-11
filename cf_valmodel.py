@@ -14,7 +14,9 @@ Order of the arithmetic, per component and per case (low / adopted / high):
     adjusted               = attributable x (1 + control premium %) x (1 - minority discount %) x (1 - DLOM %)
 Group:
     sum of parts           = sum of the adjusted components that are included
-    group equity (pre)     = sum of parts + additions - deductions - eliminations - capitalised central costs
+    going-concern value    = sum over going-concern items of  sign x value x exchange rate x probability %   (production-plan DCF, synergies,
+                             development options, less capex still to spend, ramp-up costs and any overlap with the component values)
+    group equity (pre)     = sum of parts + additions - deductions - eliminations - capitalised central costs + going-concern value
     group equity           = group equity (pre) x (1 + control %) x (1 - minority %) x (1 - DLOM %)    (group-level adjustments)
     value of the stake     = group equity x stake %          (per share when a share count is given)
 
@@ -36,11 +38,26 @@ METHODS = ["Discounted cash flow", "Market multiples", "Net asset value", "Indep
            "Cost approach", "Dividend / income approach", "Other"]
 STATUSES = ["Draft", "Final"]
 
+# Going-concern / development value: value the components do not already carry because the business is moving into production.
+# (key, label, sign): amounts are entered as positives; the kind decides the sign.
+GC_KINDS = [("dcf", "Production-plan DCF (cash flows entered)", 1), ("synergy", "Synergies between the assets (present value)", 1),
+            ("development", "Development / expansion option value (present value)", 1), ("other_add", "Other addition (present value)", 1),
+            ("capex", "Less: capex still to be spent (present value)", -1), ("rampup", "Less: ramp-up losses and working capital (present value)", -1),
+            ("overlap", "Less: value already inside the component values (avoids double counting)", -1), ("other_deduct", "Other deduction (present value)", -1)]
+GC_SIGN = {k: sg for k, _, sg in GC_KINDS}
+GC_STAGES = ["Exploration / pre-feasibility", "Feasibility / financing", "Construction / commissioning", "Ramp-up", "Steady-state production"]
+# Indicative range of the probability of reaching steady state, by stage - a starting point for professional judgement, to be supported by evidence.
+GC_STAGE_HINT = {"Exploration / pre-feasibility": "10% - 30%", "Feasibility / financing": "35% - 60%", "Construction / commissioning": "65% - 85%",
+                 "Ramp-up": "85% - 95%", "Steady-state production": "95% - 100%"}
+GC_MAX_YEARS = 15
+
 DEFAULT_DATA = {
     "basis_of_value": "Fair value", "purpose": "", "standard": "", "premise": "Going concern",
     "fx": {}, "components": [], "holding": [],
     "group": {"control_pct": 0.0, "minority_pct": 0.0, "dlom_pct": 0.0, "stake_pct": 100.0, "shares": None},
     "narrative": {"scope": "", "assumptions": "", "limiting": ""},
+    "goingconcern": {"enabled": False, "stage": "", "items": [], "basis": ""},
+    "report": {"background": "", "audience": "", "instructions": "", "sections": {}, "generated_at": ""},
     "import_log": [],
 }
 
@@ -140,6 +157,50 @@ def normalise_holding(h):
             "annual": f(h.get("annual")), "multiple": f(h.get("multiple")), "notes": str(h.get("notes") or "")[:500]}
 
 
+def _cash_flows(v):
+    """A list of yearly cash flows from a list or a comma / newline separated string; blanks inside the list count as 0, trailing blanks are dropped."""
+    if isinstance(v, str):
+        v = [x for x in re.split(r"[;\n\t]|,(?=\s*[-(\d])", v)]
+    out = []
+    for x in (v or [])[:GC_MAX_YEARS]:
+        out.append(opt(x))
+    while out and out[-1] is None:
+        out.pop()
+    return [0.0 if x is None else x for x in out]
+
+
+def normalise_gc_item(x):
+    x = x or {}
+    kind = x.get("kind") if x.get("kind") in GC_SIGN else "synergy"
+    prob = opt(x.get("probability_pct"))
+    return {"id": x.get("id") or new_id(), "label": (str(x.get("label") or "").strip() or "Item")[:200], "kind": kind,
+            "currency": (str(x.get("currency") or "").strip().upper() or "")[:6],
+            "low": opt(x.get("low")), "adopted": opt(x.get("adopted")), "high": opt(x.get("high")),
+            "cash_flows": _cash_flows(x.get("cash_flows")), "rate_pct": opt(x.get("rate_pct")), "rate_range": _clamp(f(x.get("rate_range"), 1.0), 0.0, 20.0),
+            "growth_pct": opt(x.get("growth_pct")), "mid_year": bool(x.get("mid_year", True)),
+            "probability_pct": 100.0 if prob is None else _clamp(prob, 0.0, 100.0), "include": bool(x.get("include", True)),
+            "notes": str(x.get("notes") or "")[:1000]}
+
+
+def dcf_value(cash_flows, rate_pct, growth_pct=None, mid_year=True):
+    """(present value, present value of the terminal value) of yearly cash flows 1..N at the valuation date. Year-end flows unless mid_year
+    (flows arrive half-way through each year). The terminal value is the Gordon growth value of the last flow, used only when growth < rate.
+    None when there are no flows or no usable rate."""
+    if not cash_flows or rate_pct is None:
+        return None
+    r = rate_pct / 100.0
+    if r <= -0.99:
+        return None
+    n = len(cash_flows)
+    shift = 0.5 if mid_year else 0.0
+    pv = sum(cf / (1 + r) ** (t - shift) for t, cf in enumerate(cash_flows, start=1))
+    tv_pv = 0.0
+    if growth_pct is not None and r > growth_pct / 100.0:
+        g = growth_pct / 100.0
+        tv_pv = cash_flows[-1] * (1 + g) / (r - g) / (1 + r) ** (n - shift)
+    return pv + tv_pv, tv_pv
+
+
 def normalise(data, reporting_currency="USD"):
     data = data or {}
     out = copy.deepcopy(DEFAULT_DATA)
@@ -162,6 +223,18 @@ def normalise(data, reporting_currency="USD"):
                     "shares": (lambda s: s if s and s > 0 else None)(opt(g.get("shares")))}
     nar = data.get("narrative") or {}
     out["narrative"] = {k: str(nar.get(k) or "")[:6000] for k in ("scope", "assumptions", "limiting")}
+    gc = data.get("goingconcern") or {}
+    out["goingconcern"] = {"enabled": bool(gc.get("enabled")), "stage": str(gc.get("stage") or "")[:80], "basis": str(gc.get("basis") or "")[:4000],
+                           "items": [normalise_gc_item(x) for x in (gc.get("items") or [])][:60]}
+    rp = data.get("report") or {}
+    secs = {}
+    for k, v in (rp.get("sections") or {}).items():
+        if isinstance(v, dict):
+            secs[str(k)[:30]] = {"text": str(v.get("text") or "")[:20000], "origin": str(v.get("origin") or "template")[:12],
+                                 "include": bool(v.get("include", True)), "at": str(v.get("at") or "")[:20],
+                                 "flags": [str(x)[:60] for x in (v.get("flags") or [])][:12]}
+    out["report"] = {"background": str(rp.get("background") or "")[:8000], "audience": str(rp.get("audience") or "")[:300],
+                     "instructions": str(rp.get("instructions") or "")[:2000], "sections": secs, "generated_at": str(rp.get("generated_at") or "")[:20]}
     out["import_log"] = list(data.get("import_log") or [])[-30:]
     return out
 
@@ -249,7 +322,8 @@ def consolidate(data, reporting_currency="USD", valuation_date=None):
         tgt = {"add": add_t, "deduct": ded_t, "eliminate": elim_t, "capcost": cap_t}[h["kind"]]
         for i in range(3):
             tgt[i] += eff[i]
-    pre = tuple(parts[i] + add_t[i] + ded_t[i] + elim_t[i] + cap_t[i] for i in range(3))
+    gc_rows, gc_t, gc_raw = _going_concern(d, fx, reporting_currency, warnings)
+    pre = tuple(parts[i] + add_t[i] + ded_t[i] + elim_t[i] + cap_t[i] + gc_t[i] for i in range(3))
     g = d["group"]
     gf = (1 + g["control_pct"] / 100.0) * (1 - g["minority_pct"] / 100.0) * (1 - g["dlom_pct"] / 100.0)
     group_eq = tuple(v * gf for v in pre)
@@ -267,12 +341,76 @@ def consolidate(data, reporting_currency="USD", valuation_date=None):
                 warnings.append(f"{r['c']['name']}: valued on {cd.strftime('%d %b %Y')}, more than a year before the model date.")
             elif r["c"]["include"] and cd and cd > ref:
                 warnings.append(f"{r['c']['name']}: valued on {cd.strftime('%d %b %Y')}, after the model date.")
-    if any(r["problem"] in ("no value", "no rate") for r in rows):
-        warnings.insert(0, "The total is INCOMPLETE until the components flagged below are fixed.")
+    gc_bad = any(r["problem"] for r in gc_rows if r["counted_item"])
+    complete = not any(r["problem"] in ("no value", "no rate") for r in rows) and not gc_bad
+    if not complete:
+        warnings.insert(0, "The total is INCOMPLETE until the components and going-concern items flagged below are fixed.")
     return {"data": d, "currency": reporting_currency, "rows": rows, "holding_rows": hold_rows, "parts": parts,
             "additions": tuple(add_t), "deductions": tuple(ded_t), "eliminations": tuple(elim_t), "capcost": tuple(cap_t),
+            "gc": tuple(gc_t), "gc_unrisked": tuple(gc_raw), "gc_rows": gc_rows, "gc_on": d["goingconcern"]["enabled"],
             "pre": pre, "group_factor": gf, "group_equity": group_eq, "stake": stake, "per_share": per_share,
-            "warnings": warnings, "count": len(live), "complete": not any(r["problem"] in ("no value", "no rate") for r in rows)}
+            "warnings": warnings, "count": len(live), "complete": complete}
+
+
+def _going_concern(d, fx, reporting, warnings):
+    """(rows, risk-adjusted net effect per case, un-risked net effect per case). Items count only when the section is switched on, the item is
+    included and it has what it needs; an included item that lacks a value, a rate or a discount rate is flagged and makes the model incomplete."""
+    gc = d["goingconcern"]
+    rows, tot, raw = [], [0.0] * 3, [0.0] * 3
+    on = gc["enabled"]
+    for it in gc["items"]:
+        rate = _rate(fx, it["currency"], reporting)
+        sign = GC_SIGN[it["kind"]]
+        row = {"g": it, "rate": rate, "sign": sign, "vals": None, "risked": None, "effect": None, "problem": None, "tv_share": None, "counted": False,
+               "counted_item": bool(on and it["include"])}
+        if it["kind"] == "dcf":
+            if not it["cash_flows"]:
+                row["problem"] = "no cash flows"
+            elif it["rate_pct"] is None:
+                row["problem"] = "no discount rate"
+            else:
+                rr = it["rate_range"]
+                res3 = [dcf_value(it["cash_flows"], it["rate_pct"] + dr, it["growth_pct"], it["mid_year"]) for dr in (rr, 0.0, -rr)]
+                row["vals"] = tuple(sorted(x[0] for x in res3))
+                mid = res3[1]
+                row["tv_share"] = (mid[1] / mid[0] * 100.0) if mid and mid[0] > 0 else None
+                if it["growth_pct"] is not None and it["rate_pct"] <= it["growth_pct"]:
+                    warnings.append(f"{it['label']}: terminal growth is not below the discount rate, so no terminal value was included.") if row["counted_item"] else None
+                if row["tv_share"] is not None and row["tv_share"] > 75 and row["counted_item"]:
+                    warnings.append(f"{it['label']}: the terminal value is {row['tv_share']:.0f}% of the DCF value - support the long-term assumptions.")
+        else:
+            row["vals"] = case_values(it["low"], it["adopted"], it["high"])
+            if row["vals"] is None:
+                row["problem"] = "no value"
+        if row["problem"] is None and rate is None:
+            row["problem"] = "no rate"
+        if row["problem"] and row["counted_item"]:
+            msg = {"no value": "no value entered", "no rate": f"no exchange rate from {it['currency']} to {reporting}",
+                   "no cash flows": "no cash flows entered", "no discount rate": "no discount rate entered"}[row["problem"]]
+            warnings.append(f"{it['label']}: {msg} - it is not in the total.")
+        if row["problem"] is None:
+            row["risked"] = tuple(v * rate * it["probability_pct"] / 100.0 for v in row["vals"])
+            row["effect"] = tuple(sign * v for v in row["risked"])
+            row["unrisked"] = tuple(sign * v * rate for v in row["vals"])
+            if row["counted_item"]:
+                row["counted"] = True
+                for i in range(3):
+                    tot[i] += row["effect"][i]
+                    raw[i] += row["unrisked"][i]
+        rows.append(row)
+    if on:
+        adds = [r for r in rows if r["counted"] and r["sign"] > 0 and r["g"]["kind"] in ("dcf", "synergy", "development")]
+        has_overlap = any(r["counted"] and r["g"]["kind"] == "overlap" for r in rows)
+        if adds and not has_overlap:
+            dcf_comps = [c["name"] for c in d["components"] if c["include"] and (c["method"] in ("Discounted cash flow", "Forecast model valuation") or c["type"] == "Mining / resource asset")]
+            if dcf_comps:
+                warnings.append("Check for double counting: " + ", ".join(dcf_comps[:4]) + (" and others" if len(dcf_comps) > 4 else "")
+                                + " may already include the production value added here. Add a 'value already inside the component values' deduction if so.")
+        if adds and not gc["stage"]:
+            warnings.append("Going-concern value: state the stage of development so the probabilities can be explained in the report.")
+        if not gc["items"]:
+            warnings.append("The going-concern section is switched on but has no items.")
+    return rows, tot, raw
 
 
 def football(res):
@@ -291,7 +429,7 @@ def currencies_needed(data, reporting_currency="USD"):
     """Currencies used by components / holding items other than the reporting currency (so the rate table lists them)."""
     d = normalise(data, reporting_currency)
     seen = []
-    for x in d["components"] + d["holding"]:
+    for x in d["components"] + d["holding"] + d["goingconcern"]["items"]:
         cur = x.get("currency")
         if cur and cur != reporting_currency and cur not in seen:
             seen.append(cur)

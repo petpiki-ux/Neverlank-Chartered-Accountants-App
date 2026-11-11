@@ -72,6 +72,7 @@ def build_excel(vm):
     ws_set = wb.create_sheet("Settings")
     ws_c = wb.create_sheet("Components")
     ws_h = wb.create_sheet("Holding items")
+    ws_g = wb.create_sheet("Going concern")
 
     # ---------------------------------------------------------------- Settings: group inputs + FX
     brand.xlsx_title_band(ws_set, "Settings, exchange rates and group adjustments", _subtitle(vm) + ["Blue cells on yellow are inputs"], ncols=6)
@@ -84,7 +85,8 @@ def build_excel(vm):
     S = {}
     for label, key, val, fmt in (("Control premium (%)", "ctl", g["control_pct"], "0.0"), ("Minority discount (%)", "min", g["minority_pct"], "0.0"),
                                  ("Discount for lack of marketability, DLOM (%)", "dlom", g["dlom_pct"], "0.0"),
-                                 ("Stake valued (%)", "stake", g["stake_pct"], "0.0"), ("Shares in issue (optional)", "shares", g["shares"], "#,##0")):
+                                 ("Stake valued (%)", "stake", g["stake_pct"], "0.0"), ("Shares in issue (optional)", "shares", g["shares"], "#,##0"),
+                                 ("Include going-concern value (1 = yes, 0 = no)", "gcon", 1 if d["goingconcern"]["enabled"] else 0, "0")):
         ws_set.cell(row=r, column=1, value=label)
         _inp(ws_set.cell(row=r, column=2), val, fmt)
         S[key] = f"Settings!$B${r}"
@@ -191,6 +193,72 @@ def build_excel(vm):
     ws_h.add_data_validation(dv_k)
     dv_k.add(f"B{hfirst}:B{hlast}")
 
+
+    # ---------------------------------------------------------------- Going concern
+    gcd = d["goingconcern"]
+    gy = V.GC_MAX_YEARS
+    cf0 = 13                                  # first cash-flow column (M)
+    cfl = cf0 + gy - 1                        # last cash-flow column
+    c_rate, c_lo, c_ad, c_hi, c_elo, c_ead, c_ehi = cfl + 1, cfl + 2, cfl + 3, cfl + 4, cfl + 5, cfl + 6, cfl + 7
+    brand.xlsx_title_band(ws_g, "Going-concern and development value", _subtitle(vm) + [f"Stage: {gcd['stage'] or 'not stated'}. Present values at the valuation date; each item x its probability"], ncols=c_ehi)
+    brand.xlsx_page_setup(ws_g)
+    heads = ["Item", "Treatment", "Currency", "Low", "Adopted", "High", "Discount rate %", "Rate range +/- pts", "Terminal growth %", "Mid-year (1/0)", "Probability %", "Include (1/0)"]
+    heads += [f"Year {k + 1}" for k in range(gy)] + ["Rate to " + vm.currency, "Value low", "Value adopted", "Value high", f"Effect low ({vm.currency})", f"Effect adopted ({vm.currency})", f"Effect high ({vm.currency})"]
+    _head(ws_g, 8, heads)
+    _setw(ws_g, {"A": 36, "B": 16, "C": 9, "D": 14, "E": 14, "F": 14, "G": 11, "H": 10, "I": 11, "J": 9, "K": 11, "L": 9})
+    for k in range(gy):
+        ws_g.column_dimensions[CL(cf0 + k)].width = 13
+    for k in (c_rate, c_lo, c_ad, c_hi, c_elo, c_ead, c_ehi):
+        ws_g.column_dimensions[CL(k)].width = 15
+    ws_g.freeze_panes = ws_g.cell(row=9, column=3)
+    gfirst = 9
+    gitems = gcd["items"]
+    gn = len(gitems) + 4
+    glast = gfirst + gn - 1
+    CFR = lambda R: f"${CL(cf0)}{R}:${CL(cfl)}{R}"
+    for i in range(gn):
+        R = gfirst + i
+        it = gitems[i] if i < len(gitems) else None
+        vals = [it["label"] if it else None, it["kind"] if it else None, (it["currency"] or vm.currency) if it else None, it["low"] if it else None,
+                it["adopted"] if it else None, it["high"] if it else None, it["rate_pct"] if it else None, it["rate_range"] if it else None,
+                it["growth_pct"] if it else None, (1 if it["mid_year"] else 0) if it else None, it["probability_pct"] if it else None, (1 if it["include"] else 0) if it else None]
+        for ci, (v, fm) in enumerate(zip(vals, [None, None, None, NUM, NUM, NUM, "0.0", "0.0", "0.0", "0", "0.0", "0"]), start=1):
+            _inp(ws_g.cell(row=R, column=ci), v, fm)
+        for k in range(gy):
+            v = it["cash_flows"][k] if it and k < len(it["cash_flows"]) else None
+            _inp(ws_g.cell(row=R, column=cf0 + k), v, NUM)
+        ws_g.cell(row=R, column=c_rate, value=f'=IF($C{R}="",1,IFERROR(INDEX({FXR},MATCH($C{R},{FXC},0)),"n/a"))').number_format = NUM4
+
+        def dcf(shift, R=R):
+            r = f"($G{R}/100{shift})"
+            n = f"COUNT({CFR(R)})"
+            return (f"IF(OR(NOT(ISNUMBER($G{R})),{n}=0),0,NPV({r},{CFR(R)})*(1+{r})^(0.5*N($J{R}))"
+                    f"+IF(AND(ISNUMBER($I{R}),{r}>$I{R}/100),INDEX({CFR(R)},{n})*(1+$I{R}/100)/({r}-$I{R}/100)/(1+{r})^({n}-0.5*N($J{R})),0))")
+        adopted_fill = f'IF($E{R}<>"",$E{R},IF(AND($D{R}<>"",$F{R}<>""),($D{R}+$F{R})/2,IF($D{R}<>"",$D{R},IF($F{R}<>"",$F{R},0))))'
+        ws_g.cell(row=R, column=c_ad, value=f'=IF($B{R}="dcf",{dcf("")},{adopted_fill})')
+        ws_g.cell(row=R, column=c_lo, value=f'=IF($B{R}="dcf",{dcf(f"+$H{R}/100")},IF($D{R}<>"",$D{R},{CL(c_ad)}{R}))')
+        ws_g.cell(row=R, column=c_hi, value=f'=IF($B{R}="dcf",{dcf(f"-$H{R}/100")},IF($F{R}<>"",$F{R},{CL(c_ad)}{R}))')
+        for k in (c_lo, c_ad, c_hi):
+            ws_g.cell(row=R, column=k).number_format = NUM
+        for ek, vk in ((c_elo, c_lo), (c_ead, c_ad), (c_ehi, c_hi)):
+            ws_g.cell(row=R, column=ek, value=(f'=IF(AND($L{R}=1,ISNUMBER(${CL(c_rate)}{R}),{S["gcon"]}=1),IF(OR($B{R}="dcf",$B{R}="synergy",$B{R}="development",$B{R}="other_add"),1,-1)'
+                                               f'*{CL(vk)}{R}*${CL(c_rate)}{R}*IF($K{R}="",100,$K{R})/100,0)')).number_format = NUM
+    gtot = glast + 1
+    ws_g.cell(row=gtot, column=1, value="Net going-concern and development value").font = Font(bold=True)
+    for k in (c_elo, c_ead, c_ehi):
+        cell = ws_g.cell(row=gtot, column=k, value=f"=SUM({CL(k)}{gfirst}:{CL(k)}{glast})")
+        cell.number_format, cell.font, cell.fill, cell.border = NUM, Font(bold=True), FILL_TOT, TOP
+    dv_g = DataValidation(type="list", formula1='"dcf,synergy,development,other_add,capex,rampup,overlap,other_deduct"', allow_blank=True)
+    dv_gi = DataValidation(type="list", formula1='"0,1"', allow_blank=True)
+    ws_g.add_data_validation(dv_g)
+    ws_g.add_data_validation(dv_gi)
+    dv_g.add(f"B{gfirst}:B{glast}")
+    dv_gi.add(f"L{gfirst}:L{glast}")
+    dv_gi.add(f"J{gfirst}:J{glast}")
+    GCT = {"low": f"'Going concern'!${CL(c_elo)}${gtot}", "adopted": f"'Going concern'!${CL(c_ead)}${gtot}", "high": f"'Going concern'!${CL(c_ehi)}${gtot}"}
+    ws_g.cell(row=gtot + 2, column=1, value="Treatments: dcf, synergy, development, other_add add to value; capex, rampup, overlap, other_deduct reduce it. Enter amounts as positives. "
+                                           "For dcf rows, enter yearly net cash flows (year 1 first); low and high use the discount rate plus / minus the range.").font = Font(italic=True, color=MUTED)
+
     def hsum(kind, col):
         return f'SUMIF(\'Holding items\'!$B${hfirst}:$B${hlast},"{kind}",\'Holding items\'!${col}${hfirst}:${col}${hlast})'
 
@@ -222,7 +290,8 @@ def build_excel(vm):
     put("Less: holding-company liabilities", "ded", lambda case, col, hc: "=" + hsum("deduct", hc))
     put("Less: eliminations (cross-holdings, intercompany)", "elim", lambda case, col, hc: "=" + hsum("eliminate", hc))
     put("Less: capitalised central costs", "cap", lambda case, col, hc: "=" + hsum("capcost", hc))
-    put("Group equity value before group adjustments", "pre", lambda case, col, hc: f"=SUM({col}{rows['parts']}:{col}{rows['cap']})", total=True)
+    put("Add: going-concern and development value (risk-adjusted, net)", "gc", lambda case, col, hc: f"={GCT[case]}")
+    put("Group equity value before group adjustments", "pre", lambda case, col, hc: f"=SUM({col}{rows['parts']}:{col}{rows['gc']})", total=True)
     put("Group adjustment factor (control, minority, DLOM)", "factor",
         lambda case, col, hc: f"=(1+{S['ctl']}/100)*(1-{S['min']}/100)*(1-{S['dlom']}/100)", fmt="0.0000")
     put("Group equity value", "group", lambda case, col, hc: f"={col}{rows['pre']}*{col}{rows['factor']}", total=True)
@@ -295,6 +364,8 @@ def _bridge_lines(res):
                        ("eliminations", "Less: eliminations (cross-holdings, intercompany)"), ("capcost", "Less: capitalised central costs")):
         if any(abs(x) > 0.005 for x in res[key]):
             lines.append((label, res[key], False))
+    if res.get("gc_on") and any(abs(x) > 0.005 for x in res.get("gc", (0, 0, 0))):
+        lines.append(("Add: going-concern and development value (risk-adjusted)", res["gc"], False))
     lines.append(("Group equity value before group adjustments", res["pre"], True))
     if res["group_factor"] != 1:
         lines.append((f"Group adjustments (control {g['control_pct']:g}%, minority {g['minority_pct']:g}%, DLOM {g['dlom_pct']:g}%)",
@@ -414,6 +485,21 @@ def build_pdf(vm, signed=False):
                        h["currency"] or cur, _m(e[0]), _m(e[1]), _m(e[2])])
         story.append(P._simple(hd, [90 * mm, 50 * mm, 14 * mm, 30 * mm, 30 * mm, 30 * mm], size=7.8, align_right_from=3))
 
+    if d["goingconcern"]["enabled"] and res["gc_rows"]:
+        story.append(Paragraph("Going-concern and development value", P._h3))
+        story.append(P._p(f"Stage: {d['goingconcern']['stage'] or 'not stated'}. Present values at the valuation date, each multiplied by its probability of being achieved. "
+                          f"Before probability weighting the net value is {_m(res['gc_unrisked'][1])}.", P._note))
+        gd = [["Item", "Treatment", "Probability", "Low", "Adopted", "High"]]
+        for x in res["gc_rows"]:
+            it = x["g"]
+            lab = dict((k, l) for k, l, _ in V.GC_KINDS)[it["kind"]].split(" (")[0]
+            if x["counted"]:
+                gd.append([it["label"][:60], lab[:44], f"{it['probability_pct']:g}%", _m(x["effect"][0]), _m(x["effect"][1]), _m(x["effect"][2])])
+            else:
+                gd.append([it["label"][:60], lab[:44], "", "", "not in total", ""])
+        gd.append(["Net going-concern and development value", "", "", _m(res["gc"][0]), _m(res["gc"][1]), _m(res["gc"][2])])
+        story.append(P._simple(gd, [80 * mm, 70 * mm, 24 * mm, 30 * mm, 30 * mm, 30 * mm], size=7.8, align_right_from=2, bold_last=True))
+
     fxs = [c for c in V.currencies_needed(d, cur)]
     if fxs:
         story.append(Paragraph("Exchange rates", P._h3))
@@ -527,6 +613,17 @@ def build_docx(vm, signed=False):
                             h["currency"] or cur, _m(e[0]), _m(e[1]), _m(e[2])])
         brand.heading(doc, "Holding-company items", 2)
         table(["Item", "Treatment", "Cur", "Effect: low", "Effect: adopted", "Effect: high"], hr_rows, [3.3, 2.0, 0.6, 1.2, 1.2, 1.2], num_from=3, size=8.5)
+    if d["goingconcern"]["enabled"] and res["gc_rows"]:
+        brand.heading(doc, "Going-concern and development value", 2)
+        para(f"Stage: {d['goingconcern']['stage'] or 'not stated'}. Present values at the valuation date, each multiplied by its probability of being achieved. "
+             f"Before probability weighting the net value is {_m(res['gc_unrisked'][1])}.", size=9, colour=brand.MUTED)
+        gd = []
+        for x in res["gc_rows"]:
+            it = x["g"]
+            lab = dict((k, l) for k, l, _ in V.GC_KINDS)[it["kind"]].split(" (")[0]
+            gd.append([it["label"], lab, f"{it['probability_pct']:g}%", *( [_m(v) for v in x["effect"]] if x["counted"] else ["", "not in total", ""] )])
+        gd.append(["Net going-concern and development value", "", "", _m(res["gc"][0]), _m(res["gc"][1]), _m(res["gc"][2])])
+        table(["Item", "Treatment", "Probability", "Low", "Adopted", "High"], gd, [2.8, 2.5, 0.9, 1.1, 1.1, 1.1], num_from=2, size=8.5, bold_rows=(len(gd),))
     fxs = V.currencies_needed(d, cur)
     if fxs:
         brand.heading(doc, "Exchange rates", 2)

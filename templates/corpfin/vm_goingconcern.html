@@ -1,0 +1,112 @@
+{% extends "corpfin/vm_base.html" %}
+{% block tab %}
+{% set locked = vm.is_final %}
+<style>
+  .gc-item { border: 1px solid var(--line, #dfe5ee); border-radius: 8px; padding: 12px 14px; margin-bottom: 12px; background: #fff; }
+  .gc-item.off { opacity: .6; }
+  .gc-item.bad { border-color: #e4a5a0; background: #fff8f7; }
+  .gc-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; align-items: end; }
+  .gc-grid label { font-size: 11px; display: block; margin-bottom: 2px; color: #5b6b80; }
+  .gc-grid input[type=number], .gc-grid input[type=text], .gc-grid select { width: 100%; box-sizing: border-box; }
+  .gc-grid input[type=number] { text-align: right; }
+  .gc-cf { display: grid; grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); gap: 6px; margin-top: 8px; }
+  .gc-cf label { font-size: 10.5px; color: #5b6b80; display: block; margin-bottom: 1px; }
+  .gc-cf input { width: 100%; box-sizing: border-box; text-align: right; }
+  .gc-head { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 8px; }
+  .gc-tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: #eef2f8; color: #1f3a5f; }
+  .gc-tag.minus { background: #fbeceb; color: #8a2a24; }
+</style>
+<form method="post" action="{{ url_for('corpfin.vm_save_gc', vm_id=vm.id) }}">
+<div class="card">
+  <div class="gc-head"><h3 style="margin:0;">Going-concern and development value</h3>
+    {% if not locked %}<button class="btn gold" type="submit" name="action" value="save">Save</button>{% endif %}</div>
+  <p class="cf-sub">For a business that is moving into production. Component valuations value each asset on the evidence supplied; this section adds what they do not carry &mdash; the value of the
+    production plan as a whole, synergies between the assets, and development options &mdash; and takes off the capex still to be spent and ramp-up costs. Every item is multiplied by its
+    <strong>probability</strong> of being achieved, so a pre-production plan is not valued as if it were certain. Amounts are present values at the valuation date.</p>
+  <div class="flash warning" style="margin:8px 0;"><strong>Avoid double counting.</strong> If a component was valued by a DCF of its own production, that value is already in the sum of the parts. Add only what is not in it, or enter the
+    overlap as <em>&ldquo;Less: value already inside the component values&rdquo;</em>.</div>
+  <div class="form-row">
+    <div style="max-width:260px;"><label style="display:flex;gap:8px;align-items:center;"><input type="checkbox" name="gc_enabled" {% if d.goingconcern.enabled %}checked{% endif %} {% if locked %}disabled{% endif %}> Include this section in the group value</label></div>
+    <div style="flex:1;"><label>Stage of development</label>
+      <select name="gc_stage" id="gcStage" {% if locked %}disabled{% endif %}><option value="">Choose&hellip;</option>{% for s in VM_GC_STAGES %}<option {% if d.goingconcern.stage == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select>
+      <div class="muted" id="gcHint" style="font-size:11.5px;margin-top:3px;"></div></div>
+  </div>
+  <div><label>Basis for the probabilities and the plan (goes into the report)</label>
+    <textarea name="gc_basis" rows="3" placeholder="For example: the licence is granted; the pre-feasibility study was completed in &hellip;; funding of &hellip; is committed; offtake is agreed for &hellip;" {% if locked %}readonly{% endif %}>{{ d.goingconcern.basis }}</textarea></div>
+</div>
+
+<div class="card" id="items">
+  <div class="gc-head"><h3 style="margin:0;">Items</h3>{% if not locked %}<button class="btn gold" type="submit" name="action" value="save">Save</button>{% endif %}</div>
+  <input type="hidden" name="n" value="{{ d.goingconcern['items']|length }}">
+  {% for row in res.gc_rows %}{% set it = row.g %}{% set i = loop.index0 %}
+  <div class="gc-item {{ 'off' if not it.include or not d.goingconcern.enabled }} {{ 'bad' if row.problem and row.counted_item }}">
+    <div class="gc-head">
+      <div><span class="gc-tag {{ 'minus' if row.sign < 0 }}">{{ 'Adds' if row.sign > 0 else 'Deducts' }}</span>
+        {% if row.effect %}<span class="muted" style="margin-left:8px;font-size:12px;">{{ cur }} {{ row.effect[1]|cfn }} adopted{% if it.probability_pct < 100 %} after {{ '%g'|format(it.probability_pct) }}% probability{% endif %}</span>{% endif %}
+        {% if row.problem and row.counted_item %}<span style="color:#b3261e;margin-left:8px;font-size:12px;">Needs: {{ row.problem }}</span>{% endif %}</div>
+      <div style="display:flex;gap:10px;align-items:center;">
+        <label style="font-size:12px;display:flex;gap:5px;align-items:center;"><input type="checkbox" name="g{{ i }}_include" {% if it.include %}checked{% endif %} {% if locked %}disabled{% endif %}> Include</label>
+        {% if not locked %}<button type="submit" name="action" value="delete:{{ it.id }}" class="btn small secondary" onclick="return confirm('Remove this item?');">&times;</button>{% endif %}</div>
+    </div>
+    <input type="hidden" name="g{{ i }}_id" value="{{ it.id }}">
+    <div class="gc-grid">
+      <div style="grid-column: span 2;"><label>Item</label><input type="text" name="g{{ i }}_label" value="{{ it.label }}" {% if locked %}readonly{% endif %}></div>
+      <div style="grid-column: span 2;"><label>Treatment</label>
+        <select name="g{{ i }}_kind" {% if locked %}disabled{% endif %}>{% for k, lbl, sg in VM_GC_KINDS %}<option value="{{ k }}" {% if it.kind == k %}selected{% endif %}>{{ lbl }}</option>{% endfor %}</select></div>
+      <div><label>Currency</label><input type="text" name="g{{ i }}_currency" value="{{ it.currency or cur }}" maxlength="6" {% if locked %}readonly{% endif %}></div>
+      <div><label>Probability of being achieved %</label><input type="number" step="any" min="0" max="100" name="g{{ i }}_probability_pct" value="{{ it.probability_pct|vmnum }}" {% if locked %}readonly{% endif %}></div>
+    </div>
+    {% if it.kind == 'dcf' %}
+    <div class="gc-grid" style="margin-top:10px;">
+      <div><label>Discount rate %</label><input type="number" step="any" name="g{{ i }}_rate_pct" value="{{ it.rate_pct|vmnum }}" {% if locked %}readonly{% endif %}></div>
+      <div><label>Range &plusmn; percentage points</label><input type="number" step="any" min="0" name="g{{ i }}_rate_range" value="{{ it.rate_range|vmnum }}" {% if locked %}readonly{% endif %}></div>
+      <div><label>Terminal growth % (blank = none)</label><input type="number" step="any" name="g{{ i }}_growth_pct" value="{{ it.growth_pct|vmnum }}" {% if locked %}readonly{% endif %}></div>
+      <div><label style="display:flex;gap:6px;align-items:center;margin-top:16px;"><input type="checkbox" name="g{{ i }}_mid_year" {% if it.mid_year %}checked{% endif %} {% if locked %}disabled{% endif %}> Cash flows arrive mid-year</label></div>
+    </div>
+    <div class="muted" style="font-size:11.5px;margin-top:8px;">Net cash flow to the company in each year after the valuation date, in {{ it.currency or cur }}: the discount rate, plus and minus the range, gives the low, adopted and high values.</div>
+    <div class="gc-cf">
+      {% for j in range(VM_GC_YEARS) %}<div><label>Year {{ j + 1 }}</label><input type="number" step="0.01" name="g{{ i }}_cf{{ j }}" value="{{ it.cash_flows[j]|vmnum if j < it.cash_flows|length else '' }}" {% if locked %}readonly{% endif %}></div>{% endfor %}
+    </div>
+    {% if row.vals %}<div style="margin-top:8px;font-size:12.5px;">Present value (before probability): low <strong>{{ row.vals[0]|cfn }}</strong>, adopted <strong>{{ row.vals[1]|cfn }}</strong>, high <strong>{{ row.vals[2]|cfn }}</strong>
+      {% if row.tv_share is not none %}<span class="muted"> &middot; terminal value is {{ '%.0f'|format(row.tv_share) }}% of the value</span>{% endif %}</div>{% endif %}
+    {% else %}
+    <div class="gc-grid" style="margin-top:10px;">
+      <div><label>Low</label><input type="number" step="0.01" name="g{{ i }}_low" value="{{ it.low|vmnum }}" {% if locked %}readonly{% endif %}></div>
+      <div><label>Adopted</label><input type="number" step="0.01" name="g{{ i }}_adopted" value="{{ it.adopted|vmnum }}" {% if locked %}readonly{% endif %}></div>
+      <div><label>High</label><input type="number" step="0.01" name="g{{ i }}_high" value="{{ it.high|vmnum }}" {% if locked %}readonly{% endif %}></div>
+    </div>
+    <div class="muted" style="font-size:11.5px;margin-top:6px;">Present value at the valuation date, entered as a positive amount; the treatment decides whether it adds or deducts. Leave low and high blank to use the adopted figure.</div>
+    {% endif %}
+    <div style="margin-top:8px;"><input type="text" name="g{{ i }}_notes" value="{{ it.notes }}" placeholder="Basis and source for this item (shown in the report)" style="width:100%;box-sizing:border-box;" {% if locked %}readonly{% endif %}></div>
+  </div>
+  {% else %}<div class="empty-state">No items yet. Add the production-plan DCF first, then synergies, development options, capex still to be spent and any overlap with the component values.</div>{% endfor %}
+  {% if not locked %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+    {% for k, lbl, sg in VM_GC_KINDS %}<button class="btn secondary small" type="submit" name="action" value="add:{{ k }}">+ {{ lbl.split(' (')[0] }}</button>{% endfor %}
+  </div>
+  {% endif %}
+</div>
+</form>
+
+{% if res.gc_rows %}
+<div class="card">
+  <h3 style="margin-top:0;">Effect on the group value &mdash; {{ cur }}</h3>
+  <table class="cf-table"><thead><tr><th>Item</th><th class="n">Probability</th><th class="n">Before probability (adopted)</th><th class="n">Low</th><th class="n">Adopted</th><th class="n">High</th></tr></thead><tbody>
+  {% for row in res.gc_rows %}<tr {% if not row.counted %}class="memo"{% endif %}><td>{{ row.g.label }}</td><td class="n">{{ '%g'|format(row.g.probability_pct) }}%</td>
+    {% if row.counted %}<td class="n">{{ row.unrisked[1]|cfn }}</td><td class="n">{{ row.effect[0]|cfn }}</td><td class="n"><strong>{{ row.effect[1]|cfn }}</strong></td><td class="n">{{ row.effect[2]|cfn }}</td>
+    {% else %}<td colspan="4" class="muted">{{ 'Not included' if not row.g.include or not d.goingconcern.enabled else 'Incomplete: ' ~ row.problem }}</td>{% endif %}</tr>{% endfor %}
+  <tr class="grand"><td colspan="2">Net going-concern and development value</td><td class="n">{{ res.gc_unrisked[1]|cfn }}</td><td class="n">{{ res.gc[0]|cfn }}</td><td class="n">{{ res.gc[1]|cfn }}</td><td class="n">{{ res.gc[2]|cfn }}</td></tr>
+  </tbody></table>
+  {% if res.gc_on %}<p class="cf-sub" style="margin-top:8px;">Allowance for the risk that the plan is not achieved: {{ cur }} {{ (res.gc_unrisked[1] - res.gc[1])|cfn }}. This net amount is added to the sum of the parts in the consolidation.</p>
+  {% else %}<p class="cf-sub" style="margin-top:8px;">Switched off: nothing on this page is in the group value.</p>{% endif %}
+</div>
+{% endif %}
+<script>
+(function () {
+  var hints = {{ VM_GC_HINTS|tojson }};
+  var sel = document.getElementById('gcStage'), box = document.getElementById('gcHint');
+  function show() { var h = hints[sel.value]; box.textContent = h ? 'Indicative probability of reaching steady-state production at this stage: ' + h + ' - a starting point for judgement; support the figures you use.' : ''; }
+  if (sel) { sel.addEventListener('change', show); show(); }
+})();
+</script>
+{% endblock %}
