@@ -638,35 +638,6 @@
   {% endif %}
 </div>
 
-<div class="card" id="client-decision">
-  <h3 class="mt-0">Decision to accept this client</h3>
-  <p class="muted" style="font-size:12px;">Made once, here, after the vetting above. Engagements for this client that require Client Acceptance stay locked until the client is Accepted (or Accepted with conditions); each engagement still completes its own checklists, engagement letter and sign-off.</p>
-  <div class="flash {{ vetting_assessment.level }}" style="margin-bottom:10px;"><strong>Vetting:</strong> {{ vetting_assessment.label }}</div>
-  <p style="font-size:13px;margin:6px 0;">Current decision:
-    <span class="badge {{ 'status-Completed' if client.is_accepted_as_client else ('risk-High' if client.acceptance_status == 'Declined' else 'status-OnHold') }}">{{ client.acceptance_status }}</span>
-    {% if client.acceptance_decided_at %}<span class="muted" style="font-size:11.5px;">by {{ client.acceptance_decided_by.name if client.acceptance_decided_by else '-' }} on {{ (client.acceptance_decided_at|cat).strftime('%d %b %Y') }}</span>{% endif %}
-  </p>
-  {% if client.acceptance_decision_notes %}<p style="font-size:12.5px;white-space:pre-wrap;margin:4px 0 10px;">{{ client.acceptance_decision_notes }}</p>{% endif %}
-  {% if client.is_accepted_as_client and (vetting_assessment.hits or vetting_assessment.potential) %}
-  <div class="flash danger" style="margin-bottom:10px;">The vetting now shows a hit or a potential match although the client is recorded as accepted. Review it and record the decision again.</div>
-  {% endif %}
-  {% if can_decide_acceptance %}
-  <form method="post" action="{{ url_for('clients.save_acceptance_decision', client_id=client.id) }}">
-    <div class="form-row">
-      <div>
-        <label for="client_decision">Decision</label>
-        <select id="client_decision" name="decision">{% for d in client_accept_decisions %}<option value="{{ d }}" {% if client.acceptance_status == d %}selected{% endif %}>{{ d }}</option>{% endfor %}</select>
-      </div>
-    </div>
-    <label for="client_decision_notes">Decision notes <span class="muted" style="font-size:11.5px;">(required for Accepted with conditions and Declined, and for Accepted when the vetting shows a hit or potential match)</span></label>
-    <textarea id="client_decision_notes" name="decision_notes" rows="3">{{ client.acceptance_decision_notes or '' }}</textarea>
-    <button type="submit" class="btn gold" style="margin-top:8px;">Save decision</button>
-  </form>
-  {% else %}
-  <p class="muted" style="font-size:12px;">Only a Partner or the Admin records this decision.</p>
-  {% endif %}
-</div>
-
 <div class="card">
   <h3 class="mt-0">Understanding the Entity's Business - Public Information</h3>
   <p class="muted" style="font-size:12px;">
@@ -774,6 +745,35 @@
   </table>
   {% else %}
   <div class="empty-state">No advances from this client. Record one when the client pays before an invoice is raised.</div>
+  {% endif %}
+</div>
+
+<div class="card" id="client-decision">
+  <h3 class="mt-0">Decision to accept this client</h3>
+  <p class="muted" style="font-size:12px;">Made once, here, at the end of the client page, after the directors and shareholders have been scanned and vetted and the entity's business has been researched above. Engagements for this client that require Client Acceptance stay locked until the client is Accepted (or Accepted with conditions); each engagement still completes its own checklists, engagement letter and sign-off.</p>
+  <div class="flash {{ vetting_assessment.level }}" style="margin-bottom:10px;"><strong>Vetting:</strong> {{ vetting_assessment.label }}</div>
+  <p style="font-size:13px;margin:6px 0;">Current decision:
+    <span class="badge {{ 'status-Completed' if client.is_accepted_as_client else ('risk-High' if client.acceptance_status == 'Declined' else 'status-OnHold') }}">{{ client.acceptance_status }}</span>
+    {% if client.acceptance_decided_at %}<span class="muted" style="font-size:11.5px;">by {{ client.acceptance_decided_by.name if client.acceptance_decided_by else '-' }} on {{ (client.acceptance_decided_at|cat).strftime('%d %b %Y') }}</span>{% endif %}
+  </p>
+  {% if client.acceptance_decision_notes %}<p style="font-size:12.5px;white-space:pre-wrap;margin:4px 0 10px;">{{ client.acceptance_decision_notes }}</p>{% endif %}
+  {% if client.is_accepted_as_client and (vetting_assessment.hits or vetting_assessment.potential) %}
+  <div class="flash danger" style="margin-bottom:10px;">The vetting now shows a hit or a potential match although the client is recorded as accepted. Review it and record the decision again.</div>
+  {% endif %}
+  {% if can_decide_acceptance %}
+  <form method="post" action="{{ url_for('clients.save_acceptance_decision', client_id=client.id) }}">
+    <div class="form-row">
+      <div>
+        <label for="client_decision">Decision</label>
+        <select id="client_decision" name="decision">{% for d in client_accept_decisions %}<option value="{{ d }}" {% if client.acceptance_status == d %}selected{% endif %}>{{ d }}</option>{% endfor %}</select>
+      </div>
+    </div>
+    <label for="client_decision_notes">Decision notes <span class="muted" style="font-size:11.5px;">(required for Accepted with conditions and Declined, and for Accepted when the vetting shows a hit or potential match)</span></label>
+    <textarea id="client_decision_notes" name="decision_notes" rows="3">{{ client.acceptance_decision_notes or '' }}</textarea>
+    <button type="submit" class="btn gold" style="margin-top:8px;">Save decision</button>
+  </form>
+  {% else %}
+  <p class="muted" style="font-size:12px;">Only a Partner or the Admin records this decision.</p>
   {% endif %}
 </div>
 
