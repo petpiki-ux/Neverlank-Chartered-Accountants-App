@@ -804,6 +804,41 @@ def _loan_sheets(wb, meta, d):
 
 
 
+def _loan_analysis_sheet(wb, meta, d):
+    """'Loan analysis': the facilities against the income statement, balance sheet, cash flow and KPIs (values as at export)."""
+    import cf_ma_loans as FL
+    an = FL.statement_analysis(d)
+    if not an:
+        return None
+    ws = wb.create_sheet("Loan analysis")
+    brand.xlsx_title_band(ws, "Loan facilities in the statements", [meta.get("client", ""), meta.get("name", ""), "Values as at export."], ncols=6)
+    brand.xlsx_page_setup(ws)
+    ws.column_dimensions["A"].width = 62
+    for col in "BCD":
+        ws.column_dimensions[col].width = 16
+    r = 6
+    for key in ("income", "balance", "cashflow", "kpis"):
+        t = an[key]
+        ws.cell(row=r, column=1, value=t["title"]).font = Font(bold=True, size=12, color=NAVY)
+        r += 1
+        for j, h in enumerate([""] + list(t["cols"]), start=1):
+            c = ws.cell(row=r, column=j, value=h)
+            c.font, c.fill = Font(bold=True), FILL_SUB
+            c.alignment = Alignment(horizontal="left" if j == 1 else "right")
+        for row in t["rows"]:
+            r += 1
+            c = ws.cell(row=r, column=1, value=("   " if row["kind"] == "indent" else "") + row["label"])
+            c.font = Font(bold=row["kind"] == "total", italic=row["kind"] == "memo")
+            for j, v in enumerate(row["vals"], start=2):
+                cell = ws.cell(row=r, column=j, value=None if v is None else round(v, 4))
+                cell.number_format = '0.00"x"' if row["fmt"] == "x" else NUM
+                cell.font = Font(bold=row["kind"] == "total", italic=row["kind"] == "memo")
+        r += 1
+        ws.cell(row=r, column=1, value=t["note"]).font = Font(italic=True, color=MUTED)
+        r += 3
+    return ws
+
+
 def build_pack_workbook(meta, d):
     from cf_ma_pdf import _basis_lines
     structure = M.normalise_structure(d["structure"])
@@ -852,7 +887,8 @@ def build_pack_workbook(meta, d):
         _scenario_sheet(wb, meta, d, ex, labels)
     _pack_sheet(wb, meta, d, labels, V, status, _basis_lines(d, V, status), M.key_messages(d, ""))
     _loan_sheets(wb, meta, d)
-    order = ["Pack", "Income statement", "Balance sheet", "Cash flow", "KPIs", "Variances", "Variance bridge", "Scenarios", "Loan facilities", "Loan schedules", DATA]
+    _loan_analysis_sheet(wb, meta, d)
+    order = ["Pack", "Income statement", "Balance sheet", "Cash flow", "KPIs", "Variances", "Variance bridge", "Scenarios", "Loan facilities", "Loan analysis", "Loan schedules", DATA]
     wb._sheets = [wb[n] for n in order if n in wb.sheetnames]
     for ws in wb.worksheets:
         ws.sheet_properties.tabColor = NAVY if ws.title == "Pack" else ("0000FF" if ws.title == DATA else GOLD)

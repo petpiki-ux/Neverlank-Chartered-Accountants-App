@@ -409,6 +409,25 @@ def _loans(wb, meta, d):
         ws.cell(row=6, column=1, value="No loan facilities have been entered for this pack.")
 
 
+def _loan_block(ws, t):
+    """Append a loan-facilities analysis block (cf_ma_loans.statement_analysis) under a page's table."""
+    if not t:
+        return
+    r = ws.max_row + 3
+    ws.cell(row=r, column=1, value=t["title"]).font = Font(bold=True, size=12, color=NAVY)
+    r += 1
+    _hdr(ws, r, [""] + list(t["cols"]))
+    for row in t["rows"]:
+        r += 1
+        c = ws.cell(row=r, column=1, value=("   " if row["kind"] == "indent" else "") + row["label"])
+        c.font = Font(bold=row["kind"] == "total", italic=row["kind"] == "memo")
+        for j, v in enumerate(row["vals"], start=2):
+            cell = _val(ws, r, j, v, "0.00\"x\"" if row["fmt"] == "x" else NUM, bold=row["kind"] == "total")
+            if row["kind"] == "memo":
+                cell.font = Font(italic=True)
+    _put_note(ws, r + 1, t["note"])
+
+
 # =========================================================================== entry point
 
 def build_page_workbook(meta, d, tab, args=None, ctx=None):
@@ -441,6 +460,11 @@ def build_page_workbook(meta, d, tab, args=None, ctx=None):
         _loans(wb, meta, d)
     else:
         raise KeyError(tab)
+    if tab in ("income", "balance", "cashflow", "kpis"):
+        import cf_ma_loans as FL
+        an = FL.statement_analysis(d)
+        if an:
+            _loan_block(wb.active, an[tab])
     for ws in wb.worksheets:
         ws.sheet_properties.tabColor = X.GOLD
     wb.properties.creator = "Neverlank Chartered Accountants"

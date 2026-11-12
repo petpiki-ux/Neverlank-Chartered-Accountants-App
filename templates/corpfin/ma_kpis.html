@@ -20,4 +20,5 @@
   <p class="cf-sub">Ratios use the year-to-date figures (days measures are annualised for the months elapsed). Margin and cost ratios are judged against the budget (or last year if there is none); liquidity, leverage and cover ratios against fixed thresholds.</p>
 </div>
 {% endif %}
+{{ ma.loan_block((loan_an or {}).get('kpis'), pack.id) }}
 {% endblock %}

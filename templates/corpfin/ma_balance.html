@@ -17,4 +17,5 @@
 {{ ma.basis(d, none, status) }}
 {% if d.commentary.balance %}<div class="card"><h3 style="margin-top:0;">Commentary</h3><p style="white-space:pre-wrap;">{{ d.commentary.balance }}</p></div>{% endif %}
 {% endif %}
+{{ ma.loan_block((loan_an or {}).get('balance'), pack.id) }}
 {% endblock %}

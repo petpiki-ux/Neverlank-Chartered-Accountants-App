@@ -149,3 +149,25 @@
   {% if V and V.outlook_basis %}<div class="muted">Full-year forecast basis: {{ V.outlook_basis }}.</div>{% endif %}
 </div>
 {% endmacro %}
+
+{# A loan-facilities analysis block (from cf_ma_loans.statement_analysis): {title, cols, rows, note, warn} #}
+{% macro loan_block(t, pack_id=None) %}
+{% if t %}
+<div class="card">
+  <h3 style="margin-top:0;">{{ t.title }}{% if pack_id %} <a class="cf-sub" style="font-weight:normal;margin-left:8px;" href="{{ url_for('corpfin.pack_tab', pack_id=pack_id, tab='loans') }}">Loan facilities tab</a>{% endif %}</h3>
+  <div class="tbl-scroll"><table class="cf-table ma-table">
+    <thead><tr class="ma-sub"><th class="ma-label" style="text-align:left;"></th>{% for c in t.cols %}<th>{{ c }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for r in t.rows %}
+      <tr class="{{ 'total' if r.kind == 'total' else '' }}">
+        <td class="ma-label" style="{% if r.kind == 'indent' %}padding-left:22px;{% elif r.kind == 'memo' %}font-style:italic;{% endif %}">{{ r.label }}</td>
+        {% for v in r.vals %}<td class="n" {% if r.kind == 'memo' %}style="font-style:italic;"{% endif %}>{% if v is none %}&ndash;{% elif r.fmt == 'x' %}{{ '%.2f'|format(v) }}x{% else %}{{ v|cfn }}{% endif %}</td>{% endfor %}
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  <p class="cf-sub" style="margin-bottom:0;">{{ t.note }}</p>
+  {% if t.warn %}<div class="flash warning" style="margin-top:8px;">The statement and the facilities do not agree. See the balancing line above: it shows what the statement holds beyond (or lacks against) the facilities schedule.</div>{% endif %}
+</div>
+{% endif %}
+{% endmacro %}

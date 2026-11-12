@@ -23,4 +23,5 @@
 {{ ma.basis(d, V, status) }}
 {% if d.commentary.income %}<div class="card"><h3 style="margin-top:0;">Commentary</h3><p style="white-space:pre-wrap;">{{ d.commentary.income }}</p></div>{% endif %}
 {% endif %}
+{{ ma.loan_block((loan_an or {}).get('income'), pack.id) }}
 {% endblock %}

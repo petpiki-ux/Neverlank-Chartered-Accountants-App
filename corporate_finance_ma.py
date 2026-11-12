@@ -239,6 +239,8 @@ def pack_tab(pack_id, tab):
                months=M.fy_months(d), report_month=M.report_month(d), fy=M.fy_label(d), prior_label=M.prior_fy_label(d),
                month_label=M.month_label, warnings=M.warnings(d), status=M.data_status(d), has_prior=bool((d.get("prior") or {}).get("pl")),
                engagements=_engagement_choices([pack.client]) if tab == "setup" else [], link_status=LK.link_status(_data(pack)))
+    if tab in ("income", "balance", "cashflow", "kpis"):
+        ctx["loan_an"] = FL.statement_analysis(d)
     if tab == "summary":
         ctx.update(V=M.vectors(d), msgs=M.key_messages(d, ""), kpis=M.kpi_table(d), charts=_chart_payload(d))
     elif tab == "income":

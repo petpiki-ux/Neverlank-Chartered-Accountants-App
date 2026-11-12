@@ -339,3 +339,125 @@ def parse_form(form, d, skip=None):
             continue
         out.append(normalise_facility(raw, len(out), default_month))
     return out[:MAX_FACILITIES]
+
+
+# --------------------------------------------------------------------------- the facilities in the statements
+
+def _due_within_12(rows, month):
+    """Capital falling due in the 12 months after the end of `month`."""
+    start, end = M.shift_month(month, 1), M.shift_month(month, 12)
+    return sum(x["repay"] for x in rows if start <= x["month"] <= end)
+
+
+def statement_analysis(d, facs=None):
+    """Loan facility figures laid out against the income statement, balance sheet, cash flow and KPIs of the pack.
+    Returns None when there are no facilities in use, else {income, balance, cashflow, kpis}: each a table
+    {title, cols, rows:[{label, vals, kind, fmt}], note}. A value of None means 'not available'.
+    The facility figures come from the schedule; the statement figures are the pack's own (actual to the reporting month, forecast after),
+    so the balancing line shows what the statement holds beyond the facilities (other interest, other borrowings) - or what it lacks."""
+    facs = [x for x in (facilities_of(d) if facs is None else facs) if x["include"] and x["amount"] > 0]
+    if not facs:
+        return None
+    ps = pack_schedule(d, facs)
+    months, ridx = ps["months"], ps["actual_n"] - 1
+    cur, fy_end = months[ridx], months[-1]
+    V = M.vectors(d)
+    fy = M.fy_label(d)
+    cur_lab = M.month_label(cur, False)
+    sets = {"month": [cur], "ytd": months[:ridx + 1], "fy": months}
+    ordr = ("month", "ytd", "fy")
+
+    def tot(key, per, fxs=None):
+        return sum(fx["rows"][m][key] for fx in (fxs or ps["facilities"]) for m in sets[per])
+
+    def sub(a, b):
+        return None if (a is None or b is None) else a - b
+
+    def row(label, vals, kind="line", fmt="money"):
+        return {"label": label, "vals": vals, "kind": kind, "fmt": fmt}
+
+    # ---- income statement
+    stmt = {"month": (V["actual_month"] or {}).get("int_exp") if V["actual_month"] else None,
+            "ytd": (V["actual_ytd"] or {}).get("int_exp") if V["actual_ytd"] else None,
+            "fy": (V["outlook"] or {}).get("int_exp") if V["outlook"] else None}
+    rows = []
+    for fx in ps["facilities"]:
+        rows.append(row(f"Interest - {label_of(fx['fac'])}", [tot("interest", p, [fx]) for p in ordr], "indent"))
+    rows.append(row("Interest on loan facilities", [tot("interest", p) for p in ordr], "line"))
+    rows.append(row("Establishment fees (expensed when drawn)", [tot("fee", p) for p in ordr], "line"))
+    cost = [tot("interest", p) + tot("fee", p) for p in ordr]
+    rows.append(row("Total loan facility cost", cost, "total"))
+    rows.append(row("Interest expense per income statement", [stmt[p] for p in ordr], "line"))
+    other = [sub(stmt[p], cost[i]) for i, p in enumerate(ordr)]
+    rows.append(row("Other interest and charges (statement less facilities)", other, "memo"))
+    note_i = ("Actual months are the books; later months are the forecast. A negative balance means the statement holds less interest than the facilities "
+              "schedule: for actual months the books may not yet record the facility interest or fees; for forecast months the forecast may not be "
+              "linked to these facilities (use 'Save and update the forecast' on the Loan facilities tab).")
+    income = {"title": "Loan facilities in the income statement", "cols": [cur_lab, "Year to date", f"Full year {fy}"], "rows": rows, "note": note_i,
+              "warn": any(v is not None and v < -max(1.0, 0.02 * (cost[i] or 0)) for i, v in enumerate(other))}
+
+    # ---- balance sheet
+    ser, fser, bser = M.bs_series(d), M.forecast_bs(d), M.budget_bs(d)
+    bs_cur = ser.get(cur) or fser.get(cur)
+    bs_end = fser.get(fy_end) or bser.get(fy_end) or ser.get(fy_end)
+    full = {fx["fac"]["id"]: schedule(fx["fac"]) for fx in ps["facilities"]}
+    at = (cur, fy_end)
+    rows = []
+    for fx in ps["facilities"]:
+        rows.append(row(f"{label_of(fx['fac'])} - balance outstanding", [fx["rows"][m]["close"] for m in at], "indent"))
+    bal = [sum(fx["rows"][m]["close"] for fx in ps["facilities"]) for m in at]
+    rows.append(row("Loan facility borrowings", bal, "total"))
+    bs_b = [(f(b.get("borrowings")) if b else None) for b in (bs_cur, bs_end)]
+    rows.append(row("Borrowings per balance sheet", bs_b, "line"))
+    rows.append(row("Borrowings not in the facilities (balance)", [sub(bs_b[i], bal[i]) for i in range(2)], "memo"))
+    due = [sum(_due_within_12(full[fx["fac"]["id"]], m) for fx in ps["facilities"]) for m in at]
+    due = [min(due[i], bal[i]) for i in range(2)]
+    rows.append(row("Facility capital due within 12 months (current)", due, "line"))
+    rows.append(row("Facility capital due after 12 months (non-current)", [bal[i] - due[i] for i in range(2)], "line"))
+    balance = {"title": "Loan facilities in the balance sheet", "cols": [f"At {cur_lab}", f"At {M.month_label(fy_end, False)}"], "rows": rows,
+               "note": "The balance sheet holds borrowings as one line. This splits the facilities' balance into what falls due within 12 months (a current liability) "
+                       "and the rest. At the reporting month the balance sheet is the actual one; at the year end it is the forecast (or budget).",
+               "warn": any(bs_b[i] is not None and bs_b[i] < bal[i] - max(1.0, 0.005 * bal[i]) for i in range(2))}
+
+    # ---- cash flow
+    cfr = {r["key"]: r for r in M.cashflow_rows(d)["rows"]}
+    cfv = {"month": ("a",), "ytd": ("ya",), "fy": ("ffy",)}
+    def cfg(key, per):
+        r = cfr.get(key)
+        return r[cfv[per][0]] if r else None
+    draw = [tot("draw", p) for p in ordr]
+    rep = [tot("repay", p) for p in ordr]
+    net = [draw[i] - rep[i] for i in range(3)]
+    rows = [row("Loan drawdowns", draw), row("Capital repaid", [-x for x in rep]),
+            row("Net loan drawdown / (repayment) - facilities", net, "total"),
+            row("Net loan drawdown / (repayment) - cash flow statement", [cfg("loans", p) for p in ordr]),
+            row("Difference (statement less facilities)", [sub(cfg("loans", p), net[i]) for i, p in enumerate(ordr)], "memo"),
+            row("Interest and fees paid - facilities", [-(tot("interest", p) + tot("fee", p)) for p in ordr]),
+            row("Net interest - cash flow statement", [cfg("interest", p) for p in ordr], "line")]
+    cashflow = {"title": "Loan facilities in the cash flow", "cols": [cur_lab, "Year to date", f"Full year {fy}"], "rows": rows,
+                "note": "Capital repayments and drawdowns are financing cash flows; interest and fees reduce operating cash. The cash flow statement is derived from the "
+                        "movement between balance sheets, so a difference means borrowings moved by something other than the facilities.",
+                "warn": False}
+
+    # ---- KPIs
+    ebitda = {"ytd": (V["actual_ytd"] or {}).get("ebitda") if V["actual_ytd"] else None, "fy": (V["outlook"] or {}).get("ebitda") if V["outlook"] else None}
+    ebit = {"ytd": (V["actual_ytd"] or {}).get("ebit") if V["actual_ytd"] else None, "fy": (V["outlook"] or {}).get("ebit") if V["outlook"] else None}
+    ds = {p: tot("interest", p) + tot("fee", p) + tot("repay", p) for p in ("ytd", "fy")}
+    cs = {p: tot("interest", p) + tot("fee", p) for p in ("ytd", "fy")}
+    div = lambda a, b: (a / b) if (a is not None and b and b > 1e-9) else None
+    rows = [row("Debt service (facility interest, fees and capital)", [ds["ytd"], ds["fy"]]),
+            row("Debt service cover (EBITDA / debt service)", [div(ebitda["ytd"], ds["ytd"]), div(ebitda["fy"], ds["fy"])], "line", "x"),
+            row("Interest cover on the facilities (EBIT / interest and fees)", [div(ebit["ytd"], cs["ytd"]), div(ebit["fy"], cs["fy"])], "line", "x")]
+    cur_ratio, cur_adj = None, None
+    if bs_cur:
+        ca = f(bs_cur["inventory"]) + f(bs_cur["receivables"]) + f(bs_cur["other_assets"]) + f(bs_cur["cash"])
+        cl = f(bs_cur["payables"]) + f(bs_cur["other_liabilities"]) + f(bs_cur["overdraft"])
+        cur_ratio = div(ca, cl)
+        due_cur = min(due[0], bal[0])
+        cur_adj = div(ca, cl + due_cur)
+    rows.append(row(f"Current ratio as reported, {cur_lab}", [cur_ratio, None], "line", "x"))
+    rows.append(row(f"Current ratio including facility capital due within 12 months, {cur_lab}", [cur_adj, None], "line", "x"))
+    kpis = {"title": "Loan facilities and the KPIs", "cols": ["Year to date", f"Full year {fy}"], "rows": rows,
+            "note": "Debt service cover below about 1.2x, or a current ratio that falls below 1 once the instalments due within 12 months are counted, "
+                    "is what a lender will look at first.", "warn": bool(cur_adj is not None and cur_ratio is not None and cur_adj < 1.0 <= cur_ratio)}
+    return {"income": income, "balance": balance, "cashflow": cashflow, "kpis": kpis}

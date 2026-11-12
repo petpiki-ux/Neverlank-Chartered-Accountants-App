@@ -282,6 +282,26 @@ def _waterfall_drawing(b, width, height=58 * mm):
     return dr
 
 
+def _loan_table(story, t, cur):
+    """A loan-facilities analysis block (cf_ma_loans.statement_analysis) under a statement."""
+    if not t:
+        return
+    from reportlab.platypus import KeepTogether
+    head = [""] + list(t["cols"])
+    rows = [head]
+    bold = []
+    for r in t["rows"]:
+        vals = ["-" if v is None else (f"{v:,.2f}x" if r["fmt"] == "x" else _n(v)) for v in r["vals"]]
+        rows.append([r["label"]] + vals)
+        if r["kind"] == "total":
+            bold.append(len(rows) - 1)
+    lw = 110 * mm
+    w = (WIDTH - lw) / max(1, len(head) - 1)
+    tb = _simple(rows, [lw] + [w] * (len(head) - 1), size=7.2)
+    tb.setStyle(TableStyle([("FONTNAME", (0, i), (-1, i), "Helvetica-Bold") for i in bold]))
+    story.append(KeepTogether([Spacer(1, 3 * mm), Paragraph(t["title"], _h3), tb, _p(f"{cur}. {t['note']}", _note_style)]))
+
+
 def build_pack_pdf(pack, meta, d, firm, opts=None):
     opts = opts or {}
     var = opts.get("var", True)
@@ -338,6 +358,9 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
     story.append(Spacer(1, 2 * mm))
     story += [_p("•  " + b, _note_style) for b in _basis_lines(d, V, status)[:3] if "MODELLED" in b or "Estimated" in b]
 
+    import cf_ma_loans as FL0
+    loan_an = FL0.statement_analysis(d)
+
     # ---- income statement
     story += [PageBreak(), Paragraph(f"Income statement - {labels['month']}" + (" (year to date)" if opts.get("ytd") else ""), _h2)]
     if A is None:
@@ -349,6 +372,7 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
         story.append(_p(f"{cur}. Variances: favourable positive, adverse in brackets. Last year is the {labels['prior']} accounts spread evenly across the months.", _note_style))
         if com.get("income"):
             story += [Paragraph("Commentary", _h3), _p(com["income"])]
+        _loan_table(story, (loan_an or {}).get("income"), cur)
 
     # ---- balance sheet
     bal = M.balance_rows(d)
@@ -361,6 +385,7 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
         story.append(_p(f"{cur}. Retained earnings include the current year's profit. Forecast and budget balance sheets are shown where they come from a forecast model.", _note_style))
         if com.get("balance"):
             story += [Paragraph("Commentary", _h3), _p(com["balance"])]
+        _loan_table(story, (loan_an or {}).get("balance"), cur)
 
     # ---- cash flow
     cfl = M.cashflow_rows(d)
@@ -373,6 +398,7 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
         story.append(_p(f"{cur}. Indirect method, derived from the movement between balance sheets. Cash is shown net of overdraft.", _note_style))
         if com.get("cash"):
             story += [Paragraph("Commentary", _h3), _p(com["cash"])]
+        _loan_table(story, (loan_an or {}).get("cashflow"), cur)
 
     # ---- KPIs
     if A is not None:
@@ -394,6 +420,7 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
                 st.append(("TEXTCOLOR", (4, i), (4, i), col))
         t.setStyle(TableStyle(st))
         story.append(t)
+        _loan_table(story, (loan_an or {}).get("kpis"), cur)
 
     # ---- variances
     if A is not None and V["has_budget"]:
