@@ -608,8 +608,12 @@ def _parse_assumptions(form, base):
 
     loans = []
     count = int(g("n_ln", len(a["loans"])))
+    old_loans = list(a["loans"])
     for k in range(count):
         if f"ln_name_{k}" not in form:
+            continue
+        if k < len(old_loans) and old_loans[k].get("fac"):
+            loans.append(old_loans[k])      # managed from a Management Accounts pack's Loan facilities tab: not edited here
             continue
         loans.append({"name": form.get(f"ln_name_{k}", "Loan"), "opening_balance": g(f"ln_open_{k}"),
                       "drawdown_amount": g(f"ln_draw_{k}"), "drawdown_year": g(f"ln_dyear_{k}", 1),
@@ -618,6 +622,9 @@ def _parse_assumptions(form, base):
                       "maturity_year": g(f"ln_mat_{k}", n),
                       "start_date": (form.get(f"ln_start_{k}") or "").strip(), "end_date": (form.get(f"ln_end_{k}") or "").strip(),
                       "fee_pct": g(f"ln_fee_{k}", 0.0), "fee_amount": g(f"ln_feeamt_{k}", 0.0)})
+    for k, ol in enumerate(old_loans):          # facility loans are never lost, even if the form leaves them out
+        if ol.get("fac") and not any(x.get("fac") == ol["fac"] for x in loans):
+            loans.insert(min(k, len(loans)), ol)
     if loans or "n_ln" in form:
         a["loans"] = loans
 
@@ -655,6 +662,8 @@ def _apply_line_action(a, action):
         a["loans"].append({"name": "New loan", "opening_balance": 0.0, "drawdown_amount": 100000.0, "drawdown_year": 1, "rate": 12.0,
                            "repay_type": "straight", "repay_years": min(5, n) or 5, "grace_years": 0, "maturity_year": n})
         msg = "Loan added."
+    elif verb == "del_ln" and 0 <= idx < len(a["loans"]) and a["loans"][idx].get("fac"):
+        msg = "That loan comes from the Loan facilities tab of a Management Accounts pack. Remove or switch off the facility there."
     elif verb == "del_ln" and 0 <= idx < len(a["loans"]):
         a["loans"].pop(idx)
         msg = "Loan removed."

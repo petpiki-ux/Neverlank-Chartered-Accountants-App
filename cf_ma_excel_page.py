@@ -30,6 +30,7 @@ PAGES = {
     "reforecast": "Reforecast",
     "actuals": "Actuals",
     "budget": "Budget and forecast",
+    "loans": "Loan facilities",
 }
 
 
@@ -399,6 +400,15 @@ def _budget(wb, meta, d, labels, args):
     return ws
 
 
+def _loans(wb, meta, d):
+    """The Loan facilities tab: the facilities month by month with live formulas (values elsewhere in this file are as at export)."""
+    wb.remove(wb.active)
+    if X._loan_sheets(wb, dict(meta, currency=meta.get("currency", "")), d) is None:
+        ws = wb.create_sheet("Loan facilities")
+        _head(ws, "Loan facilities", meta, "", 8)
+        ws.cell(row=6, column=1, value="No loan facilities have been entered for this pack.")
+
+
 # =========================================================================== entry point
 
 def build_page_workbook(meta, d, tab, args=None, ctx=None):
@@ -427,6 +437,8 @@ def build_page_workbook(meta, d, tab, args=None, ctx=None):
         _actuals(wb, meta, d, labels, args)
     elif tab == "budget":
         _budget(wb, meta, d, labels, args)
+    elif tab == "loans":
+        _loans(wb, meta, d)
     else:
         raise KeyError(tab)
     for ws in wb.worksheets:

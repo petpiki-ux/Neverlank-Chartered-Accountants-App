@@ -11,7 +11,7 @@
       &middot; Management accounts &middot; {{ fy }} &middot; {{ cur }}</div>
   </div>
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-    {% if tab in ('summary','income','balance','cashflow','kpis','variances','varmodel','reforecast','actuals','budget') %}
+    {% if tab in ('summary','income','balance','cashflow','kpis','variances','varmodel','reforecast','actuals','budget','loans') %}
     <a class="btn secondary" href="{{ url_for('corpfin.pack_excel_page', pack_id=pack.id, tab=tab, **request.args.to_dict()) }}" title="Download what this page shows as an Excel workbook">Excel: this page</a>
     {% endif %}
     <a class="btn secondary" href="{{ url_for('corpfin.pack_excel', pack_id=pack.id, month=request.args.get('month')) }}" title="The whole pack with live formulas">Excel pack</a>

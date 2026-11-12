@@ -17,6 +17,7 @@ import re
 
 import cf_engine as E
 import cf_ma as M
+import cf_ma_loans as FL
 
 f = M.f
 
@@ -269,8 +270,26 @@ def continuation_assumptions(d, params=None, currency="USD"):
     int_exp_ann = max(0.0, ann("int_exp"))
     rate = max(0.0, min(60.0, 100.0 * int_exp_ann / debt)) if debt > 0 and int_exp_ann > 0 else 12.0
     loans = []
-    if f(bs.get("borrowings")) > 0:
-        loans.append({"name": "Existing borrowings", "opening_balance": f(bs.get("borrowings")), "drawdown_amount": 0.0, "drawdown_year": 1,
+    facs = [x for x in FL.facilities_of(d) if x["include"] and x["amount"] > 0]
+    book_debt = f(bs.get("borrowings"))
+    if facs:
+        # the bank facilities listed on the pack's Loan facilities tab carry their own rate, fee and repayments
+        fl, fnotes = FL.engine_loans(facs, M.shift_month(A["month"], 1), p["years"])
+        loans.extend(fl)
+        notes.extend(fnotes)
+        covered = sum(L_["opening_balance"] for L_ in fl)
+        rest = book_debt - covered
+        if rest > 1.0:
+            loans.append({"name": "Other borrowings", "opening_balance": rest, "drawdown_amount": 0.0, "drawdown_year": 1,
+                          "rate": rate, "repay_type": "straight", "repay_years": p["repay_years"], "grace_years": 0, "maturity_year": p["years"]})
+            notes.append(f"The balance sheet shows borrowings of {book_debt:,.2f}; the facilities account for {covered:,.2f}. The remaining {rest:,.2f} "
+                         f"is carried as 'Other borrowings', repaid evenly over {p['repay_years']} years at {rate:.1f}% (the rate implied by the actual interest). "
+                         "Add the missing facility on the Loan facilities tab if it is a bank facility.")
+        elif rest < -1.0:
+            notes.append(f"The facilities add up to {covered:,.2f} at the start of the forecast but the balance sheet shows borrowings of {book_debt:,.2f}. "
+                         "The forecast follows the facilities; check the amounts and drawdown months on the Loan facilities tab.")
+    elif book_debt > 0:
+        loans.append({"name": "Existing borrowings", "opening_balance": book_debt, "drawdown_amount": 0.0, "drawdown_year": 1,
                       "rate": rate, "repay_type": "straight", "repay_years": p["repay_years"], "grace_years": 0, "maturity_year": p["years"]})
         notes.append(f"Existing borrowings are assumed to be repaid evenly over {p['repay_years']} years at {rate:.1f}% (the rate implied by the actual interest).")
     dep_rate_cash = max(0.0, min(30.0, 100.0 * ann("int_inc") / cash)) if cash > 0 and ann("int_inc") > 0 else 2.0
@@ -342,14 +361,20 @@ def overlay_forward(a_new, a_old):
     out["inv_days"] = pad(old["inv_days"], old["inv_days"][-1] if old["inv_days"] else 0.0)
     out["pay_days"] = pad(old["pay_days"], old["pay_days"][-1] if old["pay_days"] else 0.0)
     # loans: the existing borrowings take the old terms; new planned loans carry over
-    oldl = {L["name"].strip().lower(): L for L in old["loans"]}
+    # (loans that come from the pack's Loan facilities tab are rebuilt from the facilities every time and are never carried over by hand)
+    oldl = {L["name"].strip().lower(): L for L in old["loans"] if not L.get("fac")}
     for L in out["loans"]:
+        if L.get("fac"):
+            continue
         o = oldl.get(L["name"].strip().lower())
         if o:
             for k in ("rate", "repay_type", "repay_years", "grace_years", "maturity_year", "end_date", "fee_pct", "fee_amount"):
                 L[k] = o[k]
+    taken = {L["name"].strip().lower() for L in out["loans"]}
     for L in old["loans"]:
-        if L["opening_balance"] == 0 and L["drawdown_amount"] > 0:
+        if L.get("fac"):
+            continue
+        if L["opening_balance"] == 0 and L["drawdown_amount"] > 0 and L["name"].strip().lower() not in taken:
             out["loans"].append(copy.deepcopy(L))
     return E.normalise(out)
 
@@ -427,7 +452,8 @@ def link_status(d):
             st[k_] = str(link.get(src_) or "")
     st["moved_on"] = link.get("built_for") != cur
     st["actuals_changed"] = (not st["moved_on"]) and bool(link.get("fingerprint")) and link["fingerprint"] != fingerprint(d)
-    st["stale"] = st["moved_on"] or st["actuals_changed"]
+    st["facilities_changed"] = (not st["moved_on"]) and (link.get("fac_fp") or "") != FL.fingerprint(d)
+    st["stale"] = st["moved_on"] or st["actuals_changed"] or st["facilities_changed"]
     forecast = d.get("forecast") or {}
     st["pack_in_step"] = forecast.get("source") == "continuation" and forecast.get("model_id") == link.get("model_id")
     if st["moved_on"]:
@@ -436,6 +462,9 @@ def link_status(d):
     elif st["actuals_changed"]:
         st["message"] = ("The actuals for the reporting month have changed since the forecast was built (for example a corrected Excel pack "
                          "was imported). Roll the forecast forward to open from the latest figures.")
+    elif st["facilities_changed"]:
+        st["message"] = ("The loan facilities have changed since the forecast was built. Update the forecast (Loan facilities tab, or Roll forward "
+                         "on Budget & forecast) so that its interest, fees and repayments follow them.")
     elif not st["pack_in_step"]:
         st["message"] = "The pack's forecast has been replaced or edited since it was taken from the model. Refresh it from the model to relink."
     else:

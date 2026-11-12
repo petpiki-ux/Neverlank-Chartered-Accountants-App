@@ -1,0 +1,116 @@
+{% extends "corpfin/ma_base.html" %}
+{% block tab %}
+{% set locked = pack.is_final %}
+<div class="card">
+  <h3 style="margin-top:0;">Loan facilities</h3>
+  <p class="cf-sub">The bank facilities the business carries: lender, amount, interest rate, establishment fee, term and how it is repaid. Each one is scheduled month by month below,
+  and when this pack is linked to a forecast model the model carries exactly these loans, so the forecast's interest, establishment fees, capital repayments, cash and borrowings follow them.
+  Interest is charged each month on the balance outstanding (rate &divide; 12). The <strong>establishment fee is expensed in the month the facility is drawn</strong>
+  (amount &times; fee % plus any fixed fee). A facility drawn before the forecast starts opens at the balance outstanding then and its fee, already paid, is not charged again. Amounts are in {{ cur }}.</p>
+  {% if link and link.model_id %}
+  <p class="cf-sub" style="margin-bottom:0;">Linked forecast model: <strong>{{ link.model_number }}</strong>{% if link_model %} &ndash; <a href="{{ url_for('corpfin.model_tab', model_id=link_model.id, tab='loans') }}">open its Loans &amp; covenants tab</a>{% endif %}.
+  {% if link_status and link_status.facilities_changed %}<span class="cf-bad">The facilities have changed since the forecast was built &ndash; use &ldquo;Save and update the forecast&rdquo;.</span>{% elif facs %}<span class="cf-ok">The forecast follows these facilities.</span>{% endif %}</p>
+  {% else %}
+  <p class="cf-sub" style="margin-bottom:0;">This pack is not linked to a forecast model yet. Build the forecast from the actuals on <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='budget') }}">Budget &amp; forecast</a> and it will pick these facilities up.</p>
+  {% endif %}
+</div>
+
+{% for w in fac_checks %}<div class="flash warning">{{ w }}</div>{% endfor %}
+
+<form method="post" action="{{ url_for('corpfin.pack_facilities_save', pack_id=pack.id) }}" class="card">
+  <input type="hidden" name="n_fac" value="{{ facs|length }}">
+  {% if not facs %}<div class="empty-state" style="padding:12px 0;">No facilities yet. Use &ldquo;Add a facility&rdquo; and fill it in.</div>{% endif %}
+  {% for x in facs %}{% set i = loop.index0 %}
+  <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;">
+    <input type="hidden" name="fac_id_{{ i }}" value="{{ x.id }}">
+    <div class="form-row">
+      <div><label>Lender / facility</label><input type="text" class="cf-in" name="fac_lender_{{ i }}" value="{{ x.lender }}" maxlength="60" placeholder="e.g. NBS" {{ 'disabled' if locked }}></div>
+      <div><label>Amount ({{ cur }})</label><input type="number" step="any" min="0" class="cf-in" name="fac_amount_{{ i }}" value="{{ x.amount|cfin }}" {{ 'disabled' if locked }}></div>
+      <div><label>Interest rate (% a year)</label><input type="number" step="any" min="0" class="cf-in" name="fac_rate_{{ i }}" value="{{ x.rate|cfin }}" {{ 'disabled' if locked }}></div>
+      <div><label>Establishment fee (% of amount)</label><input type="number" step="any" min="0" max="100" class="cf-in" name="fac_feepct_{{ i }}" value="{{ x.fee_pct|cfin }}" {{ 'disabled' if locked }}></div>
+      <div><label>Fixed fee ({{ cur }}, optional)</label><input type="number" step="any" min="0" class="cf-in" name="fac_feefix_{{ i }}" value="{{ x.fee_fixed|cfin }}" {{ 'disabled' if locked }}></div>
+    </div>
+    <div class="form-row">
+      <div><label>Drawn in (month)</label><input type="month" class="cf-in" name="fac_draw_{{ i }}" value="{{ x.draw_month }}" {{ 'disabled' if locked }}></div>
+      <div><label>Term (months, drawdown to last repayment)</label><input type="number" min="1" max="240" class="cf-in" name="fac_term_{{ i }}" value="{{ x.term_months }}" {{ 'disabled' if locked }}></div>
+      <div><label>Capital grace (months)</label><input type="number" min="0" max="239" class="cf-in" name="fac_grace_{{ i }}" value="{{ x.grace_months }}" {{ 'disabled' if locked }}></div>
+      <div style="min-width:280px;"><label>Repayment</label><select class="cf-in" name="fac_repay_{{ i }}" {{ 'disabled' if locked }}>{% for k, lab in repay_types %}<option value="{{ k }}" {% if x.repay == k %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+      <div><label>&nbsp;</label><label style="font-weight:normal;"><input type="checkbox" name="fac_inc_{{ i }}" value="1" {% if x.include %}checked{% endif %} {{ 'disabled' if locked }}> In use</label></div>
+    </div>
+    <div class="form-row">
+      <div style="flex:2;"><label>Security / notes (optional)</label><input type="text" class="cf-in" name="fac_sec_{{ i }}" value="{{ x.security }}" maxlength="200" {{ 'disabled' if locked }}></div>
+    </div>
+    <div class="cf-sub">
+      {% if x.amount > 0 %}Establishment fee {{ fee_of(x)|cfn }} ({{ cur }}) &middot; {{ repay_short[x.repay] }} over {{ x.term_months }} months from {{ month_label(x.draw_month, False) }}{% if x.grace_months %}, after {{ x.grace_months }} month(s) of interest only{% endif %}.{% endif %}
+      {% if not locked %}<button class="btn small danger" type="submit" name="action" value="del:{{ i }}" formnovalidate onclick="return confirm('Remove this facility?');" style="margin-left:8px;">Remove</button>{% endif %}
+    </div>
+  </div>
+  {% endfor %}
+  {% if not locked %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+    {% if facs|length < max_facilities %}<button class="btn secondary" type="submit" name="action" value="add" formnovalidate>+ Add a facility</button>{% endif %}
+    <button class="btn gold" type="submit" name="action" value="save">Save facilities</button>
+    {% if link and link.model_id %}<button class="btn" type="submit" name="action" value="sync" title="Saves, then rolls the linked forecast model forward from the actuals using these facilities">Save and update the forecast</button>{% endif %}
+  </div>
+  <p class="cf-sub" style="margin-bottom:0;">Defaults the pack cannot know &ndash; the term, the drawdown month and the repayment pattern &ndash; must be taken from the facility letters. Check them before relying on the forecast.</p>
+  {% endif %}
+</form>
+
+{% if ps.facilities %}
+{% set months = ps.months %}
+<div class="card">
+  <h3 style="margin-top:0;">Schedule by month &ndash; {{ fy }}</h3>
+  <p class="cf-sub">Months marked <strong>Actual</strong> are already in the books (the schedule is a check on them); months marked <strong>Forecast</strong> are what the forecast model carries.</p>
+  <div class="tbl-scroll"><table class="cf-table ma-table">
+    <thead>
+      <tr class="ma-band"><th class="ma-label"></th>{% for mo in months %}<th>{{ 'Actual' if mo in ps.actual else 'Forecast' }}</th>{% endfor %}<th>Year</th></tr>
+      <tr class="ma-sub"><th class="ma-label" style="text-align:left;">{{ cur }}</th>{% for mo in months %}<th>{{ month_label(mo, False) }}</th>{% endfor %}<th>{{ fy }}</th></tr>
+    </thead>
+    <tbody>
+    {% for fx in ps.facilities %}
+      <tr class="total"><td class="ma-label" colspan="{{ months|length + 2 }}"><strong>{{ label_of(fx.fac) }}</strong> &ndash; {{ fx.fac.amount|cfn }} at {{ fx.fac.rate|cfin }}%</td></tr>
+      <tr><td class="ma-label">Opening balance</td>{% for mo in months %}<td class="n">{{ fx.rows[mo].open|cfn }}</td>{% endfor %}<td class="n">{{ fx.year.open|cfn }}</td></tr>
+      <tr><td class="ma-label">Drawdown</td>{% for mo in months %}<td class="n">{{ fx.rows[mo].draw|cfn }}</td>{% endfor %}<td class="n">{{ fx.year.draw|cfn }}</td></tr>
+      <tr><td class="ma-label">Interest</td>{% for mo in months %}<td class="n">{{ fx.rows[mo].interest|cfn }}</td>{% endfor %}<td class="n">{{ fx.year.interest|cfn }}</td></tr>
+      <tr><td class="ma-label">Establishment fee</td>{% for mo in months %}<td class="n">{{ fx.rows[mo].fee|cfn }}</td>{% endfor %}<td class="n">{{ fx.year.fee|cfn }}</td></tr>
+      <tr><td class="ma-label">Capital repaid</td>{% for mo in months %}<td class="n">{{ fx.rows[mo].repay|cfn }}</td>{% endfor %}<td class="n">{{ fx.year.repay|cfn }}</td></tr>
+      <tr class="total"><td class="ma-label">Closing balance</td>{% for mo in months %}<td class="n">{{ fx.rows[mo].close|cfn }}</td>{% endfor %}<td class="n">{{ fx.year.close|cfn }}</td></tr>
+    {% endfor %}
+    {% if ps.facilities|length > 1 %}
+      <tr class="total"><td class="ma-label" colspan="{{ months|length + 2 }}"><strong>All facilities</strong></td></tr>
+      <tr><td class="ma-label">Interest</td>{% for mo in months %}<td class="n">{{ ps.total[mo].interest|cfn }}</td>{% endfor %}<td class="n">{{ ps.year.interest|cfn }}</td></tr>
+      <tr><td class="ma-label">Establishment fees</td>{% for mo in months %}<td class="n">{{ ps.total[mo].fee|cfn }}</td>{% endfor %}<td class="n">{{ ps.year.fee|cfn }}</td></tr>
+      <tr><td class="ma-label">Capital repaid</td>{% for mo in months %}<td class="n">{{ ps.total[mo].repay|cfn }}</td>{% endfor %}<td class="n">{{ ps.year.repay|cfn }}</td></tr>
+      <tr class="total"><td class="ma-label">Closing borrowings</td>{% for mo in months %}<td class="n">{{ ps.total[mo].close|cfn }}</td>{% endfor %}<td class="n">{{ ps.year.close|cfn }}</td></tr>
+    {% endif %}
+    </tbody>
+  </table></div>
+</div>
+
+{% if int_check %}
+<div class="card">
+  <h3 style="margin-top:0;">Schedule against the actual books</h3>
+  <p class="cf-sub">Interest expense in the actual months (including any establishment fee posted to interest) against the schedule's interest and fees. A difference is not necessarily wrong &ndash; bank charges, other borrowings and the timing of postings all show here &ndash; but a large one is worth explaining.</p>
+  <div class="tbl-scroll"><table class="cf-table">
+    <thead><tr><th>Month</th><th class="n">Schedule (interest + fees)</th><th class="n">Books (interest expense)</th><th class="n">Difference</th></tr></thead>
+    <tbody>{% for r in int_check %}<tr><td>{{ month_label(r.month, False) }}</td><td class="n">{{ r.schedule|cfn }}</td><td class="n">{{ r.books|cfn }}</td><td class="n">{{ r.diff|cfn }}</td></tr>{% endfor %}</tbody>
+  </table></div>
+</div>
+{% endif %}
+
+{% for fx in ps.facilities %}
+<details class="card">
+  <summary style="cursor:pointer;"><strong>{{ label_of(fx.fac) }}</strong> &ndash; the whole life of the facility
+    ({{ fx.life.interest|cfn }} interest{% if fx.life.fee %} + {{ fx.life.fee|cfn }} establishment fee{% endif %}{% if fx.instalment %}; instalment {{ fx.instalment|cfn }} a month{% endif %}, last repayment {{ month_label(fx.last_month, False) }})</summary>
+  <div class="tbl-scroll"><table class="cf-table" style="margin-top:8px;">
+    <thead><tr><th>#</th><th>Month</th><th class="n">Opening</th><th class="n">Drawdown</th><th class="n">Interest</th><th class="n">Fee</th><th class="n">Capital repaid</th><th class="n">Closing</th></tr></thead>
+    <tbody>
+    {% for r in life[fx.fac.id] %}
+      <tr><td>{{ r.n }}</td><td>{{ month_label(r.month, False) }}</td><td class="n">{{ r.open|cfn }}</td><td class="n">{{ r.draw|cfn }}</td><td class="n">{{ r.interest|cfn }}</td><td class="n">{{ r.fee|cfn }}</td><td class="n">{{ r.repay|cfn }}</td><td class="n">{{ r.close|cfn }}</td></tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+</details>
+{% endfor %}
+{% endif %}
+{% endblock %}

@@ -32,6 +32,7 @@ import cf_fsload as FS
 import cf_recon as RC
 import cf_ma_var as VM
 import cf_ma_link as LK
+import cf_ma_loans as FL
 import cf_tools as T
 from extensions import db
 from financials import suggest_fs_category
@@ -45,7 +46,7 @@ from corporate_finance import (corpfin_bp, _guard, _can_see, _is_signoff_role, _
 PACK_TABS = [
     ("summary", "Summary"), ("income", "Income statement"), ("balance", "Balance sheet"), ("cashflow", "Cash flow"),
     ("kpis", "KPIs"), ("variances", "Variances"), ("varmodel", "Variance model"), ("reforecast", "Reforecast"), ("commentary", "Commentary"), ("actuals", "Actuals"),
-    ("budget", "Budget & forecast"), ("prior", "Prior year"), ("setup", "Setup"),
+    ("budget", "Budget & forecast"), ("loans", "Loan facilities"), ("prior", "Prior year"), ("setup", "Setup"),
 ]
 PLAN_NAMES = {"budget": "Budget", "forecast": "Forecast"}
 MAX_UPLOAD = 15 * 1024 * 1024
@@ -264,6 +265,8 @@ def pack_tab(pack_id, tab):
         ctx.update(plans={n: d.get(n) or {} for n in PLAN_NAMES}, line_defs=M.pl_line_defs(d["structure"]),
                    plan_pl={n: M.budget_months(d, n) for n in PLAN_NAMES}, models=_pack_models(pack))
         ctx.update(_continuation_ctx(pack, d))
+    elif tab == "loans":
+        ctx.update(_loans_ctx(pack, d))
     elif tab == "prior":
         pb = M.prior_bs(d)
         ctx.update(prior=d.get("prior") or {}, line_defs=M.pl_line_defs(d["structure"]), bs_lines=M.BS_LINES, **loader_context(pack.client_id, pack.engagement_id),
@@ -271,6 +274,78 @@ def pack_tab(pack_id, tab):
     elif tab == "setup":
         ctx.update(currencies=CURRENCIES, outlooks=OUTLOOKS, months_full=MONTH_NAMES)
     return render_template(f"corpfin/ma_{tab}.html", **ctx)
+
+
+def _loans_ctx(pack, d):
+    """What the Loan facilities tab shows: the facilities as entered, their monthly schedule, and the checks against the books."""
+    facs = FL.facilities_of(d)
+    link = d.get("forecast_link") or {}
+    model = None
+    if link.get("model_id"):
+        model = CFModel.query.get(link["model_id"])
+        if model is not None and (model.client_id != pack.client_id or not _can_see(model)):
+            model = None
+    return dict(facs=facs, ps=FL.pack_schedule(d, facs), fac_checks=FL.checks(d, facs), int_check=FL.interest_check(d, facs),
+                repay_types=FL.REPAY_TYPES, repay_short=FL.REPAY_SHORT, fee_of=FL.fee_of, label_of=FL.label_of,
+                default_month=M.report_month(d), link=link, link_model=model, max_facilities=FL.MAX_FACILITIES,
+                life={x['id']: FL.schedule(x) for x in facs if x['include'] and x['amount'] > 0})
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/facilities/save", methods=["POST"])
+def pack_facilities_save(pack_id):
+    """Save the pack's loan facilities; 'sync' also brings the linked forecast model (and so the pack's forecast) in line with them."""
+    pack = _pack_or_404(pack_id)
+    if _plocked(pack):
+        return _back(pack, "loans")
+    d = _data(pack)
+    action = request.form.get("action") or "save"
+    facs = FL.parse_form(request.form, d)
+    if action == "add":
+        if len(facs) >= FL.MAX_FACILITIES:
+            flash(f"A pack can hold up to {FL.MAX_FACILITIES} facilities.", "warning")
+        else:
+            facs.append(FL.normalise_facility(FL.blank_facility(M.report_month(d), len(facs)), len(facs), M.report_month(d)))
+    elif action.startswith("del:"):
+        try:
+            gone = int(action[4:])
+        except ValueError:
+            gone = -1
+        n_form = 0
+        try:
+            n_form = int(request.form.get("n_fac") or 0)
+        except ValueError:
+            pass
+        facs = FL.parse_form(request.form, d, skip=gone if 0 <= gone < n_form else None)
+    d["facilities"] = facs
+    link = d.get("forecast_link") or {}
+    if action == "sync":
+        if not (link.get("model_id")):
+            _save(pack, d)
+            flash("The facilities were saved. This pack is not linked to a forecast model yet: build the forecast on Budget & forecast and it will "
+                  "pick the facilities up.", "warning")
+            return _back(pack, "loans")
+        try:
+            model, plan, new_link, notes, verb = _continue_core(pack, d, LK.normalise_params(link.get("params")), "roll")
+        except LK.LinkError as e:
+            _save(pack, d)
+            flash(f"The facilities were saved, but the forecast could not be updated: {e}", "danger")
+            return _back(pack, "loans")
+        _save(pack, d)
+        msg = f"The facilities were saved and model {model.model_number} was {verb}: its loans, interest, fees, repayments and borrowings now follow them."
+        if plan["months"]:
+            msg += f" The pack's forecast covers {M.month_label(plan['months'][0], False)} to {M.month_label(plan['months'][-1], False)}."
+        flash(msg, "success")
+        for n_ in notes:
+            flash(n_, "warning")
+        return _back(pack, "loans")
+    _save(pack, d)
+    if action == "add":
+        flash("A blank facility was added. Fill it in and save.", "info")
+    elif action.startswith("del:"):
+        flash("The facility was removed.", "success")
+    else:
+        flash("Loan facilities saved." + (" The forecast has not been updated yet: use 'Save and update the forecast'." if (link.get("model_id") and facs) else ""), "success")
+    return _back(pack, "loans")
 
 
 def _pack_models(pack):
@@ -880,7 +955,7 @@ def _params_from_form(form, d):
     return LK.normalise_params(raw)
 
 
-def _apply_model_to_pack(pack, d, model, scenario, built_for, params, fingerprint):
+def _apply_model_to_pack(pack, d, model, scenario, built_for, params, fingerprint, fac_fp=None):
     """Run the model and put its remaining-month results into the pack's Forecast. Returns (plan, result, link, notes)."""
     result = _run(model, scenario)
     a = result["a"]
@@ -892,6 +967,7 @@ def _apply_model_to_pack(pack, d, model, scenario, built_for, params, fingerprin
     plan = LK.plan_from_result(structure, result, a, M.fy_months(d), n, has_oth)
     link = {"model_id": model.id, "model_number": model.model_number, "model_name": model.name, "scenario": scenario.name,
             "built_for": built_for, "start_month": a["start_month"], "params": params, "fingerprint": fingerprint,
+            "fac_fp": (d.get("forecast_link") or {}).get("fac_fp", "") if fac_fp is None else fac_fp,
             "refreshed": _stamp(), "months": plan["months"]}
     old_fc = d.get("forecast") or {}
     if old_fc.get("source") != "continuation" and (old_fc.get("pl") or old_fc.get("bs")):
@@ -950,7 +1026,7 @@ def _continue_core(pack, d, params, mode, target=None):
         _touch(model)
         db.session.commit()
         verb = "updated from the actuals" if target is not None else ("rolled forward" if mode == "roll" else "rebuilt from the actuals")
-    plan, result, link, more = _apply_model_to_pack(pack, d, model, _base_scenario(model), M.report_month(d), params, LK.fingerprint(d))
+    plan, result, link, more = _apply_model_to_pack(pack, d, model, _base_scenario(model), M.report_month(d), params, LK.fingerprint(d), FL.fingerprint(d))
     return model, plan, link, notes + more + info["notes"], verb
 
 
@@ -1453,6 +1529,8 @@ def _pack_bundle(pack, d=None):
     add("Excel pack", f"{base}_pack.xlsx", lambda: _pack_excel_bytes(pack, d))
     add("PDF pack", f"{base}_pack.pdf", lambda: _pack_pdf_bytes(pack, d, {"var": True, "ytd": False}))
     for tab, title in XP.PAGES.items():
+        if tab == "loans" and not FL.facilities_of(d):
+            continue
         add(f"{title} sheet", f"sheets/{_safe_name(title)}.xlsx", lambda tab=tab: _pack_page_bytes(pack, d, tab, {}))
     if notes:
         files.append(("NOT_INCLUDED.txt", ("\n".join(notes) + "\n").encode()))

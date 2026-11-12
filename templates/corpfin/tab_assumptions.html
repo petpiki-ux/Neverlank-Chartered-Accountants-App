@@ -157,6 +157,14 @@
 <div class="card">
   <p class="cf-sub">Existing borrowings (opening balance) and new facilities (drawdown). Enter the <strong>start date</strong> (drawdown) and <strong>end date</strong> (last repayment); the model works in months. Interest is charged on the balance outstanding, and the <strong>establishment fee</strong> is paid when the loan is drawn, on top of interest, and charged to finance costs. "Equal capital" repays evenly by month from the start to the end date (after any grace period); "bullet" repays everything at the end date. After year 1 the model runs annually, so a part-year loan carries interest only for the months it is outstanding.</p>
   {% for L in base.loans %}{% set k = loop.index0 %}
+  {% if L.fac %}
+  <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;background:#f6f8fb;">
+    <input type="hidden" name="ln_name_{{ k }}" value="{{ L.name }}">
+    <strong>{{ L.name }}</strong> <span class="badge">From the pack's Loan facilities</span>
+    <div class="cf-sub" style="margin:6px 0 0;">{{ L.rate|cfpp }} a year{% if L.opening_balance %} &middot; {{ L.opening_balance|cfn }} outstanding when the forecast starts{% else %} &middot; {{ L.drawdown_amount|cfn }} drawn{% endif %}{% if L.fee_amount %} &middot; establishment fee {{ L.fee_amount|cfn }}{% endif %} &middot; capital repaid on the facility's own schedule. {{ loan_when[k] }}.
+      This loan is managed on the <strong>Loan facilities</strong> tab of the Management Accounts pack (amount, rate, fee, term, repayments); change it there and update the forecast. It cannot be edited here.</div>
+  </div>
+  {% else %}
   <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;">
     <div class="form-row">
       <div><label>Loan</label><input type="text" class="cf-in" name="ln_name_{{ k }}" value="{{ L.name }}" maxlength="60"></div>
@@ -180,6 +188,7 @@
     <div class="cf-sub" style="margin:4px 0 8px;">As the model reads it: {{ loan_when[k] }}</div>
     <button class="btn small danger" name="action" value="del_ln:{{ k }}" formnovalidate onclick="return confirm('Remove this loan?');">Remove loan</button>
   </div>
+  {% endif %}
   {% else %}<p class="muted">No loans in the model.</p>{% endfor %}
   <button class="btn small secondary" name="action" value="add_ln" formnovalidate>+ Add loan</button>
 </div>

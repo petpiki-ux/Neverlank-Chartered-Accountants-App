@@ -237,7 +237,9 @@ def _assumptions_sheet(wb, a, meta):
     loan_open_cells = []
     for k, L in enumerate(a["loans"]):
         T = E.loan_timing(a, L)
-        kind_txt = "bullet - repaid at the end date" if L["repay_type"] == "bullet" else "equal monthly principal instalments to the end date"
+        kind_txt = ("scheduled repayments from the Loan facilities tab of a Management Accounts pack (interest and capital repaid are values)"
+                    if L.get("plan") is not None else
+                    "bullet - repaid at the end date" if L["repay_type"] == "bullet" else "equal monthly principal instalments to the end date")
         dates_txt = ""
         if L.get("start_date") or L.get("end_date"):
             dates_txt = f"; dates {L.get('start_date') or '-'} to {L.get('end_date') or '-'}"
@@ -283,7 +285,7 @@ def _assumptions_sheet(wb, a, meta):
 
 # --------------------------------------------------------------------------- Calc sheet
 
-def _calc_sheet(wb, a, R, meta, periods):
+def _calc_sheet(wb, a, R, meta, periods, result=None):
     ws = wb.create_sheet("Calc")
     P = len(periods)
     ncols = FIRST_PERIOD_COL + P
@@ -459,10 +461,17 @@ def _calc_sheet(wb, a, R, meta, periods):
             put(f"ln{k}_open", f"={ref['open']}" if i == 0 else f"={Pv(f'ln{k}_close')}")
             ps, mo = X("pstart"), X("months")
             put(f"ln{k}_draw", f"=IF(AND({ps}<={ref['draw_m']}-1,{ref['draw_m']}-1<{ps}+{mo}),{ref['draw']},0)")
-            put(f"ln{k}_int", f"={ref['rate']}/100/12*({X(f'ln{k}_open')}*MIN({mo},MAX(0,{ref['end_m']}-{ps}))"
-                              f"+{X(f'ln{k}_draw')}*MAX(0,MIN({ps}+{mo},{ref['end_m']})-({ref['draw_m']}-1)))")
+            sched = L.get("plan") is not None and result is not None
+            if sched:
+                # a facility with its own repayment schedule (Management Accounts pack): the figures are the schedule's, as values
+                put(f"ln{k}_int", result["periods"][i]["loans"][k]["interest"])
+            else:
+                put(f"ln{k}_int", f"={ref['rate']}/100/12*({X(f'ln{k}_open')}*MIN({mo},MAX(0,{ref['end_m']}-{ps}))"
+                                  f"+{X(f'ln{k}_draw')}*MAX(0,MIN({ps}+{mo},{ref['end_m']})-({ref['draw_m']}-1)))")
             put(f"ln{k}_fee", f"=IF({X(f'ln{k}_draw')}>0,{X(f'ln{k}_draw')}*{ref['fee_pct']}/100+{ref['fee_amt']},0)")
-            if L["repay_type"] == "bullet":
+            if sched:
+                put(f"ln{k}_repay", result["periods"][i]["loans"][k]["repay"])
+            elif L["repay_type"] == "bullet":
                 put(f"ln{k}_repay", f"=IF(AND({ps}<={ref['end_m']}-1,{ref['end_m']}-1<{ps}+{mo}),{X(f'ln{k}_open')}+{X(f'ln{k}_draw')},0)")
             else:
                 put(f"ln{k}_repay", f"=MIN({X(f'ln{k}_open')}+{X(f'ln{k}_draw')},{ref['principal0']}/{ref['term']}"
@@ -1245,7 +1254,7 @@ def build_model_workbook(meta, a, valuation=None, scenarios=None, sensitivity=No
     _cover_sheet_placeholder = wb.active
     periods = E.build_periods(a)
     ws_a, R = _assumptions_sheet(wb, a, meta)
-    ws_c, rw = _calc_sheet(wb, a, R, meta, periods)
+    ws_c, rw = _calc_sheet(wb, a, R, meta, periods, result)
     ws_s, A = _annual_sheet(wb, a, R, meta, result)
     _monthly_sheet(wb, a, R, meta)
     _cashflow_forecast_sheet(wb, a, R, meta)

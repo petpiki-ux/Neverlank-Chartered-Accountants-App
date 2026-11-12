@@ -238,7 +238,8 @@ def build_model_pdf(model, scenario, result, firm, valuation=None, scenarios=Non
                      {"kind": "line", "label": "Repayment", "values": [-d["loans"][k]["repay"] for d in ann], "fmt": "money"},
                      {"kind": "total", "label": "Closing balance", "values": [d["loans"][k]["close"] for d in ann], "fmt": "money"},
                      {"kind": "line", "label": "Interest charged", "values": [d["loans"][k]["interest"] for d in ann], "fmt": "money"}]
-            terms = (f"{L['rate']:.2f}% a year; " + (f"bullet repayment in year {L['maturity_year']}" if L["repay_type"] == "bullet"
+            terms = (f"{L['rate']:.2f}% a year; " + ("repaid on the facility's own schedule" if L.get("plan") is not None else
+                     f"bullet repayment in year {L['maturity_year']}" if L["repay_type"] == "bullet"
                      else f"equal capital over {L['repay_years']} year(s)" + (f" after {L['grace_years']} year(s) grace" if L["grace_years"] else "")))
             story.append(KeepTogether([Paragraph(f"{escape(L['name'])} - {terms}", _h3), _grid([d["label"] for d in ann], lines)]))
             story.append(Spacer(1, 2 * mm))

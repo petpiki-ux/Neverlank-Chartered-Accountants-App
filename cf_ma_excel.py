@@ -658,6 +658,152 @@ def _pack_sheet(wb, meta, d, labels, V, status, basis_lines, msgs):
 
 # =========================================================================== entry point
 
+# --------------------------------------------------------------------------- loan facilities (live formulas)
+
+DATEFMT = "mmm-yy"
+
+
+def _mdate(key):
+    return date(int(key[:4]), int(key[5:7]), 1)
+
+
+def _loan_sheets(wb, meta, d):
+    """'Loan facilities' (the year month by month) and 'Loan schedules' (every facility from drawdown to final repayment).
+    The schedules hold the inputs (blue) and the formulas; the year view adds them up by month with SUMIFS. Returns the first sheet or None."""
+    import cf_ma_loans as FL
+    facs = [x for x in FL.facilities_of(d) if x["include"] and x["amount"] > 0]
+    if not facs:
+        return None
+    months = M.fy_months(d)
+    ridx = M.report_index(d)
+    cur = meta.get("currency", "")
+    ws = wb.create_sheet("Loan facilities")
+    wl = wb.create_sheet("Loan schedules")
+
+    # ---- schedules: one block per facility
+    brand.xlsx_title_band(wl, "Loan schedules", [meta.get("client", ""), meta.get("name", ""),
+                          "Every facility from drawdown to final repayment. Blue cells are inputs; change them and the year view recalculates."], ncols=9)
+    brand.xlsx_page_setup(wl)
+    for col, w in zip("ABCDEFGHI", (40, 14, 14, 14, 14, 14, 14, 14, 4)):
+        wl.column_dimensions[col].width = w
+    r = 6
+    blocks = []
+    for fac in facs:
+        lab = FL.label_of(fac)
+        wl.cell(row=r, column=1, value=f"{lab} - facility {fac['id']}").font = Font(bold=True, size=12, color=NAVY)
+        rows = {}
+        items = (("amt", "Amount", fac["amount"], NUM), ("rate", "Interest rate (% a year)", fac["rate"], "0.00"),
+                 ("feepct", "Establishment fee (% of amount)", fac["fee_pct"], "0.00"), ("feefix", "Establishment fee (fixed amount)", fac["fee_fixed"], NUM),
+                 ("draw", "Drawn in (month)", _mdate(fac["draw_month"]), DATEFMT), ("term", "Term (months, drawdown to last repayment)", fac["term_months"], "0"),
+                 ("grace", "Capital grace (months)", fac["grace_months"], "0"), ("type", "Repayment (level / straight / bullet)", fac["repay"], "@"))
+        rr = r + 1
+        for key, label, val, fmt in items:
+            wl.cell(row=rr, column=1, value=label)
+            c = wl.cell(row=rr, column=2, value=val)
+            c.number_format, c.font, c.fill = fmt, F_INPUT, FILL_INPUT
+            rows[key] = f"$B${rr}"
+            rr += 1
+        calc = (("fee", "Establishment fee (expensed in the month drawn)", f"={rows['amt']}*{rows['feepct']}/100+{rows['feefix']}", NUM),
+                ("mr", "Monthly interest rate", f"={rows['rate']}/100/12", "0.0000%"),
+                ("k", "Number of capital instalments", f"=MAX(1,{rows['term']}-{rows['grace']})", "0"))
+        for key, label, formula, fmt in calc:
+            wl.cell(row=rr, column=1, value=label)
+            c = wl.cell(row=rr, column=2, value=formula)
+            c.number_format = fmt
+            rows[key] = f"$B${rr}"
+            rr += 1
+        wl.cell(row=rr, column=1, value="Equal monthly instalment (capital + interest; 'level' only)")
+        c = wl.cell(row=rr, column=2, value=f'=IF({rows["type"]}="level",IF({rows["mr"]}=0,{rows["amt"]}/{rows["k"]},{rows["amt"]}*{rows["mr"]}/(1-(1+{rows["mr"]})^(-{rows["k"]}))),0)')
+        c.number_format = NUM
+        rows["pmt"] = f"$B${rr}"
+        rr += 2
+        hdr = rr
+        for j, h in enumerate(("No.", "Month", "Opening", "Drawdown", "Interest", "Establishment fee", "Capital repaid", "Closing"), start=1):
+            c = wl.cell(row=hdr, column=j, value=h)
+            c.font, c.fill = Font(bold=True), FILL_SUB
+            c.alignment = Alignment(horizontal="left" if j == 1 else "right")
+        first = hdr + 1
+        for n in range(1, fac["term_months"] + 1):
+            x = first + n - 1
+            wl.cell(row=x, column=1, value=n)
+            wl.cell(row=x, column=2, value=f"=EDATE({rows['draw']},A{x}-1)").number_format = DATEFMT
+            wl.cell(row=x, column=3, value=0 if n == 1 else f"=H{x - 1}").number_format = NUM
+            wl.cell(row=x, column=4, value=f"=IF(A{x}=1,{rows['amt']},0)").number_format = NUM
+            wl.cell(row=x, column=5, value=f"=(C{x}+D{x})*{rows['mr']}").number_format = NUM
+            wl.cell(row=x, column=6, value=f"=IF(A{x}=1,{rows['fee']},0)").number_format = NUM
+            wl.cell(row=x, column=7, value=(f'=IF(A{x}<={rows["grace"]},0,IF(A{x}={rows["term"]},C{x}+D{x},IF({rows["type"]}="bullet",0,'
+                                            f'IF({rows["type"]}="straight",MIN(C{x}+D{x},{rows["amt"]}/{rows["k"]}),MIN(C{x}+D{x},MAX(0,{rows["pmt"]}-E{x}))))))')).number_format = NUM
+            wl.cell(row=x, column=8, value=f"=C{x}+D{x}-G{x}").number_format = NUM
+        last = first + fac["term_months"] - 1
+        tr = last + 1
+        wl.cell(row=tr, column=1, value="Total over the life").font = Font(bold=True)
+        for j, col in ((4, "D"), (5, "E"), (6, "F"), (7, "G")):
+            c = wl.cell(row=tr, column=j, value=f"=SUM({col}{first}:{col}{last})")
+            c.number_format, c.font, c.border = NUM, Font(bold=True), TOP
+        blocks.append({"fac": fac, "label": lab, "first": first, "last": last})
+        r = tr + 3
+
+    # ---- the year view
+    ncols = len(months) + 2
+    brand.xlsx_title_band(ws, "Loan facilities", [meta.get("client", ""), meta.get("name", ""),
+                          f"{M.fy_label(d)} month by month - {cur}. Actual months are a check on the books; forecast months are what the forecast model carries."], ncols=max(ncols, 8))
+    brand.xlsx_page_setup(ws)
+    ws.column_dimensions["A"].width = 40
+    for k in range(2, ncols + 1):
+        ws.column_dimensions[CL(k)].width = 12.5
+    hr = 6
+    for j, mk in enumerate(months, start=2):
+        c = ws.cell(row=hr, column=j, value="Actual" if j - 2 <= ridx else "Forecast")
+        c.font, c.fill, c.alignment = Font(bold=True), FILL_BAND, Alignment(horizontal="center")
+        c = ws.cell(row=hr + 1, column=j, value=_mdate(mk))
+        c.number_format, c.font, c.fill, c.alignment = DATEFMT, Font(bold=True), FILL_SUB, Alignment(horizontal="right")
+    ws.cell(row=hr + 1, column=1, value=cur).font = Font(bold=True)
+    ws.cell(row=hr + 1, column=1).fill = FILL_SUB
+    c = ws.cell(row=hr + 1, column=ncols, value=M.fy_label(d))
+    c.font, c.fill, c.alignment = Font(bold=True), FILL_SUB, Alignment(horizontal="right")
+    r = hr + 2
+    total_rows = {k: [] for k in ("open", "draw", "int", "fee", "rep", "close")}
+    cols = (("open", "Opening balance", "C"), ("draw", "Drawdown", "D"), ("int", "Interest", "E"), ("fee", "Establishment fee", "F"),
+            ("rep", "Capital repaid", "G"), ("close", "Closing balance", "H"))
+    for b in blocks:
+        ws.cell(row=r, column=1, value=f"{b['label']} - {b['fac']['amount']:,.0f} at {b['fac']['rate']:g}%").font = Font(bold=True, color=NAVY)
+        r += 1
+        for key, label, col in cols:
+            ws.cell(row=r, column=1, value=label).font = Font(bold=(key == "close"))
+            rng_m = f"'Loan schedules'!$B${b['first']}:$B${b['last']}"
+            rng_v = f"'Loan schedules'!${col}${b['first']}:${col}${b['last']}"
+            for j in range(2, len(months) + 2):
+                c = ws.cell(row=r, column=j, value=f"=SUMIFS({rng_v},{rng_m},{CL(j)}${hr + 1})")
+                c.number_format = NUM
+                if key == "close":
+                    c.font, c.border = Font(bold=True), TOP
+            if key == "open":
+                yf = f"=B{r}"
+            elif key == "close":
+                yf = f"={CL(len(months) + 1)}{r}"
+            else:
+                yf = f"=SUM(B{r}:{CL(len(months) + 1)}{r})"
+            c = ws.cell(row=r, column=ncols, value=yf)
+            c.number_format, c.font = NUM, Font(bold=True)
+            total_rows[key].append(r)
+            r += 1
+        r += 1
+    if len(blocks) > 1:
+        ws.cell(row=r, column=1, value="All facilities").font = Font(bold=True, color=NAVY)
+        r += 1
+        for key, label, col in cols:
+            ws.cell(row=r, column=1, value=label).font = Font(bold=(key == "close"))
+            for j in range(2, ncols + 1):
+                c = ws.cell(row=r, column=j, value="=" + "+".join(f"{CL(j)}{x}" for x in total_rows[key]))
+                c.number_format = NUM
+                if key == "close" or j == ncols:
+                    c.font = Font(bold=True)
+            r += 1
+    ws.freeze_panes = ws.cell(row=hr + 2, column=2)
+    return ws
+
+
+
 def build_pack_workbook(meta, d):
     from cf_ma_pdf import _basis_lines
     structure = M.normalise_structure(d["structure"])
@@ -705,7 +851,8 @@ def build_pack_workbook(meta, d):
     if V["actual_ytd"] is not None and ex.get("scen"):
         _scenario_sheet(wb, meta, d, ex, labels)
     _pack_sheet(wb, meta, d, labels, V, status, _basis_lines(d, V, status), M.key_messages(d, ""))
-    order = ["Pack", "Income statement", "Balance sheet", "Cash flow", "KPIs", "Variances", "Variance bridge", "Scenarios", DATA]
+    _loan_sheets(wb, meta, d)
+    order = ["Pack", "Income statement", "Balance sheet", "Cash flow", "KPIs", "Variances", "Variance bridge", "Scenarios", "Loan facilities", "Loan schedules", DATA]
     wb._sheets = [wb[n] for n in order if n in wb.sheetnames]
     for ws in wb.worksheets:
         ws.sheet_properties.tabColor = NAVY if ws.title == "Pack" else ("0000FF" if ws.title == DATA else GOLD)

@@ -464,6 +464,39 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
         story.append(_simple(rows, [52 * mm] + [w] * (len(head) - 1), size=7.4))
         story.append(_p(f"{cur}. Actual months to {labels['month']} are as recorded; the remaining months are rebuilt from each scenario's starting point and changes. Scenarios are indicative and do not change the forecast in the pack.", _note_style))
 
+    # ---- loan facilities
+    import cf_ma_loans as FL
+    ps = FL.pack_schedule(d)
+    if ps["facilities"]:
+        story += [PageBreak(), Paragraph(f"Loan facilities - {labels['fy']}", _h2)]
+        mons = ps["months"]
+        head = [""] + [M.month_label(m) for m in mons] + ["Year"]
+        mark = [""] + [("A" if m in ps["actual"] else "F") for m in mons] + [""]
+        lw = 34 * mm
+        w = (WIDTH - lw) / (len(head) - 1)
+        rows, bold_rows = [head, mark], []
+        for fx in ps["facilities"]:
+            fac = fx["fac"]
+            rows.append([f"{FL.label_of(fac)}: {fac['amount']:,.0f} at {fac['rate']:g}%"] + [""] * (len(head) - 1))
+            bold_rows.append(len(rows) - 1)
+            for key, lab in (("open", "Opening"), ("draw", "Drawdown"), ("interest", "Interest"), ("fee", "Establishment fee"),
+                             ("repay", "Capital repaid"), ("close", "Closing")):
+                rows.append([lab] + [_n(fx["rows"][m][key]) for m in mons] + [_n(fx["year"][key])])
+                if key == "close":
+                    bold_rows.append(len(rows) - 1)
+        if len(ps["facilities"]) > 1:
+            rows.append(["All facilities"] + [""] * (len(head) - 1))
+            bold_rows.append(len(rows) - 1)
+            for key, lab in (("interest", "Interest"), ("fee", "Establishment fees"), ("repay", "Capital repaid"), ("close", "Closing borrowings")):
+                rows.append([lab] + [_n(ps["total"][m][key]) for m in mons] + [_n(ps["year"][key])])
+        t = _simple(rows, [lw] + [w] * (len(head) - 1), size=6.4)
+        t.setStyle(TableStyle([("FONTNAME", (0, r), (-1, r), "Helvetica-Bold") for r in bold_rows]))
+        story.append(t)
+        story.append(_p(f"{cur}. A = actual month (already in the books; the schedule is a check on it), F = forecast month. Interest is charged monthly on the balance "
+                        "outstanding. The establishment fee is expensed in the month the facility is drawn.", _note_style))
+        for w_ in FL.checks(d):
+            story.append(_p("•  " + w_, _small))
+
     # ---- commentary & basis
     more = [(k, lab) for k, lab in (("outlook", "Full-year outlook"), ("actions", "Actions and recommendations")) if com.get(k)]
     story += [PageBreak(), Paragraph("Commentary", _h2)]
