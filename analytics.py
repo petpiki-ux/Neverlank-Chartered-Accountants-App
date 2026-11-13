@@ -106,7 +106,9 @@ def _invoice_rows(currency):
     """Plain dicts for every issued invoice in one currency (so the maths
     below never touches the ORM again)."""
     rows = []
-    for inv in Invoice.query.filter(Invoice.currency == currency, Invoice.status.in_(["Sent", "Paid"])).all():
+    from invoicing import with_money
+    from sqlalchemy.orm import selectinload
+    for inv in with_money(Invoice.query.filter(Invoice.currency == currency, Invoice.status.in_(["Sent", "Paid"]))).options(selectinload(Invoice.client)).all():
         if not inv.issue_date:
             continue
         net = inv.subtotal

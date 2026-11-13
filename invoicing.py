@@ -20,8 +20,17 @@ from models import (
     INVOICE_STATUSES, INVOICE_CURRENCIES, user_can_access_engagement,
 )
 from timeutil import to_cat
+from sqlalchemy.orm import selectinload
 
 invoicing_bp = Blueprint("invoicing", __name__, url_prefix="/invoices")
+
+
+def with_money(query):
+    """Load each invoice's lines, receipts and credit notes (with their lines) in a few queries for the whole list. The totals, balance and
+    status of an invoice read all of them; without this a list of 2,000 invoices runs about 7,000 small queries."""
+    from models import Invoice as _Invoice, CreditNote as _CreditNote
+    return query.options(selectinload(_Invoice.lines), selectinload(_Invoice.receipts),
+                         selectinload(_Invoice.credit_notes).selectinload(_CreditNote.lines))
 
 
 def _invoice_visible(invoice):
@@ -105,7 +114,7 @@ def list_invoices():
         query = query.filter_by(status=status_filter)
     if client_filter:
         query = query.filter_by(client_id=int(client_filter))
-    all_invoices = query.order_by(Invoice.issue_date.desc(), Invoice.id.desc()).all()
+    all_invoices = with_money(query.order_by(Invoice.issue_date.desc(), Invoice.id.desc())).all()
     # Same confidentiality rule as everywhere else: an invoice linked to an
     # engagement is hidden from anyone not on that engagement (Admin sees
     # everything). An invoice with no engagement link is visible to all.
@@ -129,7 +138,7 @@ def _visible_engagements_for_invoicing():
     same confidentiality rule as the rest of the app (Admin sees all)."""
     from engagements import _visible_to_current_user  # reuse rather than duplicate the rule
     return _visible_to_current_user(
-        Engagement.query.order_by(Engagement.client_id, Engagement.title).all()
+        Engagement.query.options(selectinload(Engagement.tasks)).order_by(Engagement.client_id, Engagement.title).all()
     )
 
 

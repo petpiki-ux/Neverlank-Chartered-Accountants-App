@@ -345,6 +345,14 @@ def make_backup(app, kind="manual", by=None, scope="full"):
             integrity = _snapshot_db(app, snap)
             if integrity != "ok":
                 raise RuntimeError("The database failed SQLite's integrity check, so it was not backed up: " + str(integrity)[:200])
+        if not dbp and make_url(app.config["SQLALCHEMY_DATABASE_URI"]).drivername.startswith("postgresql"):
+            # PostgreSQL: a plain-file dump of every table (db_dump.py), restored with tools/restore_pg_dump.py
+            import db_dump
+            snap = os.path.join(snap_dir, "neverlank_pg.jsonl.gz")
+            with app.app_context():
+                db_dump.dump_to_file(db.engine, db.metadata, snap)
+            integrity = "ok"
+            db_bytes = os.path.getsize(snap)
         stamp = now.strftime("%Y-%m-%d_%H%M%S")
         name = f"neverlank_backup_{stamp}_{kind}.zip"
         final = os.path.join(BACKUP_DIR, name)
@@ -352,7 +360,7 @@ def make_backup(app, kind="manual", by=None, scope="full"):
         count = 0
         with zipfile.ZipFile(partial, "w", zipfile.ZIP_DEFLATED, compresslevel=6, allowZip64=True) as z:
             if snap:
-                z.write(snap, "database/neverlank.db")
+                z.write(snap, "database/" + os.path.basename(snap))
             for p, rel in files:
                 try:
                     z.write(p, "files/" + rel)
@@ -450,7 +458,8 @@ def delete_backup(name):
 
 README_TEXT = """NEVERLANK AUDIT APP - BACKUP
 
-database/neverlank.db   the whole database (every client, engagement, trial balance, invoice...), a consistent copy.
+database/neverlank.db   the whole database (every client, engagement, trial balance, invoice...), a consistent copy. (If the app runs on PostgreSQL this
+                        is database/neverlank_pg.jsonl.gz instead - a plain-file dump; see tools/restore_pg_dump.py to put it back.)
 files/...               every other file the app keeps (uploads, document templates, libraries), under the same path as on the disk.
 backup_info.json        when it was made, by whom, and whether the database passed SQLite's integrity check.
 

@@ -24,7 +24,9 @@ import emailer
 from extensions import db
 from invoice_pdf import build_invoice_pdf, invoice_filename
 from invoicing import FIRM_LETTERHEAD, _ensure_invoice_access, _invoice_visible
-from models import Invoice, InvoiceSend, user_has_permission
+from models import CreditNote, Invoice, InvoiceSend, user_has_permission
+from sqlalchemy import or_
+from sqlalchemy.orm import selectinload
 from timeutil import to_cat
 
 invoice_send_bp = Blueprint("invoice_send", __name__, url_prefix="/invoices")
@@ -158,10 +160,17 @@ def reminder_state(invoice, today=None):
             "due_now": due_now, "paused": invoice.reminders_paused}
 
 
+def _with_money_and_history(query):
+    """Load each invoice's lines, receipts, credit notes and sent history in a few queries for the whole list, instead of several per invoice
+    (the balance and reminder maths read all of them)."""
+    return query.options(selectinload(Invoice.lines), selectinload(Invoice.receipts),
+                         selectinload(Invoice.credit_notes).selectinload(CreditNote.lines), selectinload(Invoice.sends))
+
+
 def reminder_rows(today=None, only_visible=True):
     """Every invoice in the reminder cycle (visible to the current user), most overdue first."""
     today = today or date.today()
-    candidates = Invoice.query.filter(Invoice.status == "Sent").all()
+    candidates = _with_money_and_history(Invoice.query.filter(Invoice.status == "Sent")).all()
     rows = []
     for inv in candidates:
         if only_visible and not _invoice_visible(inv):
@@ -179,7 +188,8 @@ def due_reminder_count():
         return 0
     cutoff = date.today() - timedelta(days=REMINDER_AFTER_DAYS)
     count = 0
-    for inv in Invoice.query.filter(Invoice.status == "Sent").all():
+    due = Invoice.query.filter(Invoice.status == "Sent", or_(Invoice.due_date.is_(None), Invoice.due_date <= cutoff))
+    for inv in _with_money_and_history(due).all():
         if inv.due_date and inv.due_date > cutoff:
             continue
         if not _invoice_visible(inv):

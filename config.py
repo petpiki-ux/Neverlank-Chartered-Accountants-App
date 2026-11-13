@@ -84,11 +84,23 @@ VAT_IMPORTS_DATA_DIR = os.path.join(DATA_DIR, "vat_imports_data")
 ZIMRA_DATA_DIR = os.path.join(DATA_DIR, "zimra_data")
 
 
+def _database_url():
+    """DATABASE_URL as the host gives it. PostgreSQL hosts (Render) hand out 'postgres://...' or 'postgresql://...'; SQLAlchemy wants the
+    driver named, so both are turned into 'postgresql+psycopg2://...'. Anything else (e.g. sqlite:///...) is used as it is."""
+    url = os.environ.get("DATABASE_URL") or f"sqlite:///{os.path.join(INSTANCE_DIR, 'neverlank.db')}"
+    for old in ("postgres://", "postgresql://"):
+        if url.startswith(old):
+            return "postgresql+psycopg2://" + url[len(old):]
+    return url
+
+
 class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "neverlank-dev-secret-change-me")
-    SQLALCHEMY_DATABASE_URI = os.environ.get(
-        "DATABASE_URL", f"sqlite:///{os.path.join(INSTANCE_DIR, 'neverlank.db')}"
-    )
+    SQLALCHEMY_DATABASE_URI = _database_url()
+    # PostgreSQL only: the app serves 8 requests at once (gunicorn --threads 8), so keep 8 connections ready; test a connection before using
+    # it (the host closes idle ones) and retire them hourly. SQLite needs none of this.
+    SQLALCHEMY_ENGINE_OPTIONS = ({"pool_size": 8, "max_overflow": 4, "pool_pre_ping": True, "pool_recycle": 3600}
+                                 if _database_url().startswith("postgresql") else {})
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_FOLDER = UPLOAD_DIR
     MAX_CONTENT_LENGTH = 25 * 1024 * 1024  # 25 MB per upload

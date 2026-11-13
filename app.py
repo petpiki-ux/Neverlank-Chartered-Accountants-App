@@ -215,6 +215,10 @@ def _migrate_screenings_to_client():
                         fr.flag_key = f"screening:{match.id}"
             r.migrated_to_client = True
     db.session.commit()
+    if db.engine.dialect.name == "postgresql":      # rows were saved with chosen ids: keep PostgreSQL's id counter ahead of them
+        import db_indexes
+        with db.engine.begin() as _conn:
+            db_indexes.reset_sequences(_conn)
 
 
 def _backfill_task_categories():
@@ -247,8 +251,9 @@ def _add_missing_columns():
     no-op on a fresh install (the column is already in db.create_all()'s
     table definition) and safe to run repeatedly.
     """
-    if db.engine.dialect.name != "sqlite":
-        return  # only SQLite is supported/expected; skip silently otherwise
+    dialect = db.engine.dialect.name
+    if dialect not in ("sqlite", "postgresql"):
+        return  # only SQLite and PostgreSQL are supported; skip silently otherwise
     partner_signoff_cols = [("partner_signed_by_id", "INTEGER"), ("partner_signed_at", "DATETIME")]
     additions = {
         "document": [
@@ -625,12 +630,22 @@ def _add_missing_columns():
     # (receipt, zimra_reply, invoice) already have their own entry above and a repeated key in the literal would replace it.
     for _t in ("quotation", "invoice", "credit_note", "receipt", "client_advance", "zimra_reply", "workpaper_narrative"):
         additions[_t] = list(additions.get(_t, [])) + [("mp_signed_by_id", "INTEGER"), ("mp_signed_at", "DATETIME"), ("mp_signed_key", "VARCHAR(64)")]
+    def _pg_type(col_type):
+        # the column types above are written for SQLite; PostgreSQL spells two of them differently
+        return col_type.replace("DATETIME", "TIMESTAMP").replace("DEFAULT 0", "DEFAULT FALSE").replace("DEFAULT 1", "DEFAULT TRUE")
+
+    from sqlalchemy import inspect as _inspect
+    _insp = _inspect(db.engine)
     with db.engine.connect() as conn:
         for table, columns in additions.items():
-            existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            if dialect == "sqlite":
+                existing = {row[1] for row in conn.execute(text(f"PRAGMA table_info({table})"))}
+            else:
+                existing = {c["name"] for c in _insp.get_columns(table)} if _insp.has_table(table) else set()
             for col_name, col_type in columns:
                 if col_name not in existing:
-                    conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {col_name} {col_type}"))
+                    ddl = col_type if dialect == "sqlite" else _pg_type(col_type)
+                    conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN {col_name} {ddl}'))
                     conn.commit()
         # A schedule can never bill the same occurrence twice (an existing
         # database can't get a table constraint added after the fact, but it
@@ -788,6 +803,9 @@ def create_app():
 
     import security
     security.init_security(app)
+    if os.environ.get("NL_STRICT_LENGTHS"):         # test runs only: see db_strict.py
+        import db_strict
+        db_strict.install()
 
     from auth import auth_bp
     from clients import clients_bp
@@ -1099,6 +1117,11 @@ def create_app():
     with app.app_context():
         db.create_all()
         _add_missing_columns()
+        try:                                    # lookup indexes on foreign key columns (see db_indexes.py); once made, a start-up no-op
+            import db_indexes
+            db_indexes.ensure_indexes(db.engine)
+        except Exception as _exc:
+            app.logger.warning("Could not add database indexes: %s", _exc)
         _merge_tax_engagement_types()
         _rename_consulting_service()
         _backfill_task_categories()
