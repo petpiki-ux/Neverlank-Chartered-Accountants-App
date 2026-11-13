@@ -25,7 +25,7 @@ from models import (
     SANCTIONS_SCREENING_SOURCES, SANCTIONS_SCREENING_RESULTS,
     SANCTIONS_AUTO_SOURCES, REGULATORY_NOTICE_SOURCES, REGULATORY_NOTICE_SOURCE_LABELS,
     SanctionsListStatus, RegulatoryNotice, ClientKeyPerson,
-    COAMapping, StandardChartOfAccounts, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, FinancialStatements,
+    COAMapping, StandardChartOfAccounts, TrialBalance, TrialBalanceLine, AuditAdjustment, AuditAdjustmentLine, next_journal_reference, FinancialStatements,
     REPORTING_FRAMEWORKS, REPORTING_FRAMEWORK_LABELS,
     CASH_FLOW_METHODS, CASH_FLOW_METHOD_LABELS, PIE_CRITERIA, SME_ACT_SECTORS, SME_ACT_SIZE_BANDS,
     SubstantiveProcedureArea, SubstantiveProcedureItem,

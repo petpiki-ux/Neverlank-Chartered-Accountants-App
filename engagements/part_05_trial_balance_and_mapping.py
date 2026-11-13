@@ -431,7 +431,7 @@ def unmark_trial_balance_not_applicable(tb_id):
 def add_audit_adjustment(tb_id):
     tb = TrialBalance.query.get_or_404(tb_id)
     _ensure_engagement_access(tb.engagement)
-    reference = request.form.get("reference", "").strip() or f"AJE {len(tb.adjustments) + 1}"
+    reference = request.form.get("reference", "").strip() or next_journal_reference(tb.id)
     adjustment = AuditAdjustment(
         trial_balance_id=tb.id,
         reference=reference,

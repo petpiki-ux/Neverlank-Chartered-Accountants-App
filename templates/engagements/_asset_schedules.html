@@ -399,7 +399,7 @@
   </table>
   {% endif %}
   {% if rc.existing_py and not p.py_lines %}
-  <p class="muted" style="font-size:11.5px;">{{ 'PPE-REG-PY' }} is on the trial balance but the chosen treatment does not use it - pushing removes it.</p>
+  <p class="muted" style="font-size:11.5px;">{{ rc.existing_py.reference }} (PPE-REG-PY) is on the trial balance but the chosen treatment does not use it - pushing removes it.</p>
   {% endif %}
   {% if p.lines or p.py_lines %}
   {% if p.lines %}
@@ -415,7 +415,7 @@
   </table>
   {% endif %}
   {% if rc.existing %}
-  <p class="muted" style="font-size:11.5px;">{{ 'PPE-REG' }} is already on the trial balance ({{ rc.existing.lines|length }} lines{% if rc.existing.is_partner_signed %}, partner-signed{% elif rc.existing.is_reviewed %}, reviewed{% endif %}). The preview above is worked from the trial balance <em>before</em> it; pushing replaces its lines and clears the review and partner sign-off.</p>
+  <p class="muted" style="font-size:11.5px;">{{ rc.existing.reference }} (PPE-REG) is already on the trial balance ({{ rc.existing.lines|length }} lines{% if rc.existing.is_partner_signed %}, partner-signed{% elif rc.existing.is_reviewed %}, reviewed{% endif %}). The preview above is worked from the trial balance <em>before</em> it; pushing replaces its lines and clears the review and partner sign-off.</p>
   {% endif %}
   {% if p.rest_to == 'suspense' and p.balancing|abs >= 0.005 %}
   <p class="muted" style="font-size:11.5px;">A balance of {{ '%.2f'|format(p.balancing|abs) }} is left on a suspense line: it is the other side of the movement (for example the bank or a payable for an addition, or the proceeds of a disposal), which the register cannot see. Find it and move it to the right account on the Finalisation tab before sign-off.</p>
@@ -429,7 +429,7 @@
   {% else %}
   <p style="font-size:12.5px;"><strong>The register agrees to the trial balance</strong> (cost, accumulated depreciation and the depreciation charge){% if rc.existing %} after adjustment {{ 'PPE-REG' }}{% endif %}. Nothing to push.</p>
   {% if rc.existing %}
-  <form method="post" action="{{ url_for('assetrecon.push_to_tb', engagement_id=engagement.id) }}"><button type="submit" class="btn small secondary">Remove adjustment PPE-REG (no longer needed)</button></form>
+  <form method="post" action="{{ url_for('assetrecon.push_to_tb', engagement_id=engagement.id) }}"><button type="submit" class="btn small secondary">Remove adjustment {{ rc.existing.reference }} (PPE-REG, no longer needed)</button></form>
   {% endif %}
   {% endif %}
   {% endif %}

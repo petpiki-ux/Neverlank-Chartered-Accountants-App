@@ -1020,7 +1020,10 @@ class AuditAdjustment(db.Model):
     else. Its line items live in AuditAdjustmentLine below."""
     id = db.Column(db.Integer, primary_key=True)
     trial_balance_id = db.Column(db.Integer, db.ForeignKey("trial_balance.id"), nullable=False)
-    reference = db.Column(db.String(50))  # e.g. "AJE 1"
+    reference = db.Column(db.String(50))  # the journal number, e.g. "AJE 1" - given automatically (see next_journal_reference)
+    # Where a pushed journal came from (PPE-REG, PPE-REG-PY, DT-PY, DT-CUR). The app finds "its" journal by this code, so the visible
+    # reference can be the next AJE number and still be refreshed - not duplicated - by the next push. Blank for journals typed by hand.
+    source_key = db.Column(db.String(30))
     description = db.Column(db.Text)
     # Which column of the trial balance the journal adjusts: "current" (the year under audit, the original behaviour) or "prior" (the
     # comparative column - a restatement). A prior-year journal with carry_to_current also restates the current year's OPENING balances:
@@ -1073,6 +1076,26 @@ class AuditAdjustment(db.Model):
 
     def __repr__(self):
         return f"<AuditAdjustment {self.reference}>"
+
+
+def adjustment_key(adj):
+    """The code saying where an adjustment came from (PPE-REG, DT-CUR ...): its source_key, or - for a journal made before journals were
+    numbered automatically - its reference."""
+    return (getattr(adj, "source_key", None) or getattr(adj, "reference", None) or "").strip().upper()
+
+
+def journal_number(reference):
+    """3 for "AJE 3" (also "aje3", "AJE-3"); None for any other reference."""
+    import re as _re
+    m = _re.match(r"^\s*AJE\s*[-.:]?\s*(\d+)\s*$", reference or "", _re.I)
+    return int(m.group(1)) if m else None
+
+
+def next_journal_reference(trial_balance_id):
+    """The next journal number on a trial balance: one more than the highest AJE number already used, so every journal - pushed from the
+    Asset Register or Deferred Tax tab, or added by hand - gets the next number in one sequence."""
+    used = [journal_number(r) for (r,) in db.session.query(AuditAdjustment.reference).filter_by(trial_balance_id=trial_balance_id)]
+    return f"AJE {max([n for n in used if n], default=0) + 1}"
 
 
 class AuditAdjustmentLine(db.Model):

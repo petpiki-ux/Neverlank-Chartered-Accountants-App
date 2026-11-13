@@ -13,7 +13,7 @@ from flask import Blueprint, redirect, url_for, request, flash
 from flask_login import login_required
 
 from extensions import db
-from models import Engagement, TrialBalance, DeferredTaxComputation
+from models import Engagement, TrialBalance, DeferredTaxComputation, adjustment_key
 import financials as fin
 
 dtadj_bp = Blueprint("dtadj", __name__, url_prefix="/engagements")
@@ -128,7 +128,7 @@ def position(engagement, oci_current=0.0):
         prior_notes.append("No prior-year figures for: " + ", ".join(missing) + ". They are left out of the prior-year computation.")
     computed_pri = sum(pri_rows) * prate if pri_rows else None
 
-    base_adj = [a for a in tb.adjustments if (a.reference or "").strip().upper() not in (REF_PRIOR, REF_CURRENT)]
+    base_adj = [a for a in tb.adjustments if adjustment_key(a) not in (REF_PRIOR, REF_CURRENT)]
     totals = fin.apply_adjustments(fin.compute_totals(tb.lines), base_adj)
 
     out = {"ok": True, "tb": tb, "rate": rec.tax_rate_percent, "prior_rate": prate * 100.0, "prior_notes": prior_notes, "warnings": list(ppe["warnings"]),
@@ -153,7 +153,7 @@ def position(engagement, oci_current=0.0):
         blk = out[key]
         if not blk:
             continue
-        ex = next((a for a in tb.adjustments if (a.reference or "").strip().upper() == blk["reference"]), None)
+        ex = next((a for a in tb.adjustments if adjustment_key(a) == blk["reference"]), None)
         blk["existing"] = ex
         want = sorted((l["account_name"], l["fs_category"], l["debit"], l["credit"]) for l in blk["lines"])
         have = sorted((l.account_name, l.fs_category, r2(l.debit), r2(l.credit)) for l in (ex.lines if ex else []))
@@ -188,14 +188,14 @@ def post_journals(engagement_id):
                                  f"Computed net deferred tax liability/(asset) {p['computed']:,.2f}; trial balance {p['tb_net']:,.2f}. Proposed from the Deferred Tax tab.",
                                  "prior")
         if st:
-            done.append(f"{REF_PRIOR} {st}")
+            done.append(f"{asset_recon.journal_label(tb, REF_PRIOR)} {st}")
     if "current" in which and pos["current"] is not None:
         c = pos["current"]
         st = asset_recon._upsert(tb, REF_CURRENT, c["lines"],
                                  f"Deferred tax brought to the Deferred Tax Computation at {ye}: computed net deferred tax liability/(asset) {c['computed']:,.2f}; "
                                  f"trial balance {c['tb_net']:,.2f}. Proposed from the Deferred Tax tab.", "current")
         if st:
-            done.append(f"{REF_CURRENT} {st}")
+            done.append(f"{asset_recon.journal_label(tb, REF_CURRENT)} {st}")
     if not which:
         flash("Tick the journal(s) you confirm.", "info")
     elif not done:

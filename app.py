@@ -241,6 +241,30 @@ def _backfill_task_categories():
         db.session.commit()
 
 
+def _number_existing_journals():
+    """Give the journals made before numbering was automatic their AJE numbers, in the order they were made. A journal pushed from the
+    Asset Register or Deferred Tax tab (reference PPE-REG, PPE-REG-PY, DT-PY, DT-CUR) or with no reference gets the next number on its trial
+    balance and remembers its source code; a reference someone typed by hand is left as it is. Safe to run on every start-up."""
+    from models import AuditAdjustment, journal_number
+    pushed = {"PPE-REG", "PPE-REG-PY", "DT-PY", "DT-CUR"}
+    todo = [a for a in AuditAdjustment.query.order_by(AuditAdjustment.id).all()
+            if not a.source_key and ((a.reference or "").strip().upper() in pushed or not (a.reference or "").strip())]
+    if not todo:
+        return
+    top = {}
+    for tb_id, ref in db.session.query(AuditAdjustment.trial_balance_id, AuditAdjustment.reference):
+        n = journal_number(ref)
+        if n:
+            top[tb_id] = max(top.get(tb_id, 0), n)
+    for a in todo:
+        code = (a.reference or "").strip().upper()
+        if code in pushed:
+            a.source_key = code
+        top[a.trial_balance_id] = top.get(a.trial_balance_id, 0) + 1
+        a.reference = f"AJE {top[a.trial_balance_id]}"
+    db.session.commit()
+
+
 def _add_missing_columns():
     """Lightweight auto-migration for SQLite: db.create_all() only creates
     brand-new tables, it never adds a column to a table that already exists.
@@ -274,7 +298,7 @@ def _add_missing_columns():
 
         # applies_to: 'current' (the year under audit) or 'prior' (a restatement of the comparative column); carry_to_current: a prior-year
         # adjustment also restates the current year's opening balances (see financials.apply_adjustments).
-        "audit_adjustment": [("applies_to", "VARCHAR(10) DEFAULT 'current'"), ("carry_to_current", "BOOLEAN DEFAULT 1")],
+        "audit_adjustment": [("applies_to", "VARCHAR(10) DEFAULT 'current'"), ("carry_to_current", "BOOLEAN DEFAULT 1"), ("source_key", "VARCHAR(30)")],
         "ppe_asset_class": [("tb_aliases", "VARCHAR(400)")],
         "ppe_asset": [("tax_disposed_on", "DATE"), ("tax_disposal_proceeds", "FLOAT"), ("opening_tax_value", "FLOAT")],
         "message_recipient": [("recalled_at", "DATETIME"), ("deleted_at", "DATETIME")],
@@ -1122,6 +1146,11 @@ def create_app():
             db_indexes.ensure_indexes(db.engine)
         except Exception as _exc:
             app.logger.warning("Could not add database indexes: %s", _exc)
+        try:
+            _number_existing_journals()
+        except Exception as _exc:
+            db.session.rollback()
+            app.logger.warning("Could not number the existing journals: %s", _exc)
         _merge_tax_engagement_types()
         _rename_consulting_service()
         _backfill_task_categories()

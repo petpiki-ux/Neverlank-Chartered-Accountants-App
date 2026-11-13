@@ -29,7 +29,7 @@ from flask_login import login_required, current_user
 
 import financials as fin
 from extensions import db
-from models import Engagement, TrialBalance, AuditAdjustment, AuditAdjustmentLine
+from models import Engagement, TrialBalance, AuditAdjustment, AuditAdjustmentLine, adjustment_key, next_journal_reference
 import asset_schedules as sched
 
 assetrecon_bp = Blueprint("assetrecon", __name__, url_prefix="/engagements")
@@ -151,7 +151,7 @@ def position(tb):
                 if abs(net) > 1e-9:
                     _slot(by[bn], *dep_class_of(name))["dep"] += net
     for adj in tb.adjustments:
-        ref = (adj.reference or "").strip().upper()
+        ref = adjustment_key(adj)
         is_prior, carry = adj.is_prior_year, adj.carries_to_current
         for l in adj.lines:
             net = (l.debit or 0.0) - (l.credit or 0.0)
@@ -622,7 +622,7 @@ def reconcile(engagement, open_to="retained_earnings", rest_to="suspense", basis
     prop = proposal(reg, pos, open_to, rest_to, units if use_units else None, legs, accounts)
     existing = existing_py = None
     for a in tb.adjustments:
-        ref = (a.reference or "").strip().upper()
+        ref = adjustment_key(a)
         if ref == REFERENCE:
             existing = a
         elif ref == REFERENCE_PY:
@@ -651,12 +651,14 @@ def _dep_outside_category(tb):
 # ---------------------------------------------------------------------------------------------------- push
 
 def _upsert(tb, reference, lines, description, applies_to="current"):
-    """Create or refresh the one adjustment with this reference on the trial balance (never a second one): lines replaced, sign-offs
-    cleared. With no lines an existing one is removed. Returns "added" / "refreshed" / "removed" / None."""
+    """Create or refresh the one adjustment from this source on the trial balance (never a second one): lines replaced, sign-offs
+    cleared. With no lines an existing one is removed. Returns "added" / "refreshed" / "removed" / None.
+    `reference` is the source code (PPE-REG, DT-CUR ...); the journal's visible reference is the next AJE number, given when it is
+    first made and kept when it is refreshed."""
     import engagements as eng
     existing = None
     for a in tb.adjustments:
-        if (a.reference or "").strip().upper() == reference:
+        if adjustment_key(a) == reference:
             existing = a
             break
     if not lines:
@@ -666,10 +668,14 @@ def _upsert(tb, reference, lines, description, applies_to="current"):
         return None
     status = "refreshed"
     if existing is None:
-        existing = AuditAdjustment(trial_balance_id=tb.id, reference=reference)
+        existing = AuditAdjustment(trial_balance_id=tb.id, reference=next_journal_reference(tb.id), source_key=reference)
         db.session.add(existing)
         status = "added"
     else:
+        if not existing.source_key:                      # made before journals were numbered: number it now
+            existing.source_key = reference
+            if (existing.reference or "").strip().upper() == reference:
+                existing.reference = next_journal_reference(tb.id)
         for l in list(existing.lines):
             db.session.delete(l)
     existing.description = description
@@ -683,6 +689,12 @@ def _upsert(tb, reference, lines, description, applies_to="current"):
     db.session.refresh(existing)
     eng._touch_adjustment(existing)
     return status
+
+
+def journal_label(tb, key):
+    """'AJE 4 (PPE-REG)' for the journal from this source on the trial balance (just the code when it has been removed)."""
+    a = next((x for x in AuditAdjustment.query.filter_by(trial_balance_id=tb.id).all() if adjustment_key(x) == key), None)
+    return f"{a.reference} ({key})" if a is not None else key
 
 
 @assetrecon_bp.route("/<int:engagement_id>/assets/reconcile/push", methods=["POST"])
@@ -705,14 +717,14 @@ def push_to_tb(engagement_id):
                f"Also restates the opening balances of the year ended {ye}. Pushed from the Asset Register tab.")
     st = _upsert(tb, REFERENCE_PY, prop["py_lines"], py_desc, "prior")
     if st:
-        done.append(f"{REFERENCE_PY} {st}")
+        done.append(f"{journal_label(tb, REFERENCE_PY)} {st}")
     desc = (f"Asset Register to trial balance, year ended {ye}: brings property, plant and equipment (cost and accumulated depreciation, "
             f"{'class by class' if rc['basis'] == 'class' else 'in total'}) "
             f"and the depreciation charge to the register. The opening net book value difference goes to {OPEN_TO[prop['open_to']].lower()}; "
             f"the balance to {leg_label(prop['rest_to'], rc).lower()}{' (with the legs chosen for individual classes)' if prop['legs'] else ''}. Pushed from the Asset Register tab.")
     st = _upsert(tb, REFERENCE, prop["lines"], desc, "current")
     if st:
-        done.append(f"{REFERENCE} {st}")
+        done.append(f"{journal_label(tb, REFERENCE)} {st}")
     db.session.commit()
     if not done:
         flash("The register already agrees to the trial balance - nothing to push.", "info")
