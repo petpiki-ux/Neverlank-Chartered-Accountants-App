@@ -356,8 +356,8 @@ def _run_html(ctx, p, r, idx, base, part=None):
         return f'<span class="wr pic" contenteditable="false" data-r="{idx}">{"".join(pics)}</span>'
     text = _run_text(r)
     if text == "":
-        return f'<span class="wr" data-r="{idx}"{(" style=" + chr(34) + css + chr(34)) if css else ""}></span>'
-    return f'<span class="wr" data-r="{idx}"{(" style=" + chr(34) + css + chr(34)) if css else ""}>{html.escape(text)}</span>'
+        return f'<span class="wr" data-r="{idx}"{(" style=" + chr(34) + html.escape(css, quote=True) + chr(34)) if css else ""}></span>'
+    return f'<span class="wr" data-r="{idx}"{(" style=" + chr(34) + html.escape(css, quote=True) + chr(34)) if css else ""}>{html.escape(text)}</span>'
 
 
 def _para_html(ctx, p, path, in_table=False, part=None):
@@ -401,7 +401,7 @@ def _para_html(ctx, p, path, in_table=False, part=None):
     editable = "false" if (has_pic and not para_text(p).strip()) else "true"
     placeholder = "" if inner.replace("<span", "").strip() and para_text(p) else " empty"
     return (f'<div class="wp-p{placeholder}" contenteditable="{editable}" data-path="{".".join(map(str, path))}"{marker} '
-            f'style="{";".join(css)}" spellcheck="true">{inner}</div>')
+            f'style="{html.escape(";".join(css), quote=True)}" spellcheck="true">{inner}</div>')
 
 
 def _cell_borders(tbl_borders, tc):
@@ -501,7 +501,7 @@ def _table_html(ctx, tbl, path, part=None):
                     inner.append(_table_html(ctx, blk, bp, part))
                 else:
                     inner.append(_para_html(ctx, blk, bp, True, part))
-            out.append(f'<td{attrs} style="{";".join(css)}">{"".join(inner)}</td>')
+            out.append(f'<td{attrs} style="{html.escape(";".join(css), quote=True)}">{"".join(inner)}</td>')
         out.append("</tr>")
     out.append("</table>")
     return "".join(out)

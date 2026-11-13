@@ -13,8 +13,10 @@
     <input type="text" id="name" name="name" value="{{ current_user.name }}" required>
     <label for="email">Email</label>
     <input type="email" id="email" name="email" value="{{ current_user.email or '' }}">
-    <label for="new_password">New password (leave blank to keep current)</label>
-    <input type="password" id="new_password" name="new_password">
+    <label for="new_password">New password (leave blank to keep current; at least 10 characters)</label>
+    <input type="password" id="new_password" name="new_password" autocomplete="new-password" minlength="10">
+    <label for="current_password">Current password (needed only when changing the password)</label>
+    <input type="password" id="current_password" name="current_password" autocomplete="current-password">
     <button type="submit" class="btn gold">Save changes</button>
   </form>
 </div>

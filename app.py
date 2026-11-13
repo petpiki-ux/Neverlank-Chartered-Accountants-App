@@ -786,6 +786,9 @@ def create_app():
     login_manager.init_app(app)
     socketio.init_app(app)
 
+    import security
+    security.init_security(app)
+
     from auth import auth_bp
     from clients import clients_bp
     from engagements import engagements_bp

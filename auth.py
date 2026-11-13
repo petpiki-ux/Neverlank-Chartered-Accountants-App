@@ -3,6 +3,7 @@ from flask_login import login_user, logout_user, login_required, current_user
 
 from extensions import db
 from models import User
+import security
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
 
@@ -15,8 +16,14 @@ def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
+        ip = security.client_ip()
+        wait = security.throttle.retry_after(ip, username)
+        if wait:
+            flash(f"Too many failed sign-in attempts. Please wait {max(1, wait // 60 + (1 if wait % 60 else 0))} minute(s) and try again.", "danger")
+            return render_template("auth/login.html"), 429
         user = User.query.filter_by(username=username).first()
         if user and user.is_active_flag and user.check_password(password):
+            security.throttle.success(ip, username)
             login_user(user)
             try:                                    # Managing Partner / Admin: bring the exchange-rate register up to date in the background
                 from flask import current_app
@@ -25,8 +32,8 @@ def login():
             except Exception:
                 pass
             flash(f"Welcome back, {user.name}.", "success")
-            next_url = request.args.get("next")
-            return redirect(next_url or url_for("engagements.dashboard"))
+            return redirect(security.safe_next(request.args.get("next"), url_for("engagements.dashboard")))
+        security.throttle.failure(ip, username)
         flash("Invalid username or password.", "danger")
 
     return render_template("auth/login.html")
@@ -35,6 +42,8 @@ def login():
 @auth_bp.route("/logout")
 @login_required
 def logout():
+    if (request.headers.get("Sec-Fetch-Site") or "").lower() == "cross-site" or not security.same_origin_ok():
+        return redirect(url_for("engagements.dashboard"))      # another site cannot sign people out
     logout_user()
     flash("You have been logged out.", "info")
     return redirect(url_for("auth.login"))
@@ -47,6 +56,14 @@ def account():
         name = request.form.get("name", "").strip()
         email = request.form.get("email", "").strip()
         new_password = request.form.get("new_password", "")
+        if new_password:
+            if not current_user.check_password(request.form.get("current_password", "")):
+                flash("To change your password, enter your current password correctly.", "danger")
+                return redirect(url_for("auth.account"))
+            problem = security.password_problem(new_password)
+            if problem:
+                flash(problem, "danger")
+                return redirect(url_for("auth.account"))
         current_user.name = name or current_user.name
         current_user.email = email
         if new_password:

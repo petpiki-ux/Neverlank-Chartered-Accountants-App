@@ -3,6 +3,7 @@ from flask import Blueprint, render_template, redirect, url_for, request, flash,
 from flask_login import login_required, current_user
 
 from extensions import db
+import security
 from models import User, Permission, PERMISSIONS, USER_ROLES, user_has_permission, UserPermissionOverride
 
 users_bp = Blueprint("users", __name__, url_prefix="/team")
@@ -67,7 +68,16 @@ def new_user():
             email=request.form.get("email", "").strip(),
             role=requested_role,
         )
-        person.set_password(request.form.get("password") or "changeme123")
+        chosen = request.form.get("password") or ""
+        if chosen:
+            problem = security.password_problem(chosen)
+            if problem:
+                flash(problem, "danger")
+                return render_template("users/form.html", person=None)
+        else:
+            chosen = security.temporary_password()          # no shared default password: each new account gets its own
+            flash(f"Temporary password for {username}: {chosen} - give it to them now (it is not shown again) and ask them to change it under My Account.", "warning")
+        person.set_password(chosen)
         db.session.add(person)
         db.session.commit()
         flash(f"Team member {person.name} added.", "success")
@@ -91,7 +101,11 @@ def edit_user(user_id):
         person.is_active_flag = bool(request.form.get("is_active"))
         new_password = request.form.get("password")
         if new_password:
-            person.set_password(new_password)
+            problem = security.password_problem(new_password)
+            if problem:
+                flash(problem + " The password was not changed.", "danger")
+            else:
+                person.set_password(new_password)
         # Per-user Access Rights overrides (see models.UserPermissionOverride)
         # - admin-only, same reasoning as manage_permissions below: someone
         # merely delegated "Manage Team Members" must never be able to grant

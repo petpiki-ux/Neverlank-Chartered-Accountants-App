@@ -1136,8 +1136,12 @@ def run_seed():
     # Admin user
     if not User.query.filter_by(username="admin").first():
         admin = User(username="admin", name="Petros Piki", email="pet.piki@gmail.com", role="admin")
-        admin.set_password("changeme123")
+        import os as _os, security as _sec
+        initial = _os.environ.get("ADMIN_INITIAL_PASSWORD") or _sec.temporary_password()
+        admin.set_password(initial)
         db.session.add(admin)
+        if not _os.environ.get("ADMIN_INITIAL_PASSWORD"):
+            print(f"FIRST-RUN ADMIN LOGIN -> username: admin / password: {initial}  (change it under My Account after signing in)", flush=True)
 
     # Checklist templates - each only gets created if a template with that
     # exact name doesn't already exist, so this is safe to re-run any time.
@@ -1161,7 +1165,7 @@ if __name__ == "__main__":
     from app import app
     with app.app_context():
         run_seed()
-        print("Seed complete. Admin login -> username: admin / password: changeme123")
+        print("Seed complete.")
 
 
 # --------------------------------------------------------------------------

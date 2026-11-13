@@ -26,7 +26,7 @@
     <label><input type="checkbox" name="is_active" style="width:auto;display:inline-block;" {% if person.is_active_flag %}checked{% endif %}> Active</label>
     {% endif %}
     <label for="password">{% if person %}Reset password (leave blank to keep current){% else %}Password{% endif %}</label>
-    <input type="password" id="password" name="password" {% if not person %}placeholder="default: changeme123"{% endif %}>
+    <input type="password" id="password" name="password" autocomplete="new-password" {% if not person %}placeholder="leave blank for a random temporary password"{% else %}placeholder="at least 10 characters"{% endif %}>
     {% if person and current_user.role == 'admin' %}
     <h3 style="font-size:14px;margin:18px 0 4px;">Access Rights</h3>
     <p class="muted" style="font-size:11.5px;margin:0 0 10px;">Override a capability for {{ person.name }} specifically, regardless of what their role ({{ person.role|capitalize }}) defaults to (Team &gt; Permissions) - useful to limit access to a sensitive module (e.g. Payroll) for one person, or to grant one person a capability without changing their role. Leave "Use role default" unless you need a named exception.</p>

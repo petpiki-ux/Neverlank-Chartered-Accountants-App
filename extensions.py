@@ -18,4 +18,8 @@ login_manager.login_message_category = "info"
 # peer-to-peer WebRTC) - this channel only carries small, infrequent
 # signaling messages. See README_APPLY_THIS_UPDATE.txt for the one
 # required change this needs in production: a single web worker process.
-socketio = SocketIO(cors_allowed_origins="*", async_mode="threading")
+# Only pages served from this site itself may open the signalling channel (python-engineio's default same-origin rule, which honours the
+# host's X-Forwarded-Proto / Host headers). Extra origins (a custom domain behind another proxy) can be listed in TRUSTED_ORIGINS.
+import os as _os
+_extra = [o.strip() for o in _os.environ.get("TRUSTED_ORIGINS", "").split(",") if o.strip().startswith("http")]
+socketio = SocketIO(cors_allowed_origins=(_extra or None), async_mode="threading")
