@@ -5,7 +5,7 @@
   <h3 style="margin-top:0;">Loan facilities</h3>
   <p class="cf-sub">The bank facilities the business carries: lender, amount, interest rate, establishment fee, term and how it is repaid. Each one is scheduled month by month below,
   and when this pack is linked to a forecast model the model carries exactly these loans, so the forecast's interest, establishment fees, capital repayments, cash and borrowings follow them.
-  Interest is charged each month on the balance outstanding (rate &divide; 12). The <strong>establishment fee is expensed in the month the facility is drawn</strong>
+  Interest is charged each month on the balance outstanding (rate &divide; 12); in the month of drawdown it is charged only for the days from the <strong>drawdown date</strong> to the month end (the drawdown day counts). The <strong>establishment fee is expensed in the month the facility is drawn</strong>
   (amount &times; fee % plus any fixed fee). A facility drawn before the forecast starts opens at the balance outstanding then and its fee, already paid, is not charged again. Amounts are in {{ cur }}.</p>
   {% if link and link.model_id %}
   <p class="cf-sub" style="margin-bottom:0;">Linked forecast model: <strong>{{ link.model_number }}</strong>{% if link_model %} &ndash; <a href="{{ url_for('corpfin.model_tab', model_id=link_model.id, tab='loans') }}">open its Loans &amp; covenants tab</a>{% endif %}.
@@ -31,7 +31,7 @@
       <div><label>Fixed fee ({{ cur }}, optional)</label><input type="number" step="any" min="0" class="cf-in" name="fac_feefix_{{ i }}" value="{{ x.fee_fixed|cfin }}" {{ 'disabled' if locked }}></div>
     </div>
     <div class="form-row">
-      <div><label>Drawn in (month)</label><input type="month" class="cf-in" name="fac_draw_{{ i }}" value="{{ x.draw_month }}" {{ 'disabled' if locked }}></div>
+      <div><label>Drawdown date</label><input type="date" class="cf-in" name="fac_drawdate_{{ i }}" value="{{ x.draw_date or (x.draw_month ~ '-01') }}" {{ 'disabled' if locked }}></div>
       <div><label>Term (months, drawdown to last repayment)</label><input type="number" min="1" max="240" class="cf-in" name="fac_term_{{ i }}" value="{{ x.term_months }}" {{ 'disabled' if locked }}></div>
       <div><label>Capital grace (months)</label><input type="number" min="0" max="239" class="cf-in" name="fac_grace_{{ i }}" value="{{ x.grace_months }}" {{ 'disabled' if locked }}></div>
       <div style="min-width:280px;"><label>Repayment</label><select class="cf-in" name="fac_repay_{{ i }}" {{ 'disabled' if locked }}>{% for k, lab in repay_types %}<option value="{{ k }}" {% if x.repay == k %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
@@ -41,7 +41,7 @@
       <div style="flex:2;"><label>Security / notes (optional)</label><input type="text" class="cf-in" name="fac_sec_{{ i }}" value="{{ x.security }}" maxlength="200" {{ 'disabled' if locked }}></div>
     </div>
     <div class="cf-sub">
-      {% if x.amount > 0 %}Establishment fee {{ fee_of(x)|cfn }} ({{ cur }}) &middot; {{ repay_short[x.repay] }} over {{ x.term_months }} months from {{ month_label(x.draw_month, False) }}{% if x.grace_months %}, after {{ x.grace_months }} month(s) of interest only{% endif %}.{% endif %}
+      {% if x.amount > 0 %}Establishment fee {{ fee_of(x)|cfn }} ({{ cur }}) &middot; {{ repay_short[x.repay] }} over {{ x.term_months }} months from {{ x.draw_date|string if x.draw_date else month_label(x.draw_month, False) }}{% if x.grace_months %}, after {{ x.grace_months }} month(s) of interest only{% endif %}.{% endif %}
       {% if not locked %}<button class="btn small danger" type="submit" name="action" value="del:{{ i }}" formnovalidate onclick="return confirm('Remove this facility?');" style="margin-left:8px;">Remove</button>{% endif %}
     </div>
   </div>
@@ -52,7 +52,7 @@
     <button class="btn gold" type="submit" name="action" value="save">Save facilities</button>
     {% if link and link.model_id %}<button class="btn" type="submit" name="action" value="sync" title="Saves, then rolls the linked forecast model forward from the actuals using these facilities">Save and update the forecast</button>{% endif %}
   </div>
-  <p class="cf-sub" style="margin-bottom:0;">Defaults the pack cannot know &ndash; the term, the drawdown month and the repayment pattern &ndash; must be taken from the facility letters. Check them before relying on the forecast.</p>
+  <p class="cf-sub" style="margin-bottom:0;">Defaults the pack cannot know &ndash; the term, the drawdown date and the repayment pattern &ndash; must be taken from the facility letters. Check them before relying on the forecast.</p>
   {% endif %}
 </form>
 

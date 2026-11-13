@@ -206,6 +206,53 @@ rep_ = kp[[k for k in kp if k.startswith("Current ratio as reported")][0]][0]
 check(adj is not None and rep_ is not None and adj < rep_, f"KPIs: counting instalments due within 12 months lowers the current ratio ({rep_:.2f}x -> {adj:.2f}x)")
 check(FL.statement_analysis(build()[0]) is None, "no facilities: no analysis")
 
+# =========================================================================== drawdown DATE: first-month interest for the days outstanding
+import datetime as _dt
+check(FL.first_frac(NBS) == 1.0 and NBS["draw_date"] == "", "a facility with only a month is treated as drawn on the 1st (fraction 1.0)")
+ND = FL.normalise_facility(dict(NBS, draw_date="2026-07-15", draw_month="2026-01"), 0, "2026-01")
+check(ND["draw_month"] == "2026-07" and ND["draw_date"] == "2026-07-15", "the date decides the month (a stale month field is ignored)")
+check(near(FL.first_frac(ND), 17 / 31, 1e-9), "drawn 15 July: 17 of 31 days outstanding (the drawdown day counts)")
+rd = FL.schedule(ND)
+check(near(rd[0]["interest"], 500000 * 0.18 / 12 * 17 / 31), f"first-month interest is pro-rated by days ({rd[0]['interest']:,.2f})")
+check(near(rd[1]["interest"], (500000 - rd[0]["repay"]) * 0.18 / 12), "later months are full months on the balance, as before")
+check(rd[0]["month"] == "2026-07" and len(rd) == 12 and near(rd[0]["fee"], 15000) and near(sum(x["repay"] for x in rd), 500000), "months, fee and capital are unchanged by the date")
+check(all(near(x["payment"], pmt, 0.02) for x in rd[:-1]) and rd[-1]["payment"] <= pmt + 0.01 and near(rd[-1]["close"], 0),
+      "the level instalment is unchanged; the smaller first interest means a little more capital in month 1 and a slightly smaller final payment")
+check(near(FL.first_frac(FL.normalise_facility(dict(NBS, draw_date="2026-07-01"), 0, "2026-01")), 1.0), "drawn on the 1st: a full month")
+check(near(FL.first_frac(FL.normalise_facility(dict(NBS, draw_date="2026-07-31"), 0, "2026-01")), 1 / 31, 1e-9), "drawn on the last day: one day of interest")
+check(near(FL.first_frac(FL.normalise_facility(dict(NBS, draw_date="2028-02-29"), 0, "2026-01")), 1 / 29, 1e-9), "a leap-year February is 29 days")
+for bad in ("2026-02-30", "2026-13-01", "abc", "", None, "2026-07"):
+    check(FL.normalise_facility(dict(NBS, draw_date=bad), 0, "2026-01")["draw_date"] == "", f"an invalid date ({bad!r}) is dropped and the month is kept")
+check(FL.normalise_facility(dict(NBS, draw_date="2026-02-30"), 0, "2026-01")["draw_month"] == "2026-07", "an invalid date falls back to the month given")
+bst = FL.schedule(dict(ND, repay="bullet", term_months=6))
+check(near(bst[0]["interest"], 500000 * 0.18 / 12 * 17 / 31) and all(near(x["interest"], 7500) for x in bst[1:]), "bullet: only the first month is part-month")
+# a pack saved before the date existed hashes exactly as before
+_dfp = {"facilities": [dict(NBS)]}
+_old = __import__("hashlib").md5(__import__("json").dumps([{k: v for k, v in NBS.items()}], sort_keys=True).encode()).hexdigest()[:12]
+_nodate = {k: v for k, v in NBS.items() if k != "draw_date"}
+_old2 = __import__("hashlib").md5(__import__("json").dumps([_nodate], sort_keys=True).encode()).hexdigest()[:12]
+check(FL.fingerprint({"facilities": [dict(_nodate)], "settings": {"fy_start_month": 1, "fy_start_year": 2026}, "structure": build()[0]["structure"]}) == _old2,
+      "fingerprint of a facility with no date equals the one from before the date existed (packs are not flagged stale)")
+# the forecast model's interest equals the schedule's, including the part first month
+dD, _s0 = build()
+dD["facilities"] = [dict(ND)]
+aD, iD = LK.continuation_assumptions(dD, {"years": 2}, "USD")
+lnD = [L for L in aD["loans"] if L["fac"]][0]
+check(near(lnD["draw_frac"], 17 / 31, 1e-9), "the model loan carries the first-month fraction")
+resD = E.run(aD)
+okD = True
+for j in range(12):
+    L_ = resD["periods"][j]["loans"][0]
+    for key in ("open", "draw", "interest", "fee", "repay", "close"):
+        if not near(L_[key], rd[j][key], 0.01):
+            okD = False
+            print("   mismatch", j, key, L_[key], rd[j][key])
+check(okD, "forecast model = schedule month by month with a mid-month drawdown (first-month interest included)")
+check(resD["checks"]["balance_ok"] and resD["checks"]["cash_ok"], "the model still balances with a mid-month drawdown")
+check(any("outstanding" in n_ and "2026-07-15" in n_ for n_ in iD["notes"]), "a note explains the part-month first interest")
+# annual interest in the model (period sums are used by the annual view)
+check(near(resD["annual"][0]["loans"][0]["interest"], sum(x["interest"] for x in rd)), "model annual interest equals the schedule's total")
+
 # =========================================================================== web layer
 from app import create_app
 from extensions import db
@@ -248,7 +295,7 @@ def fac_form(rows, action="save"):
     f_ = {"n_fac": str(len(rows)), "action": action}
     for i, x in enumerate(rows):
         f_.update({f"fac_id_{i}": x.get("id", f"fac{i + 1}"), f"fac_lender_{i}": x["lender"], f"fac_amount_{i}": str(x["amount"]), f"fac_rate_{i}": str(x["rate"]),
-                   f"fac_feepct_{i}": str(x["fee_pct"]), f"fac_feefix_{i}": "0", f"fac_draw_{i}": x["draw_month"], f"fac_term_{i}": str(x["term_months"]),
+                   f"fac_feepct_{i}": str(x["fee_pct"]), f"fac_feefix_{i}": "0", f"fac_draw_{i}": x["draw_month"], f"fac_drawdate_{i}": x.get("draw_date", ""), f"fac_term_{i}": str(x["term_months"]),
                    f"fac_grace_{i}": "0", f"fac_repay_{i}": x["repay"]})
         if x.get("include", True):
             f_[f"fac_inc_{i}"] = "1"
@@ -257,6 +304,11 @@ two = [dict(NBS), dict(TNC)]
 r = c.post(f"{BASE}/{pid}/facilities/save", data=fac_form(two), follow_redirects=True)
 saved = getdata().get("facilities")
 check(r.status_code == 200 and saved and len(saved) == 2 and saved[0]["lender"] == "NBS" and saved[1]["amount"] == 2000000, "saving stores both facilities")
+check('type="date"' in r.data.decode() and 'name="fac_drawdate_0"' in r.data.decode() and 'value="2026-07-01"' in r.data.decode(), "the form shows a drawdown date (the 1st when only a month was saved)")
+_r2 = c.post(f"{BASE}/{pid}/facilities/save", data=fac_form([dict(NBS, draw_date="2026-07-15"), dict(TNC)]), follow_redirects=True)
+_sv = getdata().get("facilities")
+check(_sv and _sv[0].get("draw_date") == "2026-07-15" and _sv[0]["draw_month"] == "2026-07" and b'value="2026-07-15"' in _r2.data, "a drawdown date posted from the form is saved and shown again")
+c.post(f"{BASE}/{pid}/facilities/save", data=fac_form(two), follow_redirects=True)
 html = r.data.decode()
 check("NBS" in html and "TNC" in html and "15,000" in html and "40,000" in html and "Schedule by month" in html, "the tab shows both facilities, the fees and the monthly schedule")
 check("not linked to a forecast model yet" in html, "the tab says the pack is not yet linked to a forecast")
@@ -439,6 +491,35 @@ if soffice:
     wsc = wbm["Calc"]
     errs = [c_.coordinate for row in wsc.iter_rows() for c_ in row if isinstance(c_.value, str) and c_.value.startswith("#")]
     check(not errs, f"the model Excel has no formula errors ({errs[:3]})")
+
+# a facility drawn mid-month: the Excel formulas (live) give the same interest as the app
+if soffice:
+    _d2 = getdata()
+    _fa = dict(_d2["facilities"][0], draw_date="2026-07-15", draw_month="2026-07")
+    setdata(lambda x: x.update({"facilities": [_fa] + x["facilities"][1:]}))
+    _page = c.get(f"{BASE}/{pid}/excel/loans")
+    _t2 = tempfile.mkdtemp(prefix="xl2_")
+    open(os.path.join(_t2, "p.xlsx"), "wb").write(_page.data)
+    subprocess.run([soffice, "--headless", "--convert-to", "xlsx", "--outdir", os.path.join(_t2, "o"), os.path.join(_t2, "p.xlsx")], capture_output=True, timeout=180)
+    from openpyxl import load_workbook as _lw2
+    _w2 = _lw2(os.path.join(_t2, "o", "p.xlsx"), data_only=True)
+    _s2 = _w2["Loan facilities"]
+    _ps = FL.pack_schedule(getdata())
+    _ri = [r_ for r_ in range(1, _s2.max_row + 1) if _s2.cell(row=r_, column=1).value == "Interest"]
+    _okj = True
+    for fi, fx in enumerate(_ps["facilities"]):
+        for j, mk in enumerate(_ps["months"]):
+            got = _s2.cell(row=_ri[fi], column=2 + j).value or 0
+            if abs(got - fx["rows"][mk]["interest"]) > 0.5:
+                _okj = False
+                print("   xl date mismatch", fx["fac"]["lender"], mk, got, fx["rows"][mk]["interest"])
+    check(_okj, "Excel with a 15 July drawdown date: live formulas equal the app's interest, every month")
+    _jul = _ps["facilities"][0]["rows"]["2026-07"]["interest"]
+    _fn = FL.normalise_facility(_fa, 0, "2026-01")
+    check(abs(_jul - _fn["amount"] * _fn["rate"] / 100 / 12 * 17 / 31) < 0.01, f"the July interest in the pack is the part-month figure ({_jul:,.2f})")
+    _ws_l = [n_ for n_ in _w2.sheetnames if "chedule" in n_ or "acilit" in n_]
+    _errs = [c_.coordinate for n_ in _w2.sheetnames for row in _w2[n_].iter_rows() for c_ in row if isinstance(c_.value, str) and c_.value.startswith("#")]
+    check(not _errs, f"no formula errors in the loan workbook ({_errs[:3]})")
 
 print()
 print("FAILURES:", len(fails))

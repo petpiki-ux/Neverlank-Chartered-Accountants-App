@@ -16,6 +16,8 @@ Conventions (the same as the forecast engine, so the two always agree):
 * capital instalments are paid at the END of the month. The first one falls in the drawdown month plus the capital grace months;
   the last one in the month before the term ends (term = months from drawdown to the final repayment).
 """
+import calendar
+import datetime
 import hashlib
 import json
 
@@ -41,6 +43,28 @@ def _month(value, default=""):
     return default
 
 
+def _date(value):
+    """A real calendar date as YYYY-MM-DD, or '' when the value is not one."""
+    s = str(value or "").strip()[:10]
+    if len(s) == 10 and s[4] == "-" and s[7] == "-":
+        try:
+            return datetime.date(int(s[:4]), int(s[5:7]), int(s[8:])).isoformat() if 1900 <= int(s[:4]) <= 2200 else ""
+        except ValueError:
+            return ""
+    return ""
+
+
+def first_frac(fac):
+    """Share of the drawdown month the money is outstanding: (days from the drawdown date to month end, both inclusive) / days in the month.
+    1.0 when only a month was given (treated as drawn on the 1st), so facilities entered before the date existed are unchanged."""
+    d = fac.get("draw_date") or ""
+    if not d:
+        return 1.0
+    y, m, day = int(d[:4]), int(d[5:7]), int(d[8:])
+    dim = calendar.monthrange(y, m)[1]
+    return (dim - day + 1) / dim
+
+
 def _months_between(a, b):
     """Whole months from month a to month b (negative when b is earlier)."""
     return (int(b[:4]) - int(a[:4])) * 12 + (int(b[5:]) - int(a[5:]))
@@ -52,7 +76,7 @@ def facility_id(i):
 
 def blank_facility(draw_month, i=0):
     return {"id": facility_id(i), "lender": "New facility", "amount": 0.0, "rate": 0.0, "fee_pct": 0.0, "fee_fixed": 0.0, "draw_month": draw_month,
-            "term_months": DEFAULT_TERM, "grace_months": 0, "repay": "level", "include": True, "security": "", "notes": ""}
+            "draw_date": "", "term_months": DEFAULT_TERM, "grace_months": 0, "repay": "level", "include": True, "security": "", "notes": ""}
 
 
 def normalise_facility(raw, i, default_month):
@@ -61,11 +85,14 @@ def normalise_facility(raw, i, default_month):
     term = int(max(1, min(MAX_TERM, f(raw.get("term_months"), DEFAULT_TERM))))
     grace = int(max(0, min(term - 1, f(raw.get("grace_months"), 0))))
     inc = raw.get("include")
+    # the drawdown DATE is the input; the month is derived from it (a facility saved with only a month keeps that month, drawn on the 1st)
+    draw_date = _date(raw.get("draw_date"))
+    draw_month = draw_date[:7] if draw_date else _month(raw.get("draw_month"), default_month)
     return {
         "id": str(raw.get("id") or facility_id(i))[:24], "lender": str(raw.get("lender") or "").strip()[:60],
         "amount": max(0.0, f(raw.get("amount"))), "rate": max(0.0, min(200.0, f(raw.get("rate")))),
         "fee_pct": max(0.0, min(100.0, f(raw.get("fee_pct")))), "fee_fixed": max(0.0, f(raw.get("fee_fixed"))),
-        "draw_month": _month(raw.get("draw_month"), default_month), "term_months": term, "grace_months": grace, "repay": repay,
+        "draw_month": draw_month, "draw_date": draw_date, "term_months": term, "grace_months": grace, "repay": repay,
         "include": True if inc is None else bool(inc),
         "security": str(raw.get("security") or "").strip()[:200], "notes": str(raw.get("notes") or "").strip()[:400],
     }
@@ -118,7 +145,7 @@ def schedule(fac):
         op = bal
         draw = amount if i == 0 else 0.0
         base = op + draw
-        interest = base * r
+        interest = base * r * (first_frac(fac) if i == 0 else 1.0)     # drawn part-way through the first month: only the days it is outstanding
         fee = fee_of(fac) if i == 0 else 0.0
         if i < grace:
             repay = 0.0
@@ -297,8 +324,9 @@ def engine_loans(facs, start_month, years):
         if idx0 >= 0:
             fee = fee_of(fac)
             loans.append(dict(base, opening_balance=0.0, drawdown_amount=fac["amount"], drawdown_year=idx0 // 12 + 1,
-                              start_date=fac["draw_month"] + "-01", fee_pct=0.0, fee_amount=fee))
-            notes.append(f"{name}: drawn in {M.month_label(fac['draw_month'], False)} (a forecast month), so the establishment fee of {fee:,.2f} is charged then.")
+                              start_date=fac["draw_month"] + "-01", draw_frac=first_frac(fac), fee_pct=0.0, fee_amount=fee))
+            notes.append(f"{name}: drawn in {M.month_label(fac['draw_month'], False)} (a forecast month), so the establishment fee of {fee:,.2f} is charged then"
+                         + (f", and its first month's interest is for the {first_frac(fac):.0%} of the month it is outstanding (drawn {fac['draw_date']})." if first_frac(fac) < 1 else "."))
         else:
             bal = balance_at(rows, M.shift_month(start_month, -1))
             loans.append(dict(base, opening_balance=bal, drawdown_amount=0.0, drawdown_year=1, start_date="", fee_pct=0.0, fee_amount=0.0))
@@ -313,6 +341,8 @@ def fingerprint(d):
     facs = facilities_of(d)
     if not facs:
         return ""
+    # a facility with no drawdown date hashes exactly as before the date existed, so packs saved earlier are not flagged as out of date
+    facs = [{k: v for k, v in fac.items() if not (k == "draw_date" and not v)} for fac in facs]
     return hashlib.md5(json.dumps(facs, sort_keys=True).encode()).hexdigest()[:12]
 
 
@@ -332,7 +362,7 @@ def parse_form(form, d, skip=None):
             continue
         raw = {"id": form.get(f"fac_id_{i}") or "", "lender": form.get(f"fac_lender_{i}"), "amount": form.get(f"fac_amount_{i}"),
                "rate": form.get(f"fac_rate_{i}"), "fee_pct": form.get(f"fac_feepct_{i}"), "fee_fixed": form.get(f"fac_feefix_{i}"),
-               "draw_month": form.get(f"fac_draw_{i}"), "term_months": form.get(f"fac_term_{i}"), "grace_months": form.get(f"fac_grace_{i}"),
+               "draw_date": form.get(f"fac_drawdate_{i}"), "draw_month": form.get(f"fac_draw_{i}"), "term_months": form.get(f"fac_term_{i}"), "grace_months": form.get(f"fac_grace_{i}"),
                "repay": form.get(f"fac_repay_{i}"), "include": bool(form.get(f"fac_inc_{i}")), "security": form.get(f"fac_sec_{i}"),
                "notes": form.get(f"fac_notes_{i}")}
         if not (str(raw["lender"] or "").strip() or f(raw["amount"]) > 0):

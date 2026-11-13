@@ -667,6 +667,12 @@ def _mdate(key):
     return date(int(key[:4]), int(key[5:7]), 1)
 
 
+def _ddate(fac):
+    """The facility's drawdown date; the 1st of the month when only a month was given."""
+    d = fac.get("draw_date") or ""
+    return date(int(d[:4]), int(d[5:7]), int(d[8:])) if d else _mdate(fac["draw_month"])
+
+
 def _loan_sheets(wb, meta, d):
     """'Loan facilities' (the year month by month) and 'Loan schedules' (every facility from drawdown to final repayment).
     The schedules hold the inputs (blue) and the formulas; the year view adds them up by month with SUMIFS. Returns the first sheet or None."""
@@ -694,7 +700,7 @@ def _loan_sheets(wb, meta, d):
         rows = {}
         items = (("amt", "Amount", fac["amount"], NUM), ("rate", "Interest rate (% a year)", fac["rate"], "0.00"),
                  ("feepct", "Establishment fee (% of amount)", fac["fee_pct"], "0.00"), ("feefix", "Establishment fee (fixed amount)", fac["fee_fixed"], NUM),
-                 ("draw", "Drawn in (month)", _mdate(fac["draw_month"]), DATEFMT), ("term", "Term (months, drawdown to last repayment)", fac["term_months"], "0"),
+                 ("draw", "Drawdown date (a month only = the 1st)", _ddate(fac), "dd mmm yyyy"), ("term", "Term (months, drawdown to last repayment)", fac["term_months"], "0"),
                  ("grace", "Capital grace (months)", fac["grace_months"], "0"), ("type", "Repayment (level / straight / bullet)", fac["repay"], "@"))
         rr = r + 1
         for key, label, val, fmt in items:
@@ -704,6 +710,8 @@ def _loan_sheets(wb, meta, d):
             rows[key] = f"$B${rr}"
             rr += 1
         calc = (("fee", "Establishment fee (expensed in the month drawn)", f"={rows['amt']}*{rows['feepct']}/100+{rows['feefix']}", NUM),
+                ("frac", "Share of the drawdown month the money is outstanding",
+                 f"=(DAY(EOMONTH({rows['draw']},0))-DAY({rows['draw']})+1)/DAY(EOMONTH({rows['draw']},0))", "0.0000"),
                 ("mr", "Monthly interest rate", f"={rows['rate']}/100/12", "0.0000%"),
                 ("k", "Number of capital instalments", f"=MAX(1,{rows['term']}-{rows['grace']})", "0"))
         for key, label, formula, fmt in calc:
@@ -726,10 +734,10 @@ def _loan_sheets(wb, meta, d):
         for n in range(1, fac["term_months"] + 1):
             x = first + n - 1
             wl.cell(row=x, column=1, value=n)
-            wl.cell(row=x, column=2, value=f"=EDATE({rows['draw']},A{x}-1)").number_format = DATEFMT
+            wl.cell(row=x, column=2, value=f"=EDATE(DATE(YEAR({rows['draw']}),MONTH({rows['draw']}),1),A{x}-1)").number_format = DATEFMT
             wl.cell(row=x, column=3, value=0 if n == 1 else f"=H{x - 1}").number_format = NUM
             wl.cell(row=x, column=4, value=f"=IF(A{x}=1,{rows['amt']},0)").number_format = NUM
-            wl.cell(row=x, column=5, value=f"=(C{x}+D{x})*{rows['mr']}").number_format = NUM
+            wl.cell(row=x, column=5, value=f"=(C{x}+D{x})*{rows['mr']}*IF(A{x}=1,{rows['frac']},1)").number_format = NUM
             wl.cell(row=x, column=6, value=f"=IF(A{x}=1,{rows['fee']},0)").number_format = NUM
             wl.cell(row=x, column=7, value=(f'=IF(A{x}<={rows["grace"]},0,IF(A{x}={rows["term"]},C{x}+D{x},IF({rows["type"]}="bullet",0,'
                                             f'IF({rows["type"]}="straight",MIN(C{x}+D{x},{rows["amt"]}/{rows["k"]}),MIN(C{x}+D{x},MAX(0,{rows["pmt"]}-E{x}))))))')).number_format = NUM
