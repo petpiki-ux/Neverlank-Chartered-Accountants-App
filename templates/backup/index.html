@@ -13,7 +13,7 @@
     {% if scheduler_on %}A backup is made automatically once a day (about {{ '%02d'|format((hour + 2) % 24) }}:00 Harare time, and straight after the app restarts if one was missed). The newest {{ limits.auto }} automatic and {{ limits.manual }} manual backups are kept.{% else %}The automatic schedule is switched off (BACKUP_SCHEDULER=off).{% endif %}
     {% if disk %}Disk: {{ human_size(disk.free) }} free of {{ human_size(disk.total) }}.{% endif %}
   </p>
-  {% if not sqlite_ok %}<p class="flash warning">This installation does not use the built-in SQLite database, so only the files are backed up. Back up the database with your database provider.</p>{% endif %}
+  {% if not sqlite_ok %}<p class="flash info">This installation runs on PostgreSQL. Every backup here holds your files plus a plain-file copy of the whole database (database/neverlank_pg.jsonl.gz inside the zip). It is put back with tools/restore_pg_dump.py, not with a button on this page. Your database provider's own automatic backups remain the first line of defence, so keep those switched on.</p>{% endif %}
   <form method="post" action="{{ url_for('backup.backup_now') }}" class="inline"><button type="submit" class="btn gold">Back up now</button></form>
   <form method="post" action="{{ url_for('backup.backup_now') }}" class="inline"><input type="hidden" name="scope" value="database"><button type="submit" class="btn secondary" title="Just the database - small and quick, for when there is little room on the disk">Back up the database only</button></form>
 </div>
