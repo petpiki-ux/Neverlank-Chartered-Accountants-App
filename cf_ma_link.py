@@ -270,6 +270,7 @@ def continuation_assumptions(d, params=None, currency="USD"):
     int_exp_ann = max(0.0, ann("int_exp"))
     rate = max(0.0, min(60.0, 100.0 * int_exp_ann / debt)) if debt > 0 and int_exp_ann > 0 else 12.0
     loans = []
+    fac_gap = 0.0           # facilities outstanding that the books' balance sheet does not hold
     facs = [x for x in FL.facilities_of(d) if x["include"] and x["amount"] > 0]
     book_debt = f(bs.get("borrowings"))
     if facs:
@@ -286,6 +287,7 @@ def continuation_assumptions(d, params=None, currency="USD"):
                          f"is carried as 'Other borrowings', repaid evenly over {p['repay_years']} years at {rate:.1f}% (the rate implied by the actual interest). "
                          "Add the missing facility on the Loan facilities tab if it is a bank facility.")
         elif rest < -1.0:
+            fac_gap = -rest
             notes.append(f"The facilities add up to {covered:,.2f} at the start of the forecast but the balance sheet shows borrowings of {book_debt:,.2f}. "
                          "The forecast follows the facilities; check the amounts and drawdown months on the Loan facilities tab.")
     elif book_debt > 0:
@@ -294,6 +296,20 @@ def continuation_assumptions(d, params=None, currency="USD"):
         notes.append(f"Existing borrowings are assumed to be repaid evenly over {p['repay_years']} years at {rate:.1f}% (the rate implied by the actual interest).")
     dep_rate_cash = max(0.0, min(30.0, 100.0 * ann("int_inc") / cash)) if cash > 0 and ann("int_inc") > 0 else 2.0
 
+    if fac_gap > 1.0:
+        # the facilities' balance has to be funded by something in the opening position: the preparer says how much went into stock and how
+        # much paid off suppliers; whatever is left reduces reserves (the engine takes reserves as the balancing figure)
+        adj = FL.adjust_of(d)
+        inv_up, pay_dn = adj["inventory"], min(adj["payables"], opening["payables"])
+        if inv_up + pay_dn > fac_gap:
+            k = fac_gap / (inv_up + pay_dn)
+            inv_up, pay_dn = inv_up * k, pay_dn * k
+        if inv_up + pay_dn > 0.5:
+            opening["inventory"] += inv_up
+            opening["payables"] -= pay_dn
+            notes.append(f"The facilities not yet in the books ({fac_gap:,.2f}) are placed in the opening position: stock up {inv_up:,.2f}, "
+                         f"trade payables down {pay_dn:,.2f}, and the remaining {fac_gap - inv_up - pay_dn:,.2f} reduces reserves "
+                         "(set on the Loan facilities tab).")
     # working-capital days from the closing balances against the run-rate
     rev_ann = annual_rev
     cogs_ann = max(0.0, ann("cogs")) if use_ytd else max(0.0, tot["cogs"] / share)
@@ -335,6 +351,37 @@ def continuation_assumptions(d, params=None, currency="USD"):
             "annual_revenue_runrate": annual_rev, "opening_reserves": E.opening_reserves(a),
             "actual_retained": f(bs.get("retained")), "has_other_income": has_oth, "pl_lines": len(streams) + len(opex)}
     return a, info
+
+
+def opening_gap_info(d):
+    """For the Loan facilities tab: the facilities outstanding at the start of the forecast that the books do not hold, and a suggested split
+    (stock up to about 45 days of cost of sales, payables down to about 60 days of costs, the rest reserves). None when there is no gap."""
+    try:
+        A = anchor(d)
+    except LinkError:
+        return None
+    facs = [x for x in FL.facilities_of(d) if x["include"] and x["amount"] > 0]
+    if not facs:
+        return None
+    covered = sum(FL.balance_at(FL.schedule(x), A["month"]) for x in facs)
+    book = f(A["bs"].get("borrowings"))
+    gap = covered - book
+    if gap <= 1.0:
+        return None
+    structure = M.normalise_structure(d.get("structure"))
+    idx = M.report_index(d)
+    cum = M.cumulative_actuals(d)[idx]["cum"]
+    vec = M.pl_vector(structure, cum)
+    nw = idx + 1
+    cogs_ann, opex_ann = vec["cogs"] * 12.0 / nw, vec["opex_total"] * 12.0 / nw
+    inv0, pay0 = f(A["bs"].get("inventory")), f(A["bs"].get("payables"))
+    s_inv = max(0.0, cogs_ann * 45.0 / 365.0 - inv0) if cogs_ann > 0 else 0.0
+    s_pay = max(0.0, pay0 - (cogs_ann + opex_ann) * 60.0 / 365.0) if (cogs_ann + opex_ann) > 0 else 0.0
+    if s_inv + s_pay > gap:
+        k = gap / (s_inv + s_pay)
+        s_inv, s_pay = s_inv * k, s_pay * k
+    return {"gap": gap, "covered": covered, "book": book, "month": A["month"], "inventory": inv0, "payables": pay0,
+            "suggest_inventory": round(s_inv, -2), "suggest_payables": round(s_pay, -2)}
 
 
 def overlay_forward(a_new, a_old):

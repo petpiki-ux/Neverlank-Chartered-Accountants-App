@@ -46,6 +46,28 @@
     </div>
   </div>
   {% endfor %}
+  {% if gap_info %}
+  <div class="card" style="margin-bottom:12px;">
+    <h4 style="margin-top:0;">Facilities not yet in the books</h4>
+    <p class="cf-sub">At {{ month_label(gap_info.month, False) }} the facilities show <strong>{{ gap_info.covered|cfn }}</strong> outstanding but the balance sheet holds borrowings of <strong>{{ gap_info.book|cfn }}</strong>.
+      The difference of <strong>{{ gap_info.gap|cfn }}</strong> has to be matched by something on the other side of the forecast's opening balance sheet. Say how much of it went into stock and how much paid off suppliers;
+      whatever is left reduces reserves. The Actual columns stay exactly as the books show them.</p>
+    <div class="form-row">
+      <div><label>Increase stock by ({{ cur }})</label><input type="number" step="any" min="0" class="cf-in" id="adjInv" name="adj_inventory" value="{{ gap_adj.inventory|cfin }}" {{ 'disabled' if locked }}></div>
+      <div><label>Reduce trade payables by ({{ cur }})</label><input type="number" step="any" min="0" class="cf-in" id="adjPay" name="adj_payables" value="{{ gap_adj.payables|cfin }}" {{ 'disabled' if locked }}></div>
+      <div><label>Reduce reserves by (the rest)</label><input type="text" class="cf-in" id="adjRest" readonly value="{{ (gap_info.gap - gap_adj.inventory - gap_adj.payables)|cfn }}"></div>
+    </div>
+    <p class="cf-sub" style="margin-bottom:0;">Stock now {{ gap_info.inventory|cfn }}, payables now {{ gap_info.payables|cfn }}.
+      {% if not locked %}<button class="btn small secondary" type="button" id="adjSuggest" data-inv="{{ gap_info.suggest_inventory|round|int }}" data-pay="{{ gap_info.suggest_payables|round|int }}">Fill in a suggestion</button>
+      <span>(stock to about 45 days of cost of sales, payables to about 60 days of costs, the rest to reserves)</span>{% endif %}</p>
+  </div>
+  <script>
+  (function(){var gap={{ gap_info.gap|round(2) }},i=document.getElementById('adjInv'),p=document.getElementById('adjPay'),r=document.getElementById('adjRest'),b=document.getElementById('adjSuggest');
+    function up(){var v=gap-(parseFloat(i.value)||0)-(parseFloat(p.value)||0);r.value=v.toLocaleString('en-US',{maximumFractionDigits:0});r.style.color=v<0?'#b00020':'';}
+    i.addEventListener('input',up);p.addEventListener('input',up);
+    if(b){b.addEventListener('click',function(){i.value=b.dataset.inv;p.value=b.dataset.pay;up();});}})();
+  </script>
+  {% endif %}
   {% if not locked %}
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
     {% if facs|length < max_facilities %}<button class="btn secondary" type="submit" name="action" value="add" formnovalidate>+ Add a facility</button>{% endif %}

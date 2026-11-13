@@ -287,7 +287,7 @@ def _loans_ctx(pack, d):
         model = CFModel.query.get(link["model_id"])
         if model is not None and (model.client_id != pack.client_id or not _can_see(model)):
             model = None
-    return dict(facs=facs, ps=FL.pack_schedule(d, facs), fac_checks=FL.checks(d, facs), int_check=FL.interest_check(d, facs),
+    return dict(gap_info=LK.opening_gap_info(d), gap_adj=FL.adjust_of(d), facs=facs, ps=FL.pack_schedule(d, facs), fac_checks=FL.checks(d, facs), int_check=FL.interest_check(d, facs),
                 repay_types=FL.REPAY_TYPES, repay_short=FL.REPAY_SHORT, fee_of=FL.fee_of, label_of=FL.label_of,
                 default_month=M.report_month(d), link=link, link_model=model, max_facilities=FL.MAX_FACILITIES,
                 life={x['id']: FL.schedule(x) for x in facs if x['include'] and x['amount'] > 0})
@@ -319,6 +319,8 @@ def pack_facilities_save(pack_id):
             pass
         facs = FL.parse_form(request.form, d, skip=gone if 0 <= gone < n_form else None)
     d["facilities"] = facs
+    if "adj_inventory" in request.form or "adj_payables" in request.form:
+        d["facility_adjust"] = FL.parse_adjust(request.form)
     link = d.get("forecast_link") or {}
     if action == "sync":
         if not (link.get("model_id")):

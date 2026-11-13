@@ -579,6 +579,38 @@ if cf0["other_equity"]["ffy"] is not None:
 check("Loan facilities not yet in the books" in c.get(f"{BASE}/{pid}/balance").data.decode(), "the Balance sheet tab shows the adjustment line")
 check(FL.unbooked_gap(getdata()) == gap and FL.unbooked_gap({**dg, "forecast": {}}) == 0.0, "no gap when the forecast is not a continuation")
 
+# =========================================================================== the opening gap is absorbed by stock, payables and reserves
+gi = LK.opening_gap_info(getdata())
+check(gi and gi["gap"] > 1000 and gi["suggest_inventory"] >= 0 and gi["suggest_payables"] >= 0 and gi["suggest_inventory"] + gi["suggest_payables"] <= gi["gap"] + 1, f"the tab can suggest a split of the gap ({gi['gap']:,.0f}: stock {gi['suggest_inventory']:,.0f}, payables {gi['suggest_payables']:,.0f})")
+_lt = c.get(f"{BASE}/{pid}/loans").data.decode()
+check("Facilities not yet in the books" in _lt and 'name="adj_inventory"' in _lt and 'name="adj_payables"' in _lt, "the Loan facilities tab shows the opening-gap card")
+_fp0 = FL.fingerprint(getdata())
+_two = [dict(NBS, draw_month="2026-03"), dict(TNC, draw_month="2026-05")]
+_form = fac_form(_two, "save"); _form.update({"adj_inventory": "30000", "adj_payables": "40000"})
+c.post(f"{BASE}/{pid}/facilities/save", data=_form, follow_redirects=True)
+_sd = getdata()
+check(_sd.get("facility_adjust") == {"inventory": 30000.0, "payables": 40000.0}, "the split is saved")
+check(FL.fingerprint(_sd) != _fp0 and LK.link_status(_sd)["facilities_changed"], "changing the split marks the forecast out of date")
+_old_inv = M.bs_series(_sd)[M.shift_month(_sd["forecast_link"]["start_month"], -1)]
+c.post(f"{BASE}/{pid}/continuation/build", data={"mode": "new", "years": "2"}, follow_redirects=True)
+dq = getdata()
+_gapq = FL.unbooked_gap(dq)
+check(near(_gapq, gap - 70000, 1.0), f"reserves now take only the rest of the gap ({_gapq:,.0f} = {gap:,.0f} - 70,000)")
+_st = dq["forecast_link"]["start_month"]
+_fb = M.forecast_bs(dq)[_st]
+_ab = M.bs_series(dq)[M.shift_month(_st, -1)]
+check(near(_fb["inventory"], _ab["inventory"] + 30000, 2000) and near(_fb["payables"], _ab["payables"] - 40000, 2000), f"the forecast carries the extra stock ({_ab['inventory']:,.0f} -> {_fb['inventory']:,.0f}) and the lower payables ({_ab['payables']:,.0f} -> {_fb['payables']:,.0f})")
+_tot = M.bs_total(_fb)
+check(abs(_tot["check"]) < 1.0, "the forecast balance sheet balances")
+_balq = FL.with_facilities(M.balance_rows(dq), dq)
+_fcol = {r["key"]: r for r in _balq["rows"]}
+if _fcol["assets"]["f"] is not None:
+    check(near(_fcol["assets"]["f"], _fcol["el"]["f"], 1.0), "forecast column: total assets = total equity and liabilities")
+_mid = dq["forecast_link"]["model_id"]
+with app.app_context():
+    _res = E.run(E.normalise(CFModel.query.get(_mid).assumptions))
+check(_res["checks"]["balance_ok"] and _res["checks"]["cash_ok"], "the model balances and cash ties with the split")
+
 print()
 print("FAILURES:", len(fails))
 for m_ in fails:

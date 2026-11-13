@@ -336,6 +336,16 @@ def engine_loans(facs, start_month, years):
     return loans, notes
 
 
+def adjust_of(d):
+    """How the facilities' opening gap (facilities the books do not hold) is absorbed: stock up, payables down, the rest reserves."""
+    a = d.get("facility_adjust") if isinstance(d.get("facility_adjust"), dict) else {}
+    return {"inventory": max(0.0, f(a.get("inventory"))), "payables": max(0.0, f(a.get("payables")))}
+
+
+def parse_adjust(form):
+    return {"inventory": max(0.0, f(form.get("adj_inventory"))), "payables": max(0.0, f(form.get("adj_payables")))}
+
+
 def fingerprint(d):
     """Changes whenever the facilities (or whether they are in use) change; stored on the forecast link to flag a forecast that is out of date."""
     facs = facilities_of(d)
@@ -343,6 +353,9 @@ def fingerprint(d):
         return ""
     # a facility with no drawdown date hashes exactly as before the date existed, so packs saved earlier are not flagged as out of date
     facs = [{k: v for k, v in fac.items() if not (k == "draw_date" and not v)} for fac in facs]
+    adj = adjust_of(d)
+    if adj["inventory"] or adj["payables"]:
+        facs = facs + [{"_adjust": adj}]       # changing the allocation of the opening gap also makes the forecast out of date
     return hashlib.md5(json.dumps(facs, sort_keys=True).encode()).hexdigest()[:12]
 
 
