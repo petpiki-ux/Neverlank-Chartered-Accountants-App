@@ -587,7 +587,7 @@ class LegislativeAskCache(db.Model):
     filed matches at all" is never cached, so those always retry fresh."""
     __tablename__ = "legislative_ask_cache"
     id = db.Column(db.Integer, primary_key=True)
-    question_normalized = db.Column(db.String(500), nullable=False, index=True)  # lowercased/whitespace-collapsed, for exact-match lookup
+    question_normalized = db.Column(db.String(1000), nullable=False, index=True)  # lowercased/whitespace-collapsed, for exact-match lookup
     question_original = db.Column(db.String(500), nullable=False)  # as actually typed, for display/audit only
     status = db.Column(db.String(20), nullable=False)  # "done" or "no_answer" only - see legislation_search.ask
     answer = db.Column(db.Text, nullable=False)

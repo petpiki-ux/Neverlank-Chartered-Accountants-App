@@ -897,7 +897,7 @@ class PolicyAskCache(db.Model):
     all" is never cached, so those always retry fresh."""
     __tablename__ = "policy_ask_cache"
     id = db.Column(db.Integer, primary_key=True)
-    question_normalized = db.Column(db.String(500), nullable=False, index=True)
+    question_normalized = db.Column(db.String(1000), nullable=False, index=True)
     question_original = db.Column(db.String(500), nullable=False)
     status = db.Column(db.String(20), nullable=False)  # "done" or "no_answer" only
     answer = db.Column(db.Text, nullable=False)

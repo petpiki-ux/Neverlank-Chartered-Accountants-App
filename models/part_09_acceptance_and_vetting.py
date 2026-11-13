@@ -85,7 +85,7 @@ class ClientAcceptanceChecklistItem(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     client_acceptance_id = db.Column(db.Integer, db.ForeignKey("client_acceptance.id"), nullable=False)
     section = db.Column(db.String(100))
-    item_text = db.Column(db.String(300), nullable=False)
+    item_text = db.Column(db.String(600), nullable=False)
     response = db.Column(db.String(10), default="")  # "" = not yet assessed, "Yes", "No", "N/A"
     comment = db.Column(db.Text)
     order = db.Column(db.Integer, default=0)
