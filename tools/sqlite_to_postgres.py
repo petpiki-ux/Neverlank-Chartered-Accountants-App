@@ -50,6 +50,8 @@ def main(argv=None):
     ap.add_argument("--pg", required=True, help="PostgreSQL URL of an empty database")
     ap.add_argument("--dry-run", action="store_true", help="read and check only; write nothing to PostgreSQL")
     ap.add_argument("--truncate-long-text", action="store_true", help="cut text longer than its column instead of stopping")
+    ap.add_argument("--reset-target", action="store_true",
+                    help="if an earlier copy stopped half-way, drop the app's tables from the PostgreSQL database first (only the app's own tables)")
     ap.add_argument("--batch", type=int, default=500)
     args = ap.parse_args(argv)
 
@@ -78,7 +80,7 @@ def main(argv=None):
     def copy_all(dst):
         # ---- parent keys, to find orphans: {table: set of primary key values that WILL exist in the target}
         kept_keys = {}
-        report = {"orphan_nulled": [], "orphan_dropped": [], "truncated": [], "too_long": []}
+        report = {"orphan_nulled": [], "orphan_dropped": [], "truncated": [], "too_long": [], "nul_stripped": []}
         totals = {}
         t0 = time.time()
 
@@ -135,6 +137,11 @@ def main(argv=None):
                                 drop = True
                     if drop:
                         continue
+                    for name, v in list(data.items()):
+                        # PostgreSQL refuses the NUL character (0x00) inside text; SQLite allows it. It is invisible junk, so drop it.
+                        if isinstance(v, str) and "\x00" in v:
+                            data[name] = v.replace("\x00", "")
+                            report["nul_stripped"].append((table.name, pk_value(data, pk_cols), name))
                     for name, limit in str_limits.items():
                         v = data.get(name)
                         if isinstance(v, str) and len(v) > limit:
@@ -171,8 +178,11 @@ def main(argv=None):
         dst = create_engine(normalise_pg_url(args.pg), pool_pre_ping=True)
         d_insp = inspect(dst)
         existing = [t for t in d_insp.get_table_names() if t in {x.name for x in tables}]
-        if existing:
-            print("The PostgreSQL database already has app tables (e.g. %s). Use a new, empty database." % ", ".join(existing[:5]))
+        if existing and args.reset_target:
+            print("Dropping the app's %d tables left by an earlier, unfinished copy." % len(existing))
+            metadata.drop_all(dst)
+        elif existing:
+            print("The PostgreSQL database already has app tables (e.g. %s). Use a new, empty database, or add --reset-target if an earlier copy stopped half-way." % ", ".join(existing[:5]))
             return 2
         metadata.create_all(dst)
         import db_indexes
@@ -194,6 +204,10 @@ def main(argv=None):
         print(f"{len(report['orphan_dropped'])} row(s) were left out because a required link pointed at a missing row:")
         for r in report["orphan_dropped"][:30]:
             print("  %s id=%s: %s=%s (no such row in %s)" % r)
+    if report["nul_stripped"]:
+        print(f"{len(report['nul_stripped'])} text value(s) held an invisible NUL character, which was removed:")
+        for r in report["nul_stripped"][:30]:
+            print("  %s id=%s column %s" % r)
     if report["truncated"]:
         print(f"{len(report['truncated'])} text value(s) were cut to fit their column.")
 
