@@ -246,7 +246,7 @@ def pack_tab(pack_id, tab):
     elif tab == "income":
         ctx.update(inc=M.income_rows(d), view="ytd" if request.args.get("view") == "ytd" else "month", var=request.args.get("var") != "0")
     elif tab == "balance":
-        ctx.update(bal=M.balance_rows(d), var=request.args.get("var") != "0")
+        ctx.update(bal=FL.with_facilities(M.balance_rows(d), d), var=request.args.get("var") != "0")
     elif tab == "cashflow":
         ctx.update(cfl=M.cashflow_rows(d), view="ytd" if request.args.get("view") == "ytd" else "month", var=request.args.get("var") != "0")
     elif tab == "kpis":

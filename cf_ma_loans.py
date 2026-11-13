@@ -379,6 +379,45 @@ def _due_within_12(rows, month):
     return sum(x["repay"] for x in rows if start <= x["month"] <= end)
 
 
+def with_facilities(bal, d, facs=None):
+    """The balance sheet rows with the loan facilities shown inside the table, under Borrowings: the facilities' balance (from their
+    schedule), and how much of it falls due within 12 months / after. Presentation only: no total, balance check or other line changes,
+    so the statement still ties to the books. The Borrowings line itself is the books (actual) or the forecast, which may not hold the
+    facilities - the card under the table shows the difference. Returns `bal` unchanged when there are no facilities in use."""
+    facs = [x for x in (facilities_of(d) if facs is None else facs) if x["include"] and x["amount"] > 0]
+    if not facs or not bal or not bal.get("rows"):
+        return bal
+    months = M.fy_months(d)
+    cur = bal.get("month") or months[M.report_index(d)]
+    at = {"lm": M.shift_month(cur, -1), "a": cur, "f": cur, "ffy": months[-1], "py": M.shift_month(months[0], -1)}
+    full = [schedule(x) for x in facs]
+
+    def balance(m):
+        return sum(balance_at(r, m) for r in full)
+
+    def due(m):
+        return min(balance(m), sum(_due_within_12(r, m) for r in full))
+
+    def mk(key, label, fn):
+        r = {"key": key, "label": label, "kind": "indent", "b": None, "bfy": None, "var": None, "chg_month": None}
+        for col, m in at.items():
+            r[col] = fn(m)
+        if not bal.get("has_forecast"):
+            r["f"] = r["ffy"] = None
+        r["chg_year"] = None if r["a"] is None or r["py"] is None else r["a"] - r["py"]
+        return r
+
+    extra = [mk("fac_total", "of which: loan facilities (per their schedule)", balance),
+             mk("fac_current", "due within 12 months", due),
+             mk("fac_noncurrent", "due after 12 months", lambda m: balance(m) - due(m))]
+    rows = []
+    for r in bal["rows"]:
+        rows.append(r)
+        if r.get("key") == "borrowings":
+            rows += extra
+    return dict(bal, rows=rows)
+
+
 def statement_analysis(d, facs=None):
     """Loan facility figures laid out against the income statement, balance sheet, cash flow and KPIs of the pack.
     Returns None when there are no facilities in use, else {income, balance, cashflow, kpis}: each a table

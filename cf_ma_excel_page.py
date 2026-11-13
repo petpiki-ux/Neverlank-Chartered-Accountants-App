@@ -151,7 +151,8 @@ def _income(wb, meta, d, labels, args):
 
 
 def _balance(wb, meta, d, labels, args):
-    bal = M.balance_rows(d)
+    import cf_ma_loans as FL
+    bal = FL.with_facilities(M.balance_rows(d), d)
     cols = P._balance_cols(labels, args.get("var") != "0")
     return _statement(wb, "Balance sheet", meta, d, cols, bal["rows"], f"As at {labels['month']}. Retained earnings include the current year's profit.",
                       note="Values as at export.")

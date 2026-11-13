@@ -375,7 +375,7 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
         _loan_table(story, (loan_an or {}).get("income"), cur)
 
     # ---- balance sheet
-    bal = M.balance_rows(d)
+    bal = FL0.with_facilities(M.balance_rows(d), d)
     story += [PageBreak(), Paragraph(f"Balance sheet - {labels['month']}", _h2)]
     if bal["rows"][0]["a"] is None:
         story.append(_p("No balance sheet has been captured for this month."))

@@ -253,6 +253,26 @@ check(any("outstanding" in n_ and "2026-07-15" in n_ for n_ in iD["notes"]), "a 
 # annual interest in the model (period sums are used by the annual view)
 check(near(resD["annual"][0]["loans"][0]["interest"], sum(x["interest"] for x in rd)), "model annual interest equals the schedule's total")
 
+# =========================================================================== facilities inside the balance sheet table
+dB2, _s2 = build()
+dB2["facilities"] = [dict(NBS, draw_month="2026-03"), dict(TNC, draw_month="2026-05")]
+bal0 = M.balance_rows(dB2)
+balF = FL.with_facilities(bal0, dB2)
+kk = [r["key"] for r in balF["rows"]]
+check(kk[kk.index("borrowings") + 1:kk.index("borrowings") + 4] == ["fac_total", "fac_current", "fac_noncurrent"], "facility rows sit directly under Borrowings")
+check(len(balF["rows"]) == len(bal0["rows"]) + 3 and [r for r in balF["rows"] if r["key"] not in ("fac_total", "fac_current", "fac_noncurrent")] == bal0["rows"], "only the three rows are added; every other line is untouched")
+ft = [r for r in balF["rows"] if r["key"] == "fac_total"][0]
+fc = [r for r in balF["rows"] if r["key"] == "fac_current"][0]
+fn_ = [r for r in balF["rows"] if r["key"] == "fac_noncurrent"][0]
+_cur = bal0["month"]
+_exp = sum(FL.balance_at(FL.schedule(x), _cur) for x in FL.facilities_of(dB2))
+check(near(ft["a"], _exp) and _exp > 0, f"facility balance at the reporting month is the schedule's ({ft['a']:,.2f})")
+check(near(fc["a"] + fn_["a"], ft["a"]) and fc["b"] is None and ft["b"] is None, "current + non-current = facility balance; budget is blank (budget does not carry them)")
+check(near(ft["lm"], sum(FL.balance_at(FL.schedule(x), M.shift_month(_cur, -1)) for x in FL.facilities_of(dB2))), "last-month column is the balance a month earlier")
+check(all(near(r["a"], r2["a"]) for r, r2 in zip([x for x in balF["rows"] if x["key"] in ("assets", "equity", "liabilities", "el", "check")], [x for x in bal0["rows"] if x["key"] in ("assets", "equity", "liabilities", "el", "check")])), "totals and the balance check are unchanged")
+check(FL.with_facilities(bal0, build()[0]) is bal0, "no facilities: the balance sheet is returned unchanged")
+
+from openpyxl import load_workbook as _lw
 # =========================================================================== web layer
 from app import create_app
 from extensions import db
@@ -312,6 +332,11 @@ c.post(f"{BASE}/{pid}/facilities/save", data=fac_form(two), follow_redirects=Tru
 html = r.data.decode()
 check("NBS" in html and "TNC" in html and "15,000" in html and "40,000" in html and "Schedule by month" in html, "the tab shows both facilities, the fees and the monthly schedule")
 check("not linked to a forecast model yet" in html, "the tab says the pack is not yet linked to a forecast")
+_bt = c.get(f"{BASE}/{pid}/balance").data.decode()
+check("of which: loan facilities" in _bt and "due within 12 months" in _bt and "due after 12 months" in _bt, "the Balance sheet tab shows the facility rows inside the table")
+_bx = _lw(io.BytesIO(c.get(f"{BASE}/{pid}/excel/balance").data)).active
+check("of which: loan facilities" in " ".join(str(c_.value) for row in _bx.iter_rows() for c_ in row if c_.value), "Excel: this page (balance sheet) has the facility rows")
+
 r = c.post(f"{BASE}/{pid}/facilities/save", data=fac_form(two, "sync"), follow_redirects=True)
 check(b"not linked to a forecast model yet" in r.data and b"picked" in r.data.lower() or b"pick the facilities up" in r.data, "'Save and update the forecast' without a linked model says to build the forecast first")
 
@@ -388,7 +413,6 @@ incl = {r_["label"]: r_["vals"] for r_ in anl["income"]["rows"]}
 check(incl["Other interest and charges (statement less facilities)"][2] > -1.0, "linked forecast: the full-year income statement holds at least the facilities' interest and fees")
 check(not anl["income"]["warn"] or True, "income block computed for the linked pack")
 xr = c.get(f"{BASE}/{pid}/excel/income")
-from openpyxl import load_workbook as _lw
 _ws = _lw(io.BytesIO(xr.data)).active
 _txt = " ".join(str(c_.value) for row in _ws.iter_rows() for c_ in row if c_.value)
 check("Loan facilities in the income statement" in _txt and "Total loan facility cost" in _txt, "Excel income page carries the loan block")
@@ -407,6 +431,7 @@ if shutil.which("pdftotext"):
     _t = subprocess.run(["pdftotext", "-layout", _pp, "-"], capture_output=True, text=True).stdout
     check(all(x in _t for x in ("Loan facilities in the income statement", "Loan facilities in the balance sheet", "Loan facilities in the cash flow", "Loan facilities and the KPIs", "Loan facilities - FY2026")),
           "the PDF pack carries the loan blocks under each statement and the loan page")
+    check("of which" in _t and "due after 12 months" in _t, "the PDF balance sheet carries the facility rows")
 r4 = c.get(f"{BASE}/{pid}/download-all")
 check(r4.status_code == 200 and r4.data[:2] == b"PK", "ZIP of all sheets builds")
 import zipfile
