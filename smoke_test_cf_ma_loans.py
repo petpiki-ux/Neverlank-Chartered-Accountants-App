@@ -546,6 +546,39 @@ if soffice:
     _errs = [c_.coordinate for n_ in _w2.sheetnames for row in _w2[n_].iter_rows() for c_ in row if isinstance(c_.value, str) and c_.value.startswith("#")]
     check(not _errs, f"no formula errors in the loan workbook ({_errs[:3]})")
 
+# =========================================================================== facilities already drawn but missing from the books: the gap is its own equity line
+setdata(lambda x: x.update({"facilities": [dict(NBS, draw_month="2026-03"), dict(TNC, draw_month="2026-05")]}))
+c.post(f"{BASE}/{pid}/continuation/build", data={"mode": "new", "years": "2"}, follow_redirects=True)
+dg = getdata()
+gap = FL.unbooked_gap(dg)
+_start = dg["forecast_link"]["start_month"]
+_a_ret = M.bs_series(dg)[M.shift_month(_start, -1)]["retained"]
+_fbs = M.forecast_bs(dg)
+_first = _fbs[_start]
+check(gap > 1000, f"the facilities missing from the books create an opening gap ({gap:,.0f})")
+_v = M.pl_vector(M.normalise_structure(dg["structure"]), M.forecast_months(dg)[_start])
+check(near(_a_ret - (_first["retained"] - (_v["pat"] - _v["div"])), gap, 0.5), "the gap equals the reserves the engine removed at the start of the forecast")
+balG = FL.with_facilities(M.balance_rows(dg), dg)
+keysG = [r["key"] for r in balG["rows"]]
+check("fac_gap" in keysG and keysG.index("fac_gap") == keysG.index("retained") + 1, "the adjustment line sits directly under retained earnings")
+rG = [r for r in balG["rows"] if r["key"] == "retained"][0]
+aG = [r for r in balG["rows"] if r["key"] == "fac_gap"][0]
+rawG = [r for r in M.balance_rows(dg)["rows"] if r["key"] == "retained"][0]
+eqG = [r for r in balG["rows"] if r["key"] == "equity"][0]
+rawEq = [r for r in M.balance_rows(dg)["rows"] if r["key"] == "equity"][0]
+if rawG["ffy"] is not None:
+    check(near(rG["ffy"] + aG["ffy"], rawG["ffy"]) and near(aG["ffy"], -gap), "year end: retained + adjustment = the balance sheet's own retained earnings")
+    check(near(eqG["ffy"], rawEq["ffy"]), "total equity is unchanged")
+    check(rG["ffy"] > rawG["ffy"] and abs(rG["ffy"] - _a_ret) < 0.5 * _a_ret, f"reserves now run on from the actuals ({_a_ret:,.0f} -> {rG['ffy']:,.0f})")
+cfG = FL.cashflow_with_facilities(M.cashflow_rows(dg), dg)
+cf0 = {r["key"]: r for r in M.cashflow_rows(dg)["rows"]}
+cf1 = {r["key"]: r for r in cfG["rows"]}
+if cf0["other_equity"]["ffy"] is not None:
+    check("fac_gap" in cf1 and near(cf1["fac_gap"]["ffy"], -gap) and near(cf1["other_equity"]["ffy"] + cf1["fac_gap"]["ffy"], cf0["other_equity"]["ffy"]), "cash flow: the gap is split out of other equity movements (non-cash)")
+    check(near(cf1["cff"]["ffy"], cf0["cff"]["ffy"]) and near(cf1["net"]["ffy"], cf0["net"]["ffy"]), "cash flow totals are unchanged")
+check("Loan facilities not yet in the books" in c.get(f"{BASE}/{pid}/balance").data.decode(), "the Balance sheet tab shows the adjustment line")
+check(FL.unbooked_gap(getdata()) == gap and FL.unbooked_gap({**dg, "forecast": {}}) == 0.0, "no gap when the forecast is not a continuation")
+
 print()
 print("FAILURES:", len(fails))
 for m_ in fails:

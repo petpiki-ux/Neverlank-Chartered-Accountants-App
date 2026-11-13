@@ -159,7 +159,8 @@ def _balance(wb, meta, d, labels, args):
 
 
 def _cash(wb, meta, d, labels, args):
-    cfl = M.cashflow_rows(d)
+    import cf_ma_loans as FL
+    cfl = FL.cashflow_with_facilities(M.cashflow_rows(d), d)
     cols = P._cash_cols(labels, args.get("var") != "0")
     return _statement(wb, "Cash flow", meta, d, cols, cfl["rows"], f"{labels['month']}. Indirect method, derived from the movement between balance sheets; cash is net of overdraft.",
                       note="Values as at export.")

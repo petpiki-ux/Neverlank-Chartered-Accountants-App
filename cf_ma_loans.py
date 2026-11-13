@@ -379,6 +379,32 @@ def _due_within_12(rows, month):
     return sum(x["repay"] for x in rows if start <= x["month"] <= end)
 
 
+def unbooked_gap(d):
+    """Amount by which a forecast that follows the loan facilities cuts the reserves at its start, because the books' balance sheet does not
+    hold facilities the Loan facilities tab says are outstanding (the engine balances the opening position with the reserves). 0 when the
+    forecast is not a continuation of the actuals, or the books already hold the facilities."""
+    fc = d.get("forecast") or {}
+    link = d.get("forecast_link") or {}
+    start = str(link.get("start_month") or "")[:7]
+    if fc.get("source") != "continuation" or not start or not (link.get("fac_fp") or ""):
+        return 0.0
+    try:
+        a_bs = M.bs_series(d).get(M.shift_month(start, -1))
+        f_bs = M.forecast_bs(d).get(start)
+        f_pl = M.forecast_months(d).get(start)
+        if not a_bs or not f_bs or not f_pl:
+            return 0.0
+        v = M.pl_vector(M.normalise_structure(d.get("structure")), f_pl)
+        opening_reserves = f(f_bs.get("retained")) - (v["pat"] - v["div"])
+        gap = f(a_bs.get("retained")) - opening_reserves
+    except Exception:
+        return 0.0
+    return gap if gap > 1.0 else 0.0
+
+
+ADJ_LABEL = "Loan facilities not yet in the books (adjustment)"
+
+
 def with_facilities(bal, d, facs=None):
     """The balance sheet rows with the loan facilities shown inside the table, under Borrowings: the facilities' balance (from their
     schedule), and how much of it falls due within 12 months / after. Presentation only: no total, balance check or other line changes,
@@ -410,12 +436,38 @@ def with_facilities(bal, d, facs=None):
     extra = [mk("fac_total", "of which: loan facilities (per their schedule)", balance),
              mk("fac_current", "due within 12 months", due),
              mk("fac_noncurrent", "due after 12 months", lambda m: balance(m) - due(m))]
+    gap = unbooked_gap(d)
     rows = []
     for r in bal["rows"]:
+        if gap and r.get("key") == "retained":
+            # reserves run on from the actuals; the cut the facilities cause is shown on its own line (total equity is unchanged)
+            r = dict(r, **{c: (None if r.get(c) is None else r[c] + gap) for c in ("f", "ffy")})
+            rows.append(r)
+            rows.append({"key": "fac_gap", "label": ADJ_LABEL, "kind": "line", "lm": None, "a": None, "b": None, "bfy": None, "py": None, "var": None,
+                         "chg_year": None, "chg_month": None, "f": (None if r["f"] is None else -gap), "ffy": (None if r["ffy"] is None else -gap)})
+            continue
         rows.append(r)
         if r.get("key") == "borrowings":
             rows += extra
     return dict(bal, rows=rows)
+
+
+def cashflow_with_facilities(cfl, d):
+    """The cash flow rows with the facilities' opening gap split out of 'Other equity movements' into its own (non-cash) line, in the
+    full-year forecast column. Totals do not change."""
+    gap = unbooked_gap(d)
+    if not gap or not cfl or not cfl.get("rows"):
+        return cfl
+    rows = []
+    for r in cfl["rows"]:
+        if r.get("key") == "other_equity" and r.get("ffy") is not None:
+            r = dict(r, ffy=r["ffy"] + gap)
+            rows.append(r)
+            rows.append({"key": "fac_gap", "label": ADJ_LABEL + ", non-cash", "kind": "indent", "lm": None, "a": None, "f": None, "b": None, "ya": None,
+                         "yb": None, "ffy": -gap, "bfy": None, "var": None, "yvar": None})
+            continue
+        rows.append(r)
+    return dict(cfl, rows=rows)
 
 
 def statement_analysis(d, facs=None):

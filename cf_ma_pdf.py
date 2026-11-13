@@ -388,7 +388,7 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
         _loan_table(story, (loan_an or {}).get("balance"), cur)
 
     # ---- cash flow
-    cfl = M.cashflow_rows(d)
+    cfl = FL0.cashflow_with_facilities(M.cashflow_rows(d), d)
     story += [PageBreak(), Paragraph(f"Cash flow - {labels['month']}", _h2)]
     if cfl["rows"][0]["a"] is None and cfl["rows"][0]["ya"] is None:
         story.append(_p("The cash flow is derived from two balance sheets; the opening or closing balance sheet is missing."))

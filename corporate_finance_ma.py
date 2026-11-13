@@ -248,7 +248,7 @@ def pack_tab(pack_id, tab):
     elif tab == "balance":
         ctx.update(bal=FL.with_facilities(M.balance_rows(d), d), var=request.args.get("var") != "0")
     elif tab == "cashflow":
-        ctx.update(cfl=M.cashflow_rows(d), view="ytd" if request.args.get("view") == "ytd" else "month", var=request.args.get("var") != "0")
+        ctx.update(cfl=FL.cashflow_with_facilities(M.cashflow_rows(d), d), view="ytd" if request.args.get("view") == "ytd" else "month", var=request.args.get("var") != "0")
     elif tab == "kpis":
         ctx.update(kpis=M.kpi_table(d), V=M.vectors(d))
     elif tab == "variances":
