@@ -4729,8 +4729,24 @@
     </form>
 
     {% if trial_balance.adjustments %}
+    {# A journal is "concluded" once it is reviewed AND partner-signed: it starts collapsed to one line so the working area stays short. Journals still being worked on stay open. #}
+    <div class="adj-toolbar" style="display:flex;gap:8px;align-items:center;margin:4px 0 8px;">
+      <button type="button" class="btn small secondary" id="adjCollapseAll">Collapse all</button>
+      <button type="button" class="btn small secondary" id="adjExpandAll">Expand all</button>
+      <span class="muted" style="font-size:11.5px;">Concluded journals (reviewed and partner-signed) start collapsed.</span>
+    </div>
     {% for adj in trial_balance.adjustments %}
-    <div class="card" style="background:#faf9f6;" id="adj{{ adj.id }}">
+    {% set adj_concluded = adj.is_reviewed and adj.is_partner_signed %}
+    <details class="card adj-card" style="background:#faf9f6;" id="adj{{ adj.id }}" data-adj-id="{{ adj.id }}" data-concluded="{{ 1 if adj_concluded else 0 }}"{% if not adj_concluded %} open{% endif %}>
+      <summary style="cursor:pointer;font-size:13px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;">
+        <strong>{{ adj.reference or 'No reference' }}</strong>
+        <span>{{ adj.description or '(no description)' }}</span>
+        <span class="muted" style="font-size:12px;">{{ 'Prior year' if adj.is_prior_year else 'Current year' }} - Dr {{ '%.2f'|format(adj.total_debit) }} / Cr {{ '%.2f'|format(adj.total_credit) }}</span>
+        {% if not adj.is_balanced %}<span class="badge" style="background:#f8d7da;color:#b02a2a;">Out of balance</span>
+        {% elif adj_concluded %}<span class="badge status-Completed">Concluded</span>
+        {% elif adj.is_reviewed %}<span class="badge status-Review">Reviewed - awaiting partner</span>
+        {% else %}<span class="badge status-Review">Awaiting review</span>{% endif %}
+      </summary>
       {% if adj.is_prior_year %}<div style="margin-bottom:6px;"><span class="badge status-Review">Prior year - restates the comparatives{% if adj.carry_to_current is not false %} and this year's opening balances{% endif %}</span></div>{% endif %}
       <form method="post" action="{{ url_for('engagements.update_audit_adjustment', adjustment_id=adj.id) }}" class="form-row" style="align-items:flex-end;">
         <div><label>Reference</label><input type="text" name="reference" value="{{ adj.reference or '' }}" style="width:100px;"></div>
@@ -4819,8 +4835,33 @@
         <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
         {% endif %}
       {% endif %}
-    </div>
+    </details>
     {% endfor %}
+    <script>
+    (function () {
+      var cards = document.querySelectorAll('details.adj-card');
+      if (!cards.length) return;
+      var key = 'nl_adj_state';
+      var saved = {};
+      try { saved = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { saved = {}; }
+      var target = (location.hash || '').replace('#', '');
+      cards.forEach(function (d) {
+        var id = d.getAttribute('data-adj-id'), concl = d.getAttribute('data-concluded');
+        var s = saved[id];
+        // remembered choice only counts while the journal is in the same state (concluded or not) as when it was saved
+        if (s && s.c === concl) { d.open = !!s.o; }
+        if (d.id === target) { d.open = true; }
+        d.addEventListener('toggle', function () {
+          saved[id] = { o: d.open ? 1 : 0, c: concl };
+          try { localStorage.setItem(key, JSON.stringify(saved)); } catch (e) {}
+        });
+      });
+      function setAll(v) { cards.forEach(function (d) { d.open = v; }); }
+      var c = document.getElementById('adjCollapseAll'), x = document.getElementById('adjExpandAll');
+      if (c) c.addEventListener('click', function () { setAll(false); });
+      if (x) x.addEventListener('click', function () { setAll(true); });
+    })();
+    </script>
     {% else %}
     <div class="empty-state">No adjustments proposed yet - the financial statements below are computed straight from the preliminary trial balance.</div>
     {% endif %}
