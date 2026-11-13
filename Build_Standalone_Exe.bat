@@ -86,6 +86,12 @@ echo Building NeverlankApp.exe - this can take a minute or two, please wait...
   --add-data "document_templates;document_templates" ^
   --hidden-import sqlalchemy.dialects.sqlite ^
   --hidden-import sqlalchemy.dialects.sqlite.pysqlite ^
+  --hidden-import engineio.async_drivers.threading ^
+  --collect-submodules models ^
+  --collect-submodules engagements ^
+  --collect-submodules tax ^
+  --collect-submodules workpapers ^
+  --collect-submodules financials ^
   app.py
 
 if exist "dist\NeverlankApp.exe" (

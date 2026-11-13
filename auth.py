@@ -1,4 +1,6 @@
-from flask import Blueprint, render_template, redirect, url_for, request, flash
+import time
+
+from flask import Blueprint, render_template, redirect, url_for, request, flash, session
 from flask_login import login_user, logout_user, login_required, current_user
 
 from extensions import db
@@ -6,6 +8,19 @@ from models import User
 import security
 
 auth_bp = Blueprint("auth", __name__, url_prefix="/auth")
+
+
+def complete_login(user, nxt, remember=False):
+    """Everything that happens once a person is fully signed in (password, and the code when two-factor is on)."""
+    login_user(user, remember=remember)
+    try:                                    # Managing Partner / Admin: bring the exchange-rate register up to date in the background
+        from flask import current_app
+        import firm_fx
+        firm_fx.on_login(current_app, user)
+    except Exception:
+        pass
+    flash(f"Welcome back, {user.name}.", "success")
+    return redirect(nxt or url_for("engagements.dashboard"))
 
 
 @auth_bp.route("/login", methods=["GET", "POST"])
@@ -23,16 +38,13 @@ def login():
             return render_template("auth/login.html"), 429
         user = User.query.filter_by(username=username).first()
         if user and user.is_active_flag and user.check_password(password):
+            nxt = security.safe_next(request.args.get("next"), url_for("engagements.dashboard"))
+            if user.totp_enabled:                   # password right - now the second step (the throttle is cleared only after the code)
+                session.clear()
+                session["pending_2fa"] = {"uid": user.id, "t": time.time(), "next": nxt, "remember": False}
+                return redirect(url_for("twofactor.challenge"))
             security.throttle.success(ip, username)
-            login_user(user)
-            try:                                    # Managing Partner / Admin: bring the exchange-rate register up to date in the background
-                from flask import current_app
-                import firm_fx
-                firm_fx.on_login(current_app, user)
-            except Exception:
-                pass
-            flash(f"Welcome back, {user.name}.", "success")
-            return redirect(security.safe_next(request.args.get("next"), url_for("engagements.dashboard")))
+            return complete_login(user, nxt)
         security.throttle.failure(ip, username)
         flash("Invalid username or password.", "danger")
 

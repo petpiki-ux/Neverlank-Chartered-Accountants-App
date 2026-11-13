@@ -6,10 +6,9 @@ instance/*.db-shm
 instance/*.db-wal
 uploads/*
 !uploads/.gitkeep
-# Ad-hoc local test scripts written while developing a feature (not part of
-# the deployed app, and never uploaded to Render) - kept out of the repo so
-# they don't clutter it or get mistaken for something that ships.
-smoke_test*.py
+# The smoke_test_*.py files ARE kept in the repo now: the GitHub "Tests" workflow
+# (.github/workflows/tests.yml) runs them on every push. They are harmless on Render
+# (nothing imports them).
 document_templates_data/
 build/
 dist/

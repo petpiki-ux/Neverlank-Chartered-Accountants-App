@@ -293,7 +293,7 @@ def _add_missing_columns():
         # last_seen_at - see models.User.is_online and this file's
         # _update_last_seen - drives the Messages "who's in the app" online
         # indicator.
-        "user": [("last_seen_at", "DATETIME")],
+        "user": [("last_seen_at", "DATETIME"), ("totp_secret", "VARCHAR(64)"), ("totp_enabled", "BOOLEAN DEFAULT 0"), ("totp_last_step", "BIGINT"), ("recovery_hashes", "TEXT")],
         "income_tax_computation": [("profit_before_tax_manual", "FLOAT")],
 
         # applies_to: 'current' (the year under audit) or 'prior' (a restatement of the comparative column); carry_to_current: a prior-year
@@ -886,6 +886,9 @@ def create_app():
     from training import training_bp
 
     app.register_blueprint(auth_bp)
+    from two_factor import twofactor_bp, enforce_setup
+    app.register_blueprint(twofactor_bp)
+    app.before_request(enforce_setup)
     app.register_blueprint(clients_bp)
     app.register_blueprint(engagements_bp)
     app.register_blueprint(users_bp)

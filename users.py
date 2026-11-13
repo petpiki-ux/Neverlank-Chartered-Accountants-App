@@ -106,6 +106,10 @@ def edit_user(user_id):
                 flash(problem + " The password was not changed.", "danger")
             else:
                 person.set_password(new_password)
+        if request.form.get("reset_2fa") and current_user.role == "admin" and person.totp_enabled:    # lost phone and recovery codes
+            import two_factor
+            two_factor.admin_reset(person)
+            flash(f"Two-factor sign-in was switched off for {person.name}; they can set it up again from My Account.", "info")
         # Per-user Access Rights overrides (see models.UserPermissionOverride)
         # - admin-only, same reasoning as manage_permissions below: someone
         # merely delegated "Manage Team Members" must never be able to grant

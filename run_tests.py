@@ -18,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PG_TEMPLATE = None
 # These check the start-up repair of an OLD SQLite file (they rebuild tables with SQLite's own commands), so they have no meaning on PostgreSQL.
 SQLITE_ONLY = {"smoke_test_advances.py", "smoke_test_learning.py", "smoke_test_prohibited.py", "smoke_test_signature_upgrade.py", "smoke_test_suppliers_upgrade.py",
-               "smoke_test_zimra_ai.py", "smoke_test_backup.py"}
+               "smoke_test_zimra_ai.py", "smoke_test_backup.py", "smoke_test_access_matrix.py"}   # the access test copies the SQLite file between probes
 
 
 def _pg_admin(template, sql):

@@ -704,6 +704,11 @@ class User(UserMixin, db.Model):
     # Never a precise "last activity" audit log - just recent enough to
     # drive an online/offline dot.
     last_seen_at = db.Column(db.DateTime)
+    # Two-factor sign-in (see two_factor.py). The secret is the authenticator-app key; recovery codes are kept only as hashes.
+    totp_secret = db.Column(db.String(64))
+    totp_enabled = db.Column(db.Boolean, default=False)
+    totp_last_step = db.Column(db.BigInteger)          # newest 30-second step already used, so a code cannot be replayed
+    recovery_hashes = db.Column(db.Text)               # JSON list of SHA-256 hashes of the unused recovery codes
 
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

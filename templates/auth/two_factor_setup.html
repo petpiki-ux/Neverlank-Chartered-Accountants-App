@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}Two-factor sign-in - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Two-factor sign-in</h1>
+    <div class="subtitle">A second check at sign-in: a 6-digit code from an authenticator app on your phone.</div>
+  </div>
+  <div><a class="btn" href="{{ url_for('auth.account') }}">Back to My Account</a></div>
+</div>
+
+{% if new_codes %}
+<div class="card" style="max-width:560px;border-left:4px solid #b8860b;">
+  <h3>Your recovery codes</h3>
+  <p>Keep these somewhere safe (not on the same phone). Each code works <strong>once</strong>, if you lose your phone. They are shown only now.</p>
+  <pre style="font-size:16px;line-height:1.7;background:#f6f6f6;padding:12px;border-radius:6px;">{% for c in new_codes %}{{ c }}
+{% endfor %}</pre>
+  <button type="button" class="btn" onclick="window.print()">Print</button>
+</div>
+{% endif %}
+
+{% if enabled %}
+<div class="card" style="max-width:560px;">
+  <p><strong>Two-factor sign-in is on.</strong> You have {{ left }} unused recovery code{{ '' if left == 1 else 's' }}.</p>
+  <form method="post" action="{{ url_for('twofactor.new_recovery_codes') }}" style="margin-bottom:18px;">
+    <label for="pw1">Get a fresh set of recovery codes (the old ones stop working) - enter your password</label>
+    <input type="password" id="pw1" name="password" autocomplete="current-password" required>
+    <button type="submit" class="btn">New recovery codes</button>
+  </form>
+  {% if required %}
+    <p class="muted">Two-factor sign-in is required for your role, so it cannot be switched off.</p>
+  {% else %}
+  <form method="post" action="{{ url_for('twofactor.disable') }}">
+    <label for="pw2">Switch it off - enter your password</label>
+    <input type="password" id="pw2" name="password" autocomplete="current-password" required>
+    <label for="code2">and a current code (or a recovery code)</label>
+    <input type="text" id="code2" name="code" autocomplete="off" required>
+    <button type="submit" class="btn danger">Switch off two-factor sign-in</button>
+  </form>
+  {% endif %}
+</div>
+{% else %}
+<div class="card" style="max-width:560px;">
+  <ol>
+    <li>Install an authenticator app (Microsoft Authenticator, Google Authenticator or Authy) on your phone.</li>
+    <li>In the app choose <em>Add account</em> and {% if qr %}scan this picture{% else %}type in this key{% endif %}:
+      {% if qr %}<div style="width:200px;margin:10px 0;">{{ qr|safe }}</div>{% endif %}
+      <div>Key: <code style="font-size:15px;">{{ secret }}</code></div>
+    </li>
+    <li>Type the 6-digit code the app now shows:</li>
+  </ol>
+  <form method="post" autocomplete="off">
+    <input type="text" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" required autofocus style="letter-spacing:3px;font-size:18px;max-width:200px;">
+    <button type="submit" class="btn gold">Turn on two-factor sign-in</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

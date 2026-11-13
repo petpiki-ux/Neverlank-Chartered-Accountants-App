@@ -24,6 +24,9 @@
     <p class="muted" style="font-size:12px;margin:-10px 0 14px 0;">Supervisors, partners and admins can review and sign off checklist items, tasks and timesheets prepared by others.{% if current_user.role != 'admin' %} Only an admin can grant the admin role.{% endif %}</p>
     {% if person %}
     <label><input type="checkbox" name="is_active" style="width:auto;display:inline-block;" {% if person.is_active_flag %}checked{% endif %}> Active</label>
+    {% if current_user.role == 'admin' and person.totp_enabled %}
+    <label><input type="checkbox" name="reset_2fa" style="width:auto;display:inline-block;"> Switch off two-factor sign-in for this person (lost phone and recovery codes)</label>
+    {% endif %}
     {% endif %}
     <label for="password">{% if person %}Reset password (leave blank to keep current){% else %}Password{% endif %}</label>
     <input type="password" id="password" name="password" autocomplete="new-password" {% if not person %}placeholder="leave blank for a random temporary password"{% else %}placeholder="at least 10 characters"{% endif %}>

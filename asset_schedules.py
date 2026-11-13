@@ -117,8 +117,56 @@ def split_assets(assets, ps, pe):
     return openings, additions, later
 
 
+_LAND_AND_BUILDINGS = {"premises", "land and buildings", "land and building", "buildings and land"}
+
+
+def canonical_class_name(name):
+    """The name an asset class is kept under. 'Premises', 'Land & Buildings', 'Land/Buildings' and 'land and buildings' are one class,
+    called Land and Buildings; every other name is returned as typed (extra spaces removed)."""
+    clean = " ".join((name or "").split())
+    key = " ".join(re.sub(r"[&/,+]", " and ", clean.lower()).replace("-", " ").split())
+    key = re.sub(r"(\band\b\s*)+", "and ", key).strip()
+    key = re.sub(r"^and |\band$", "", key).strip()
+    return "Land and Buildings" if key in _LAND_AND_BUILDINGS else clean
+
+
+def normalise_class_names():
+    """Start-up tidy: bring every engagement's asset classes to their canonical name (see canonical_class_name). Where an engagement already
+    has a class with that name, the two are merged (assets, tax rule and trial-balance aliases move across) instead of being left as duplicates.
+    Safe to run every start; returns how many classes were renamed or merged."""
+    changed = 0
+    for c in PPEAssetClass.query.order_by(PPEAssetClass.id).all():
+        canon = canonical_class_name(c.name)
+        if canon == (c.name or ""):
+            continue
+        keep = next((o for o in PPEAssetClass.query.filter_by(engagement_id=c.engagement_id).all()
+                     if o.id != c.id and (o.name or "").strip().lower() == canon.lower()), None)
+        if keep is None:
+            c.name = canon
+        else:
+            for a in PPEAsset.query.filter_by(asset_class_id=c.id).all():
+                a.asset_class_id = keep.id
+            from models import EngagementTaxAssetRule
+            has_rule = EngagementTaxAssetRule.query.filter_by(asset_class_id=keep.id).first() is not None
+            for rule in EngagementTaxAssetRule.query.filter_by(asset_class_id=c.id).all():
+                if has_rule:
+                    db.session.delete(rule)
+                else:
+                    rule.asset_class_id = keep.id
+                    has_rule = True
+            if keep.rate_percent is None and c.rate_percent is not None:
+                keep.rate_percent, keep.useful_life_years = c.rate_percent, c.useful_life_years
+            keep.tb_aliases = "|".join(sorted({k for k in ((keep.tb_aliases or "") + "|" + (c.tb_aliases or "")).split("|") if k})) or None
+            db.session.flush()
+            db.session.delete(c)
+        changed += 1
+    if changed:
+        db.session.commit()
+    return changed
+
+
 def _class_by_name(engagement_id, name, create=True):
-    name = " ".join((name or "").split())
+    name = canonical_class_name(name)
     if not name:
         return None
     for c in PPEAssetClass.query.filter_by(engagement_id=engagement_id).all():

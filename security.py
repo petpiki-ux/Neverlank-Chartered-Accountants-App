@@ -8,6 +8,9 @@
   policy that still lets the site's own pages use the camera and microphone (voice and video calls).
 * Login throttling: repeated failures from one address for one user are locked out for a while (in memory; the app runs as one process).
 * Password rules and safe redirect targets.
+* Uploads: every uploaded file, on every page, is checked once here - an accepted file type, and contents that match the type (a program or
+  web page renamed to .pdf is refused).
+* Idle sign-out: a session that has been idle for NL_IDLE_MINUTES (default 120; 0 turns it off) is signed out.
 """
 import os
 import re
@@ -49,6 +52,85 @@ def same_origin_ok(req=None):
             netloc = urlparse(value).netloc.lower()
             return netloc == "" or netloc in allowed        # a relative Referer ('/page') points at this site
     return True
+
+
+# --------------------------------------------------------------------------- uploads
+
+# Every file type any page of the app accepts. A page may accept fewer (its own list still applies); none may accept more.
+UPLOAD_EXTENSIONS = {
+    "pdf", "doc", "docx", "xls", "xlsx", "xlsm", "ppt", "pptx", "csv", "tsv", "txt", "zip",
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "tif", "tiff",
+}
+_OFFICE_ZIP = {"docx", "xlsx", "xlsm", "pptx", "zip"}
+_OFFICE_OLE = {"doc", "xls", "ppt"}
+_IMAGES = {
+    "png": (b"\x89PNG\r\n\x1a\n",), "jpg": (b"\xff\xd8\xff",), "jpeg": (b"\xff\xd8\xff",), "gif": (b"GIF87a", b"GIF89a"),
+    "bmp": (b"BM",), "tif": (b"II*\x00", b"MM\x00*"), "tiff": (b"II*\x00", b"MM\x00*"),
+}
+# Whatever the extension says, a file that opens like one of these is a program or a web page, not a document.
+_DANGEROUS_START = (b"MZ", b"\x7fELF", b"#!", b"\xca\xfe\xba\xbe", b"\xfe\xed\xfa")
+_DANGEROUS_TEXT = (b"<?php", b"<script", b"<html", b"<!doctype html", b"<svg", b"<iframe", b"javascript:")
+
+
+def upload_problem(storage):
+    """Why an uploaded file (a werkzeug FileStorage) must be refused, or None when it is fine. Reads only the first few kilobytes."""
+    name = (storage.filename or "").replace("\\", "/").rsplit("/", 1)[-1].strip()
+    if not name:
+        return None                                             # nothing was chosen in this box
+    ext = name.rsplit(".", 1)[-1].lower() if "." in name else ""
+    if ext not in UPLOAD_EXTENSIONS:
+        return f"Files of type '.{ext}' are not accepted. Allowed: PDF, Word, Excel, PowerPoint, CSV/text, images and zip."
+    stream = storage.stream
+    try:
+        pos = stream.tell()
+        head = stream.read(4096)
+        stream.seek(pos)
+    except (OSError, ValueError, AttributeError):
+        return None
+    if not head:
+        return None                                             # an empty file: the page's own checks say so
+    low = head.lstrip().lower()
+    if head.startswith(_DANGEROUS_START) or (ext not in ("txt", "csv", "tsv") and any(low.startswith(t) for t in _DANGEROUS_TEXT)):
+        return f"'{name}' is not really a {ext.upper()} file (it looks like a program or web page), so it was refused."
+    if ext == "pdf" and b"%PDF" not in head[:1024]:
+        return f"'{name}' is not a real PDF file."
+    if ext in _OFFICE_ZIP and not head.startswith((b"PK\x03\x04", b"PK\x05\x06", b"\xd0\xcf\x11\xe0")):
+        return f"'{name}' is not a real {ext.upper()} file."
+    if ext in _OFFICE_OLE and not head.startswith((b"\xd0\xcf\x11\xe0", b"PK\x03\x04")):
+        # old Excel exports are sometimes plain text or XML under an .xls name; those are fine as long as they are not a page or program
+        if ext == "xls" and (low.startswith(b"<?xml") or low.startswith(b"<table") or b"\x00" not in head[:512]):
+            pass
+        else:
+            return f"'{name}' is not a real {ext.upper()} file."
+    if ext in _IMAGES and not head.startswith(_IMAGES[ext]):
+        return f"'{name}' is not a real {ext.upper()} image."
+    if ext == "webp" and not (head.startswith(b"RIFF") and head[8:12] == b"WEBP"):
+        return f"'{name}' is not a real WEBP image."
+    return None
+
+
+class UploadRefused(Exception):
+    """Raised when a page tries to store an uploaded file that upload_problem() refuses."""
+
+
+_save_guard_installed = False
+
+
+def _install_save_guard():
+    global _save_guard_installed
+    if _save_guard_installed:
+        return
+    from werkzeug.datastructures import FileStorage
+    original = FileStorage.save
+
+    def checked_save(self, dst, buffer_size=16384):
+        problem = upload_problem(self)
+        if problem:
+            raise UploadRefused(problem)
+        return original(self, dst, buffer_size)
+
+    FileStorage.save = checked_save
+    _save_guard_installed = True
 
 
 def safe_next(target, fallback):
@@ -186,6 +268,48 @@ def init_security(app):
         if request.method in UNSAFE_METHODS and not same_origin_ok():
             abort(403, description="This request did not come from this site, so it was refused (cross-site request protection). "
                                    "Go back, reload the page and try again.")
+
+    # Uploaded files are checked at the one place every page stores them: FileStorage.save. A page's own checks (type, size, "choose a file")
+    # run first and keep their own wording; whatever a page lets through is then refused here if it is a program, a web page or not what its
+    # name says. Files a page only reads in memory (an Excel import) are never stored, so they are not touched.
+    _install_save_guard()
+
+    @app.errorhandler(UploadRefused)
+    def _upload_refused(exc):
+        from flask import flash, redirect
+        from extensions import db
+        db.session.rollback()
+        problem = str(exc)
+        ref = request.referrer or ""
+        if request.accept_mimetypes.accept_html and ref and urlparse(ref).netloc.lower() in ({request.host.lower()} | _extra_hosts()):
+            flash(problem, "danger")
+            return redirect(ref)
+        return problem, 400
+
+    @app.before_request
+    def _idle_signout():
+        """Sign out a session that has been idle too long (NL_IDLE_MINUTES, default 120, 0 = never)."""
+        try:
+            limit = float(os.environ.get("NL_IDLE_MINUTES", "120")) * 60
+        except ValueError:
+            limit = 7200.0
+        if limit <= 0 or request.endpoint in (None, "static") or request.path.startswith("/socket.io"):
+            return None
+        from flask import session, flash, redirect, url_for
+        from flask_login import current_user, logout_user
+        if not current_user.is_authenticated:
+            session.pop("_last_active", None)
+            return None
+        now = time.time()
+        last = session.get("_last_active")
+        if last is not None and now - float(last) > limit:
+            logout_user()
+            session.pop("_last_active", None)
+            flash("You were signed out because you were inactive for a while. Please sign in again.", "info")
+            return redirect(url_for("auth.login", next=request.path if request.method == "GET" else None))
+        if last is None or now - float(last) > 30:          # at most one session write every 30 seconds
+            session["_last_active"] = now
+        return None
 
     @app.after_request
     def _security_headers(resp):
