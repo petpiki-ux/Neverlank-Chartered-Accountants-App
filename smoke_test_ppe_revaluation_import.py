@@ -152,6 +152,7 @@ with app.app_context():
     mv_ = fin_.build_ppe_movement_schedule(cd_, ad_, eng3.period_end)
     check(near(mv_["total"]["closing_nbv"], 527050.5) and near(mv_["total"]["closing_acc_dep"], 0) and near(mv_["total"]["charge"], 0), "the register closes at 527,050.50 with nil accumulated depreciation and no charge")
     check(pr.get(EID3) is None or not pr.get(EID3).lines, "no revaluation is recorded")
+    check("The Asset Register schedule now closes at 527,050.50" in r.data.decode(), "the confirmation says what the register schedule now closes at")
     check(not pr.calculate(eng3, pr.get(EID3))["totals"]["count"], "the revaluation card has nothing to apply")
 
 # an applied revaluation is locked against importing

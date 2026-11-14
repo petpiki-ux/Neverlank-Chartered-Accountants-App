@@ -862,7 +862,19 @@ def import_confirm(engagement_id, token):
                "figures because the file has no earlier amounts - enter a different opening cost or accumulated depreciation where you have it.")
         if left:
             msg += f" {left} line(s) totalling {left_total:,.2f} were not assigned to an asset and are not in the register."
-        flash(msg, "warning" if left else "success")
+        # what the register schedule (step 4) now says, so a difference from the file's total is explained at once
+        import engagements as eng_mod
+        import financials as fin_mod
+        _, all_assets, cdicts, adicts = eng_mod._ppe_plain_data(engagement.id)
+        mv = fin_mod.build_ppe_movement_schedule(cdicts, adicts, engagement.period_end)
+        closing = mv["total"]["closing_nbv"]
+        others = [a for a in all_assets if a.id not in sums]
+        other_nbv = sum((a.cost or 0.0) - (a.disposal_cost or 0.0) - ((a.opening_accumulated_depreciation or 0.0) + (a.current_year_depreciation or 0.0) - (a.disposal_accumulated_depreciation or 0.0)) for a in others)
+        msg += f" The Asset Register schedule now closes at {closing:,.2f}."
+        if others:
+            msg += (f" That is {sum(sums.values()):,.2f} from this file plus {len(others)} other asset(s) already in the register ({other_nbv:,.2f}) that "
+                    "are not in the valuer's list - delete them from the register if they are not part of this valuation.")
+        flash(msg, "warning" if (left or others) else "success")
         return _import_redirect(engagement)
     existing = {l.asset_id: l for l in rec.lines}
     n_new = n_upd = 0
