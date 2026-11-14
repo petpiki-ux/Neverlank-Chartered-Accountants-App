@@ -73,10 +73,7 @@
   {% endif %}
 </div>
 
-<div class="card">
-  {% if updates %}
-  {% for u in updates %}
-  <div id="legislative-update-{{ u.id }}" style="padding:10px 0;border-bottom:1px solid var(--border);">
+{% macro lu_head(u) %}
     <p style="margin:0;">
       <strong>{{ u.title }}</strong>
       {% if u.instrument_type %}<span class="badge">{{ u.type_label }}</span>{% endif %}
@@ -104,6 +101,11 @@
       </p>
       {% endif %}
     {% endif %}
+{% endmacro %}
+{% macro lu_entry(u, fold=False) %}
+{% if fold %}<details id="legislative-update-{{ u.id }}" class="lu-fold" style="padding:6px 0;border-bottom:1px solid var(--border);"><summary style="cursor:pointer;outline:none;"><span style="display:inline-block;vertical-align:top;width:calc(100% - 24px);">{{ lu_head(u) }}</span></summary><div style="padding:6px 0 10px 16px;">
+{% else %}<div id="legislative-update-{{ u.id }}" style="padding:10px 0;border-bottom:1px solid var(--border);">
+{{ lu_head(u) }}{% endif %}
     {% if u.summary %}<p style="font-size:13px;"><strong>Summary:</strong> {{ u.summary }}</p>{% endif %}
 
     {% if u.has_source %}
@@ -198,8 +200,31 @@
     {% if can_edit %}
     <form method="post" action="{{ url_for('tax.delete_legislative_update', update_id=u.id) }}" onsubmit="return confirm('Delete this update?')"><button type="submit" class="btn small danger">Delete</button></form>
     {% endif %}
-  </div>
-  {% endfor %}
+{% if fold %}</div></details>{% else %}</div>{% endif %}
+{% endmacro %}
+
+<div class="card">
+  {% if updates %}
+  {% set case_list = updates|selectattr('instrument_type', 'equalto', 'Case')|list %}
+  {% for u in updates %}{% if u.instrument_type != 'Case' %}{{ lu_entry(u) }}{% endif %}{% endfor %}
+  {% if case_list %}
+  <details id="lu-cases" style="margin-top:12px;">
+    <summary style="cursor:pointer;font-size:15px;font-weight:bold;padding:8px 0;">Court cases ({{ case_list|length }}) <span class="muted" style="font-weight:normal;font-size:12.5px;">- click to open; each case opens on its own</span></summary>
+    <div style="margin:4px 0 8px;"><button type="button" class="btn small secondary" onclick="luFold(true)">Open all cases</button> <button type="button" class="btn small secondary" onclick="luFold(false)">Close all cases</button></div>
+    {% for u in case_list %}{{ lu_entry(u, True) }}{% endfor %}
+  </details>
+  {% endif %}
+  <script>
+  function luFold(open) { document.querySelectorAll('details.lu-fold').forEach(function (d) { d.open = open; }); }
+  function luReveal() {
+    var id = (location.hash || '').slice(1); if (!id) return;
+    var el = document.getElementById(id); if (!el) return;
+    for (var p = el; p; p = p.parentElement) { if (p.tagName === 'DETAILS') p.open = true; }
+    el.scrollIntoView();
+  }
+  window.addEventListener('hashchange', luReveal); document.addEventListener('DOMContentLoaded', luReveal);
+  document.addEventListener('click', function (e) { var a = e.target.closest && e.target.closest('a[href^="#legislative-update-"]'); if (a) setTimeout(luReveal, 0); });
+  </script>
   {% else %}
   <div class="empty-state">No legislative updates logged yet.</div>
   {% endif %}
