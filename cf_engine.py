@@ -251,6 +251,10 @@ def normalise(a):
             "draw_frac": max(0.0, min(1.0, f(L.get("draw_frac"), 1.0))),
             "plan": ([max(0.0, f(x)) for x in L["plan"][:MAX_YEARS * 12]] if isinstance(L.get("plan"), list) and L.get("plan") else None),
             "fac": str(L.get("fac") or "")[:24],
+            # a scheduled facility drawn in several tranches: [{idx (model month), amount, frac (share of that month outstanding), fee}]
+            "draws": ([{"idx": max(0, int(f(x.get("idx")))), "amount": max(0.0, f(x.get("amount"))), "frac": max(0.0, min(1.0, f(x.get("frac"), 1.0))),
+                        "fee": max(0.0, f(x.get("fee")))} for x in L["draws"][:MAX_YEARS * 12] if isinstance(x, dict)]
+                      if isinstance(L.get("draws"), list) and L.get("draws") and isinstance(L.get("plan"), list) and L.get("plan") else None),
         })
     out["loans"] = loans
 
@@ -466,15 +470,29 @@ def run(a):
             interest = L["rate"] / 100.0 / 12.0 * (open_k * months_open + draw * months_draw)
             fee = (draw * L["fee_pct"] / 100.0 + L["fee_amount"]) if draw > 0 else 0.0
             principal0 = L["opening_balance"] + L["drawdown_amount"]
+            tr = None
+            if L.get("plan") is not None and L.get("draws") is not None:
+                # several tranches: the drawdowns (and their fees) of the months in this period
+                tr = [t for t in L["draws"] if s0 <= t["idx"] < s0 + m]
+                draw = sum(t["amount"] for t in tr)
+                fee = sum(t["fee"] for t in tr)
             if L.get("plan") is not None:
                 # scheduled loan: walk the months of the period (interest on the balance at the start of each month, capital paid at its end)
                 bal, interest, repay = open_k, 0.0, 0.0
                 for j in range(s0, s0 + m):
                     frac = 1.0
-                    if draw and j == T["draw_idx"]:
-                        bal += draw
-                        frac = L.get("draw_frac", 1.0)
-                    interest += L["rate"] / 100.0 / 12.0 * bal * frac
+                    if tr is not None:
+                        w = 0.0                      # drawn this month: each tranche bears interest for its own share of the month
+                        for t in tr:
+                            if t["idx"] == j:
+                                w += t["amount"] * t["frac"]
+                                bal += t["amount"]
+                        interest += L["rate"] / 100.0 / 12.0 * (bal - sum(t["amount"] for t in tr if t["idx"] == j) + w)
+                    else:
+                        if draw and j == T["draw_idx"]:
+                            bal += draw
+                            frac = L.get("draw_frac", 1.0)
+                        interest += L["rate"] / 100.0 / 12.0 * bal * frac
                     pay_j = min(bal, L["plan"][j]) if j < len(L["plan"]) else 0.0
                     bal -= pay_j
                     repay += pay_j

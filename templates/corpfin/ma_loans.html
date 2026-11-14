@@ -3,10 +3,12 @@
 {% set locked = pack.is_final %}
 <div class="card">
   <h3 style="margin-top:0;">Loan facilities</h3>
-  <p class="cf-sub">The bank facilities the business carries: lender, amount, interest rate, establishment fee, term and how it is repaid. Each one is scheduled month by month below,
-  and when this pack is linked to a forecast model the model carries exactly these loans, so the forecast's interest, establishment fees, capital repayments, cash and borrowings follow them.
-  Interest is charged each month on the balance outstanding (rate &divide; 12); in the month of drawdown it is charged only for the days from the <strong>drawdown date</strong> to the month end (the drawdown day counts). The <strong>establishment fee is expensed in the month the facility is drawn</strong>
-  (amount &times; fee % plus any fixed fee). A facility drawn before the forecast starts opens at the balance outstanding then and its fee, already paid, is not charged again. Amounts are in {{ cur }}.</p>
+  <p class="cf-sub">The bank facilities the business carries: lender, interest rate, establishment fee, <strong>each drawdown (a date and an amount)</strong> and how it is repaid (<strong>first repayment date and number of instalments</strong>).
+  Each one is scheduled month by month below, and when this pack is linked to a forecast model the model carries exactly these loans, so the forecast's interest, establishment fees, capital repayments, cash and borrowings follow them.
+  Interest is charged each month on the balance outstanding (rate &divide; 12); in the month a drawdown is made it is charged only for the days from that <strong>drawdown date</strong> to the month end (the drawdown day counts).
+  The <strong>establishment fee is expensed in the month each amount is drawn</strong> (amount &times; fee %; a fixed fee goes with the first drawdown).
+  Until the month of the <strong>first repayment date</strong> only interest is paid; from then on one instalment is paid at each month end. A level instalment is worked out on the balance when repayments start, and worked out again over the instalments left if more is drawn afterwards.
+  A facility drawn before the forecast starts opens at the balance outstanding then and its fee, already paid, is not charged again. Amounts are in {{ cur }}.</p>
   {% if link and link.model_id %}
   <p class="cf-sub" style="margin-bottom:0;">Linked forecast model: <strong>{{ link.model_number }}</strong>{% if link_model %} &ndash; <a href="{{ url_for('corpfin.model_tab', model_id=link_model.id, tab='loans') }}">open its Loans &amp; covenants tab</a>{% endif %}.
   {% if link_status and link_status.facilities_changed %}<span class="cf-bad">The facilities have changed since the forecast was built &ndash; use &ldquo;Save and update the forecast&rdquo;.</span>{% elif facs %}<span class="cf-ok">The forecast follows these facilities.</span>{% endif %}</p>
@@ -23,17 +25,28 @@
   {% for x in facs %}{% set i = loop.index0 %}
   <div style="border:1px solid var(--border);border-radius:6px;padding:10px 12px;margin-bottom:10px;">
     <input type="hidden" name="fac_id_{{ i }}" value="{{ x.id }}">
+    <input type="hidden" name="fac_nd_{{ i }}" value="{{ x.draws|length }}">
     <div class="form-row">
       <div><label>Lender / facility</label><input type="text" class="cf-in" name="fac_lender_{{ i }}" value="{{ x.lender }}" maxlength="60" placeholder="e.g. NBS" {{ 'disabled' if locked }}></div>
-      <div><label>Amount ({{ cur }})</label><input type="number" step="any" min="0" class="cf-in" name="fac_amount_{{ i }}" value="{{ x.amount|cfin }}" {{ 'disabled' if locked }}></div>
       <div><label>Interest rate (% a year)</label><input type="number" step="any" min="0" class="cf-in" name="fac_rate_{{ i }}" value="{{ x.rate|cfin }}" {{ 'disabled' if locked }}></div>
-      <div><label>Establishment fee (% of amount)</label><input type="number" step="any" min="0" max="100" class="cf-in" name="fac_feepct_{{ i }}" value="{{ x.fee_pct|cfin }}" {{ 'disabled' if locked }}></div>
+      <div><label>Establishment fee (% of each amount drawn)</label><input type="number" step="any" min="0" max="100" class="cf-in" name="fac_feepct_{{ i }}" value="{{ x.fee_pct|cfin }}" {{ 'disabled' if locked }}></div>
       <div><label>Fixed fee ({{ cur }}, optional)</label><input type="number" step="any" min="0" class="cf-in" name="fac_feefix_{{ i }}" value="{{ x.fee_fixed|cfin }}" {{ 'disabled' if locked }}></div>
+      <div><label>Total drawn ({{ cur }})</label><input type="text" class="cf-in" readonly value="{{ x.amount|cfn }}" title="The sum of the drawdowns below"></div>
+    </div>
+    <div style="margin:4px 0 8px;">
+      <label style="display:block;margin-bottom:4px;">Drawdowns &ndash; date and amount of each</label>
+      {% for ln in x.draws %}{% set j = loop.index0 %}
+      <div class="form-row" style="margin-bottom:4px;align-items:flex-end;">
+        <div style="max-width:190px;"><input type="date" class="cf-in" name="fac_dd_{{ i }}_{{ j }}" value="{{ ln.date or ((ln.month ~ '-01') if ln.month and ln.amount > 0 else '') }}" {{ 'disabled' if locked }} aria-label="Drawdown {{ j + 1 }} date"></div>
+        <div style="max-width:210px;"><input type="number" step="any" min="0" class="cf-in" name="fac_da_{{ i }}_{{ j }}" value="{{ ln.amount|cfin if ln.amount else '' }}" placeholder="Amount" {{ 'disabled' if locked }} aria-label="Drawdown {{ j + 1 }} amount"></div>
+        {% if not locked and x.draws|length > 1 %}<div><button class="btn small danger" type="submit" name="action" value="deldraw:{{ i }}:{{ j }}" formnovalidate title="Remove this drawdown">&times;</button></div>{% endif %}
+      </div>
+      {% endfor %}
+      {% if not locked and x.draws|length < max_draws %}<button class="btn small secondary" type="submit" name="action" value="adddraw:{{ x.id }}" formnovalidate>+ Add a drawdown</button>{% endif %}
     </div>
     <div class="form-row">
-      <div><label>Drawdown date</label><input type="date" class="cf-in" name="fac_drawdate_{{ i }}" value="{{ x.draw_date or (x.draw_month ~ '-01') }}" {{ 'disabled' if locked }}></div>
-      <div><label>Term (months, drawdown to last repayment)</label><input type="number" min="1" max="240" class="cf-in" name="fac_term_{{ i }}" value="{{ x.term_months }}" {{ 'disabled' if locked }}></div>
-      <div><label>Capital grace (months)</label><input type="number" min="0" max="239" class="cf-in" name="fac_grace_{{ i }}" value="{{ x.grace_months }}" {{ 'disabled' if locked }}></div>
+      <div><label>{{ 'Date capital is repaid' if x.repay == 'bullet' else 'First repayment date' }}</label><input type="date" class="cf-in" name="fac_firstrepay_{{ i }}" value="{{ repay_start(x) }}" {{ 'disabled' if locked }}></div>
+      <div><label>Number of instalments</label><input type="number" min="1" max="240" class="cf-in" name="fac_ninst_{{ i }}" value="{{ instalments_of(x) }}" {{ 'disabled' if locked or x.repay == 'bullet' }}></div>
       <div style="min-width:280px;"><label>Repayment</label><select class="cf-in" name="fac_repay_{{ i }}" {{ 'disabled' if locked }}>{% for k, lab in repay_types %}<option value="{{ k }}" {% if x.repay == k %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
       <div><label>&nbsp;</label><label style="font-weight:normal;"><input type="checkbox" name="fac_inc_{{ i }}" value="1" {% if x.include %}checked{% endif %} {{ 'disabled' if locked }}> In use</label></div>
     </div>
@@ -41,7 +54,8 @@
       <div style="flex:2;"><label>Security / notes (optional)</label><input type="text" class="cf-in" name="fac_sec_{{ i }}" value="{{ x.security }}" maxlength="200" {{ 'disabled' if locked }}></div>
     </div>
     <div class="cf-sub">
-      {% if x.amount > 0 %}Establishment fee {{ fee_of(x)|cfn }} ({{ cur }}) &middot; {{ repay_short[x.repay] }} over {{ x.term_months }} months from {{ x.draw_date|string if x.draw_date else month_label(x.draw_month, False) }}{% if x.grace_months %}, after {{ x.grace_months }} month(s) of interest only{% endif %}.{% endif %}
+      {% if x.amount > 0 %}Establishment fee {{ fee_of(x)|cfn }} ({{ cur }}) &middot; {{ x.draws_n }} drawdown{{ 's' if x.draws_n != 1 }} from {{ x.draw_date|string if x.draw_date else month_label(x.draw_month, False) }}
+        &middot; {{ repay_short[x.repay] }}{% if x.repay != 'bullet' %} ({{ instalments_of(x) }} instalment{{ 's' if instalments_of(x) != 1 }}){% endif %}{% if x.grace_months %}, interest only for the first {{ x.grace_months }} month(s){% endif %}, term {{ x.term_months }} months.{% endif %}
       {% if not locked %}<button class="btn small danger" type="submit" name="action" value="del:{{ i }}" formnovalidate onclick="return confirm('Remove this facility?');" style="margin-left:8px;">Remove</button>{% endif %}
     </div>
   </div>
@@ -74,7 +88,7 @@
     <button class="btn gold" type="submit" name="action" value="save">Save facilities</button>
     {% if link and link.model_id %}<button class="btn" type="submit" name="action" value="sync" title="Saves, then rolls the linked forecast model forward from the actuals using these facilities">Save and update the forecast</button>{% endif %}
   </div>
-  <p class="cf-sub" style="margin-bottom:0;">Defaults the pack cannot know &ndash; the term, the drawdown date and the repayment pattern &ndash; must be taken from the facility letters. Check them before relying on the forecast.</p>
+  <p class="cf-sub" style="margin-bottom:0;">Defaults the pack cannot know &ndash; the drawdown dates and amounts, the first repayment date, the number of instalments and the repayment pattern &ndash; must be taken from the facility letters. Check them before relying on the forecast.</p>
   {% endif %}
 </form>
 

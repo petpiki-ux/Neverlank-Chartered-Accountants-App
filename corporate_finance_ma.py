@@ -281,6 +281,8 @@ def pack_tab(pack_id, tab):
 def _loans_ctx(pack, d):
     """What the Loan facilities tab shows: the facilities as entered, their monthly schedule, and the checks against the books."""
     facs = FL.facilities_of(d)
+    for x_ in facs:
+        x_["draws_n"] = len(FL.tranches(x_))
     link = d.get("forecast_link") or {}
     model = None
     if link.get("model_id"):
@@ -288,7 +290,7 @@ def _loans_ctx(pack, d):
         if model is not None and (model.client_id != pack.client_id or not _can_see(model)):
             model = None
     return dict(gap_info=LK.opening_gap_info(d), gap_adj=FL.adjust_of(d), facs=facs, ps=FL.pack_schedule(d, facs), fac_checks=FL.checks(d, facs), int_check=FL.interest_check(d, facs),
-                repay_types=FL.REPAY_TYPES, repay_short=FL.REPAY_SHORT, fee_of=FL.fee_of, label_of=FL.label_of,
+                repay_types=FL.REPAY_TYPES, repay_short=FL.REPAY_SHORT, fee_of=FL.fee_of, label_of=FL.label_of, repay_start=FL.repay_start, instalments_of=FL.instalments_of, max_draws=FL.MAX_DRAWS,
                 default_month=M.report_month(d), link=link, link_model=model, max_facilities=FL.MAX_FACILITIES,
                 life={x['id']: FL.schedule(x) for x in facs if x['include'] and x['amount'] > 0})
 
@@ -307,6 +309,19 @@ def pack_facilities_save(pack_id):
             flash(f"A pack can hold up to {FL.MAX_FACILITIES} facilities.", "warning")
         else:
             facs.append(FL.normalise_facility(FL.blank_facility(M.report_month(d), len(facs)), len(facs), M.report_month(d)))
+    elif action.startswith("adddraw:"):
+        for x in facs:
+            if x["id"] == action[8:]:
+                if len(x["draws"]) >= FL.MAX_DRAWS:
+                    flash(f"A facility can have up to {FL.MAX_DRAWS} drawdowns.", "warning")
+                else:
+                    x["draws"].append({"date": "", "month": "", "amount": 0.0})
+    elif action.startswith("deldraw:"):
+        try:
+            fi, dj = (int(v) for v in action[8:].split(":"))
+        except ValueError:
+            fi, dj = -1, -1
+        facs = FL.parse_form(request.form, d, skip_draw=(fi, dj))
     elif action.startswith("del:"):
         try:
             gone = int(action[4:])
@@ -345,6 +360,10 @@ def pack_facilities_save(pack_id):
     _save(pack, d)
     if action == "add":
         flash("A blank facility was added. Fill it in and save.", "info")
+    elif action.startswith("adddraw:"):
+        flash("A drawdown line was added. Enter its date and amount and save.", "info")
+    elif action.startswith("deldraw:"):
+        flash("The drawdown line was removed.", "success")
     elif action.startswith("del:"):
         flash("The facility was removed.", "success")
     else:

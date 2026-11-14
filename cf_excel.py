@@ -460,15 +460,21 @@ def _calc_sheet(wb, a, R, meta, periods, result=None):
             ref = R["loan"][k]
             put(f"ln{k}_open", f"={ref['open']}" if i == 0 else f"={Pv(f'ln{k}_close')}")
             ps, mo = X("pstart"), X("months")
-            put(f"ln{k}_draw", f"=IF(AND({ps}<={ref['draw_m']}-1,{ref['draw_m']}-1<{ps}+{mo}),{ref['draw']},0)")
             sched = L.get("plan") is not None and result is not None
+            if sched and L.get("draws") is not None:
+                put(f"ln{k}_draw", result["periods"][i]["loans"][k]["draw"])        # several tranches: the drawdown of each month as a value
+            else:
+                put(f"ln{k}_draw", f"=IF(AND({ps}<={ref['draw_m']}-1,{ref['draw_m']}-1<{ps}+{mo}),{ref['draw']},0)")
             if sched:
                 # a facility with its own repayment schedule (Management Accounts pack): the figures are the schedule's, as values
                 put(f"ln{k}_int", result["periods"][i]["loans"][k]["interest"])
             else:
                 put(f"ln{k}_int", f"={ref['rate']}/100/12*({X(f'ln{k}_open')}*MIN({mo},MAX(0,{ref['end_m']}-{ps}))"
                                   f"+{X(f'ln{k}_draw')}*MAX(0,MIN({ps}+{mo},{ref['end_m']})-({ref['draw_m']}-1)))")
-            put(f"ln{k}_fee", f"=IF({X(f'ln{k}_draw')}>0,{X(f'ln{k}_draw')}*{ref['fee_pct']}/100+{ref['fee_amt']},0)")
+            if sched and L.get("draws") is not None:
+                put(f"ln{k}_fee", result["periods"][i]["loans"][k]["fee"])
+            else:
+                put(f"ln{k}_fee", f"=IF({X(f'ln{k}_draw')}>0,{X(f'ln{k}_draw')}*{ref['fee_pct']}/100+{ref['fee_amt']},0)")
             if sched:
                 put(f"ln{k}_repay", result["periods"][i]["loans"][k]["repay"])
             elif L["repay_type"] == "bullet":

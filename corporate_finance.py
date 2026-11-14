@@ -471,13 +471,17 @@ def _loan_when(a, L):
     parts = []
     if L["opening_balance"] > 0:
         parts.append(f"{L['opening_balance']:,.0f} outstanding at the start")
-    if L["drawdown_amount"] > 0:
+    if L.get("draws"):
+        parts.append("drawn " + ", ".join(f"{t['amount']:,.0f} in {lab(t['idx'])}" for t in L["draws"] if t["amount"] > 0))
+    elif L["drawdown_amount"] > 0:
         parts.append(f"{L['drawdown_amount']:,.0f} drawn in {lab(T['draw_idx'])}")
     if L["repay_type"] == "bullet":
         parts.append(f"repaid in full at the end of {lab(T['end_idx'])}")
     else:
         parts.append(f"{T['term']} monthly principal instalment(s) from {lab(T['first_idx'])} to {lab(T['end_idx'])}")
     fee = L["drawdown_amount"] * L["fee_pct"] / 100.0 + L["fee_amount"] if L["drawdown_amount"] > 0 else 0.0
+    if L.get("draws"):
+        fee = sum(t["fee"] for t in L["draws"])
     if fee > 0:
         parts.append(f"establishment fee {fee:,.0f} paid when drawn")
     return "; ".join(parts) + "."

@@ -1,6 +1,6 @@
 """Loan facilities on a Management Accounts pack: schedule maths, the forecast model's loans, the Loan facilities tab, exports.
 Uses the Agritrade case: NBS 500,000 at 18% (3% establishment fee) and TNC 2,000,000 at 16% (2% fee)."""
-import os, sys, tempfile, copy, io, subprocess, shutil
+import os, sys, tempfile, copy, io, subprocess, shutil, re
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="nl_")
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import flask
@@ -228,8 +228,9 @@ bst = FL.schedule(dict(ND, repay="bullet", term_months=6))
 check(near(bst[0]["interest"], 500000 * 0.18 / 12 * 17 / 31) and all(near(x["interest"], 7500) for x in bst[1:]), "bullet: only the first month is part-month")
 # a pack saved before the date existed hashes exactly as before
 _dfp = {"facilities": [dict(NBS)]}
-_old = __import__("hashlib").md5(__import__("json").dumps([{k: v for k, v in NBS.items()}], sort_keys=True).encode()).hexdigest()[:12]
-_nodate = {k: v for k, v in NBS.items() if k != "draw_date"}
+_NEWKEYS = ("draws", "first_repay", "n_inst")        # fields added with the drawdown lines / first repayment date: absent from the hash when not used
+_old = __import__("hashlib").md5(__import__("json").dumps([{k: v for k, v in NBS.items() if k not in _NEWKEYS}], sort_keys=True).encode()).hexdigest()[:12]
+_nodate = {k: v for k, v in NBS.items() if k not in ("draw_date",) + _NEWKEYS}
 _old2 = __import__("hashlib").md5(__import__("json").dumps([_nodate], sort_keys=True).encode()).hexdigest()[:12]
 check(FL.fingerprint({"facilities": [dict(_nodate)], "settings": {"fy_start_month": 1, "fy_start_year": 2026}, "structure": build()[0]["structure"]}) == _old2,
       "fingerprint of a facility with no date equals the one from before the date existed (packs are not flagged stale)")
@@ -331,7 +332,8 @@ two = [dict(NBS), dict(TNC)]
 r = c.post(f"{BASE}/{pid}/facilities/save", data=fac_form(two), follow_redirects=True)
 saved = getdata().get("facilities")
 check(r.status_code == 200 and saved and len(saved) == 2 and saved[0]["lender"] == "NBS" and saved[1]["amount"] == 2000000, "saving stores both facilities")
-check('type="date"' in r.data.decode() and 'name="fac_drawdate_0"' in r.data.decode() and 'value="2026-07-01"' in r.data.decode(), "the form shows a drawdown date (the 1st when only a month was saved)")
+check('type="date"' in r.data.decode() and 'name="fac_dd_0_0"' in r.data.decode() and 'value="2026-07-01"' in r.data.decode(), "the form shows a drawdown date (the 1st when only a month was saved)")
+check('name="fac_firstrepay_0"' in r.data.decode() and 'name="fac_ninst_0"' in r.data.decode() and 'name="fac_da_0_0"' in r.data.decode(), "the form has the first repayment date, the number of instalments and the drawdown lines")
 _r2 = c.post(f"{BASE}/{pid}/facilities/save", data=fac_form([dict(NBS, draw_date="2026-07-15"), dict(TNC)]), follow_redirects=True)
 _sv = getdata().get("facilities")
 check(_sv and _sv[0].get("draw_date") == "2026-07-15" and _sv[0]["draw_month"] == "2026-07" and b'value="2026-07-15"' in _r2.data, "a drawdown date posted from the form is saved and shown again")
@@ -621,6 +623,209 @@ _pg = c.get(f"{BASE}/{pid}/balance?month={_lastm}").data.decode()
 check("No balance sheet for" not in _pg and "of which: loan facilities" in _pg and "no actual balance sheet" in _pg, f"year end ({_lastm}) shows the balance sheet from the forecast, with the loan rows")
 _mo = FL.statement_analysis(getdata())
 check(_mo is not None and any(r["label"] == "Loan facility borrowings" for r in _mo["balance"]["rows"]), "the loan card is still there")
+
+# =========================================================================== several drawdowns + first repayment date
+print("--- tranches and first repayment date")
+TR = FL.normalise_facility({"lender": "NBS", "rate": 18, "fee_pct": 3, "fee_fixed": 1000, "repay": "level",
+                            "draws": [{"date": "2026-08-20", "amount": 200000}, {"date": "2026-06-15", "amount": 300000}, {"date": "2026-09-01", "amount": 100000}],
+                            "first_repay": "2026-10-10", "n_inst": 6}, 0, "2026-01")
+check(near(TR["amount"], 600000) and TR["draw_month"] == "2026-06" and TR["draw_date"] == "2026-06-15", "tranches: amount is the sum, first drawdown is the earliest (lines sorted by date)")
+check(TR["grace_months"] == 4 and TR["n_inst"] == 6 and TR["term_months"] == 10, "first repayment 10 Oct, 6 instalments: 4 interest-only months after June, term 10 months")
+rt3 = FL.schedule(TR)
+rr = 0.18 / 12
+check(len(rt3) == 10 and rt3[0]["month"] == "2026-06" and rt3[-1]["month"] == "2027-03", "runs June 2026 to March 2027")
+check(near(rt3[0]["draw"], 300000) and near(rt3[0]["interest"], 300000 * rr * 16 / 30) and near(rt3[0]["fee"], 9000 + 1000), "June: 300,000 drawn 15 June -> 16/30 days interest; fee 3% + the fixed 1,000")
+check(near(rt3[1]["open"], 300000) and near(rt3[1]["interest"], 300000 * rr) and near(rt3[1]["draw"], 0), "July: 300,000 outstanding, full month")
+check(near(rt3[2]["draw"], 200000) and near(rt3[2]["interest"], (300000 + 200000 * 12 / 31) * rr) and near(rt3[2]["fee"], 6000), "August: 200,000 drawn 20 Aug -> 12/31 of the month; fee 3% of the tranche")
+check(near(rt3[3]["draw"], 100000) and near(rt3[3]["interest"], 600000 * rr) and near(rt3[3]["fee"], 3000), "September: 100,000 drawn on the 1st -> a full month")
+check(all(x["repay"] == 0 for x in rt3[:4]), "interest only until the first repayment month")
+check(near(rt3[4]["open"], 600000) and rt3[4]["repay"] > 0 and rt3[4]["month"] == "2026-10", "October (10 Oct): the first instalment at that month end")
+pm = 600000 * rr / (1 - (1 + rr) ** -6)
+check(all(near(x["payment"], pm, 0.02) for x in rt3[4:9]) and near(rt3[-1]["close"], 0) and near(sum(x["repay"] for x in rt3), 600000), f"six level instalments of {pm:,.2f}, capital cleared")
+check(near(sum(x["draw"] for x in rt3), 600000) and near(sum(x["fee"] for x in rt3), 19000), "total drawn 600,000 and fees 19,000 (3% of 600,000 + 1,000 fixed)")
+check(near(FL.level_instalment(TR), pm), "the level instalment shown is the one on the balance when repayments start")
+# a tranche drawn after repayments have started: the instalment is worked out again
+TL = FL.normalise_facility({"lender": "L", "rate": 12, "repay": "level", "draws": [{"date": "2026-01-01", "amount": 120000}, {"date": "2026-04-01", "amount": 60000}],
+                            "first_repay": "2026-02-28", "n_inst": 12}, 0, "2026-01")
+rl = FL.schedule(TL)
+check(TL["grace_months"] == 1 and TL["term_months"] == 13 and len(rl) == 13, "interest-only January, then 12 instalments (13 months)")
+r1 = 0.01
+check(near(rl[1]["payment"], 120000 * r1 / (1 - (1 + r1) ** -12), 0.02), "February: instalment worked out on 120,000 over 12")
+bal_apr = rl[2]["close"]
+check(near(rl[3]["payment"], (bal_apr + 60000) * r1 / (1 - (1 + r1) ** -(12 - 2)), 0.05), "April: 60,000 more drawn -> instalment worked out again on the balance over the 10 instalments left")
+check(near(rl[-1]["close"], 0) and near(sum(x["repay"] for x in rl), 180000), "all 180,000 cleared by the last instalment")
+# equal capital with a later tranche
+TS = FL.normalise_facility({"lender": "S", "rate": 12, "repay": "straight", "draws": [{"date": "2026-01-01", "amount": 120000}, {"date": "2026-03-01", "amount": 60000}],
+                            "first_repay": "2026-02-01", "n_inst": 6}, 0, "2026-01")
+rs = FL.schedule(TS)
+check(near(rs[1]["repay"], 120000 / 6) and near(rs[2]["repay"], (120000 - 20000 + 60000) / 5) and near(rs[-1]["close"], 0), "equal capital: balance / instalments left, worked out again when more is drawn")
+# bullet: the date is the repayment date
+TB = FL.normalise_facility({"lender": "B", "rate": 12, "repay": "bullet", "draws": [{"date": "2026-01-10", "amount": 50000}, {"date": "2026-03-10", "amount": 50000}], "first_repay": "2026-06-30"}, 0, "2026-01")
+rb = FL.schedule(TB)
+check(len(rb) == 6 and near(rb[-1]["repay"], 100000) and all(x["repay"] == 0 for x in rb[:-1]), "bullet: capital repaid in the month of the date entered")
+# no first repayment date: term and grace as before, tranches still work
+TG = FL.normalise_facility({"lender": "G", "rate": 12, "repay": "level", "term_months": 6, "grace_months": 2,
+                            "draws": [{"date": "2026-01-01", "amount": 60000}, {"date": "2026-02-01", "amount": 60000}]}, 0, "2026-01")
+rg = FL.schedule(TG)
+check(len(rg) == 6 and rg[0]["repay"] == 0 and rg[1]["repay"] == 0 and near(rg[2]["payment"], 120000 * r1 / (1 - (1 + r1) ** -4), 0.02) and near(rg[-1]["close"], 0), "tranches with the term/grace form: repaying from the grace end on the full balance")
+# a tranche after the final instalment extends the facility
+TX = FL.normalise_facility({"lender": "X", "rate": 12, "repay": "level", "term_months": 3, "draws": [{"date": "2026-01-01", "amount": 30000}, {"date": "2026-05-01", "amount": 10000}]}, 0, "2026-01")
+rx = FL.schedule(TX)
+check(len(rx) == 5 and near(rx[2]["close"], 0) and near(rx[-1]["close"], 0) and near(rx[-1]["repay"], 10000), "a tranche after the term: the facility runs on to that month and clears")
+# a line with no date follows the previous line's month; a zero line is ignored; one line only = old behaviour
+TZ = FL.normalise_facility({"lender": "Z", "rate": 12, "draws": [{"date": "2026-03-05", "amount": 1000}, {"date": "", "amount": 0}, {"date": "", "amount": 500}]}, 0, "2026-01")
+check(len(FL.tranches(TZ)) == 2 and near(TZ["amount"], 1500), "a blank line is ignored; an amount without a date goes in the previous line's month")
+one = FL.normalise_facility({"lender": "O", "rate": 12, "draws": [{"date": "2026-02-10", "amount": 70000}], "term_months": 4}, 0, "2026-01")
+old1 = FL.normalise_facility({"lender": "O", "rate": 12, "amount": 70000, "draw_date": "2026-02-10", "term_months": 4}, 0, "2026-01")
+check(FL.schedule(one) == FL.schedule(old1), "one drawdown line = the old single amount/date facility")
+# checks / fingerprint
+check(FL.fingerprint({"facilities": [TR], "settings": {"fy_start_month": 1, "fy_start_year": 2026}, "structure": build()[0]["structure"]}) !=
+      FL.fingerprint({"facilities": [dict(TR, draws=TR["draws"][:2])], "settings": {"fy_start_month": 1, "fy_start_year": 2026}, "structure": build()[0]["structure"]}), "fingerprint changes when a tranche is removed")
+_blank = dict(TR, draws=TR["draws"] + [{"date": "", "month": "", "amount": 0.0}])
+check(FL.fingerprint({"facilities": [TR], "settings": {"fy_start_month": 1, "fy_start_year": 2026}, "structure": build()[0]["structure"]}) ==
+      FL.fingerprint({"facilities": [_blank], "settings": {"fy_start_month": 1, "fy_start_year": 2026}, "structure": build()[0]["structure"]}), "an empty extra line does not change the fingerprint")
+# form round trip
+_form = {"n_fac": "1", "fac_id_0": "fac1", "fac_lender_0": "NBS", "fac_rate_0": "18", "fac_feepct_0": "3", "fac_feefix_0": "1000", "fac_repay_0": "level", "fac_inc_0": "1",
+         "fac_nd_0": "4", "fac_dd_0_0": "2026-06-15", "fac_da_0_0": "300000", "fac_dd_0_1": "2026-08-20", "fac_da_0_1": "200000", "fac_dd_0_2": "", "fac_da_0_2": "",
+         "fac_dd_0_3": "2026-09-01", "fac_da_0_3": "100000", "fac_firstrepay_0": "2026-10-10", "fac_ninst_0": "6"}
+pf = FL.parse_form(_form, {"settings": {"fy_start_month": 1, "fy_start_year": 2026}, "structure": build()[0]["structure"]})
+check(len(pf) == 1 and near(pf[0]["amount"], 600000) and pf[0]["first_repay"] == "2026-10-10" and pf[0]["n_inst"] == 6 and FL.schedule(pf[0]) == FL.schedule(TR), "the form gives the same facility (the empty line dropped)")
+pf2 = FL.parse_form(_form, {"settings": {"fy_start_month": 1, "fy_start_year": 2026}, "structure": build()[0]["structure"]}, skip_draw=(0, 1))
+check(near(pf2[0]["amount"], 400000), "removing a drawdown line from the form")
+check(FL.repay_start(old1) == "2026-02-01" and FL.repay_start(TR) == "2026-10-10", "the form shows the first repayment date (the first instalment month when none was entered)")
+
+# the forecast model follows the tranches
+dT, _sT = build()
+dT["facilities"] = [dict(TR)]
+dT["facilities"][0].update(draws=[{"date": "2026-07-15", "amount": 300000}, {"date": "2026-09-20", "amount": 200000}, {"date": "2026-10-01", "amount": 100000}],
+                           first_repay="2026-11-05", n_inst=6)
+TR2 = FL.facilities_of(dT)[0]
+aT, iT = LK.continuation_assumptions(dT, {"years": 2}, "USD")
+lnT = [L for L in aT["loans"] if L["fac"]][0]
+check(lnT.get("draws") and len(lnT["draws"]) == 3 and lnT["opening_balance"] == 0, "the model loan carries each drawdown (month, amount, fraction, fee)")
+resT = E.run(aT)
+sT = FL.schedule(TR2)
+okT = True
+for j in range(len(sT)):
+    L_ = resT["periods"][j]["loans"][0]
+    for key in ("open", "draw", "interest", "fee", "repay", "close"):
+        if not near(L_[key], sT[j][key], 0.01):
+            okT = False
+            print("   mismatch", j, key, L_[key], sT[j][key])
+check(okT, "forecast model = schedule month by month with three drawdowns, part-month interest, fees and a first repayment date")
+check(resT["checks"]["balance_ok"] and resT["checks"]["cash_ok"], "the model still balances and ties to cash with tranches")
+check(near(resT["annual"][0]["loans"][0]["interest"] + resT["annual"][1]["loans"][0]["interest"], sum(x["interest"] for x in sT)), "model interest (both years) equals the schedule's total")
+check(any("several tranches" in n_ for n_ in iT["notes"]), "a note explains the tranches")
+# part drawn before the forecast starts, rest later: opens at the balance and the later drawdown comes in
+dU, _sU = build()
+dU["facilities"] = [dict(draws=[{"date": "2026-03-10", "amount": 200000}, {"date": "2026-08-12", "amount": 100000}], lender="U", rate=15, fee_pct=2, repay="level", first_repay="2026-09-30", n_inst=6)]
+aU, iU = LK.continuation_assumptions(dU, {"years": 2}, "USD")
+lnU = [L for L in aU["loans"] if L["fac"]][0]
+sU = FL.schedule(FL.facilities_of(dU)[0])
+check(near(lnU["opening_balance"], [x for x in sU if x["month"] == "2026-06"][0]["close"]) and lnU["opening_balance"] > 0 and len(lnU["draws"]) == 1, "a tranche before the forecast opens at the balance; the later one is a forecast drawdown")
+resU = E.run(aU)
+okU = all(near(resU["periods"][j]["loans"][0][k], [x for x in sU if x["month"] == M.shift_month("2026-07", j)][0][k] if j < len(sU) - 4 else 0, 0.01)
+          for j in range(0, 6) for k in ("interest", "repay", "close", "fee", "draw"))
+check(okU and resU["checks"]["balance_ok"], "model = schedule for that facility too (and the model balances)")
+_keep0 = copy.deepcopy(getdata().get("facilities"))
+# the Loan facilities form: drawdown lines, first repayment date, number of instalments
+def tr_form(extra=None, action="save", nlines=3):
+    f_ = {"n_fac": "1", "action": action, "fac_id_0": "fac1", "fac_lender_0": "NBS", "fac_rate_0": "18", "fac_feepct_0": "3", "fac_feefix_0": "1000", "fac_repay_0": "level",
+          "fac_inc_0": "1", "fac_nd_0": str(nlines), "fac_dd_0_0": "2026-06-15", "fac_da_0_0": "300000", "fac_dd_0_1": "2026-08-20", "fac_da_0_1": "200000",
+          "fac_dd_0_2": "2026-09-01", "fac_da_0_2": "100000", "fac_firstrepay_0": "2026-10-10", "fac_ninst_0": "6"}
+    f_.update(extra or {})
+    return f_
+_rr = c.post(f"{BASE}/{pid}/facilities/save", data=tr_form(), follow_redirects=True)
+_sv = getdata().get("facilities")
+_pg = _rr.data.decode()
+check(_sv and len(_sv) == 1 and near(_sv[0]["amount"], 600000) and _sv[0]["first_repay"] == "2026-10-10" and _sv[0]["n_inst"] == 6 and _sv[0]["term_months"] == 10 and _sv[0]["grace_months"] == 4,
+      "posting the new form saves three drawdowns, the first repayment date and 6 instalments")
+check('value="2026-08-20"' in _pg and 'value="300000"' in _pg and 'value="2026-10-10"' in _pg and "3 drawdowns" in _pg, "the page shows the drawdown lines and the first repayment date again")
+check("Jun 2026" in _pg and "Mar 2027" in _pg, "the whole-life schedule runs June 2026 to March 2027")
+_rr = c.post(f"{BASE}/{pid}/facilities/save", data=tr_form(action="adddraw:fac1"), follow_redirects=True)
+_sv = getdata().get("facilities")
+check(len(_sv[0]["draws"]) == 4 and 'name="fac_dd_0_3"' in _rr.data.decode() and near(_sv[0]["amount"], 600000), "'+ Add a drawdown' adds an empty line and keeps the others")
+_rr = c.post(f"{BASE}/{pid}/facilities/save", data=tr_form({"fac_nd_0": "4", "fac_dd_0_3": "2026-11-01", "fac_da_0_3": "50000"}, action="save", nlines=4), follow_redirects=True)
+check(near(getdata()["facilities"][0]["amount"], 650000), "a fourth drawdown entered and saved")
+_rr = c.post(f"{BASE}/{pid}/facilities/save", data=tr_form({"fac_nd_0": "4", "fac_dd_0_3": "2026-11-01", "fac_da_0_3": "50000"}, action="deldraw:0:3", nlines=4), follow_redirects=True)
+check(near(getdata()["facilities"][0]["amount"], 600000) and len(getdata()["facilities"][0]["draws"]) == 3, "the x button removes that drawdown line")
+# sync: the forecast follows the tranches and the page warns nothing is stale afterwards
+_rr = c.post(f"{BASE}/{pid}/facilities/save", data=tr_form(action="sync"), follow_redirects=True)
+_ht = _rr.data.decode()
+print("   flash:", [x_ for x_ in re.findall(r'class="flash [a-z]+">([^<]*)', _ht)][:3])
+check(_rr.status_code == 200 and "could not be updated" not in _ht and "now follow them" in _ht, "save and update the forecast with tranches: no error")
+with app.app_context():
+    _mm = CFModel.query.get(getdata()["forecast_link"]["model_id"])
+    _nl = [L for L in E.normalise(_mm.assumptions)["loans"] if L.get("fac")]
+check(_nl and _nl[0].get("draws") and len(_nl[0]["draws"]) >= 1, "the linked model now carries the facility's drawdown lines")
+# put the original facilities back for the tests that follow
+setdata(lambda x: x.update({"facilities": copy.deepcopy(_keep0)}))
+
+# the pack Excel (live formulas) for a facility with tranches and a first repayment date equals the app's schedule
+if soffice:
+    _keep = copy.deepcopy(getdata()["facilities"])
+    _trf = {"lender": "NBS", "rate": 18, "fee_pct": 3, "fee_fixed": 1000, "repay": "level", "include": True,
+            "draws": [{"date": "2026-06-15", "amount": 300000}, {"date": "2026-08-20", "amount": 200000}, {"date": "2026-09-01", "amount": 100000}],
+            "first_repay": "2026-10-10", "n_inst": 6}
+    setdata(lambda x: x.update({"facilities": [_trf]}))
+    _page = c.get(f"{BASE}/{pid}/excel/loans")
+    _t3 = tempfile.mkdtemp(prefix="xl3_")
+    open(os.path.join(_t3, "p.xlsx"), "wb").write(_page.data)
+    subprocess.run([soffice, "--headless", "--convert-to", "xlsx", "--outdir", os.path.join(_t3, "o"), os.path.join(_t3, "p.xlsx")], capture_output=True, timeout=180)
+    from openpyxl import load_workbook as _lw3
+    _w3 = _lw3(os.path.join(_t3, "o", "p.xlsx"), data_only=True)
+    _s3 = _w3["Loan facilities"]
+    _p3 = FL.pack_schedule(getdata())
+    _ok3 = True
+    for key, lab in (("interest", "Interest"), ("fee", "Establishment fee"), ("close", "Closing balance"), ("repay", "Capital repaid"), ("draw", "Drawdown")):
+        _rw = [r_ for r_ in range(1, _s3.max_row + 1) if _s3.cell(row=r_, column=1).value == lab]
+        for j, mk in enumerate(_p3["months"]):
+            got = _s3.cell(row=_rw[0], column=2 + j).value or 0
+            if abs(got - _p3["facilities"][0]["rows"][mk][key]) > 0.5:
+                _ok3 = False
+                print("   xl tranche mismatch", key, mk, got, _p3["facilities"][0]["rows"][mk][key])
+    check(_ok3, "Excel with three drawdowns and a first repayment date: live formulas equal the app (drawdown, interest, fee, repaid, closing, every month)")
+    _wl3 = _w3["Loan schedules"]
+    _sch = FL.schedule(FL.facilities_of(getdata())[0])
+    _hdr = next(r_ for r_ in range(1, _wl3.max_row + 1) if _wl3.cell(row=r_, column=1).value == "No.")
+    _ok4 = all(abs((_wl3.cell(row=_hdr + 1 + i, column=col).value or 0) - _sch[i][k]) < 0.5 for i in range(len(_sch)) for col, k in ((5, "interest"), (7, "repay"), (8, "close")))
+    check(_ok4 and _wl3.cell(row=_hdr + len(_sch), column=8).value < 0.5, "the whole life in the Loan schedules sheet (to March 2027) equals the app and clears to nil")
+    _errs3 = [c_.coordinate for n_ in _w3.sheetnames for row in _w3[n_].iter_rows() for c_ in row if isinstance(c_.value, str) and c_.value.startswith("#")]
+    check(not _errs3, f"no formula errors with tranches ({_errs3[:3]})")
+    # change a drawdown amount in the schedule: the year view follows
+    from openpyxl import load_workbook as _lw4
+    _w4 = _lw4(os.path.join(_t3, "p.xlsx"))
+    _l4 = _w4["Loan schedules"]
+    _dr = next(r_ for r_ in range(1, _l4.max_row + 1) if str(_l4.cell(row=r_, column=1).value).strip() == "Drawdown 2")
+    _l4.cell(row=_dr, column=3).value = 0
+    _w4.save(os.path.join(_t3, "p2.xlsx"))
+    subprocess.run([soffice, "--headless", "--convert-to", "xlsx", "--outdir", os.path.join(_t3, "o"), os.path.join(_t3, "p2.xlsx")], capture_output=True, timeout=180)
+    _s4 = _lw3(os.path.join(_t3, "o", "p2.xlsx"), data_only=True)["Loan facilities"]
+    _rw = [r_ for r_ in range(1, _s4.max_row + 1) if _s4.cell(row=r_, column=1).value == "Drawdown"][0]
+    check(abs(sum((_s4.cell(row=_rw, column=2 + j).value or 0) for j in range(12)) - 400000) < 0.5, "removing a drawdown amount in the schedule sheet recalculates the year view (drawn 600,000 -> 400,000)")
+    setdata(lambda x: x.update({"facilities": _keep}))
+
+# the model's own Excel carries the tranche drawdowns and fees (values) and recalculates to the engine's figures
+import cf_excel as CX
+xbT, _inf = CX.build_model_workbook({"name": "tranches", "client": "T", "currency": "USD"}, aT)
+check(xbT[:2] == b"PK", "the model Excel builds with a tranche loan")
+_so = shutil.which("soffice") or shutil.which("libreoffice")
+if _so:
+    _tdir = tempfile.mkdtemp(prefix="trx_")
+    open(os.path.join(_tdir, "m.xlsx"), "wb").write(xbT)
+    subprocess.run([_so, "--headless", "--convert-to", "xlsx", "--outdir", os.path.join(_tdir, "out"), os.path.join(_tdir, "m.xlsx")], capture_output=True, timeout=240)
+    from openpyxl import load_workbook as _lw
+    _wb = _lw(os.path.join(_tdir, "out", "m.xlsx"), data_only=True)
+    _errs = [c_.coordinate for ws_ in _wb.worksheets for row in ws_.iter_rows() for c_ in row if isinstance(c_.value, str) and c_.value.startswith("#")]
+    check(not _errs, f"the tranche model Excel has no formula errors ({_errs[:3]})")
+    _wsa = _wb["Annual Summary"]
+    _row = next((r_ for r_ in range(1, _wsa.max_row + 1) if isinstance(_wsa.cell(row=r_, column=1).value, str) and _wsa.cell(row=r_, column=1).value.strip().lower() in ("borrowings", "loans and borrowings", "total borrowings")), None)
+    if _row:
+        _vals = [v_ for v_ in (_wsa.cell(row=_row, column=cc).value for cc in range(2, 5)) if isinstance(v_, (int, float))]
+        _exp = [x["borrowings"] for x in resT["annual"]]
+        check(all(abs(v - e) < 1.0 for v, e in zip(_vals, _exp)), f"tranche model Excel: borrowings by year equal the engine ({[round(v) for v in _vals]} vs {[round(e) for e in _exp]})")
+else:
+    print("SKIP LibreOffice not available")
 
 print()
 print("FAILURES:", len(fails))

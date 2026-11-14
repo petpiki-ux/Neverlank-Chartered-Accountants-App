@@ -673,6 +673,11 @@ def _ddate(fac):
     return date(int(d[:4]), int(d[5:7]), int(d[8:])) if d else _mdate(fac["draw_month"])
 
 
+def _rdate(text):
+    """A YYYY-MM-DD string as a date."""
+    return date(int(text[:4]), int(text[5:7]), int(text[8:10]))
+
+
 def _loan_sheets(wb, meta, d):
     """'Loan facilities' (the year month by month) and 'Loan schedules' (every facility from drawdown to final repayment).
     The schedules hold the inputs (blue) and the formulas; the year view adds them up by month with SUMIFS. Returns the first sheet or None."""
@@ -698,10 +703,13 @@ def _loan_sheets(wb, meta, d):
         lab = FL.label_of(fac)
         wl.cell(row=r, column=1, value=f"{lab} - facility {fac['id']}").font = Font(bold=True, size=12, color=NAVY)
         rows = {}
-        items = (("amt", "Amount", fac["amount"], NUM), ("rate", "Interest rate (% a year)", fac["rate"], "0.00"),
-                 ("feepct", "Establishment fee (% of amount)", fac["fee_pct"], "0.00"), ("feefix", "Establishment fee (fixed amount)", fac["fee_fixed"], NUM),
-                 ("draw", "Drawdown date (a month only = the 1st)", _ddate(fac), "dd mmm yyyy"), ("term", "Term (months, drawdown to last repayment)", fac["term_months"], "0"),
-                 ("grace", "Capital grace (months)", fac["grace_months"], "0"), ("type", "Repayment (level / straight / bullet)", fac["repay"], "@"))
+        tr = FL.tranches(fac)
+        nrows = len(FL.schedule(fac))
+        items = (("rate", "Interest rate (% a year)", fac["rate"], "0.00"),
+                 ("feepct", "Establishment fee (% of each amount drawn)", fac["fee_pct"], "0.00"), ("feefix", "Establishment fee (fixed amount, with the first drawdown)", fac["fee_fixed"], NUM),
+                 ("firstrep", "First repayment date (instalments fall at each month end from that month)", _rdate(FL.repay_start(fac)), "dd mmm yyyy"),
+                 ("ninst", "Number of instalments (a bullet has one)", FL.instalments_of(fac), "0"),
+                 ("type", "Repayment (level / straight / bullet)", fac["repay"], "@"))
         rr = r + 1
         for key, label, val, fmt in items:
             wl.cell(row=rr, column=1, value=label)
@@ -709,47 +717,87 @@ def _loan_sheets(wb, meta, d):
             c.number_format, c.font, c.fill = fmt, F_INPUT, FILL_INPUT
             rows[key] = f"$B${rr}"
             rr += 1
-        calc = (("fee", "Establishment fee (expensed in the month drawn)", f"={rows['amt']}*{rows['feepct']}/100+{rows['feefix']}", NUM),
-                ("frac", "Share of the drawdown month the money is outstanding",
-                 f"=(DAY(EOMONTH({rows['draw']},0))-DAY({rows['draw']})+1)/DAY(EOMONTH({rows['draw']},0))", "0.0000"),
+        # the drawdowns: a date and an amount each (two spare lines to add more); the share of the month outstanding is worked out per line
+        for j, h in enumerate(("Drawdowns", "Date", "Amount", "Share of month outstanding"), start=1):
+            c = wl.cell(row=rr, column=j, value=h)
+            c.font, c.fill = Font(bold=True), FILL_SUB
+            c.alignment = Alignment(horizontal="left" if j == 1 else "right")
+        t0 = rr + 1
+        lines = [(x["date"] and _rdate(x["date"]) or _mdate(x["month"]), x["amount"]) for x in tr] or [(_mdate(fac["draw_month"]), 0.0)]
+        n_lines = len(lines) + 2
+        for k in range(n_lines):
+            x = t0 + k
+            wl.cell(row=x, column=1, value=f"   Drawdown {k + 1}")
+            dc = wl.cell(row=x, column=2, value=lines[k][0] if k < len(lines) else None)
+            dc.number_format, dc.font, dc.fill = "dd mmm yyyy", F_INPUT, FILL_INPUT
+            ac = wl.cell(row=x, column=3, value=lines[k][1] if k < len(lines) else 0)
+            ac.number_format, ac.font, ac.fill = NUM, F_INPUT, FILL_INPUT
+            wl.cell(row=x, column=4, value=f'=IF(B{x}="",0,(DAY(EOMONTH(B{x},0))-DAY(B{x})+1)/DAY(EOMONTH(B{x},0)))').number_format = "0.0000"
+        t1 = t0 + n_lines - 1
+        d_rng, a_rng, f_rng = f"$B${t0}:$B${t1}", f"$C${t0}:$C${t1}", f"$D${t0}:$D${t1}"
+        rr = t1 + 1
+        rows["tr"] = (d_rng, a_rng, f_rng)
+        calc = (("amt", "Amount (all drawdowns)", f"=SUM({a_rng})", NUM),
+                ("draw", "First drawdown date", f"=MIN({d_rng})", "dd mmm yyyy"),
+                ("fee", "Establishment fee in total (% of each drawdown + the fixed fee)", f"=$B${rr}*{rows['feepct']}/100+{rows['feefix']}", NUM),
                 ("mr", "Monthly interest rate", f"={rows['rate']}/100/12", "0.0000%"),
-                ("k", "Number of capital instalments", f"=MAX(1,{rows['term']}-{rows['grace']})", "0"))
+                ("gap", "Interest-only months (first drawdown month to the first repayment month)",
+                 f'=IF({rows["type"]}="bullet",0,MAX(0,(YEAR({rows["firstrep"]})-YEAR($B${rr + 1}))*12+MONTH({rows["firstrep"]})-MONTH($B${rr + 1})))', "0"))
         for key, label, formula, fmt in calc:
             wl.cell(row=rr, column=1, value=label)
             c = wl.cell(row=rr, column=2, value=formula)
             c.number_format = fmt
             rows[key] = f"$B${rr}"
             rr += 1
-        wl.cell(row=rr, column=1, value="Equal monthly instalment (capital + interest; 'level' only)")
-        c = wl.cell(row=rr, column=2, value=f'=IF({rows["type"]}="level",IF({rows["mr"]}=0,{rows["amt"]}/{rows["k"]},{rows["amt"]}*{rows["mr"]}/(1-(1+{rows["mr"]})^(-{rows["k"]}))),0)')
+        more = (("grace", "Capital grace (months)", f"={rows['gap']}", "0"),
+                ("term", "Term (months, drawdown to last repayment)",
+                 f'=IF({rows["type"]}="bullet",MAX(0,(YEAR({rows["firstrep"]})-YEAR({rows["draw"]}))*12+MONTH({rows["firstrep"]})-MONTH({rows["draw"]}))+1,{rows["gap"]}+{rows["ninst"]})', "0"),
+                ("k", "Number of capital instalments", None, "0"),
+                ("nrows", "Months in this schedule", nrows, "0"))
+        for key, label, formula, fmt in more:
+            wl.cell(row=rr, column=1, value=label)
+            if key == "k":
+                formula = f"=MAX(1,{rows['term']}-{rows['grace']})"
+            c = wl.cell(row=rr, column=2, value=formula)
+            c.number_format = fmt
+            rows[key] = f"$B${rr}"
+            rr += 1
+        wl.cell(row=rr, column=1, value="Equal monthly instalment when repayments start ('level' only; worked out again when more is drawn later)")
+        c = wl.cell(row=rr, column=2, value=(f'=IF({rows["type"]}="level",IF({rows["mr"]}=0,{rows["amt"]}/{rows["k"]},{rows["amt"]}*{rows["mr"]}/(1-(1+{rows["mr"]})^(-{rows["k"]}))),0)'))
         c.number_format = NUM
         rows["pmt"] = f"$B${rr}"
         rr += 2
         hdr = rr
-        for j, h in enumerate(("No.", "Month", "Opening", "Drawdown", "Interest", "Establishment fee", "Capital repaid", "Closing"), start=1):
+        for j, h in enumerate(("No.", "Month", "Opening", "Drawdown", "Interest", "Establishment fee", "Capital repaid", "Closing", "Instalment"), start=1):
             c = wl.cell(row=hdr, column=j, value=h)
             c.font, c.fill = Font(bold=True), FILL_SUB
             c.alignment = Alignment(horizontal="left" if j == 1 else "right")
         first = hdr + 1
-        for n in range(1, fac["term_months"] + 1):
+        in_month = lambda x: f"({d_rng}>=B{x})*({d_rng}<EDATE(B{x},1))"
+        for n in range(1, nrows + 1):
             x = first + n - 1
             wl.cell(row=x, column=1, value=n)
             wl.cell(row=x, column=2, value=f"=EDATE(DATE(YEAR({rows['draw']}),MONTH({rows['draw']}),1),A{x}-1)").number_format = DATEFMT
             wl.cell(row=x, column=3, value=0 if n == 1 else f"=H{x - 1}").number_format = NUM
-            wl.cell(row=x, column=4, value=f"=IF(A{x}=1,{rows['amt']},0)").number_format = NUM
-            wl.cell(row=x, column=5, value=f"=(C{x}+D{x})*{rows['mr']}*IF(A{x}=1,{rows['frac']},1)").number_format = NUM
-            wl.cell(row=x, column=6, value=f"=IF(A{x}=1,{rows['fee']},0)").number_format = NUM
-            wl.cell(row=x, column=7, value=(f'=IF(A{x}<={rows["grace"]},0,IF(A{x}={rows["term"]},C{x}+D{x},IF({rows["type"]}="bullet",0,'
-                                            f'IF({rows["type"]}="straight",MIN(C{x}+D{x},{rows["amt"]}/{rows["k"]}),MIN(C{x}+D{x},MAX(0,{rows["pmt"]}-E{x}))))))')).number_format = NUM
+            wl.cell(row=x, column=4, value=f'=SUMPRODUCT({a_rng}*{in_month(x)})').number_format = NUM
+            wl.cell(row=x, column=5, value=f"=(C{x}+SUMPRODUCT({a_rng}*{f_rng}*{in_month(x)}))*{rows['mr']}").number_format = NUM
+            wl.cell(row=x, column=6, value=f"=D{x}*{rows['feepct']}/100" + (f"+{rows['feefix']}" if n == 1 else "")).number_format = NUM
+            # the instalment is set when repayments start and again whenever more is drawn after that
+            left = f"({rows['term']}-A{x}+1)"
+            ann = f'IF({rows["type"]}="level",IF({rows["mr"]}=0,(C{x}+D{x})/{left},(C{x}+D{x})*{rows["mr"]}/(1-(1+{rows["mr"]})^(-{left}))),(C{x}+D{x})/{left})'
+            prev = "0" if n == 1 else f"I{x - 1}"
+            wl.cell(row=x, column=9, value=f'=IF(AND(A{x}>{rows["grace"]},{left}>0,OR(A{x}={rows["grace"]}+1,D{x}>0)),{ann},{prev})').number_format = NUM
+            wl.cell(row=x, column=7, value=(f'=IF(A{x}<={rows["grace"]},0,IF(OR(A{x}={rows["term"]},A{x}={rows["nrows"]}),C{x}+D{x},IF({rows["type"]}="bullet",0,'
+                                            f'IF({rows["type"]}="straight",MIN(C{x}+D{x},I{x}),MIN(C{x}+D{x},MAX(0,I{x}-E{x}))))))')).number_format = NUM
             wl.cell(row=x, column=8, value=f"=C{x}+D{x}-G{x}").number_format = NUM
-        last = first + fac["term_months"] - 1
-        tr = last + 1
-        wl.cell(row=tr, column=1, value="Total over the life").font = Font(bold=True)
+        last = first + nrows - 1
+        tot = last + 1
+        wl.cell(row=tot, column=1, value="Total over the life").font = Font(bold=True)
         for j, col in ((4, "D"), (5, "E"), (6, "F"), (7, "G")):
-            c = wl.cell(row=tr, column=j, value=f"=SUM({col}{first}:{col}{last})")
+            c = wl.cell(row=tot, column=j, value=f"=SUM({col}{first}:{col}{last})")
             c.number_format, c.font, c.border = NUM, Font(bold=True), TOP
         blocks.append({"fac": fac, "label": lab, "first": first, "last": last})
-        r = tr + 3
+        r = tot + 3
 
     # ---- the year view
     ncols = len(months) + 2
