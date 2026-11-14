@@ -615,6 +615,13 @@ with app.app_context():
     _res = E.run(E.normalise(CFModel.query.get(_mid).assumptions))
 check(_res["checks"]["balance_ok"] and _res["checks"]["cash_ok"], "the model balances and cash ties with the split")
 
+# =========================================================================== a forecast month without actuals still shows the balance sheet and the loans
+_lastm = M.fy_months(getdata())[-1]
+_pg = c.get(f"{BASE}/{pid}/balance?month={_lastm}").data.decode()
+check("No balance sheet for" not in _pg and "of which: loan facilities" in _pg and "no actual balance sheet" in _pg, f"year end ({_lastm}) shows the balance sheet from the forecast, with the loan rows")
+_mo = FL.statement_analysis(getdata())
+check(_mo is not None and any(r["label"] == "Loan facility borrowings" for r in _mo["balance"]["rows"]), "the loan card is still there")
+
 print()
 print("FAILURES:", len(fails))
 for m_ in fails:

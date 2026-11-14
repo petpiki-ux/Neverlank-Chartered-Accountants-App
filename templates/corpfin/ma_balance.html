@@ -6,11 +6,12 @@
     <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='balance', month=request.args.get('month'), var='0') }}" class="{{ 'on' if not var }}">Figures only</a>
   </div>
 </div>
-{% if bal.rows[0].a is none %}
+{% if bal.rows[0].a is none and bal.rows[0].f is none and bal.rows[0].b is none and bal.rows[0].lm is none %}
 <div class="card"><div class="empty-state">No balance sheet for {{ labels.month }}. Upload a trial balance, or enter closing balances when capturing the month by hand, on the <a href="{{ url_for('corpfin.pack_tab', pack_id=pack.id, tab='actuals') }}">Actuals</a> tab.</div></div>
 {% else %}
 <div class="card">
   <h3 style="margin-top:0;">Balance sheet &ndash; {{ labels.month }}</h3>
+  {% if bal.rows[0].a is none %}<p class="cf-sub" style="margin-top:0;">There is no actual balance sheet for {{ labels.month }} yet (no trial balance or closing balances captured). The Forecast column shows the position the forecast expects, including the loan facilities; the Actual column fills in when the month is captured.</p>{% endif %}
   {{ ma.balance_table(bal, var, labels) }}
   <p class="cf-sub">{{ cur }}. Forecast and budget balance sheets are available when they come from a forecast model. Retained earnings include the current year's profit.</p>
   {% if loan_an and loan_an.balance %}<p class="cf-sub">Where the books hold less borrowings than the loan facilities, the balance sheet records the difference: Borrowings is raised to the facilities' balance (the &ldquo;of which: loan facilities&rdquo; rows show it, current and non-current split included) and Retained earnings is reduced by the same amount (Dr Retained earnings, Cr Borrowings). The adjustment falls away once the books record the facilities. The Forecast column already follows the facilities.</p>{% endif %}
