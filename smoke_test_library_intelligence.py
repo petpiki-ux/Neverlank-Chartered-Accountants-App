@@ -263,6 +263,32 @@ body = "\n".join(p.text for p in d.paragraphs)
 check(r.status_code == 200 and "What to do next" in body and "Transfer pricing" in body and "Facts to confirm with the client" in body and "Sources" in body, "the advice memo has actions, topics, facts to confirm and sources")
 check("filename" in r.headers.get("Content-Disposition", "") and "advice" in r.headers["Content-Disposition"], "and is named as advice")
 
+# ---------------------------------------------------------------- a slow or dropped AI call gives a clear message
+class Boom:
+    class messages:
+        @staticmethod
+        def create(**k):
+            raise TimeoutError("Request timed out or interrupted. This could be due to a network timeout")
+LSE._client = lambda: Boom()
+with app.app_context():
+    st_, msg = LSE.advise("Value added tax rate\nIncome tax\nClient sells stands and charges VAT")
+    check(st_ == "error" and "took too long" in msg and "Traceback" not in msg and "network timeout" not in msg, "a timeout is reported as 'took too long ... try again', not a raw network error")
+    st_, msg = LSE.ask("A brand new question about the VAT rate on stands")
+    check(st_ == "error" and "took too long" in msg, "the same for a question")
+class WithOpts:
+    seen = {}
+    class messages:
+        @staticmethod
+        def create(**k):
+            raise TimeoutError("x")
+    def with_options(self, **kw):
+        WithOpts.seen.update(kw); return self
+LSE._client = lambda: WithOpts()
+with app.app_context():
+    LSE.advise("Value added tax rate\nIncome tax\nClient sells stands and charges VAT")
+    check(WithOpts.seen.get("max_retries") == 0 and WithOpts.seen.get("timeout") == LSE.ADVISE_TIMEOUT < 120, "the AI call has its own time limit under the server's 120 s and is not retried")
+    check(LSE.ASK_TIMEOUT < 120 and LSE.ADVISE_MAX_PASSAGES <= 18 and LSE.ADVISE_EXCERPT_CHARS <= 1500, "advice sends fewer, shorter passages than before")
+
 print()
 print("ALL PASSED" if not fails else f"{len(fails)} FAILED")
 sys.exit(1 if fails else 0)

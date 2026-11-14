@@ -1288,6 +1288,10 @@ def create_app():
 
     register_cli(app)
 
+    if os.environ.get("RENDER"):          # on the live service only: build the library search index now, not on someone's first search
+        import legislation_index
+        legislation_index.warm(app)
+
     return app
 
 

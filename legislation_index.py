@@ -309,6 +309,17 @@ def get_index():
     return _INDEX
 
 
+def warm(app):
+    """Build the search index in the background right after the app starts, so the first search after a deploy does not wait for it."""
+    def run():
+        try:
+            with app.app_context():
+                get_index()
+        except Exception:
+            pass
+    threading.Thread(target=run, name="library-index-warm", daemon=True).start()
+
+
 def invalidate():
     global _INDEX
     _INDEX = _Index()

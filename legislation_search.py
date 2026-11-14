@@ -55,8 +55,14 @@ import legislation_understand
 
 DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 REQUEST_TIMEOUT = 90
-MAX_CANDIDATES = 12  # how many passages from the filed updates get handed to the model as context
-EXCERPT_CHARS = 3000  # per-chunk slice included in the prompt
+# The web server gives a request 120 seconds in all, so the AI is given less than that, and is never retried on a timeout (a retry would
+# push the whole request over the limit and the person would see a raw network error instead of a clear message).
+ASK_TIMEOUT = 75
+ADVISE_TIMEOUT = 105
+MAX_CANDIDATES = 10  # how many passages from the filed updates get handed to the model as context
+EXCERPT_CHARS = 2200  # per-chunk slice included in the prompt
+ADVISE_EXCERPT_CHARS = 1500  # advice reads many topics at once, so each passage is shorter
+ADVISE_MAX_PASSAGES = 18
 FUZZY_MATCH_THRESHOLD = 0.88  # difflib ratio above which a cached question is treated as "the same question" for recall purposes
 
 _STOPWORDS = {
@@ -267,7 +273,24 @@ def _client():
     return anthropic.Anthropic(api_key=api_key, timeout=REQUEST_TIMEOUT)
 
 
-def _candidate_block(update, chunk=None, flags=None):
+def _with_limits(client, timeout):
+    """The same client with this call's own time limit and no automatic retry (the test doubles have no with_options, and are used as they are)."""
+    opt = getattr(client, "with_options", None)
+    return opt(timeout=timeout, max_retries=0) if callable(opt) else client
+
+
+def friendly_error(exc):
+    """A sentence a person can act on, instead of the raw network message."""
+    text = str(exc)
+    name = type(exc).__name__.lower()
+    if "timeout" in name or "timed out" in text.lower() or "interrupted" in text.lower() or "connection" in name:
+        return "The AI took too long to reply, so nothing was drafted. Try again; for a long description, send fewer topics at a time."
+    if "rate" in name and "limit" in name or "overloaded" in text.lower() or "529" in text:
+        return "The AI service is busy just now. Wait a moment and try again."
+    return text[:400]
+
+
+def _candidate_block(update, chunk=None, flags=None, chars=None):
     lines = [
         f"[Update #{update.id}] {update.title}",
         f"Type: {update.type_label}" + (f" ({update.tax_head})" if update.tax_head else ""),
@@ -302,9 +325,9 @@ def _candidate_block(update, chunk=None, flags=None):
         lines.append(("Key holdings: " if update.instrument_type == "Case" else "Key changes: ") + "; ".join(update.ai_key_changes))
     if chunk is not None:
         heading_note = f" ({chunk.heading})" if chunk.heading else ""
-        lines.append(f"Relevant excerpt from the filed document{heading_note}: {chunk.text[:EXCERPT_CHARS]}")
+        lines.append(f"Relevant excerpt from the filed document{heading_note}: {chunk.text[:chars or EXCERPT_CHARS]}")
     elif update.extracted_text:
-        lines.append(f"Excerpt from the filed document: {update.extracted_text[:EXCERPT_CHARS]}")
+        lines.append(f"Excerpt from the filed document: {update.extracted_text[:chars or EXCERPT_CHARS]}")
     return "\n".join(lines)
 
 
@@ -607,17 +630,17 @@ def ask(question, asked_by_id=None, history=None):
     )
 
     try:
-        client = _client()
+        client = _with_limits(_client(), ASK_TIMEOUT)
         response = client.messages.create(
             model=DEFAULT_MODEL,
-            max_tokens=2500,
+            max_tokens=1800,
             system=SYSTEM_PROMPT,
             tools=[ANSWER_TOOL],
             tool_choice={"type": "tool", "name": "answer_legislation_question"},
             messages=[{"role": "user", "content": user_message}],
         )
     except Exception as exc:
-        return "error", str(exc)[:2000]
+        return "error", friendly_error(exc)
 
     for block in response.content:
         if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == "answer_legislation_question":
@@ -695,7 +718,9 @@ ADVISE_PROMPT = (
     "(for example, costs borne by one company while the income is taxed in another), add a section for it, but only to the extent the "
     "excerpts touch it. Start with a one-or-two-sentence headline, then the summary. Finish with the next actions for the firm, "
     "most important first, and the facts to confirm. Write for a partner who will send this on: direct, no filler, no repetition between sections. "
-    "Put the 'Check:' notes that matter into watch_points. This is a draft for the partner's review, never a final opinion."
+    "Put the 'Check:' notes that matter into watch_points. Be brief so the memo is quick to produce: each finding at most about 80 words, at most 6 sections, "
+    "at most 5 next actions, at most 3 planning points per section, and key figures only where a rate, limit or date really decides the point. "
+    "This is a draft for the partner's review, never a final opinion."
 )
 
 
@@ -728,24 +753,24 @@ def advise(brief_text, asked_by_id=None):
         got, _ctx, _fl = legislation_understand.retrieve(brief_text, limit=10, per_doc=2)
         for pair in got:
             take(pair)
-        pairs = pairs[:26]
+        pairs = pairs[:ADVISE_MAX_PASSAGES]
         flags = legislation_understand.supersession_flags(list({u.id: u for u, _c in pairs}.values()))
     except Exception as exc:
         db.session.rollback()
         return "error", f"The search failed: {str(exc)[:300]}"
     if not pairs:
         return "no_candidates", None
-    context = "\n\n---\n\n".join(_candidate_block(u, c, flags) for u, c in pairs)
+    context = "\n\n---\n\n".join(_candidate_block(u, c, flags, ADVISE_EXCERPT_CHARS) for u, c in pairs)
     user_message = (f"The partner's description of the situation and the topics to cover:\n\n{brief_text}\n\n=====\n\n"
                     f"Excerpts from the firm's filed library:\n\n{context}")
     try:
-        client = _client()
+        client = _with_limits(_client(), ADVISE_TIMEOUT)
         response = client.messages.create(
-            model=DEFAULT_MODEL, max_tokens=5000, system=ADVISE_PROMPT, tools=[ADVISE_TOOL],
+            model=DEFAULT_MODEL, max_tokens=3600, system=ADVISE_PROMPT, tools=[ADVISE_TOOL],
             tool_choice={"type": "tool", "name": "advise_from_library"}, messages=[{"role": "user", "content": user_message}],
         )
     except Exception as exc:
-        return "error", str(exc)[:2000]
+        return "error", friendly_error(exc)
     by_id = {u.id: u for u, _c in pairs}
     text_by_id = {}
     for u, c in pairs:
