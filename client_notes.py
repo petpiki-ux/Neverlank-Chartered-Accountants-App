@@ -55,6 +55,37 @@ def prior_owner_loan_opening(engagement):
     return whole(sum(d.values())) if d else None
 
 
+import re as _re
+_OPENING_STOCK = _re.compile(r"\bopening\b.*\b(stock|stocks|inventory|inventories|work in progress|wip)\b|\b(stock|inventory)\b.*\b(opening|brought forward|b/f|1 (jan|july))", _re.I)
+_CLOSING_STOCK = _re.compile(r"\bclosing\b.*\b(stock|stocks|inventory|inventories|work in progress|wip)\b|\b(stock|inventory)\b.*\b(closing|carried forward|c/f|at (31|30))", _re.I)
+_PRODUCTION_WORDS = _re.compile(r"\b(plant|factory|manufactur\w*|production|direct labou?r|workshop|machine\w*|raw materials?)\b", _re.I)
+
+
+def _pretty(name):
+    """An account name as the firm prints it in a note: each word starts with a capital (acronyms kept), '(contra)' and other brackets dropped."""
+    n = _re.sub(r"\([^)]*\)", " ", name or "")
+    return " ".join(w[:1].upper() + w[1:] for w in n.split())
+
+
+def _production_layout(note, headers):
+    """The Cost of production note: Opening Stock first, the other cost accounts in trial balance order, Closing Stock last (in brackets, a
+    deduction), a rule under it and the total. Only for a cost of sales that carries stock accounts (a trader with one 'Cost of sales' account
+    keeps the plain list). Titled 'Cost of production' when the accounts are a manufacturer's (plant, factory, direct labour ...), else 'Cost of sales'."""
+    rows = note.get("accounts") or []
+    opening = [a for a in rows if _OPENING_STOCK.search(a["account_name"] or "")]
+    closing = [a for a in rows if _CLOSING_STOCK.search(a["account_name"] or "") and a not in opening]
+    if not opening and not closing:
+        return None
+    middle = [a for a in rows if a not in opening and a not in closing]
+    lines = [{"label": _pretty(a["account_name"]), "cur": a["current"], "pri": a["prior"], "style": "row"} for a in opening + middle + closing]
+    if closing:
+        lines[-1]["style"] = "under"                 # the rule under the last line, as the firm prints it
+    lines.append({"label": "", "cur": None, "pri": None, "style": "gap"})
+    lines.append({"label": "", "cur": note["total"]["current"], "pri": note["total"]["prior"], "style": "end"})
+    title = "Cost of production" if any(_PRODUCTION_WORDS.search(a["account_name"] or "") for a in rows) else None
+    return {"headers": headers, "lines": lines, "check": False}, title
+
+
 def _loan_lines(loans, openings):
     """Rows of the Shareholder Loans note. One loan account: Opening Balance, Shareholder Funding, closing. Several (one account per
     shareholder): a block per shareholder, then the total of all of them. A line is {"label", "cur", "pri", "style"}, style one of
@@ -99,6 +130,13 @@ def attach_client_notes(statements, engagement, prior_opening="lookup"):
     headers = year_headers(engagement, client)
     statements["year_labels"] = headers
     for note in statements["notes"]:
+        if note["title"] in ("Cost of sales", "Cost of production") and not note.get("movement"):
+            made = _production_layout(note, headers)
+            if made:
+                note["share_layout"] = made[0]            # the generic label-and-two-years layout the Word pack and the Finalisation tab already draw
+                if made[1]:
+                    note["title"] = made[1]
+            continue
         loans = [a for a in note.get("accounts") or [] if _is_owner_loan(a["account_name"])]
         if loans and not note.get("movement"):
             if prior_opening == "lookup":

@@ -5071,7 +5071,7 @@
     {% endif %}
 
 {% set yl = statements.year_labels or ['Current year', 'Prior year'] %}
-    {% macro fmtv(v) %}{% if v is none or v|abs < 0.5 %}-{% else %}{{ '%.0f'|format(v) }}{% endif %}{% endmacro %}
+    {% macro fmtv(v) %}{% if v is none or v|abs < 0.5 %}-{% elif v < 0 %}({{ '{:,.0f}'.format(-v) }}){% else %}{{ '{:,.0f}'.format(v) }}{% endif %}{% endmacro %}
     {% macro lines_table(ll) %}
     <table style="max-width:640px;border:0;">
       <thead><tr><th style="width:56%;"></th>{% for h in ll.headers %}<th class="text-right" style="width:22%;white-space:pre-line;">{{ h.replace(' ', '\n', 1) }}</th>{% endfor %}</tr></thead>
@@ -5079,7 +5079,7 @@
       {% for ln in ll.lines %}
         {% if ln.style == 'gap' %}<tr><td colspan="3" style="border:0;height:8px;"></td></tr>
         {% elif ln.style == 'head' %}<tr><td colspan="3" style="border:0;"><strong>{{ ln.label }}</strong></td></tr>
-        {% else %}{% set deco = {'sub': 'border-top:1px solid #222;', 'total': 'border-top:1px solid #222;border-bottom:4px double #222;', 'double': 'border-bottom:4px double #222;'}.get(ln.style, '') %}
+        {% else %}{% set deco = {'sub': 'border-top:1px solid #222;', 'total': 'border-top:1px solid #222;border-bottom:4px double #222;', 'double': 'border-bottom:4px double #222;', 'under': 'border-bottom:1px solid #222;', 'end': 'border-bottom:1px solid #222;'}.get(ln.style, '') %}
         <tr><td style="border:0;">{{ ln.label }}</td><td class="text-right" style="border:0;{{ deco }}">{{ fmtv(ln.cur) }}</td><td class="text-right" style="border:0;{{ deco }}">{{ fmtv(ln.pri) }}</td></tr>
         {% endif %}
       {% endfor %}

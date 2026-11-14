@@ -578,6 +578,8 @@ def _plain_note_table(doc, headers, fractions):
                 brand.cell_borders(row[i], top=("single", 6, "000000"), bottom=("double", 12, "000000"))
             if i and rule == "double_only":
                 brand.cell_borders(row[i], bottom=("double", 12, "000000"))
+            if i and rule in ("under", "end"):
+                brand.cell_borders(row[i], bottom=("single", 6, "000000"))
         return row
     _col_widths(doc, table, fractions)
     brand.table_cell_margins(table)          # the same cell padding, centring and type size as the other note tables, so the figures line up
@@ -602,7 +604,7 @@ def _lines_layout(doc, lay):
         elif st == "head":
             add([ln["label"], "", ""], bold=True)
         else:
-            rule = {"sub": "single", "total": "double", "double": "double_only"}.get(st)
+            rule = {"sub": "single", "total": "double", "double": "double_only", "under": "under", "end": "end"}.get(st)
             add([ln["label"], _dash(ln["cur"]), _dash(ln["pri"])], rule=rule)
     if lay.get("after"):
         para = doc.add_paragraph(lay["after"])
