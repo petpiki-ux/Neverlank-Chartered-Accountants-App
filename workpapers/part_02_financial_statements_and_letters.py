@@ -63,7 +63,8 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         # of trial balance accounts - condensed IAS 16.73(e) presentation:
         # one row per asset class reconciling opening to closing NBV.
         _add_heading(doc, title, level=level)
-        headers = ["Asset class", "Opening NBV", "Additions", "Disposals", "Depreciation charge", "Closing NBV"]
+        has_reval = abs((note["movement_total"].get("revaluation") or 0.0)) >= 0.5
+        headers = ["Asset class", "Opening NBV", "Additions", "Disposals"] + (["Revaluation"] if has_reval else []) + ["Depreciation charge", "Closing NBV"]
         table = doc.add_table(rows=1, cols=len(headers))
         for i, h in enumerate(headers):
             table.rows[0].cells[i].text = h
@@ -74,6 +75,10 @@ def build_financial_statements_docx(engagement, statements, financial_statements
             values = [
                 label, _fmt_whole(row["opening_nbv"]), _fmt_whole(row["additions"]),
                 _fmt_whole(-disposals_nbv) if disposals_nbv else _fmt_whole(0),
+            ]
+            if has_reval:
+                values.append(_fmt_whole(row.get("revaluation") or 0.0))
+            values += [
                 _fmt_whole(-row["charge"]) if row["charge"] else _fmt_whole(0),
                 _fmt_whole(row["closing_nbv"]),
             ]
@@ -88,8 +93,48 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         for row in note["movement"]:
             add_row(row["class_name"], row)
         add_row("Total", note["movement_total"], bold=True)
-        _col_widths(doc, table, [0.25, 0.15, 0.15, 0.15, 0.16, 0.14])
+        _col_widths(doc, table, [0.22, 0.13, 0.13, 0.13, 0.13, 0.13, 0.13] if has_reval else [0.25, 0.15, 0.15, 0.15, 0.16, 0.14])
         _right_align(table, first_col=1)
+
+        rv = note.get("revaluation_note")
+        if rv:
+            # IAS 16.77: the date, the valuer and the basis, the carrying amount had the cost model been used, and the reserve's movement.
+            doc.add_paragraph()
+            for text in rv["paragraphs"]:
+                doc.add_paragraph(text)
+            t2 = doc.add_table(rows=1, cols=5)
+            for i, h in enumerate(["Revalued class", "Carrying amount before revaluation", "Revalued amount", "Surplus / (deficit)", "Cost model carrying amount"]):
+                t2.rows[0].cells[i].text = h
+            _style_table(t2)
+            for cl in rv["classes"] + [dict(rv["totals"], class_name="Total")]:
+                cells = t2.add_row().cells
+                for i, v in enumerate([cl["class_name"], _fmt_whole(cl["carrying_before"]), _fmt_whole(cl["fair_value"]), _fmt_whole(cl["change"]), _fmt_whole(cl["cost_model"])]):
+                    cells[i].text = v
+                    if cl["class_name"] == "Total":
+                        for p in cells[i].paragraphs:
+                            for run in p.runs:
+                                run.bold = True
+            _col_widths(doc, t2, [0.28, 0.18, 0.18, 0.18, 0.18])
+            _right_align(t2, first_col=1)
+            doc.add_paragraph()
+            doc.add_paragraph("Movement in the revaluation reserve").runs[0].bold = True
+            t3 = doc.add_table(rows=1, cols=2)
+            t3.rows[0].cells[0].text, t3.rows[0].cells[1].text = "", "Revaluation reserve"
+            _style_table(t3)
+            res = rv["reserve"]
+            for label, v, bold in [("Balance at the start of the year", res["opening"], False),
+                                   ("Revaluation surplus/(deficit) recognised in other comprehensive income", res["surplus"], False),
+                                   ("Deferred tax on the revaluation", res["deferred_tax"], False),
+                                   ("Balance at the end of the year", res["closing"], True)]:
+                cells = t3.add_row().cells
+                cells[0].text, cells[1].text = label, _fmt_whole(v)
+                if bold:
+                    for c_ in cells:
+                        for p in c_.paragraphs:
+                            for run in p.runs:
+                                run.bold = True
+            _col_widths(doc, t3, [0.75, 0.25])
+            _right_align(t3, first_col=1)
 
         rec = note.get("reconciliation")
         if rec:
@@ -546,17 +591,27 @@ def build_asset_schedules_xlsx(engagement, ctx, ca):
     # 4. Asset Register schedule
     w4 = wb.create_sheet("Asset Register schedule")
     w4.cell(row=6, column=1, value=f"Asset Register - year ended {_fmt_date(engagement.period_end)}").font = Font(bold=True, size=12, color=_GOLD_HEX)
-    r4 = _header_row(w4, 7, ["Asset class", "Cost b/f", "Additions", "Disposals", "Cost c/f", "Acc. depreciation b/f", "Charge for the year",
-                             "Depreciation on disposals", "Acc. depreciation c/f", "NBV b/f", "NBV c/f"])
     mv = ctx["as_movement"]
+    has_reval = bool(mv and abs(mv["total"].get("revaluation") or 0.0) >= 0.5)
+    heads = ["Asset class", "Cost b/f", "Additions", "Disposals"] + (["Revaluation of cost"] if has_reval else []) + ["Cost c/f", "Acc. depreciation b/f", "Charge for the year",
+             "Depreciation on disposals"] + (["Eliminated on revaluation"] if has_reval else []) + ["Acc. depreciation c/f", "NBV b/f", "NBV c/f"]
+    r4 = _header_row(w4, 7, heads)
+
+    def reg_values(label, r):
+        v = [label, r["opening_cost"], r["additions"], -r["disposals_cost"]]
+        if has_reval:
+            v.append(r.get("revaluation_cost") or 0.0)
+        v += [r["closing_cost"], r["opening_acc_dep"], r["charge"], -r["disposals_acc_dep"]]
+        if has_reval:
+            v.append(-(r.get("revaluation_acc_dep") or 0.0))
+        v += [r["closing_acc_dep"], r["opening_nbv"], r["closing_nbv"]]
+        return v
+
     if mv:
         for r in mv["by_class"]:
-            r4 = put(w4, r4, [r["class_name"], r["opening_cost"], r["additions"], -r["disposals_cost"], r["closing_cost"], r["opening_acc_dep"],
-                              r["charge"], -r["disposals_acc_dep"], r["closing_acc_dep"], r["opening_nbv"], r["closing_nbv"]], numeric_from=2)
-        t = mv["total"]
-        put(w4, r4, ["Total", t["opening_cost"], t["additions"], -t["disposals_cost"], t["closing_cost"], t["opening_acc_dep"], t["charge"],
-                     -t["disposals_acc_dep"], t["closing_acc_dep"], t["opening_nbv"], t["closing_nbv"]], bold=True, numeric_from=2)
-    _autofit(w4, [28] + [16] * 10)
+            r4 = put(w4, r4, reg_values(r["class_name"], r), numeric_from=2)
+        put(w4, r4, reg_values("Total", mv["total"]), bold=True, numeric_from=2)
+    _autofit(w4, [28] + [16] * (len(heads) - 1))
 
     # 5. Capital Allowance Schedule
     w5 = wb.create_sheet("Capital allowances")

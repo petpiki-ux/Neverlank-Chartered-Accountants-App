@@ -1,4 +1,4 @@
-"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting.
+"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine.
 
 See __init__.py: all parts share one set of names, exactly as the single file models.py did."""
 
@@ -175,3 +175,46 @@ class CoverSetting(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     __table_args__ = (db.UniqueConstraint("kind", "ref_id", name="uq_cover_setting"),)
+
+
+class PPERevaluation(db.Model):
+    """The independent revaluation of an engagement's property, plant and equipment at the year end (ppe_revaluation.py): who valued, on what
+    basis, as at when, and whether it has been applied. While `status` is "Draft" nothing in the statements changes; "Applied" means the REVAL
+    journal is on the trial balance and the Asset Register / PPE note carry the revalued amounts. One per engagement."""
+    __tablename__ = "ppe_revaluation"
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True, index=True)
+    valuation_date = db.Column(db.Date)
+    valuer_name = db.Column(db.String(200))
+    valuer_qualification = db.Column(db.String(200))            # e.g. professional body and registration number
+    report_reference = db.Column(db.String(120))
+    report_date = db.Column(db.Date)
+    basis = db.Column(db.String(80))                            # fair value: market value / depreciated replacement cost / ...
+    independent = db.Column(db.Boolean, default=True)
+    policy_confirmed = db.Column(db.Boolean, default=False)     # the revaluation model is adopted for the whole of each class revalued (IAS 16.36)
+    method_note = db.Column(db.Text)                            # methods and significant assumptions (IAS 16.77)
+    status = db.Column(db.String(12), default="Draft")
+    applied_at = db.Column(db.DateTime)
+    applied_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    lines = db.relationship("PPERevaluationLine", backref="revaluation", cascade="all, delete-orphan", order_by="PPERevaluationLine.order")
+    applied_by = db.relationship("User", foreign_keys=[applied_by_id])
+
+
+class PPERevaluationLine(db.Model):
+    """One asset's fair value from the valuer's report. `prior_reserve` is the revaluation surplus already held for this asset from an
+    earlier valuation and `prior_deficit_pl` an earlier revaluation decrease charged to profit or loss: they decide where this valuation's
+    increase or decrease goes (IAS 16.39 and 16.40). `dt_rate` is the deferred tax rate (percent) on the surplus."""
+    __tablename__ = "ppe_revaluation_line"
+    id = db.Column(db.Integer, primary_key=True)
+    revaluation_id = db.Column(db.Integer, db.ForeignKey("ppe_revaluation.id"), nullable=False, index=True)
+    asset_id = db.Column(db.Integer, db.ForeignKey("ppe_asset.id"), nullable=False)
+    fair_value = db.Column(db.Float)
+    prior_reserve = db.Column(db.Float, default=0.0)
+    prior_deficit_pl = db.Column(db.Float, default=0.0)
+    dt_rate = db.Column(db.Float)
+    order = db.Column(db.Integer, default=0)
+
+    asset = db.relationship("PPEAsset", foreign_keys=[asset_id])

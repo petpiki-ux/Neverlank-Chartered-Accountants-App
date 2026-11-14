@@ -94,7 +94,7 @@ def _add_ppe(bucket, name, net, by=None):
 
 
 # ---- asset classes: the trial balance names them in its accounts ('Motor vehicles - cost'), the register in its asset classes
-_PARENS = re.compile(r"\(\s*(per|restated to)[^)]*asset register\s*\)", re.I)
+_PARENS = re.compile(r"\(\s*(per|restated to)[^)]*asset register\s*\)|\(\s*(revaluation|eliminated on revaluation)\s*\)", re.I)
 _DEP_WORDS = re.compile(r"\b(depreciation|depn?|charge|expenses?|for\s+the\s+year|amorti[sz]ation)\b", re.I)
 
 

@@ -225,28 +225,29 @@
 <div class="card" id="schedule">
   <h3 class="mt-0">4. Asset Register schedule{% if as_period_end %} - year ended {{ as_period_end.strftime('%d %B %Y') }}{% endif %}</h3>
   {% if as_movement %}
+  {% set rvon = (as_movement.total.revaluation or 0)|abs >= 0.5 %}
   <div style="overflow-x:auto;">
   <table style="font-size:12px;">
     <thead>
-      <tr><th rowspan="2">Asset class</th><th colspan="4" class="text-right">Cost</th><th colspan="4" class="text-right">Accumulated depreciation</th><th colspan="2" class="text-right">Net book value</th></tr>
-      <tr><th class="text-right">b/f</th><th class="text-right">Additions</th><th class="text-right">Disposals</th><th class="text-right">c/f</th>
-          <th class="text-right">b/f</th><th class="text-right">Charge</th><th class="text-right">Disposals</th><th class="text-right">c/f</th>
+      <tr><th rowspan="2">Asset class</th><th colspan="{{ 5 if rvon else 4 }}" class="text-right">Cost</th><th colspan="{{ 5 if rvon else 4 }}" class="text-right">Accumulated depreciation</th><th colspan="2" class="text-right">Net book value</th></tr>
+      <tr><th class="text-right">b/f</th><th class="text-right">Additions</th><th class="text-right">Disposals</th>{% if rvon %}<th class="text-right">Revaluation</th>{% endif %}<th class="text-right">c/f</th>
+          <th class="text-right">b/f</th><th class="text-right">Charge</th><th class="text-right">Disposals</th>{% if rvon %}<th class="text-right">Eliminated on revaluation</th>{% endif %}<th class="text-right">c/f</th>
           <th class="text-right">b/f</th><th class="text-right">c/f</th></tr>
     </thead>
     <tbody>
     {% for r in as_movement.by_class %}
       <tr>
         <td>{{ r.class_name }}</td>
-        <td class="text-right">{{ '%.2f'|format(r.opening_cost) }}</td><td class="text-right">{{ '%.2f'|format(r.additions) }}</td><td class="text-right">{{ '%.2f'|format(-r.disposals_cost) }}</td><td class="text-right">{{ '%.2f'|format(r.closing_cost) }}</td>
-        <td class="text-right">{{ '%.2f'|format(r.opening_acc_dep) }}</td><td class="text-right">{{ '%.2f'|format(r.charge) }}</td><td class="text-right">{{ '%.2f'|format(-r.disposals_acc_dep) }}</td><td class="text-right">{{ '%.2f'|format(r.closing_acc_dep) }}</td>
+        <td class="text-right">{{ '%.2f'|format(r.opening_cost) }}</td><td class="text-right">{{ '%.2f'|format(r.additions) }}</td><td class="text-right">{{ '%.2f'|format(-r.disposals_cost) }}</td>{% if rvon %}<td class="text-right">{{ '%.2f'|format(r.revaluation_cost) }}</td>{% endif %}<td class="text-right">{{ '%.2f'|format(r.closing_cost) }}</td>
+        <td class="text-right">{{ '%.2f'|format(r.opening_acc_dep) }}</td><td class="text-right">{{ '%.2f'|format(r.charge) }}</td><td class="text-right">{{ '%.2f'|format(-r.disposals_acc_dep) }}</td>{% if rvon %}<td class="text-right">{{ '%.2f'|format(-r.revaluation_acc_dep) }}</td>{% endif %}<td class="text-right">{{ '%.2f'|format(r.closing_acc_dep) }}</td>
         <td class="text-right">{{ '%.2f'|format(r.opening_nbv) }}</td><td class="text-right">{{ '%.2f'|format(r.closing_nbv) }}</td>
       </tr>
     {% endfor %}
       {% set t = as_movement.total %}
       <tr>
         <td><strong>Total</strong></td>
-        <td class="text-right"><strong>{{ '%.2f'|format(t.opening_cost) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.additions) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(-t.disposals_cost) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.closing_cost) }}</strong></td>
-        <td class="text-right"><strong>{{ '%.2f'|format(t.opening_acc_dep) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.charge) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(-t.disposals_acc_dep) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.closing_acc_dep) }}</strong></td>
+        <td class="text-right"><strong>{{ '%.2f'|format(t.opening_cost) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.additions) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(-t.disposals_cost) }}</strong></td>{% if rvon %}<td class="text-right"><strong>{{ '%.2f'|format(t.revaluation_cost) }}</strong></td>{% endif %}<td class="text-right"><strong>{{ '%.2f'|format(t.closing_cost) }}</strong></td>
+        <td class="text-right"><strong>{{ '%.2f'|format(t.opening_acc_dep) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.charge) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(-t.disposals_acc_dep) }}</strong></td>{% if rvon %}<td class="text-right"><strong>{{ '%.2f'|format(-t.revaluation_acc_dep) }}</strong></td>{% endif %}<td class="text-right"><strong>{{ '%.2f'|format(t.closing_acc_dep) }}</strong></td>
         <td class="text-right"><strong>{{ '%.2f'|format(t.opening_nbv) }}</strong></td><td class="text-right"><strong>{{ '%.2f'|format(t.closing_nbv) }}</strong></td>
       </tr>
     </tbody>
@@ -434,3 +435,5 @@
   {% endif %}
   {% endif %}
 </div>
+
+{% include "engagements/_ppe_revaluation.html" %}

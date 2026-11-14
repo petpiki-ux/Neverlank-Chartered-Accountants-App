@@ -12,6 +12,17 @@ def _ppe_movement_and_policy(class_dicts, asset_dicts, period_end):
     built, rather than re-querying, since callers usually need both."""
     ppe_movement = fin.build_ppe_movement_schedule(class_dicts, asset_dicts, period_end)
     ppe_policy_text = fin.ppe_accounting_policy_text(class_dicts)
+    # An applied revaluation (ppe_revaluation.py): its IAS 16.77 disclosures ride on the movement, and its policy paragraph is added
+    # to the depreciation policy (class dicts carry the engagement id and a "revalued" flag from _ppe_plain_data).
+    engagement_id = next((c.get("engagement_id") for c in class_dicts if c.get("engagement_id")), None)
+    if engagement_id and any(a.get("revalued_to") is not None for a in asset_dicts):
+        import ppe_revaluation
+        note = ppe_revaluation.note_for(engagement_id)
+        if note is not None and ppe_movement is not None:
+            ppe_movement["revaluation_note"] = note
+        extra = ppe_revaluation.policy_paragraphs(engagement_id)
+        if extra and ppe_policy_text is not None:
+            ppe_policy_text = fin.add_revaluation_policy(ppe_policy_text, extra)
     return ppe_movement, ppe_policy_text
 
 

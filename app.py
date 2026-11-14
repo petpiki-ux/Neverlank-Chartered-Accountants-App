@@ -936,6 +936,8 @@ def create_app():
     app.register_blueprint(assetsched_bp)
     app.register_blueprint(assetimp_bp)
     app.register_blueprint(assetrecon_bp)
+    from ppe_revaluation import ppereval_bp
+    app.register_blueprint(ppereval_bp)
     app.register_blueprint(tbyear_bp)
     app.register_blueprint(tbalign_bp)
     app.register_blueprint(cfprior_bp)

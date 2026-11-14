@@ -1082,13 +1082,17 @@ def _ppe_plain_data(engagement_id):
     with the rest of financials.py."""
     classes = PPEAssetClass.query.filter_by(engagement_id=engagement_id).order_by(PPEAssetClass.order, PPEAssetClass.id).all()
     assets = PPEAsset.query.filter_by(engagement_id=engagement_id).order_by(PPEAsset.order, PPEAsset.id).all()
+    import ppe_revaluation
+    revalued = ppe_revaluation.applied_values(engagement_id)            # {asset id: fair value} once a revaluation is applied
+    revalued_classes = ppe_revaluation.revalued_class_ids(engagement_id)
     class_dicts = [
         {"id": c.id, "name": c.name, "depreciation_method": c.depreciation_method,
-         "rate_percent": c.rate_percent, "useful_life_years": c.useful_life_years}
+         "rate_percent": c.rate_percent, "useful_life_years": c.useful_life_years,
+         "revalued": c.id in revalued_classes, "engagement_id": engagement_id}
         for c in classes
     ]
     asset_dicts = [
-        {"asset_class_id": a.asset_class_id, "cost": a.cost or 0.0,
+        {"asset_class_id": a.asset_class_id, "cost": a.cost or 0.0, "revalued_to": revalued.get(a.id),
          "opening_accumulated_depreciation": a.opening_accumulated_depreciation or 0.0,
          "current_year_depreciation": a.current_year_depreciation or 0.0,
          "disposal_cost": a.disposal_cost or 0.0,

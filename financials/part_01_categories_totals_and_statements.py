@@ -343,7 +343,8 @@ def round_totals_balanced(raw):
 
 
 _PPE_MOVEMENT_KEYS = ("opening_cost", "additions", "disposals_cost", "closing_cost", "opening_acc_dep", "charge",
-                      "disposals_acc_dep", "closing_acc_dep", "opening_nbv", "closing_nbv")
+                      "disposals_acc_dep", "closing_acc_dep", "opening_nbv", "closing_nbv",
+                      "revaluation_cost", "revaluation_acc_dep", "revaluation")
 
 
 def round_ppe_movement(mv):
@@ -353,8 +354,9 @@ def round_ppe_movement(mv):
 
     def fix(src):
         r = {k: whole(src.get(k)) for k in _PPE_MOVEMENT_KEYS}
-        r["closing_cost"] = r["opening_cost"] + r["additions"] - r["disposals_cost"]
-        r["closing_acc_dep"] = r["opening_acc_dep"] + r["charge"] - r["disposals_acc_dep"]
+        r["revaluation"] = r["revaluation_cost"] + r["revaluation_acc_dep"]
+        r["closing_cost"] = r["opening_cost"] + r["additions"] - r["disposals_cost"] + r["revaluation_cost"]
+        r["closing_acc_dep"] = r["opening_acc_dep"] + r["charge"] - r["disposals_acc_dep"] - r["revaluation_acc_dep"]
         r["opening_nbv"] = r["opening_cost"] - r["opening_acc_dep"]
         r["closing_nbv"] = r["closing_cost"] - r["closing_acc_dep"]
         return r
@@ -365,7 +367,10 @@ def round_ppe_movement(mv):
         new.update(fix(row))
         by_class.append(new)
     total = {k: sum(r[k] for r in by_class) for k in _PPE_MOVEMENT_KEYS}
-    return {"by_class": by_class, "total": total}
+    out = {"by_class": by_class, "total": total}
+    if mv.get("revaluation_note"):
+        out["revaluation_note"] = mv["revaluation_note"]
+    return out
 
 
 def _row(label, current, prior=None, bold=False, memo=False, category=None):
@@ -492,9 +497,11 @@ def build_equity_statement(totals, pl):
         else:
             opening = t[code]["prior"]
             closing = t[code]["current"]
+            oci = (pl["total_comprehensive_income"]["current"] - pl["profit_for_year"]["current"]) if code == "other_reserves" else 0.0
             row = {
                 "label": label, "opening": opening, "movement": closing - opening,
-                "movement_desc": "Movement during the year", "closing": closing,
+                "movement_desc": ("Other comprehensive income for the year (net of deferred tax)" if abs(oci) >= 0.5 else "Movement during the year"),
+                "closing": closing,
             }
         total_opening += opening
         total_closing += closing

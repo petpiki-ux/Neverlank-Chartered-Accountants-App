@@ -1,0 +1,25 @@
+{# Revaluation disclosures under the Property, plant and equipment note (IAS 16.77). Context: `note` (the PPE note, with note.revaluation_note from ppe_revaluation.note_for()). #}
+{% set rvn = note.revaluation_note %}
+{% if rvn %}
+<div style="margin:8px 0;">
+  {% for para in rvn.paragraphs %}<p>{{ para }}</p>{% endfor %}
+  <table>
+    <thead><tr><th>Revalued class</th><th class="text-right">Carrying amount before revaluation</th><th class="text-right">Revalued amount</th><th class="text-right">Surplus / (deficit)</th><th class="text-right">Cost model carrying amount</th></tr></thead>
+    <tbody>
+      {% for c in rvn.classes %}
+      <tr><td>{{ c.class_name }}</td><td class="text-right">{{ '%.0f'|format(c.carrying_before) }}</td><td class="text-right">{{ '%.0f'|format(c.fair_value) }}</td><td class="text-right">{{ '%.0f'|format(c.change) }}</td><td class="text-right">{{ '%.0f'|format(c.cost_model) }}</td></tr>
+      {% endfor %}
+      <tr><td><strong>Total</strong></td><td class="text-right"><strong>{{ '%.0f'|format(rvn.totals.carrying_before) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(rvn.totals.fair_value) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(rvn.totals.change) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(rvn.totals.cost_model) }}</strong></td></tr>
+    </tbody>
+  </table>
+  <p style="margin-top:10px;"><strong>Movement in the revaluation reserve</strong></p>
+  <table>
+    <tbody>
+      <tr><td>Balance at the start of the year</td><td class="text-right">{{ '%.0f'|format(rvn.reserve.opening) }}</td></tr>
+      <tr><td>Revaluation surplus/(deficit) recognised in other comprehensive income</td><td class="text-right">{{ '%.0f'|format(rvn.reserve.surplus) }}</td></tr>
+      <tr><td>Deferred tax on the revaluation</td><td class="text-right">{{ '%.0f'|format(rvn.reserve.deferred_tax) }}</td></tr>
+      <tr><td><strong>Balance at the end of the year</strong></td><td class="text-right"><strong>{{ '%.0f'|format(rvn.reserve.closing) }}</strong></td></tr>
+    </tbody>
+  </table>
+</div>
+{% endif %}

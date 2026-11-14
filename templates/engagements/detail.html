@@ -398,7 +398,7 @@
       <div style="margin-top:14px;">
         <h4 style="margin-bottom:4px;">Movement schedule preview (feeds the PPE note)</h4>
         <table style="font-size:12px;">
-          <thead><tr><th>Asset class</th><th class="text-right">Opening NBV</th><th class="text-right">Additions</th><th class="text-right">Disposals</th><th class="text-right">Depreciation charge</th><th class="text-right">Closing NBV</th></tr></thead>
+          <thead><tr><th>Asset class</th><th class="text-right">Opening NBV</th><th class="text-right">Additions</th><th class="text-right">Disposals</th>{% if (ppe_movement.total.revaluation or 0)|abs >= 0.5 %}<th class="text-right">Revaluation</th>{% endif %}<th class="text-right">Depreciation charge</th><th class="text-right">Closing NBV</th></tr></thead>
           <tbody>
           {% for r in ppe_movement.by_class %}
             <tr>
@@ -406,6 +406,7 @@
               <td class="text-right">{{ '%.2f'|format(r.opening_nbv) }}</td>
               <td class="text-right">{{ '%.2f'|format(r.additions) }}</td>
               <td class="text-right">{{ '%.2f'|format(-(r.disposals_cost - r.disposals_acc_dep)) if r.disposals_cost or r.disposals_acc_dep else '0.00' }}</td>
+              {% if (ppe_movement.total.revaluation or 0)|abs >= 0.5 %}<td class="text-right">{{ '%.2f'|format(r.revaluation or 0) }}</td>{% endif %}
               <td class="text-right">{{ '%.2f'|format(-r.charge) if r.charge else '0.00' }}</td>
               <td class="text-right">{{ '%.2f'|format(r.closing_nbv) }}</td>
             </tr>
@@ -415,6 +416,7 @@
               <td class="text-right"><strong>{{ '%.2f'|format(ppe_movement.total.opening_nbv) }}</strong></td>
               <td class="text-right"><strong>{{ '%.2f'|format(ppe_movement.total.additions) }}</strong></td>
               <td class="text-right"><strong>{{ '%.2f'|format(-(ppe_movement.total.disposals_cost - ppe_movement.total.disposals_acc_dep)) if ppe_movement.total.disposals_cost or ppe_movement.total.disposals_acc_dep else '0.00' }}</strong></td>
+              {% if (ppe_movement.total.revaluation or 0)|abs >= 0.5 %}<td class="text-right"><strong>{{ '%.2f'|format(ppe_movement.total.revaluation or 0) }}</strong></td>{% endif %}
               <td class="text-right"><strong>{{ '%.2f'|format(-ppe_movement.total.charge) if ppe_movement.total.charge else '0.00' }}</strong></td>
               <td class="text-right"><strong>{{ '%.2f'|format(ppe_movement.total.closing_nbv) }}</strong></td>
             </tr>
@@ -5094,7 +5096,7 @@
     {% elif note.movement %}
     <p class="muted" style="font-size:11.5px;">From the Asset Register (Substantive Procedures &gt; Property, Plant and Equipment) rather than the trial balance account list.</p>
     <table>
-      <thead><tr><th>Asset class</th><th class="text-right">Opening NBV</th><th class="text-right">Additions</th><th class="text-right">Disposals</th><th class="text-right">Depreciation charge</th><th class="text-right">Closing NBV</th></tr></thead>
+      <thead><tr><th>Asset class</th><th class="text-right">Opening NBV</th><th class="text-right">Additions</th><th class="text-right">Disposals</th>{% if (note.movement_total.revaluation or 0)|abs >= 0.5 %}<th class="text-right">Revaluation</th>{% endif %}<th class="text-right">Depreciation charge</th><th class="text-right">Closing NBV</th></tr></thead>
       <tbody>
         {% for r in note.movement %}
         <tr>
@@ -5102,6 +5104,7 @@
           <td class="text-right">{{ '%.0f'|format(r.opening_nbv) }}</td>
           <td class="text-right">{{ '%.0f'|format(r.additions) }}</td>
           <td class="text-right">{{ '%.0f'|format(-(r.disposals_cost - r.disposals_acc_dep)) if r.disposals_cost or r.disposals_acc_dep else '0' }}</td>
+          {% if (note.movement_total.revaluation or 0)|abs >= 0.5 %}<td class="text-right">{{ '%.0f'|format(r.revaluation or 0) }}</td>{% endif %}
           <td class="text-right">{{ '%.0f'|format(-r.charge) if r.charge else '0' }}</td>
           <td class="text-right">{{ '%.0f'|format(r.closing_nbv) }}</td>
         </tr>
@@ -5111,11 +5114,13 @@
           <td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.opening_nbv) }}</strong></td>
           <td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.additions) }}</strong></td>
           <td class="text-right"><strong>{{ '%.0f'|format(-(note.movement_total.disposals_cost - note.movement_total.disposals_acc_dep)) if note.movement_total.disposals_cost or note.movement_total.disposals_acc_dep else '0' }}</strong></td>
+          {% if (note.movement_total.revaluation or 0)|abs >= 0.5 %}<td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.revaluation or 0) }}</strong></td>{% endif %}
           <td class="text-right"><strong>{{ '%.0f'|format(-note.movement_total.charge) if note.movement_total.charge else '0' }}</strong></td>
           <td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.closing_nbv) }}</strong></td>
         </tr>
       </tbody>
     </table>
+    {% include "engagements/_ppe_note_revaluation.html" %}
     {% if note.reconciliation %}
     {% set rec = note.reconciliation %}
     <p class="muted" style="font-size:11.5px;{% if not rec.ties_out %}color:#B02A2A;{% endif %}">

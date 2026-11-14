@@ -2,7 +2,7 @@
 
 See __init__.py: all parts share one set of names, exactly as the single file financials.py did."""
 
-def build_cash_flow(totals, pl, method="indirect"):
+def build_cash_flow(totals, pl, method="indirect", noncash=None):
     """`method` ("indirect", the default, or "direct" - see
     models.CASH_FLOW_METHODS) controls only how the OPERATING activities
     section is presented, per IAS 7.18: the indirect method reconciles
@@ -17,13 +17,19 @@ def build_cash_flow(totals, pl, method="indirect"):
     to net to that same "Cash generated from operations" figure rather than
     being a separate, potentially-inconsistent calculation."""
     t = totals
+    # `noncash`: movements that changed the balance sheet without any cash (a revaluation of property, plant and equipment, with the
+    # deferred tax on its surplus, see revaluation_noncash()): {"ppe": the revaluation's effect on PPE, "dtl": the deferred tax charged to OCI}.
+    # They are taken out of the investing movement and out of the deferred tax add-back, so closing cash still agrees to the balance sheet.
+    noncash = noncash or {}
+    nc_ppe, nc_dtl = float(noncash.get("ppe") or 0.0), float(noncash.get("dtl") or 0.0)
+    nc_pl = float(noncash.get("pl") or 0.0)        # the revaluation's gain (loss) in profit or loss: not cash, so taken back out of operating cash flow
 
     def move(code):
         return t[code]["current"] - t[code]["prior"]
 
     dep = t["depreciation_amortisation"]["current"]
     prov_move = move("long_term_provisions")
-    dtl_move = move("deferred_tax_liability")
+    dtl_move = move("deferred_tax_liability") - nc_dtl
     dta_move = move("deferred_tax_asset")
     finance_costs = pl["finance_costs"]["current"]
     pbt = pl["profit_before_tax"]["current"]
@@ -42,7 +48,9 @@ def build_cash_flow(totals, pl, method="indirect"):
         _row("Movement in long-term provisions", prov_move),
         _row("Movement in deferred tax", dtl_move - dta_move),
     ]
-    op_before_wc = pbt + finance_costs + prov_move + dtl_move - dta_move
+    if abs(nc_pl) >= 0.5:
+        adjustments.append(_row("Revaluation (gain)/loss on property, plant and equipment, not a cash flow", -nc_pl))
+    op_before_wc = pbt + finance_costs + prov_move + dtl_move - dta_move - nc_pl
 
     wc_rows = [
         _row("(Increase)/decrease in inventories", -move("inventories")),
@@ -81,7 +89,7 @@ def build_cash_flow(totals, pl, method="indirect"):
               + t["other_expenses"]["current"])
             - move("inventories") - move("other_current_assets")
             + move("trade_payables") + move("short_term_provisions") + move("other_current_liabilities")
-            + prov_move + dtl_move - dta_move
+            + prov_move + dtl_move - dta_move - nc_pl
         )
         operating_rows = [
             _row("Cash received from customers", receipts_customers, category="revenue"),
@@ -103,7 +111,7 @@ def build_cash_flow(totals, pl, method="indirect"):
     net_operating = cash_from_ops + finance_costs_paid + tax_paid
 
     investing_codes = ["ppe", "intangible_assets", "investment_property", "long_term_investments", "other_noncurrent_assets"]
-    investing_rows = [_row(f"Net movement in {category_label(c).lower()}", -move(c), category=c) for c in investing_codes]
+    investing_rows = [_row(f"Net movement in {category_label(c).lower()}", -(move(c) - (nc_ppe if c == "ppe" else 0.0)), category=c) for c in investing_codes]
     net_investing = sum(r["current"] for r in investing_rows)
 
     shares_move = move("share_capital") + move("share_premium")
@@ -130,13 +138,55 @@ def build_cash_flow(totals, pl, method="indirect"):
         # every line stays for the reconciliation to read correctly start to
         # finish.
         "operating_rows": operating_rows, "net_operating": net_operating,
-        "investing_rows": _filter_nil_rows(investing_rows), "net_investing": net_investing,
+        "investing_rows": _filter_nil_rows(investing_rows + (
+            [_row("Non-cash: revaluation of property, plant and equipment (not a cash flow; see the property, plant and equipment note)", nc_ppe, memo=True)]
+            if abs(nc_ppe) >= 0.5 else [])), "net_investing": net_investing,
         "financing_rows": _filter_nil_rows(financing_rows), "net_financing": net_financing,
         "net_movement": net_movement,
         "cash_open": cash_open, "cash_close_computed": cash_close_computed,
         "cash_close_actual": cash_close_actual,
         "variance": cash_close_actual - cash_close_computed,
     }
+
+
+def adjustment_source(adj):
+    """The source code of a journal made by the app ('REVAL', 'PPE-REG', 'DT-CUR' ...), else its reference, upper case."""
+    return ((getattr(adj, "source_key", None) or getattr(adj, "reference", None) or "")).strip().upper()
+
+
+def revaluation_noncash(adjustments):
+    """What the revaluation journal (REVAL, ppe_revaluation.py) did to the balance sheet without any cash: {"ppe": its net effect on
+    property, plant and equipment, "dtl": the deferred tax charged to OCI on it, "pl": the gain (loss) it took to profit or loss}. The Cash Flow Statement takes both out of its investing
+    movement and its deferred tax add-back. Empty when there is no such journal."""
+    ppe = dtl = pl = 0.0
+    found = False
+    for adj in adjustments or []:
+        if adjustment_source(adj) != "REVAL" or is_prior_adjustment(adj):
+            continue
+        found = True
+        for line in adj.lines:
+            net = (line.debit or 0.0) - (line.credit or 0.0)
+            if line.fs_category == "ppe":
+                ppe += net
+            elif line.fs_category == "oci_items" and "deferred" in (getattr(line, "account_name", "") or "").casefold():
+                dtl += net
+            elif line.fs_category in ("other_income", "other_expenses"):
+                pl -= net                                   # a credit to income, or a debit to expense, is read as a gain / loss
+    return {"ppe": ppe, "dtl": dtl, "pl": pl} if found else {}
+
+
+def roll_oci_into_reserves(totals):
+    """Other comprehensive income of a year is a movement in equity: the trial balance's own 'Other reserves' is what was held before it, so
+    the closing reserves on the Statement of Financial Position and in the Statement of Changes in Equity are those plus the year's OCI.
+    (Without this, a revaluation surplus in OCI raised total comprehensive income and the assets but not equity, and the balance sheet
+    did not balance.) Returns a NEW totals dict; `oci_items` itself stays, it is what the Statement of Comprehensive Income shows."""
+    oci, res = totals.get("oci_items"), totals.get("other_reserves")
+    if not oci or not res or (abs(oci.get("current", 0.0)) < 1e-9 and abs(oci.get("prior", 0.0)) < 1e-9):
+        return totals
+    out = {c: dict(v) for c, v in totals.items()}
+    for period in ("current", "prior"):
+        out["other_reserves"][period] = res[period] + oci[period]
+    return out
 
 
 def is_prior_adjustment(adj):

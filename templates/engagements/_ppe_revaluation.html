@@ -1,0 +1,153 @@
+{# 6. Revaluation of property, plant and equipment on an independent valuation (ppe_revaluation.py). Context: as_reval from ppe_revaluation.card_context(). #}
+{% macro rv_amt(x) %}{% if x is none %}-{% elif x < -0.004 %}({{ '{:,.2f}'.format(-x) }}){% else %}{{ '{:,.2f}'.format(x) }}{% endif %}{% endmacro %}
+{% set rv = as_reval %}
+{% set rec = rv.rec %}
+{% set calc = rv.calc %}
+<div class="card" id="revaluation" style="border-left:4px solid #1f3a5f;">
+  <h3 class="mt-0">6. Revaluation to fair value (independent valuation)
+    {% if rv.applied %}<span class="badge" style="background:#1e7e34;color:#fff;font-size:11px;">Applied{% if rv.journal_ref %} - {{ rv.journal_ref }} (REVAL){% endif %}</span>
+    {% elif rec and rec.lines %}<span class="badge" style="background:#b8860b;color:#fff;font-size:11px;">Draft - nothing posted</span>{% endif %}</h3>
+  <p class="muted" style="font-size:12.5px;">
+    Enter the valuer's fair value for each asset (or a total for a class, below). The app works out the surplus or deficit against the carrying amount at the year end,
+    eliminates the accumulated depreciation against cost (IAS 16.35(b)), takes the surplus to other comprehensive income and the revaluation reserve net of deferred tax
+    (any part that reverses an earlier loss goes to profit or loss), and posts one journal, <strong>REVAL</strong>. Applying it also moves the Asset Register, the
+    Property, plant and equipment note, the statement of changes in equity and the cash flow statement. <em>Undo</em> removes it again.
+  </p>
+
+  {% if rv.applied %}
+    {% if rv.stale %}
+    <div class="alert" style="background:#fdecea;border:1px solid #f5c6cb;padding:8px 10px;border-radius:4px;font-size:12.5px;">
+      The register or the valuation has changed since this revaluation was applied, so journal {{ rv.journal_ref or 'REVAL' }} is out of date. Undo it, then apply it again.
+    </div>
+    {% endif %}
+    <p style="font-size:12.5px;">
+      Valued by <strong>{{ rec.valuer_name or '(valuer not named)' }}</strong>{% if rec.valuation_date %} as at {{ rec.valuation_date.strftime('%d %B %Y') }}{% endif %}{% if rec.report_reference %}, report {{ rec.report_reference }}{% endif %}.
+      Applied {{ rec.applied_at.strftime('%d %b %Y %H:%M') if rec.applied_at else '' }}{% if rec.applied_by %} by {{ rec.applied_by.name }}{% endif %}.
+    </p>
+  {% endif %}
+
+  {% if calc and calc.classes %}
+  <div style="overflow-x:auto;">
+  <table style="font-size:12px;">
+    <thead><tr><th>Asset class</th><th class="text-right">Cost</th><th class="text-right">Accumulated depreciation</th><th class="text-right">Carrying amount</th>
+      <th class="text-right">Fair value</th><th class="text-right">Surplus / (deficit)</th><th class="text-right">To OCI</th><th class="text-right">To profit or loss</th>
+      <th class="text-right">Deferred tax</th><th class="text-right">Rate</th></tr></thead>
+    <tbody>
+    {% for g in calc.classes %}
+      <tr><td>{{ g.class_name }}{% if g.unvalued %} <span class="muted" title="Assets in this class with no valuation">({{ g.unvalued }} not valued)</span>{% endif %}</td>
+        <td class="text-right">{{ rv_amt(g.cost) }}</td><td class="text-right">{{ rv_amt(g.acc) }}</td><td class="text-right">{{ rv_amt(g.nbv) }}</td>
+        <td class="text-right">{{ rv_amt(g.fair_value) }}</td><td class="text-right">{{ rv_amt(g.change) }}</td><td class="text-right">{{ rv_amt(g.oci) }}</td><td class="text-right">{{ rv_amt(g.pl) }}</td>
+        <td class="text-right">{{ rv_amt(g.dt_oci + g.dt_pl) }}</td><td class="text-right">{{ '%g'|format(g.rate) }}%</td></tr>
+    {% endfor %}
+      {% set t = calc.totals %}
+      <tr><td><strong>Total</strong></td>
+        <td class="text-right"><strong>{{ rv_amt(t.cost) }}</strong></td><td class="text-right"><strong>{{ rv_amt(t.acc) }}</strong></td><td class="text-right"><strong>{{ rv_amt(t.nbv) }}</strong></td>
+        <td class="text-right"><strong>{{ rv_amt(t.fair_value) }}</strong></td><td class="text-right"><strong>{{ rv_amt(t.change) }}</strong></td><td class="text-right"><strong>{{ rv_amt(t.oci) }}</strong></td><td class="text-right"><strong>{{ rv_amt(t.pl) }}</strong></td>
+        <td class="text-right"><strong>{{ rv_amt(t.dt_oci + t.dt_pl) }}</strong></td><td></td></tr>
+    </tbody>
+  </table>
+  </div>
+  <p class="muted" style="font-size:11.5px;">Reserve after tax: {{ rv_amt(t.oci - t.dt_oci) }} added to the revaluation reserve in this valuation{% if t.prior_reserve %} (opening reserve for these assets {{ rv_amt(t.prior_reserve_net) }}){% endif %}.</p>
+  {% if calc.journal %}
+  <details style="margin:6px 0;"><summary style="cursor:pointer;font-size:12.5px;">The journal ({{ 'will be' if not rv.applied else 'is' }} posted as REVAL)</summary>
+    <table style="font-size:12px;margin-top:6px;"><thead><tr><th>Account</th><th>Category</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead><tbody>
+    {% for l in calc.journal %}<tr><td>{{ l.account_name }}</td><td>{{ l.fs_category }}</td><td class="text-right">{{ '{:,.2f}'.format(l.debit) if l.debit else '' }}</td><td class="text-right">{{ '{:,.2f}'.format(l.credit) if l.credit else '' }}</td></tr>{% endfor %}
+    </tbody></table>
+  </details>
+  {% endif %}
+  {% endif %}
+
+  {% if calc %}
+    {% for m in calc.issues %}<div class="alert" style="background:#fdecea;border:1px solid #f5c6cb;padding:6px 10px;border-radius:4px;font-size:12.5px;margin:4px 0;">{{ m }}</div>{% endfor %}
+    {% for m in calc.warnings %}<div class="alert" style="background:#fff8e1;border:1px solid #ffe08a;padding:6px 10px;border-radius:4px;font-size:12.5px;margin:4px 0;">{{ m }}</div>{% endfor %}
+  {% endif %}
+
+  {% if rv.applied %}
+  <form method="post" action="{{ url_for('ppereval.undo', engagement_id=engagement.id) }}" style="margin-top:8px;" onsubmit="return confirm('Undo the revaluation? The REVAL journal is removed and the register and notes go back to cost less accumulated depreciation. The valuation is kept as a draft.');">
+    <button type="submit" class="btn small danger">Undo the revaluation</button>
+  </form>
+  {% else %}
+
+  {% if rv.classes %}
+  <h4 style="margin-bottom:4px;">Value a whole class from the valuer's total</h4>
+  <p class="muted" style="font-size:12px;margin-top:0;">When the valuer gives one figure for a class, it is spread over the assets in proportion to their carrying amounts. Replace any figure below that the valuer gave for a particular asset.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:12px;">
+  {% for c in rv.classes %}
+    <form method="post" action="{{ url_for('ppereval.spread', engagement_id=engagement.id) }}" style="display:flex;gap:6px;align-items:center;border:1px solid #ddd;border-radius:4px;padding:6px 8px;">
+      <input type="hidden" name="class_id" value="{{ c.class_id }}">
+      <span style="font-size:12.5px;"><strong>{{ c.name }}</strong> <span class="muted">(carrying {{ rv_amt(c.nbv) }})</span></span>
+      <input type="text" name="class_total" placeholder="Valuer's total" style="width:120px;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Spread</button>
+    </form>
+  {% endfor %}
+  </div>
+  {% endif %}
+
+  <form method="post" action="{{ url_for('ppereval.save', engagement_id=engagement.id) }}" style="margin-top:12px;">
+    <h4 style="margin-bottom:4px;">The valuation</h4>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px 14px;">
+      <label style="font-size:12.5px;">Valuation date<input type="date" name="valuation_date" value="{{ (rec.valuation_date if rec and rec.valuation_date else rv.period_end).strftime('%Y-%m-%d') if (rec and rec.valuation_date) or rv.period_end else '' }}"></label>
+      <label style="font-size:12.5px;">Valuer<input type="text" name="valuer_name" value="{{ rec.valuer_name if rec and rec.valuer_name else '' }}" placeholder="Name of the valuer or firm"></label>
+      <label style="font-size:12.5px;">Qualification / registration<input type="text" name="valuer_qualification" value="{{ rec.valuer_qualification if rec and rec.valuer_qualification else '' }}" placeholder="e.g. professional body and number"></label>
+      <label style="font-size:12.5px;">Report reference<input type="text" name="report_reference" value="{{ rec.report_reference if rec and rec.report_reference else '' }}"></label>
+      <label style="font-size:12.5px;">Report date<input type="date" name="report_date" value="{{ rec.report_date.strftime('%Y-%m-%d') if rec and rec.report_date else '' }}"></label>
+      <label style="font-size:12.5px;">Basis of valuation<input type="text" name="basis" list="reval_bases" value="{{ rec.basis if rec and rec.basis else '' }}"><datalist id="reval_bases">{% for b in rv.bases %}<option value="{{ b }}">{% endfor %}</datalist></label>
+    </div>
+    <label style="font-size:12.5px;display:block;margin-top:6px;">Methods and significant assumptions (disclosed in the note, IAS 16.77)
+      <textarea name="method_note" rows="3" style="width:100%;">{{ rec.method_note if rec and rec.method_note else '' }}</textarea></label>
+    <div style="margin:6px 0;font-size:12.5px;">
+      <label style="margin-right:18px;"><input type="checkbox" name="independent" value="1" {% if not rec or rec.independent %}checked{% endif %}> The valuer is independent of the company</label>
+      <label><input type="checkbox" name="policy_confirmed" value="1" {% if rec and rec.policy_confirmed %}checked{% endif %}> The company adopts the revaluation model for the whole of each class revalued (accounting policy, IAS 16.29 and 36)</label>
+    </div>
+
+    <h4 style="margin-bottom:4px;">Deferred tax rate on the surplus, by class</h4>
+    <div style="display:flex;flex-wrap:wrap;gap:10px;font-size:12.5px;">
+    {% for c in rv.classes %}
+      <label>{{ c.name }} <input type="text" name="rate_{{ c.class_id }}" value="{{ '%g'|format(c.rate) }}" style="width:70px;margin-bottom:0;"> %</label>
+    {% endfor %}
+    </div>
+    <p class="muted" style="font-size:11.5px;margin-top:4px;">Defaults to the rate on the Deferred Tax tab{% if rv.default_rate is not none %} ({{ '%g'|format(rv.default_rate) }}%){% endif %}. Use the rate that applies to the way the carrying amount will be recovered - for land held as a capital asset it may differ from the corporate rate.</p>
+
+    <h4 style="margin-bottom:4px;">Fair value by asset</h4>
+    {% if rv.rows %}
+    <div style="overflow-x:auto;">
+    <table style="font-size:12px;">
+      <thead><tr><th>Asset</th><th>Class</th><th class="text-right">Cost</th><th class="text-right">Accum. depreciation</th><th class="text-right">Carrying amount</th><th class="text-right">Fair value</th><th class="text-right">Surplus / (deficit)</th>
+        <th class="text-right" title="Revaluation surplus already held for this asset from an earlier valuation">Reserve already held</th><th class="text-right" title="An earlier revaluation decrease on this asset that was charged to profit or loss">Earlier loss in profit or loss</th></tr></thead>
+      <tbody>
+      {% for r in rv.rows %}
+        <tr>
+          <td>{{ r.asset.asset_code or '' }} {{ r.asset.description }}</td><td>{{ r.class_name }}</td>
+          {% if r.fig.eligible %}
+          <td class="text-right">{{ rv_amt(r.fig.cost) }}</td><td class="text-right">{{ rv_amt(r.fig.acc) }}</td><td class="text-right">{{ rv_amt(r.fig.nbv) }}</td>
+          <td class="text-right"><input type="text" name="fv_{{ r.asset.id }}" value="{{ '%.2f'|format(r.line.fair_value) if r.line and r.line.fair_value is not none else '' }}" style="width:110px;text-align:right;margin-bottom:0;"></td>
+          <td class="text-right">{% if r.calc and r.line and r.line.fair_value is not none %}{{ rv_amt(r.calc.change) }}{% endif %}</td>
+          <td class="text-right"><input type="text" name="pr_{{ r.asset.id }}" value="{{ '%.2f'|format(r.line.prior_reserve) if r.line and r.line.prior_reserve else '' }}" style="width:80px;text-align:right;margin-bottom:0;"></td>
+          <td class="text-right"><input type="text" name="pd_{{ r.asset.id }}" value="{{ '%.2f'|format(r.line.prior_deficit_pl) if r.line and r.line.prior_deficit_pl else '' }}" style="width:80px;text-align:right;margin-bottom:0;"></td>
+          {% else %}
+          <td colspan="7" class="muted">Not revalued - {{ r.fig.reason }}</td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">Enter the assets in the register first (steps 1 and 2 above).</div>
+    {% endif %}
+    <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+      <button type="submit" class="btn small gold">Save the valuation</button>
+    </div>
+  </form>
+
+  <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+    <form method="post" action="{{ url_for('ppereval.apply', engagement_id=engagement.id) }}" onsubmit="return confirm('Post journal REVAL and revalue the register and notes? You can undo it.');">
+      <button type="submit" class="btn small" {% if not calc or calc.issues %}disabled title="Fix the points above first"{% endif %}>Apply the revaluation (post REVAL)</button>
+    </form>
+    {% if rec %}
+    <form method="post" action="{{ url_for('ppereval.delete', engagement_id=engagement.id) }}" onsubmit="return confirm('Delete the draft valuation?');"><button type="submit" class="btn small secondary">Delete the draft</button></form>
+    {% endif %}
+  </div>
+  <p class="muted" style="font-size:11.5px;margin-top:6px;">Save first - the figures above and the totals are worked from what is saved. Not done in this version: the transfer of the excess depreciation on the revalued amount from the revaluation reserve to retained earnings (IAS 16.41, permitted not required).</p>
+  {% endif %}
+</div>

@@ -27,8 +27,11 @@ def build_ppe_movement_schedule(asset_classes, assets, period_end):
     additions, disposals_cost, closing_cost, opening_acc_dep, charge,
     disposals_acc_dep, closing_acc_dep, opening_nbv, closing_nbv - built so
     that, for every row, opening_nbv + additions - disposals (cost less
-    accumulated depreciation eliminated) - charge always equals
-    closing_nbv exactly, term for term."""
+    accumulated depreciation eliminated) + revaluation - charge always
+    equals closing_nbv exactly, term for term. `revaluation` (and its two
+    parts, revaluation_cost and revaluation_acc_dep - the accumulated
+    depreciation eliminated) is nil unless an asset dict carries
+    "revalued_to"."""
     if not assets:
         return None
     period_start = _infer_period_start(period_end)
@@ -38,6 +41,7 @@ def build_ppe_movement_schedule(asset_classes, assets, period_end):
             "opening_cost": 0.0, "additions": 0.0, "disposals_cost": 0.0, "closing_cost": 0.0,
             "opening_acc_dep": 0.0, "charge": 0.0, "disposals_acc_dep": 0.0, "closing_acc_dep": 0.0,
             "opening_nbv": 0.0, "closing_nbv": 0.0,
+            "revaluation_cost": 0.0, "revaluation_acc_dep": 0.0, "revaluation": 0.0,
         }
 
     def _accumulate(row, a):
@@ -57,6 +61,19 @@ def build_ppe_movement_schedule(asset_classes, assets, period_end):
         opening_acc_dep = 0.0 if is_addition else (a.get("opening_accumulated_depreciation") or 0.0)
         closing_cost = cost - disposal_cost
         closing_acc_dep = opening_acc_dep + charge - disposal_acc_dep
+        # An asset revalued by an independent valuation (ppe_revaluation.py; "revalued_to" is the fair value at the year end): the
+        # accumulated depreciation is eliminated against the gross carrying amount (IAS 16.35(b)) and the cost becomes the valuation, so the
+        # closing net book value is the fair value. An asset sold in the year is never revalued.
+        revalued_to = a.get("revalued_to")
+        reval_cost = reval_acc = 0.0
+        if revalued_to is not None and not disposal_cost:
+            reval_cost = revalued_to - closing_cost
+            reval_acc = closing_acc_dep
+            closing_cost += reval_cost
+            closing_acc_dep -= reval_acc
+        row["revaluation_cost"] += reval_cost
+        row["revaluation_acc_dep"] += reval_acc
+        row["revaluation"] += reval_cost + reval_acc
         row["opening_cost"] += opening_cost
         row["additions"] += addition
         row["disposals_cost"] += disposal_cost
@@ -142,6 +159,27 @@ def ppe_accounting_policy_text(asset_classes):
         "after": after,
     }
     return text
+
+
+def add_revaluation_policy(text, extra_paragraphs):
+    """The depreciation policy text of ppe_accounting_policy_text() with the revaluation model's wording added for the revalued classes
+    (ppe_revaluation.policy_paragraphs): the cost sentence says the revalued classes are the exception, and the revaluation paragraph follows
+    it. Returns a new _PolicyText; the argument is left alone."""
+    parts = dict(getattr(text, "parts", None) or {})
+    paras = list(parts.get("paragraphs") or [])
+    first = ("Property, plant and equipment, other than the revalued classes described below, are stated at cost less accumulated "
+             "depreciation and any accumulated impairment losses.")
+    rest = paras[1:] if paras else []
+    new_paras = [first] + list(extra_paragraphs) + rest
+    flat = _PolicyText(" ".join(new_paras[:len(new_paras)]) if not rest else " ".join(new_paras) + (" " + parts["table_flat"] if parts.get("table_flat") else ""))
+    # keep the original flowing sentence of the depreciation bases (it follows the second paragraph in the original text)
+    original = str(text)
+    tail_at = original.find(rest[0]) if rest else -1
+    if tail_at >= 0:
+        flat = _PolicyText(" ".join([first] + list(extra_paragraphs)) + " " + original[tail_at:])
+    parts["paragraphs"] = new_paras
+    flat.parts = parts
+    return flat
 
 
 # Checked in the order line items appear on the face of the primary
@@ -398,6 +436,8 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
             note["accounts"] = []
             note["movement"] = ppe_movement["by_class"]
             note["movement_total"] = reg_total
+            if ppe_movement.get("revaluation_note"):
+                note["revaluation_note"] = ppe_movement["revaluation_note"]
             note["total"] = {"current": reg_total["closing_nbv"], "prior": reg_total["opening_nbv"]}
             if ppe_policy_text:
                 note["policy"] = str(ppe_policy_text)
@@ -564,6 +604,7 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     totals = compute_totals(lines)
     if adjustments:
         totals = apply_adjustments(totals, adjustments)
+    totals = roll_oci_into_reserves(totals)
     raw_totals, rounding, ppe_movement_raw = totals, None, ppe_movement
     if whole_numbers:
         totals, absorbed = round_totals_balanced(raw_totals)
@@ -572,7 +613,7 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     pl = build_income_statement(totals)
     equity = build_equity_statement(totals, pl)
     sfp = build_financial_position(totals, equity)
-    cf = build_cash_flow(totals, pl, method=cash_flow_method)
+    cf = build_cash_flow(totals, pl, method=cash_flow_method, noncash=revaluation_noncash(adjustments))
     if reporting_framework in ("full_ifrs", "ifrs_for_smes"):
         notes, note_number_by_category = build_notes(
             lines, totals, ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text,
