@@ -155,6 +155,41 @@ with app.app_context():
     check("The Asset Register schedule now closes at 527,050.50" in r.data.decode(), "the confirmation says what the register schedule now closes at")
     check(not pr.calculate(eng3, pr.get(EID3))["totals"]["count"], "the revaluation card has nothing to apply")
 
+# ---- closing balances over a register that still holds an old lump-sum asset: it is removed and the schedule closes at the valuer's figures
+with app.app_context():
+    e4 = Engagement(client_id=Client.query.first().id, title="Audit 2025 (old lump sum)", type="Audit", partner_id=UID, manager_id=UID,
+                    acceptance_required=False, period_end=date(2025, 12, 31), reporting_framework="ifrs_for_smes")
+    db.session.add(e4); db.session.commit(); EID4 = e4.id
+    old_cls = PPEAssetClass(engagement_id=EID4, name="Property plant and equipment", order=1); db.session.add(old_cls); db.session.commit()
+    db.session.add(PPEAsset(engagement_id=EID4, asset_class_id=old_cls.id, description="Property plant and equipment", cost=901852.0)); db.session.commit()
+r = c.post(f"/engagements/{EID4}/revaluation/import/upload", data={"file": (io.BytesIO(XLSX), "valuation.xlsx")}, content_type="multipart/form-data")
+tok4 = re.search(r"/import/([0-9a-f]{32})/confirm", r.data.decode()).group(1)
+r = c.post(f"/engagements/{EID4}/revaluation/import/{tok4}/confirm", data={"ext": ".xlsx", "filename": "valuation", "create_missing": "1", "use": "closing"}, follow_redirects=True)
+with app.app_context():
+    import financials as fin_
+    import engagements as eng_mod
+    _, _, cd_, ad_ = eng_mod._ppe_plain_data(EID4)
+    mv_ = fin_.build_ppe_movement_schedule(cd_, ad_, date(2025, 12, 31))
+    check(near(mv_["total"]["closing_nbv"], 527050.5 + 901852.0), "without removing it, the old lump sum is still in the schedule (it closes at 1,428,902.50)")
+    check("other asset(s) already in the register" in r.data.decode(), "the confirmation says so")
+tok4 = None
+r = c.post(f"/engagements/{EID4}/revaluation/import/upload", data={"file": (io.BytesIO(XLSX), "valuation.xlsx")}, content_type="multipart/form-data")
+tok4 = re.search(r"/import/([0-9a-f]{32})/confirm", r.data.decode()).group(1)
+h4 = r.data.decode()
+sel4 = {}
+for m in re.finditer(r'<select name="asset_(\d+)"[^>]*>(.*?)</select>', h4, re.S):
+    mm = re.search(r'<option value="(\d+)" selected', m.group(2))
+    if mm: sel4[m.group(1)] = mm.group(1)
+form4 = {"ext": ".xlsx", "filename": "valuation", "use": "closing", "remove_others": "1"}
+for k, v in sel4.items(): form4[f"asset_{k}"] = v
+r = c.post(f"/engagements/{EID4}/revaluation/import/{tok4}/confirm", data=form4, follow_redirects=True)
+with app.app_context():
+    _, _, cd_, ad_ = eng_mod._ppe_plain_data(EID4)
+    mv_ = fin_.build_ppe_movement_schedule(cd_, ad_, date(2025, 12, 31))
+    check(near(mv_["total"]["closing_nbv"], 527050.5), "removing the other assets, the schedule closes at the valuer's 527,050.50")
+    check(DeletedPPEAsset.query.filter_by(engagement_id=EID4).count() == 1, "the old lump-sum asset is kept under Recently deleted")
+    check(near(sum(a.cost for a in PPEAsset.query.filter_by(engagement_id=EID4).all()), 527050.5), "the register holds only the valued assets")
+
 # an applied revaluation is locked against importing
 with app.app_context():
     rec = pr.get(EID); rec.status = "Applied"; db.session.commit()

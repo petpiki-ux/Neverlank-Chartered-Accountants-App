@@ -28,6 +28,7 @@
     <div style="margin:0 0 8px;padding:8px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:12.5px;">
       <div><strong>Use these figures as</strong></div>
       <label style="display:block;"><input type="radio" name="use" value="closing"> The register's closing balances - each asset's cost becomes its value, with no accumulated depreciation and no depreciation charge, so the register closes at the valuer's figures. Replaces the cost already entered for an asset that is matched. No revaluation is recorded.</label>
+      <label style="display:block;margin-left:22px;font-size:12px;"><input type="checkbox" name="remove_others" value="1"> With closing balances: also remove every other asset in the register that is not in this list (for example an old lump-sum line brought in from the trial balance). They are kept under "Recently deleted" and can be put back.</label>
       <label style="display:block;"><input type="radio" name="use" value="fair_value" checked> Fair values for a revaluation - the cost and depreciation already in the register are kept, and the draft revaluation works out the surplus or deficit.</label>
     </div>
     <div style="margin:0 0 8px;padding:8px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:12.5px;">

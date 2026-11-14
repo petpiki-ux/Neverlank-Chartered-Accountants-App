@@ -852,6 +852,19 @@ def import_confirm(engagement_id, token):
             a.current_year_depreciation = 0.0
             a.disposal_cost = 0.0
             a.disposal_accumulated_depreciation = 0.0
+        removed = []
+        if request.form.get("remove_others") == "1":
+            # the register's other assets (for example an old lump-sum line from the trial balance) are not part of the valuer's list: archive
+            # them (restorable under "Recently deleted") so the register closes at the valuer's figures alone
+            import asset_schedules as sched_
+            for a in PPEAsset.query.filter_by(engagement_id=engagement.id).all():
+                if a.id in sums:
+                    continue
+                for l in list(PPERevaluationLine.query.filter_by(asset_id=a.id).all()):
+                    db.session.delete(l)
+                sched_.archive_asset(a, current_user.id)
+                removed.append(a)
+                db.session.delete(a)
         db.session.commit()
         try:
             os.remove(path)
@@ -868,6 +881,9 @@ def import_confirm(engagement_id, token):
         _, all_assets, cdicts, adicts = eng_mod._ppe_plain_data(engagement.id)
         mv = fin_mod.build_ppe_movement_schedule(cdicts, adicts, engagement.period_end)
         closing = mv["total"]["closing_nbv"]
+        if removed:
+            msg += (f" {len(removed)} other asset(s) not in the list were removed from the register (cost {sum(a.cost or 0.0 for a in removed):,.2f}) - "
+                    "they can be put back under 'Recently deleted' on the Asset Register tab.")
         others = [a for a in all_assets if a.id not in sums]
         other_nbv = sum((a.cost or 0.0) - (a.disposal_cost or 0.0) - ((a.opening_accumulated_depreciation or 0.0) + (a.current_year_depreciation or 0.0) - (a.disposal_accumulated_depreciation or 0.0)) for a in others)
         msg += f" The Asset Register schedule now closes at {closing:,.2f}."
