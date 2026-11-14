@@ -20,7 +20,15 @@
   </form>
 </div>
 <div class="card"><strong>Already reported?</strong> <a href="{{ url_for('whistleblower_public.status', token=token) }}">Check progress or add information</a> using your reference and key.
-{% if service.hotline_phone or service.hotline_email or service.hotline_whatsapp or service.other_channels %}
-<p class="muted" style="margin-bottom:0;">Other ways to report:
-{% if service.hotline_phone %} phone {{ service.hotline_phone }};{% endif %}{% if service.hotline_whatsapp %} WhatsApp/SMS {{ service.hotline_whatsapp }};{% endif %}{% if service.hotline_email %} email {{ service.hotline_email }};{% endif %}{% if service.other_channels %} {{ service.other_channels }}{% endif %}</p>{% endif %}</div>
+{% if links.whatsapp or links.mailto or links.tel or service.other_channels %}
+<div style="margin-top:12px;border-top:1px solid #eee;padding-top:10px;">
+<strong>Other ways to report</strong>
+<p style="margin:8px 0;">
+{% if links.whatsapp %}<a class="btn" style="background:#25D366;" href="{{ links.whatsapp }}" rel="noopener">WhatsApp {{ '+' ~ links.whatsapp_number }}</a> {% endif %}
+{% if links.mailto %}<a class="btn" style="background:#1F3A5F;" href="{{ links.mailto }}">Email {{ links.email }}</a> {% endif %}
+{% if links.tel %}<a class="btn" style="background:#555;" href="{{ links.tel }}">Call {{ links.phone }}</a>{% endif %}
+</p>
+{% if service.other_channels %}<p class="muted" style="margin:4px 0;">{{ service.other_channels }}</p>{% endif %}
+{% if links.whatsapp or links.mailto or links.tel %}<p class="muted" style="margin-bottom:0;">This page is anonymous. WhatsApp, email and phone are <strong>confidential</strong> but not anonymous: the person who receives your message can see your number or address. It is used only to follow up with you.</p>{% endif %}
+</div>{% endif %}</div>
 {% endblock %}

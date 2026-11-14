@@ -14,6 +14,24 @@
   <form method="post" action="{{ url_for('whistleblower.regenerate_link', engagement_id=engagement.id) }}" class="inline" onsubmit="return confirm('Generate a new link? The current link will stop working immediately.')"><button type="submit" class="btn small secondary">Generate a new link</button></form>
 </div>
 
+<div class="card" style="max-width:820px;">
+  <h3 class="mt-0">WhatsApp, email and QR codes for the client's employees</h3>
+  <p class="muted" style="font-size:12.5px;">Built from the hotline details saved below. One tap opens WhatsApp (with the message ready) or the email app on the employee's phone. The anonymous page is the only anonymous route: WhatsApp, email and calls are confidential, because the staff reading them see the sender's number or address. Say so to the client when you hand over the poster.</p>
+  <div style="display:flex;flex-wrap:wrap;gap:22px;align-items:flex-start;">
+    <div style="text-align:center;font-size:12px;">{% if service.portal_enabled %}<div style="width:130px;">{{ qr_web|safe }}</div>Anonymous page{% else %}<span class="muted">Switch the page on to get its QR code</span>{% endif %}</div>
+    <div style="text-align:center;font-size:12px;">{% if qr_wa %}<div style="width:130px;">{{ qr_wa|safe }}</div>WhatsApp {{ '+' ~ links.whatsapp_number }}{% else %}<span class="muted">Enter a WhatsApp number below (e.g. 0771 234 567 or +263 77 123 4567) to get its QR code</span>{% endif %}</div>
+    <div style="font-size:12.5px;line-height:1.9;">
+      {% if links.whatsapp %}<a href="{{ links.whatsapp }}" target="_blank" rel="noopener" class="btn small secondary">Test the WhatsApp link</a><br>{% endif %}
+      {% if links.mailto %}<a href="{{ links.mailto }}" class="btn small secondary">Test the email link ({{ links.email }})</a><br>{% endif %}
+      <a href="{{ url_for('whistleblower.poster', engagement_id=engagement.id) }}" target="_blank" class="btn small gold">Print the poster for the client</a><br>
+      <a href="{{ url_for('whistleblower.cases', engagement_id=engagement.id, channel='WhatsApp / SMS') }}#log" class="btn small secondary">Log a WhatsApp report</a>
+      <a href="{{ url_for('whistleblower.cases', engagement_id=engagement.id, channel='Email') }}#log" class="btn small secondary">Log an email report</a>
+    </div>
+  </div>
+  {% if service.hotline_whatsapp and not links.whatsapp %}<p class="muted" style="color:#B02A2A;">The WhatsApp number does not look right, so no link was made. Use the country code, e.g. +263 77 123 4567.</p>{% endif %}
+  {% if service.hotline_email and not links.mailto %}<p class="muted" style="color:#B02A2A;">The hotline email address does not look right, so no link was made.</p>{% endif %}
+</div>
+
 <form method="post" class="card" style="max-width:820px;">
   <h3 class="mt-0">Subscription &amp; channels</h3>
   <div class="form-row">

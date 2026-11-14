@@ -123,6 +123,35 @@ def _clean_choice(value, allowed, default):
     return value if value in allowed else default
 
 
+def channel_links(service, public_url):
+    """The ways into the service that open an app on the reporter's phone: a WhatsApp chat with the hotline number (wa.me, the message
+    ready to send), an email to the hotline address and a call. Anything not set up is left out. Only a link: nothing is sent, stored or
+    read by the app, so reaching Neverlank by WhatsApp or email is confidential (the staff see the number or address) but not anonymous."""
+    import urllib.parse as up
+    from invoice_send import normalize_phone
+    import emailer
+    out = {"web": public_url}
+    number = normalize_phone(service.hotline_whatsapp)
+    if number:
+        out["whatsapp_number"] = number
+        out["whatsapp"] = f"https://wa.me/{number}?text=" + up.quote("Hello, I would like to report a concern confidentially.")
+    address = (service.hotline_email or "").strip()
+    if address and emailer.valid_address(address):
+        out["email"] = address
+        out["mailto"] = f"mailto:{address}?subject=" + up.quote("Confidential report")
+    tel = "".join(ch for ch in (service.hotline_phone or "") if ch.isdigit() or ch == "+")
+    if len(tel) >= 7:
+        out["phone"] = (service.hotline_phone or "").strip()
+        out["tel"] = "tel:" + tel
+    return out
+
+
+def qr_svg(data, scale=4):
+    """A QR code for `data` as an inline SVG (no image file, no outside service)."""
+    import segno
+    return segno.make(data, error="m").svg_inline(scale=scale, border=2, dark="#000000", light="#ffffff")
+
+
 def _service_context(engagement):
     return {"engagement": engagement, "service": _get_or_create_service(engagement)}
 
@@ -183,9 +212,26 @@ def subscription(engagement_id):
         flash("Subscription & channels saved.", "success")
         return redirect(url_for("whistleblower.subscription", engagement_id=engagement_id))
     public_url = url_for("whistleblower_public.submit", token=service.public_token, _external=True)
+    links = channel_links(service, public_url)
     return render_template(
         "whistleblower/subscription.html", engagement=engagement, service=service, public_url=public_url,
-        frequencies=WB_REPORTING_FREQUENCIES, active_tab="subscription",
+        frequencies=WB_REPORTING_FREQUENCIES, active_tab="subscription", links=links,
+        qr_web=qr_svg(public_url, 3), qr_wa=qr_svg(links["whatsapp"], 3) if links.get("whatsapp") else None,
+    )
+
+
+@wb_bp.route("/engagement/<int:engagement_id>/poster")
+@login_required
+def poster(engagement_id):
+    """A printable notice for the client's notice boards: how to report, with a QR code for the web page and for WhatsApp."""
+    engagement = _load_engagement(engagement_id)
+    service = _get_or_create_service(engagement)
+    public_url = url_for("whistleblower_public.submit", token=service.public_token, _external=True)
+    links = channel_links(service, public_url)
+    return render_template(
+        "whistleblower/poster.html", engagement=engagement, service=service, client_name=engagement.client.name, links=links,
+        qr_web=qr_svg(public_url, 5) if service.portal_enabled else None,
+        qr_wa=qr_svg(links["whatsapp"], 5) if links.get("whatsapp") else None,
     )
 
 
@@ -228,6 +274,7 @@ def cases(engagement_id):
         "whistleblower/cases.html", engagement=engagement, service=service, cases=items, staff=staff,
         status_filter=status_filter, category_filter=category_filter, channels=WB_CHANNELS,
         categories=WB_CATEGORIES, severities=WB_SEVERITIES, statuses=WB_STATUSES, active_tab="cases",
+        default_channel=request.args.get("channel", ""),
     )
 
 
@@ -488,9 +535,10 @@ def _service_for_token(token):
 
 
 def _public_context(service):
+    public_url = url_for("whistleblower_public.submit", token=service.public_token, _external=True)
     return {
         "client_name": service.engagement.client.name, "service": service, "token": service.public_token,
-        "categories": WB_CATEGORIES,
+        "categories": WB_CATEGORIES, "links": channel_links(service, public_url),
     }
 
 

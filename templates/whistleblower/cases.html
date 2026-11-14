@@ -41,12 +41,12 @@
   {% endif %}
 </div>
 
-<form method="post" action="{{ url_for('whistleblower.add_case', engagement_id=engagement.id) }}" class="card" style="max-width:820px;">
-  <h3 class="mt-0">Log a report received by phone, email or in person</h3>
-  <p class="muted" style="font-size:12.5px;">Reports submitted through the client's anonymous page appear above automatically. Don't record the reporter's name unless they ask you to, and never in the description by default.</p>
+<form method="post" id="log" action="{{ url_for('whistleblower.add_case', engagement_id=engagement.id) }}" class="card" style="max-width:820px;">
+  <h3 class="mt-0">Log a report received by WhatsApp, email, phone or in person</h3>
+  <p class="muted" style="font-size:12.5px;">Reports submitted through the client's anonymous page appear above automatically. For a WhatsApp message or an email, paste what was reported into the description, then keep or delete the original on the hotline phone or mailbox as the firm's confidentiality procedure says. Don't copy the sender's number, email address or name into the case unless they asked you to.</p>
   <div class="form-row">
     <div><label for="received_date">Date received</label><input type="date" id="received_date" name="received_date" value=""></div>
-    <div><label for="channel">Channel</label><select id="channel" name="channel">{% for ch in channels %}{% if ch != 'Web portal' %}<option>{{ ch }}</option>{% endif %}{% endfor %}</select></div>
+    <div><label for="channel">Channel</label><select id="channel" name="channel">{% for ch in channels %}{% if ch != 'Web portal' %}<option {% if ch == default_channel %}selected{% endif %}>{{ ch }}</option>{% endif %}{% endfor %}</select></div>
     <div><label for="new_category">Category</label><select id="new_category" name="category">{% for key, label in categories %}<option value="{{ key }}">{{ label }}</option>{% endfor %}</select></div>
     <div><label for="new_severity">Severity</label><select id="new_severity" name="severity">{% for sev in severities %}<option {% if sev=='Medium' %}selected{% endif %}>{{ sev }}</option>{% endfor %}</select></div>
   </div>

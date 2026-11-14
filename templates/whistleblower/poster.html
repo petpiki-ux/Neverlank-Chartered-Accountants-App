@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="robots" content="noindex, nofollow">
+<title>Speak Up poster - {{ client_name }}</title>
+<style>
+  @page { size: A4; margin: 12mm; }
+  body { font-family: Calibri, Arial, sans-serif; margin: 0; color: #1F2A44; background: #eee; }
+  .sheet { width: 186mm; min-height: 270mm; margin: 10px auto; background: #fff; box-sizing: border-box; padding: 14mm 12mm; border-top: 10px solid #0B1F3F; border-bottom: 10px solid #C9A227; }
+  h1 { font-size: 46px; margin: 0; color: #0B1F3F; letter-spacing: 1px; }
+  .tag { color: #C9A227; font-size: 20px; font-weight: bold; margin: 2px 0 14px; }
+  p { font-size: 16px; line-height: 1.45; }
+  .row { display: flex; gap: 14mm; margin: 12mm 0 6mm; justify-content: space-around; flex-wrap: wrap; }
+  .box { text-align: center; width: 70mm; }
+  .box svg { width: 62mm; height: 62mm; }
+  .box h2 { font-size: 20px; margin: 6px 0 2px; color: #0B1F3F; }
+  .box .small { font-size: 14px; color: #444; }
+  .list { font-size: 18px; line-height: 1.9; margin: 6mm 0; }
+  .foot { font-size: 12.5px; color: #555; border-top: 1px solid #ccc; padding-top: 6px; margin-top: 10mm; }
+  .bar { max-width: 186mm; margin: 10px auto; text-align: right; }
+  .bar button { background: #C9A227; border: 0; color: #fff; padding: 9px 18px; font-size: 14px; border-radius: 4px; cursor: pointer; }
+  @media print { body { background: #fff; } .sheet { margin: 0; box-shadow: none; width: auto; } .bar { display: none; } }
+</style>
+</head>
+<body>
+<div class="bar"><button onclick="window.print()">Print the poster</button></div>
+<div class="sheet">
+  <h1>SPEAK UP</h1>
+  <div class="tag">Report a concern - safely and confidentially</div>
+  <p>{{ client_name }} has an independent reporting service run by Neverlank Chartered Accountants. If you see or suspect fraud, corruption, theft, harassment or any other serious wrongdoing, tell us. You will not be asked to prove it. Every report is handled confidentially.</p>
+  <div class="row">
+    {% if qr_web %}<div class="box">{{ qr_web|safe }}<h2>Anonymous page</h2><div class="small">Scan with your phone camera. No name, no phone number or device details are recorded.</div></div>{% endif %}
+    {% if qr_wa %}<div class="box">{{ qr_wa|safe }}<h2>WhatsApp</h2><div class="small">Scan to message {{ '+' ~ links.whatsapp_number }}. Confidential: our staff see your number.</div></div>{% endif %}
+  </div>
+  <div class="list">
+    {% if links.email %}<div><strong>Email:</strong> {{ links.email }}</div>{% endif %}
+    {% if links.phone %}<div><strong>Phone:</strong> {{ links.phone }}</div>{% endif %}
+    {% if links.whatsapp_number %}<div><strong>WhatsApp:</strong> {{ '+' ~ links.whatsapp_number }}</div>{% endif %}
+    {% if service.other_channels %}<div>{{ service.other_channels }}</div>{% endif %}
+  </div>
+  <p><strong>What to include:</strong> what happened, when and where, who was involved and how you know. Do not put yourself at risk by investigating on your own.</p>
+  <div class="foot">Operated independently by Neverlank Chartered Accountants for {{ client_name }}. If you report through the anonymous page you are given a reference and a key so you can check progress later; keep them safe.{% if not qr_web and not qr_wa and not links.email and not links.phone %} <strong>No channels are set up yet - fill in the hotline details and switch the page on first.</strong>{% endif %}</div>
+</div>
+</body>
+</html>
