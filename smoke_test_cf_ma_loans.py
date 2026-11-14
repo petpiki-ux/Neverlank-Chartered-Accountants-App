@@ -260,8 +260,8 @@ bal0 = M.balance_rows(dB2)
 balF = FL.with_facilities(bal0, dB2)
 kk = [r["key"] for r in balF["rows"]]
 check(kk[kk.index("borrowings") + 1:kk.index("borrowings") + 4] == ["fac_total", "fac_current", "fac_noncurrent"], "facility rows sit directly under Borrowings")
-_chg = ("borrowings", "liabilities", "el", "netdebt", "check")
-check(len(balF["rows"]) == len(bal0["rows"]) + 3 and [r for r in balF["rows"] if r["key"] not in ("fac_total", "fac_current", "fac_noncurrent") + _chg] == [r for r in bal0["rows"] if r["key"] not in _chg], "only the three rows are added; every other line is untouched")
+_chg = ("borrowings", "liabilities", "netdebt", "equity")
+check(len(balF["rows"]) == len(bal0["rows"]) + 4 and [r for r in balF["rows"] if r["key"] not in ("fac_total", "fac_current", "fac_noncurrent", "fac_gap") + _chg] == [r for r in bal0["rows"] if r["key"] not in _chg], "only the facility rows and the adjustment line are added; every other line is untouched")
 ft = [r for r in balF["rows"] if r["key"] == "fac_total"][0]
 fc = [r for r in balF["rows"] if r["key"] == "fac_current"][0]
 fn_ = [r for r in balF["rows"] if r["key"] == "fac_noncurrent"][0]
@@ -273,8 +273,9 @@ check(near(ft["lm"], sum(FL.balance_at(FL.schedule(x), M.shift_month(_cur, -1)) 
 _sh = max(0.0, ft["a"] - [r for r in bal0["rows"] if r["key"] == "borrowings"][0]["a"])
 _B = {r["key"]: r for r in balF["rows"]}; _B0 = {r["key"]: r for r in bal0["rows"]}
 check(_sh > 1000 and near(_B["borrowings"]["a"], _B0["borrowings"]["a"] + _sh) and near(_B["borrowings"]["a"], ft["a"]), f"Borrowings (Actual) is raised to the facilities' balance ({_B0['borrowings']['a']:,.0f} -> {_B['borrowings']['a']:,.0f})")
-check(near(_B["liabilities"]["a"], _B0["liabilities"]["a"] + _sh) and near(_B["el"]["a"], _B0["el"]["a"] + _sh) and near(_B["netdebt"]["a"], _B0["netdebt"]["a"] + _sh), "total liabilities, total equity and liabilities and net debt include the facilities")
-check(near(_B["check"]["a"], _B0["check"]["a"] - _sh) and near(_B["assets"]["a"], _B0["assets"]["a"]) and near(_B["equity"]["a"], _B0["equity"]["a"]), "the balance check shows what is still to be fixed; assets and equity are untouched")
+check(near(_B["liabilities"]["a"], _B0["liabilities"]["a"] + _sh) and near(_B["netdebt"]["a"], _B0["netdebt"]["a"] + _sh), "total liabilities and net debt include the facilities")
+check("fac_gap" in _B and near(_B["fac_gap"]["a"], -_sh) and near(_B["equity"]["a"], _B0["equity"]["a"] - _sh) and near(_B["retained"]["a"], _B0["retained"]["a"]), "the same amount reduces retained earnings on its own line, and so total equity")
+check(near(_B["el"]["a"], _B0["el"]["a"]) and near(_B["assets"]["a"], _B["el"]["a"]) and abs(_B["check"]["a"]) < 1.0, "the balance sheet still balances (check is nil)")
 check(near(_B["borrowings"]["lm"], max(_B0["borrowings"]["lm"], ft["lm"])), "the last-month column is raised the same way")
 check(FL.with_facilities(bal0, build()[0]) is bal0, "no facilities: the balance sheet is returned unchanged")
 

@@ -13,7 +13,7 @@
   <h3 style="margin-top:0;">Balance sheet &ndash; {{ labels.month }}</h3>
   {{ ma.balance_table(bal, var, labels) }}
   <p class="cf-sub">{{ cur }}. Forecast and budget balance sheets are available when they come from a forecast model. Retained earnings include the current year's profit.</p>
-  {% if loan_an and loan_an.balance %}<p class="cf-sub">Borrowings in the Actual and Last month columns are raised to the loan facilities' balance (the &ldquo;of which: loan facilities&rdquo; rows, current and non-current split included) where the books hold less, and the totals include it. The <strong>balance check</strong> then shows what the books still need on the other side &ndash; stock, payables or reserves &ndash; which is fixed in the actuals. The Forecast column already follows the facilities.</p>{% endif %}
+  {% if loan_an and loan_an.balance %}<p class="cf-sub">Borrowings in the Actual and Last month columns are raised to the loan facilities' balance (the &ldquo;of which: loan facilities&rdquo; rows, current and non-current split included) where the books hold less. The same amount reduces retained earnings (the line under them), so the balance sheet balances. Once the books record the facilities, the adjustment falls away. The Forecast column already follows the facilities.</p>{% endif %}
 </div>
 {{ ma.basis(d, none, status) }}
 {% if d.commentary.balance %}<div class="card"><h3 style="margin-top:0;">Commentary</h3><p style="white-space:pre-wrap;">{{ d.commentary.balance }}</p></div>{% endif %}

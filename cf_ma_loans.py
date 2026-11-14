@@ -415,14 +415,14 @@ def unbooked_gap(d):
     return gap if gap > 1.0 else 0.0
 
 
-ADJ_LABEL = "Loan facilities not yet in the books (adjustment)"
+ADJ_LABEL = "Loan facilities not yet in the books (reduces retained earnings)"
 
 
 def with_facilities(bal, d, facs=None):
     """The balance sheet rows with the loan facilities shown inside the table, under Borrowings: the facilities' balance (from their
     schedule), and how much of it falls due within 12 months / after. Where the books hold less borrowings than the facilities, the Borrowings
-    line and the totals include the facilities (see `_include_facilities_in_totals`), so the balance check shows what is still to be
-    fixed. Returns `bal` unchanged when there are no facilities in use."""
+    line and the totals include the facilities and the same amount reduces retained earnings (see `_include_facilities_in_totals`), so the
+    sheet balances. Returns `bal` unchanged when there are no facilities in use."""
     facs = [x for x in (facilities_of(d) if facs is None else facs) if x["include"] and x["amount"] > 0]
     if not facs or not bal or not bal.get("rows"):
         return bal
@@ -468,9 +468,9 @@ def with_facilities(bal, d, facs=None):
 
 def _include_facilities_in_totals(rows, balance, at):
     """Where the books (the Actual and Last month columns, and the prior year end) hold less borrowings than the facilities' schedule, the
-    Borrowings line is raised to the facilities' balance and flows into total liabilities, total equity and liabilities, net debt and the
-    balance check. The balance check then shows what the books still need on the other side (stock, payables, reserves) - the preparer
-    fixes that in the actuals. Forecast and budget columns are left alone (the forecast already follows the facilities)."""
+    Borrowings line is raised to the facilities' balance and flows into total liabilities and net debt. The same amount reduces retained
+    earnings, shown on its own line under them (and so total equity), so the balance sheet still balances. Forecast and budget columns are
+    left alone (the forecast already follows the facilities)."""
     by = {r["key"]: r for r in rows}
     if "borrowings" not in by:
         return rows
@@ -484,26 +484,31 @@ def _include_facilities_in_totals(rows, balance, at):
             short[col] = sh
     if not short:
         return rows
+    sign = {"borrowings": 1, "liabilities": 1, "netdebt": 1, "equity": -1}
     out = []
     for r in rows:
         k = r.get("key")
-        if k in ("borrowings", "liabilities", "el", "netdebt"):
+        if k in sign:
             r = dict(r)
             for col, sh in short.items():
                 if r.get(col) is not None:
-                    r[col] = r[col] + sh
-        elif k == "check":
-            r = dict(r)
-            for col, sh in short.items():
-                if r.get(col) is not None:
-                    r[col] = r[col] - sh
-        else:
-            out.append(r)
-            continue
-        r["var"] = M._dv(r.get("a"), r.get("b"))
-        r["chg_year"] = M._dv(r.get("a"), r.get("py"))
-        r["chg_month"] = M._dv(r.get("a"), r.get("lm"))
+                    r[col] = r[col] + sign[k] * sh
+            r["var"] = M._dv(r.get("a"), r.get("b"))
+            r["chg_year"] = M._dv(r.get("a"), r.get("py"))
+            r["chg_month"] = M._dv(r.get("a"), r.get("lm"))
+        elif k == "fac_gap":
+            r = dict(r, **{col: -sh for col, sh in short.items()})
+            r["chg_year"] = M._dv(r.get("a"), r.get("py"))
+            r["chg_month"] = M._dv(r.get("a"), r.get("lm"))
         out.append(r)
+        if k == "retained" and "fac_gap" not in by:
+            out.append({"key": "fac_gap", "label": ADJ_LABEL, "kind": "line", "lm": short.get("lm"), "a": short.get("a"), "b": None, "bfy": None,
+                        "py": short.get("py"), "var": None, "f": None, "ffy": None, "chg_year": None, "chg_month": None})
+            for col in ("lm", "a", "py"):
+                if col in short:
+                    out[-1][col] = -short[col]
+            out[-1]["chg_year"] = M._dv(out[-1]["a"], out[-1]["py"])
+            out[-1]["chg_month"] = M._dv(out[-1]["a"], out[-1]["lm"])
     return out
 
 
