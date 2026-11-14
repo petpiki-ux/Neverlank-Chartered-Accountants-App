@@ -143,7 +143,8 @@ def _statement(wb, title, meta, d, cols, rows, subtitle, sections=False, note=No
 def _income(wb, meta, d, labels, args):
     ytd = args.get("view") == "ytd"
     var = args.get("var") != "0"
-    inc = M.income_rows(d)
+    import cf_ma_loans as FL
+    inc = FL.income_with_facilities(M.income_rows(d), d)
     cols = P._income_cols(labels, ytd, var)
     sub = f"{'Year to date' if ytd else 'Month'}: {labels['month']}. Variances favourable positive, adverse in brackets."
     return _statement(wb, "Income statement", meta, d, cols, inc["rows"], sub, sections=True,

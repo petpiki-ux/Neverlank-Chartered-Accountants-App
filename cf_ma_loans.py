@@ -25,6 +25,7 @@ each of those months, interest runs on the balance as usual, and the last month 
 Facilities entered earlier with one amount, one date, a term and a grace period behave exactly as before.
 """
 import calendar
+import copy
 import datetime
 import hashlib
 import json
@@ -438,8 +439,18 @@ def pack_schedule(d, facs=None):
     return {"months": months, "actual": actual, "actual_n": ridx + 1, "facilities": out_f, "total": tot, "year": year}
 
 
+def raw(d):
+    """The pack as the books hold it (the statements may be shown with the loan facilities added: see `shown`)."""
+    return d.get("_raw") or d
+
+
+def overlay_on(d):
+    return raw(d).get("facility_overlay") is not False
+
+
 def checks(d, facs=None):
     """Plain-English findings the preparer should look at. Each is a string."""
+    d = raw(d)
     facs = facilities_of(d) if facs is None else facs
     msgs = []
     if not facs:
@@ -514,6 +525,7 @@ def checks(d, facs=None):
 def interest_check(d, facs=None):
     """Schedule interest against the interest expense in the actuals, month by month, for the actual months that have a P&L.
     Returns [{month, schedule, books, diff}]; books includes any establishment fee posted to interest."""
+    d = raw(d)
     ps = pack_schedule(d, facs)
     out = []
     try:
@@ -701,6 +713,7 @@ def unbooked_gap(d):
     """Amount by which a forecast that follows the loan facilities cuts the reserves at its start, because the books' balance sheet does not
     hold facilities the Loan facilities tab says are outstanding (the engine balances the opening position with the reserves). 0 when the
     forecast is not a continuation of the actuals, or the books already hold the facilities."""
+    d = raw(d)
     fc = d.get("forecast") or {}
     link = d.get("forecast_link") or {}
     start = str(link.get("start_month") or "")[:7]
@@ -797,22 +810,197 @@ def _include_facilities_in_totals(rows, balance, at):
     return out
 
 
+def shown(d):
+    """The pack as its statements show it: the loan facilities' interest and establishment fees added to the actual months' interest expense,
+    and their balances added to Borrowings (with the matching debit to Retained earnings, as before), so the income statement, balance sheet,
+    cash flow, KPIs, PDF and Excel all carry the loans and tie to each other. Cash is left as the books hold it.
+    The result is a copy (the pack itself is never changed) that remembers the original as `_raw` and what it added as `_overlay`.
+    Returns `d` itself when there is nothing to add: no facilities in use, the switch on the Loan facilities tab is off, or the books already hold them.
+    A month whose balance sheet already holds at least the facilities' borrowings is taken to hold their interest too, and gets no extra interest."""
+    if d.get("_overlay") is not None or d.get("_raw") is not None or not overlay_on(d):
+        return d
+    facs = [x for x in facilities_of(d) if x["include"] and x["amount"] > 0]
+    if not facs:
+        return d
+    try:
+        months = M.fy_months(d)
+        raw_series = M.bs_series(d)
+    except Exception:
+        return d
+    full = [schedule(x) for x in facs]
+
+    def bal(m):
+        return sum(balance_at(r, m) for r in full)
+
+    cost_all = {m: {"int": sum(x["interest"] for r in full for x in r if x["month"] == m), "fee": sum(x["fee"] for r in full for x in r if x["month"] == m)}
+                for m in months}
+    entries = d.get("entries") or {}
+    e2 = copy.deepcopy(entries)
+    added, S = {}, {}
+    run_i = run_f = 0.0
+    for m in months:
+        e = e2.get(m) or {}
+        booked = False
+        if e.get("bs") and m in raw_series and bal(m) > 0.5:
+            booked = f(raw_series[m].get("borrowings")) >= bal(m) - 0.5
+        a_i, a_f = (0.0, 0.0) if booked else (cost_all[m]["int"], cost_all[m]["fee"])
+        added[m] = {"int": a_i, "fee": a_f}
+        run_i += a_i
+        run_f += a_f
+        if e.get("pl") is not None and e.get("kind") in ("ytd", "month"):
+            pl = e["pl"]
+            extra = (run_i + run_f) if e.get("kind") == "ytd" else (a_i + a_f)
+            pl["int_exp"] = f(pl.get("int_exp")) + extra
+        if e.get("bs") and m in raw_series:
+            book_b = f(raw_series[m].get("borrowings"))
+            sh = bal(m) - book_b
+            sh = sh if sh > 0.5 else 0.0
+            S[m] = sh
+            e["bs"]["borrowings"] = book_b + sh
+            e["bs"]["retained"] = f(raw_series[m].get("retained")) - sh       # explicit, so later months do not roll the cut twice
+    p2 = copy.deepcopy(d.get("prior")) if d.get("prior") else d.get("prior")
+    s_py = 0.0
+    pbs = (p2 or {}).get("bs")
+    if pbs:
+        sh = bal(M.shift_month(months[0], -1)) - f(pbs.get("borrowings"))
+        if sh > 0.5:
+            s_py = sh
+            pbs["borrowings"] = f(pbs.get("borrowings")) + sh
+            pbs["retained"] = f(pbs.get("retained")) - sh
+    if not any(a["int"] or a["fee"] for a in added.values()) and not any(S.values()) and not s_py:
+        return d
+    d2 = dict(d)
+    d2["entries"] = e2
+    d2["prior"] = p2
+    d2["_raw"] = d
+    d2["_overlay"] = {"months": months, "cost_all": cost_all, "added": added, "S": S, "S_py": s_py, "gap_raw": unbooked_gap(d)}
+    return d2
+
+
+def income_with_facilities(inc, d):
+    """The income statement with two lines under Interest expense showing how much of it is the loan facilities' interest and establishment
+    fees (the amounts are already in Interest expense, Profit before tax and Profit after tax)."""
+    info = d.get("_overlay")
+    if not info or not inc or not inc.get("rows"):
+        return inc
+    V = inc["V"]
+    months, idx = info["months"], V["idx"]
+    added, cost_all = info["added"], info["cost_all"]
+
+    def pick(key, m):
+        return added.get(m, {}).get(key) if m in added else None
+
+    def fy_value(key):
+        if V["outlook"] is None:
+            return None
+        basis = V.get("outlook_basis") or ""
+        if basis.startswith("Year-to-date actual plus the latest forecast"):
+            return sum(cost_all[m][key] if m in months[V["n"]:] else added[m][key] for m in months)     # actual months as added, the rest as the forecast carries it
+        if basis.startswith("Year-to-date actual annualised"):
+            return sum(added[m][key] for m in months[:V["n"]]) * 12.0 / V["n"]
+        return sum(added[m][key] for m in months[:V["n"]])
+
+    def mk(key, label, k):
+        def blk(a=None, f_=None):
+            return {"a": a, "f": f_, "b": None, "var": None, "varpct": None, "p": None, "pvar": None, "pvarpct": None, "rag": "na"}
+        lm = pick(k, months[idx - 1]) if idx > 0 and V["last_month"] is not None else None
+        a = pick(k, months[idx]) if V["actual_month"] is not None else None
+        f_ = cost_all[months[idx]][k] if V["forecast_month"] is not None else None
+        y = sum(added[m][k] for m in months[:V["n"]]) if V["actual_ytd"] is not None else None
+        fy = blk(None, fy_value(k))
+        fy["f"] = fy_value(k)
+        return {"key": key, "label": label, "kind": "memo", "income": False, "lm": lm, "month": blk(a, f_), "ytd": blk(y), "fy": fy}
+
+    rows = []
+    for r in inc["rows"]:
+        rows.append(r)
+        if r["key"] == "int_exp":
+            rows.append(mk("fac_int", "of which: loan facility interest (per the schedules)", "int"))
+            rows.append(mk("fac_fee", "of which: loan facility establishment fees", "fee"))
+    return dict(inc, rows=rows)
+
+
 def cashflow_with_facilities(cfl, d):
-    """The cash flow rows with the facilities' opening gap split out of 'Other equity movements' into its own (non-cash) line, in the
-    full-year forecast column. Totals do not change."""
-    gap = unbooked_gap(d)
-    if not gap or not cfl or not cfl.get("rows"):
+    """The cash flow rows with the loan facilities' effect that is not in the books' cash shown on its own non-cash line, so that the drawdowns,
+    capital repaid and interest and fees paid are in the statement (Net loan drawdown, Net interest) and closing cash still agrees to the books.
+    Without the loans-in view (see `shown`), only the forecast's opening gap is split out of 'Other equity movements', as before."""
+    if not cfl or not cfl.get("rows"):
         return cfl
+    info = d.get("_overlay")
+    if not info:
+        gap = unbooked_gap(d)
+        offs = {"ffy": -gap} if gap else {}
+    else:
+        months, added, S = info["months"], info["added"], info["S"]
+        idx = M.report_index(d)
+
+        def s_of(m):
+            return info["S_py"] if m < months[0] else S.get(m)
+
+        def c_of(m):
+            return added[m]["int"] + added[m]["fee"] if m in added else 0.0
+
+        def ds(end, start):
+            a, b = s_of(end), s_of(start)
+            return None if (a is None or b is None) else a - b
+
+        offs = {}
+        if idx >= 1:
+            e_, s_ = months[idx - 1], (months[idx - 2] if idx >= 2 else M.shift_month(months[0], -1))
+            d_ = ds(e_, s_)
+            offs["lm"] = None if d_ is None else -d_ + c_of(e_)
+        d_ = ds(months[idx], months[idx - 1] if idx >= 1 else M.shift_month(months[0], -1))
+        offs["a"] = None if d_ is None else -d_ + c_of(months[idx])
+        d_ = ds(months[idx], M.shift_month(months[0], -1))
+        offs["ya"] = None if d_ is None else -d_ + sum(c_of(m) for m in months[:idx + 1])
+        offs["ffy"] = -info["gap_raw"] + sum(c_of(m) for m in months[:idx + 1])
+    if not any(abs(v or 0.0) > 0.5 for v in offs.values()):
+        return cfl
+    label = "Loan facility movements not in the books (non-cash)" if info else ADJ_LABEL + ", non-cash"
     rows = []
     for r in cfl["rows"]:
-        if r.get("key") == "other_equity" and r.get("ffy") is not None:
-            r = dict(r, ffy=r["ffy"] + gap)
+        if r.get("key") == "other_equity":
+            r = dict(r)
+            if not info:
+                # without the loans-in view the gap is only split out of the full-year forecast column, as before
+                if r.get("ffy") is not None and offs.get("ffy"):
+                    r["ffy"] = r["ffy"] - offs["ffy"]
+            else:
+                for col, v in offs.items():
+                    if v is not None and r.get(col) is not None:
+                        r[col] = r[col] - v
+                r["var"] = M._dv(r.get("a"), r.get("b"))
+                r["yvar"] = M._dv(r.get("ya"), r.get("yb"))
             rows.append(r)
-            rows.append({"key": "fac_gap", "label": ADJ_LABEL + ", non-cash", "kind": "indent", "lm": None, "a": None, "f": None, "b": None, "ya": None,
-                         "yb": None, "ffy": -gap, "bfy": None, "var": None, "yvar": None})
+            new = {"key": "fac_gap", "label": label, "kind": "indent", "lm": None, "a": None, "f": None, "b": None, "ya": None, "yb": None,
+                   "ffy": None, "bfy": None, "var": None, "yvar": None}
+            for col, v in offs.items():
+                if v is not None and r.get(col) is not None:
+                    new[col] = v
+            rows.append(new)
             continue
         rows.append(r)
     return dict(cfl, rows=rows)
+
+
+def statement_note(d, tab):
+    """One sentence under a statement saying how the loan facilities are in it (None when the loans-in view is not on)."""
+    info = d.get("_overlay")
+    if not info:
+        return None
+    names = ", ".join(label_of(x) for x in facilities_of(d) if x["include"] and x["amount"] > 0)
+    ytd = sum(a["int"] + a["fee"] for a in info["added"].values())
+    if tab == "income":
+        return (f"Loan facilities ({names}): their interest and establishment fees per the Loan facilities schedules ({ytd:,.0f} for the actual months of the year) are included in "
+                "Interest expense, Profit before tax and Profit after tax, because the books do not hold them (the lines under Interest expense show the part that is the facilities). "
+                "Income tax is as the books have it: no tax effect has been taken on this extra cost.")
+    if tab == "balance":
+        return (f"Loan facilities ({names}): their balance per the schedules is in Borrowings, with the matching debit in Retained earnings where the books hold less. "
+                "Cash is as the books hold it.")
+    if tab == "cashflow":
+        return (f"Loan facilities ({names}): drawdowns and capital repaid are in Net loan drawdown / (repayment) and the interest and fees paid are in Net interest. "
+                "The bank movements are not in the books' cash, so the line 'Loan facility movements not in the books (non-cash)' offsets them and closing cash still agrees to the balance sheet.")
+    return None
 
 
 def statement_analysis(d, facs=None):
@@ -856,9 +1044,14 @@ def statement_analysis(d, facs=None):
     rows.append(row("Interest expense per income statement", [stmt[p] for p in ordr], "line"))
     other = [sub(stmt[p], cost[i]) for i, p in enumerate(ordr)]
     rows.append(row("Other interest and charges (statement less facilities)", other, "memo"))
-    note_i = ("Actual months are the books; later months are the forecast. A negative balance means the statement holds less interest than the facilities "
-              "schedule: for actual months the books may not yet record the facility interest or fees; for forecast months the forecast may not be "
-              "linked to these facilities (use 'Save and update the forecast' on the Loan facilities tab).")
+    if d.get("_overlay"):
+        note_i = ("The facilities' interest and fees are included in the statement's interest expense (the books did not hold them), so the balance is the interest "
+                  "the books hold for other borrowings and charges. A negative balance for a forecast month means the forecast is not linked to these facilities "
+                  "(use 'Save and update the forecast' on the Loan facilities tab).")
+    else:
+        note_i = ("Actual months are the books; later months are the forecast. A negative balance means the statement holds less interest than the facilities "
+                  "schedule: for actual months the books may not yet record the facility interest or fees; for forecast months the forecast may not be "
+                  "linked to these facilities (use 'Save and update the forecast' on the Loan facilities tab).")
     income = {"title": "Loan facilities in the income statement", "cols": [cur_lab, "Year to date", f"Full year {fy}"], "rows": rows, "note": note_i,
               "warn": any(v is not None and v < -max(1.0, 0.02 * (cost[i] or 0)) for i, v in enumerate(other))}
 

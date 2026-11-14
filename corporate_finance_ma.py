@@ -239,28 +239,32 @@ def pack_tab(pack_id, tab):
                months=M.fy_months(d), report_month=M.report_month(d), fy=M.fy_label(d), prior_label=M.prior_fy_label(d),
                month_label=M.month_label, warnings=M.warnings(d), status=M.data_status(d), has_prior=bool((d.get("prior") or {}).get("pl")),
                engagements=_engagement_choices([pack.client]) if tab == "setup" else [], link_status=LK.link_status(_data(pack)))
+    # the statements are shown with the loan facilities in (see cf_ma_loans.shown); the pack's own data is never changed
+    dv = FL.shown(d) if tab in ("summary", "income", "balance", "cashflow", "kpis", "variances", "commentary") else d
+    ctx["fac_in"] = bool(dv.get("_overlay"))
+    ctx["fac_note"] = FL.statement_note(dv, tab)
     if tab in ("income", "balance", "cashflow", "kpis"):
-        ctx["loan_an"] = FL.statement_analysis(d)
+        ctx["loan_an"] = FL.statement_analysis(dv)
     if tab == "summary":
-        ctx.update(V=M.vectors(d), msgs=M.key_messages(d, ""), kpis=M.kpi_table(d), charts=_chart_payload(d))
+        ctx.update(V=M.vectors(dv), msgs=M.key_messages(dv, ""), kpis=M.kpi_table(dv), charts=_chart_payload(dv))
     elif tab == "income":
-        ctx.update(inc=M.income_rows(d), view="ytd" if request.args.get("view") == "ytd" else "month", var=request.args.get("var") != "0")
+        ctx.update(inc=FL.income_with_facilities(M.income_rows(dv), dv), view="ytd" if request.args.get("view") == "ytd" else "month", var=request.args.get("var") != "0")
     elif tab == "balance":
-        ctx.update(bal=FL.with_facilities(M.balance_rows(d), d), var=request.args.get("var") != "0")
+        ctx.update(bal=FL.with_facilities(M.balance_rows(dv), dv), var=request.args.get("var") != "0")
     elif tab == "cashflow":
-        ctx.update(cfl=FL.cashflow_with_facilities(M.cashflow_rows(d), d), view="ytd" if request.args.get("view") == "ytd" else "month", var=request.args.get("var") != "0")
+        ctx.update(cfl=FL.cashflow_with_facilities(M.cashflow_rows(dv), dv), view="ytd" if request.args.get("view") == "ytd" else "month", var=request.args.get("var") != "0")
     elif tab == "kpis":
-        ctx.update(kpis=M.kpi_table(d), V=M.vectors(d))
+        ctx.update(kpis=M.kpi_table(dv), V=M.vectors(dv))
     elif tab == "variances":
-        vl = M.variance_list(d)
+        vl = M.variance_list(dv)
         vl.sort(key=lambda x: -abs(x["ytd_var"] or 0))
-        ctx.update(vl=vl, V=M.vectors(d))
+        ctx.update(vl=vl, V=M.vectors(dv))
     elif tab == "varmodel":
         ctx.update(_varmodel_ctx(d))
     elif tab == "reforecast":
         ctx.update(_reforecast_ctx(pack, d))
     elif tab == "commentary":
-        ctx.update(msgs=M.key_messages(d, ""), com=d["commentary"], notes=d["line_notes"], line_defs=M.pl_line_defs(d["structure"]))
+        ctx.update(msgs=M.key_messages(dv, ""), com=d["commentary"], notes=d["line_notes"], line_defs=M.pl_line_defs(d["structure"]))
     elif tab == "actuals":
         ctx.update(prior_ok=bool((d.get("prior") or {}).get("pl") and (d.get("prior") or {}).get("bs")), months_full=MONTH_NAMES)
     elif tab == "budget":
@@ -290,7 +294,7 @@ def _loans_ctx(pack, d):
         if model is not None and (model.client_id != pack.client_id or not _can_see(model)):
             model = None
     return dict(gap_info=LK.opening_gap_info(d), gap_adj=FL.adjust_of(d), facs=facs, ps=FL.pack_schedule(d, facs), fac_checks=FL.checks(d, facs), int_check=FL.interest_check(d, facs),
-                repay_types=FL.REPAY_TYPES, repay_short=FL.REPAY_SHORT, fee_of=FL.fee_of, label_of=FL.label_of, repay_start=FL.repay_start, instalments_of=FL.instalments_of, max_draws=FL.MAX_DRAWS, repayments_of=FL.repayments,
+                repay_types=FL.REPAY_TYPES, repay_short=FL.REPAY_SHORT, fee_of=FL.fee_of, label_of=FL.label_of, repay_start=FL.repay_start, instalments_of=FL.instalments_of, max_draws=FL.MAX_DRAWS, repayments_of=FL.repayments, overlay_on=FL.overlay_on(d),
                 default_month=M.report_month(d), link=link, link_model=model, max_facilities=FL.MAX_FACILITIES,
                 life={x['id']: FL.schedule(x) for x in facs if x['include'] and x['amount'] > 0})
 
@@ -364,6 +368,8 @@ def pack_facilities_save(pack_id):
     d["facilities"] = facs
     if "adj_inventory" in request.form or "adj_payables" in request.form:
         d["facility_adjust"] = FL.parse_adjust(request.form)
+    if "overlay_present" in request.form:
+        d["facility_overlay"] = bool(request.form.get("show_in_statements"))
     link = d.get("forecast_link") or {}
     if action == "sync":
         if not (link.get("model_id")):
@@ -1517,7 +1523,7 @@ def pack_plan_clear(pack_id, name):
 
 def _pack_excel_bytes(pack, d):
     import cf_ma_excel
-    return cf_ma_excel.build_pack_workbook(_meta(pack, d), d)
+    return cf_ma_excel.build_pack_workbook(_meta(pack, d), FL.shown(d))
 
 
 def _pack_page_bytes(pack, d, tab, args):
@@ -1527,12 +1533,12 @@ def _pack_page_bytes(pack, d, tab, args):
         ctx = _varmodel_ctx(d)
     elif tab == "reforecast":
         ctx = _reforecast_ctx(pack, d)
-    return XP.build_page_workbook(_meta(pack, d), d, tab, args, ctx)
+    return XP.build_page_workbook(_meta(pack, d), FL.shown(d) if tab in ("summary", "income", "balance", "cashflow", "kpis", "variances", "commentary") else d, tab, args, ctx)
 
 
 def _pack_pdf_bytes(pack, d, opts):
     import cf_ma_pdf
-    return cf_ma_pdf.build_pack_pdf(pack, _meta(pack, d), d, FIRM_LETTERHEAD, opts)
+    return cf_ma_pdf.build_pack_pdf(pack, _meta(pack, d), FL.shown(d), FIRM_LETTERHEAD, opts)
 
 
 @corpfin_bp.route("/management-accounts/<int:pack_id>/excel")

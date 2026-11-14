@@ -237,6 +237,9 @@ def _basis_lines(d, V, status):
             out.append(f"{name.capitalize()}: {src}" + (", then adjusted" if pl.get("edited") else "") + ".")
     if V.get("outlook_basis"):
         out.append("Full-year forecast: " + V["outlook_basis"] + ".")
+    if d.get("_overlay"):
+        out.append("Loan facilities: interest and establishment fees per the Loan facilities schedules are included in interest expense, their balances in borrowings "
+                   "(with the debit in retained earnings) and their movements in the cash flow, because the books do not hold them. Income tax is as the books have it.")
     out.append("These management accounts are unaudited, prepared for management purposes, and have not been reviewed or audited.")
     return out
 
@@ -366,7 +369,7 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
     if A is None:
         story.append(_p("No figures."))
     else:
-        inc = M.income_rows(d)
+        inc = FL0.income_with_facilities(M.income_rows(d), d)
         story.append(_layout(_income_cols(labels, bool(opts.get("ytd")), var), inc["rows"], sections=True))
         story.append(Spacer(1, 1.5 * mm))
         story.append(_p(f"{cur}. Variances: favourable positive, adverse in brackets. Last year is the {labels['prior']} accounts spread evenly across the months.", _note_style))

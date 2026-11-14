@@ -106,6 +106,14 @@
     if(b){b.addEventListener('click',function(){i.value=b.dataset.inv;p.value=b.dataset.pay;up();});}})();
   </script>
   {% endif %}
+  {% if facs %}
+  <div class="card" style="margin-bottom:12px;">
+    <label style="font-weight:normal;"><input type="hidden" name="overlay_present" value="1"><input type="checkbox" name="show_in_statements" value="1" {% if overlay_on %}checked{% endif %} {{ 'disabled' if locked }}>
+      <strong>Show the loan facilities in the statements</strong></label>
+    <p class="cf-sub" style="margin:4px 0 0;">When on, the facilities' interest and establishment fees are added to the actual months' interest expense, their balances to Borrowings (with the debit in Retained earnings), and their drawdowns, repayments and interest to the cash flow, so the income statement, balance sheet, cash flow, KPIs, PDF and Excel all carry the loans.
+      Leave it on while the books do not hold the facilities. Turn it off once the NBS/TNC transactions have been journalised, so they are not counted twice. A month whose balance sheet already holds the facilities' borrowings gets no extra interest.</p>
+  </div>
+  {% endif %}
   {% if not locked %}
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
     {% if facs|length < max_facilities %}<button class="btn secondary" type="submit" name="action" value="add" formnovalidate>+ Add a facility</button>{% endif %}

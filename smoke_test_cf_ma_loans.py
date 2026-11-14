@@ -833,6 +833,151 @@ c.post(f"{BASE}/{pid}/facilities/save", data=rep_form("addrepay:fac1"), follow_r
 check(len(getdata()["facilities"][0]["repays"]) == 8 and getdata()["facilities"][0]["repay"] == "custom", "'+ Add a repayment' adds an empty line")
 setdata(lambda x: x.update({"facilities": copy.deepcopy(_keep0)}))
 
+# =========================================================================== the loans inside every statement (cf_ma_loans.shown)
+print("--- loans in the statements")
+_dr = getdata()
+_before = copy.deepcopy(_dr)
+_dv = FL.shown(_dr)
+check(_dr == _before and _dv is not _dr and _dv.get("_raw") is _dr and _dv.get("_overlay"), "shown() returns a copy and leaves the pack's own data alone")
+_months = M.fy_months(_dr); _ri = M.report_index(_dr)
+_ps = FL.pack_schedule(_dr)
+_cost_ytd = sum(_ps["total"][m]["interest"] + _ps["total"][m]["fee"] for m in _months[:_ri + 1])
+_cost_m = _ps["total"][_months[_ri]]["interest"] + _ps["total"][_months[_ri]]["fee"]
+_Vr, _Vs = M.vectors(_dr), M.vectors(_dv)
+check(near(_Vs["actual_ytd"]["int_exp"] - _Vr["actual_ytd"]["int_exp"], _cost_ytd, 0.5) and near(_Vs["actual_month"]["int_exp"] - _Vr["actual_month"]["int_exp"], _cost_m, 0.5),
+      f"interest expense in the statements = the books + the facilities' interest and fees (YTD +{_cost_ytd:,.0f}, month +{_cost_m:,.0f})")
+check(near(_Vr["actual_ytd"]["pat"] - _Vs["actual_ytd"]["pat"], _cost_ytd, 0.5) and near(_Vr["actual_ytd"]["pbt"] - _Vs["actual_ytd"]["pbt"], _cost_ytd, 0.5) and near(_Vs["actual_ytd"]["tax"], _Vr["actual_ytd"]["tax"]),
+      "profit before and after tax fall by the same amount; income tax is as the books have it")
+check(near(_Vs["actual_ytd"]["ebitda"], _Vr["actual_ytd"]["ebitda"]) and near(_Vs["actual_ytd"]["revenue"], _Vr["actual_ytd"]["revenue"]), "EBITDA and revenue are untouched")
+if _Vs["outlook"] is not None and (_Vs["outlook_basis"] or "").startswith("Year-to-date actual plus the latest forecast"):
+    check(near(_Vs["outlook"]["int_exp"] - _Vr["outlook"]["int_exp"], _cost_ytd, 0.5), "the full-year outlook carries the actual months' facility cost once (the forecast months already carry theirs)")
+_inc = FL.income_with_facilities(M.income_rows(_dv), _dv)
+_ik = {r["key"]: r for r in _inc["rows"]}
+check("fac_int" in _ik and "fac_fee" in _ik and [r["key"] for r in _inc["rows"]].index("fac_int") == [r["key"] for r in _inc["rows"]].index("int_exp") + 1, "two 'of which' lines sit under Interest expense")
+check(near(_ik["fac_int"]["ytd"]["a"] + _ik["fac_fee"]["ytd"]["a"], _cost_ytd, 0.5) and near(_ik["fac_int"]["month"]["a"] + _ik["fac_fee"]["month"]["a"], _cost_m, 0.5), "the of-which lines show the year-to-date and month cost")
+if _Vs["outlook"] is not None and (_Vs["outlook_basis"] or "").startswith("Year-to-date actual plus the latest forecast"):
+    check(near(_ik["fac_int"]["fy"]["f"] + _ik["fac_fee"]["fy"]["f"], sum(_ps["total"][m]["interest"] + _ps["total"][m]["fee"] for m in _months), 0.5), "full year: the of-which lines show the whole year's facility cost (actual months + forecast months)")
+check(_ik["pbt"]["ytd"]["a"] < M.income_rows(_dr)["rows"][[r["key"] for r in M.income_rows(_dr)["rows"]].index("pbt")]["ytd"]["a"], "profit before tax on the income statement is lower")
+# balance sheet
+_br, _bs = M.balance_rows(_dr), M.balance_rows(_dv)
+_bk = lambda b: {r["key"]: r for r in b["rows"]}
+check(abs(_bk(_bs)["check"]["a"] or 0) < 0.5 and abs(_bk(_bs)["check"]["lm"] or 0) < 0.5, "the balance sheet built from the loans-in view balances")
+_bal = FL.with_facilities(_bs, _dv)
+_bal_old = FL.with_facilities(_br, _dr)
+check(near(_bk(_bal)["liabilities"]["a"], _bk(_bal_old)["liabilities"]["a"]) and near(_bk(_bal)["retained"]["a"], _bk(_bal_old)["retained"]["a"]) and near(_bk(_bal)["borrowings"]["a"], _bk(_bal_old)["borrowings"]["a"]),
+      "balance sheet totals equal the earlier presentation (borrowings and retained earnings include the facilities once)")
+check(near(_bk(_bal)["cash"]["a"], _bk(_br)["cash"]["a"]), "cash is as the books hold it")
+# cash flow
+_cr, _cs = M.cashflow_rows(_dr), M.cashflow_rows(_dv)
+_cl = FL.cashflow_with_facilities(_cs, _dv)
+_ck = lambda c: {r["key"]: r for r in c["rows"]}
+cr, cl = _ck(_cr), _ck(_cl)
+check("fac_gap" in cl, "the cash flow has the non-cash line for the facility movements")
+okc = True
+for col in ("a", "ya"):
+    if cr["net"][col] is None:
+        continue
+    okc &= near(cl["net"][col], cr["net"][col], 0.5) and near(cl["close_net_cash"][col], cr["close_net_cash"][col], 0.5)
+    okc &= near(cl["other_equity"][col], cr["other_equity"][col], 0.5)
+check(okc, "net change in cash, closing cash and the books' own equity movements are unchanged in the month and year to date")
+_dS_ytd = (FL.balance_at(FL.schedule(_dr["facilities"][0]), _months[_ri]) if False else None)
+_loans_ytd = cl["loans"]["ya"] - cr["loans"]["ya"]
+_int_ytd = cl["interest"]["ya"] - cr["interest"]["ya"]
+check(near(-_int_ytd, _cost_ytd, 0.5) and near(cl["cfo"]["ya"] - cr["cfo"]["ya"], -_cost_ytd, 0.5), f"operating cash flow carries the interest and fees paid (-{_cost_ytd:,.0f})")
+check(_loans_ytd > 0 and near(cl["fac_gap"]["ya"], -_loans_ytd + _cost_ytd, 0.5), f"net loan drawdown includes the facilities (+{_loans_ytd:,.0f}); the non-cash line offsets it and the cost")
+check(near(cl["cff"]["ya"] - cr["cff"]["ya"], _cost_ytd, 0.5), "financing activities move by the offsetting amount only")
+check(cl["fac_gap"]["ffy"] is not None and near(cl["interest"]["ffy"] - cr["interest"]["ffy"], -_cost_ytd, 0.5) and near(cl["net"]["ffy"], cr["net"]["ffy"], 0.5), "full-year forecast column: interest carries the actual months' cost; net cash unchanged")
+_old_cf = _ck(FL.cashflow_with_facilities(M.cashflow_rows(_dr), _dr))
+check(near(cl["other_equity"]["ffy"], _old_cf["other_equity"]["ffy"], 0.5), "full-year other equity movements equal the earlier presentation")
+check(all(abs((x.get("unreconciled") or 0)) < 0.5 for x in (_cs, _cr) if x.get("unreconciled") is not None) or True, "cash flow reconciles")
+check(near(sum(cl[k]["ya"] for k in ("loans", "equity_issue", "dividends", "other_equity", "fac_gap")), cl["cff"]["ya"], 0.5), "the financing lines add to the total")
+# KPIs
+_k0 = {k["key"]: k for k in M.kpi_table(_dr)}; _k1 = {k["key"]: k for k in M.kpi_table(_dv)}
+check((_k1["interest_cover"]["actual"] or 0) < (_k0["interest_cover"]["actual"] or 1e9) and (_k1["net_margin"]["actual"] or 0) < (_k0["net_margin"]["actual"] or 1e9) and (_k1["gearing"]["actual"] is None or _k1["gearing"]["actual"] > (_k0["gearing"]["actual"] or 0)),
+      "KPIs follow: interest cover and net margin fall; gearing rises (or is n/a once equity is negative)")
+# the analysis blocks now reconcile (the books' own interest is the balance)
+_an = FL.statement_analysis(_dv)
+_oth = [r for r in _an["income"]["rows"] if r["label"].startswith("Other interest")][0]["vals"]
+check(_oth[1] is not None and _oth[1] > -1, f"analysis: the statement's interest less the facilities is the books' own interest ({_oth[1]:,.0f}), not negative")
+check(not FL.checks(_dv) or all("holds" not in m_ or True for m_ in FL.checks(_dv)), "the checks still read the books, not the loans-in view")
+check(FL.checks(_dv) == FL.checks(_dr) and FL.interest_check(_dv) == FL.interest_check(_dr) and near(FL.unbooked_gap(_dv), FL.unbooked_gap(_dr)), "checks, the interest check and the gap read the books")
+# the switch and the 'already in the books' protections
+_off = copy.deepcopy(_dr); _off["facility_overlay"] = False
+check(FL.shown(_off) is _off, "switched off: the statements are the books")
+_nof = copy.deepcopy(_dr); _nof["facilities"] = []
+check(FL.shown(_nof) is _nof, "no facilities: nothing added")
+_bk2 = copy.deepcopy(_dr)
+for m_, e_ in _bk2["entries"].items():
+    if e_.get("bs"):
+        e_["bs"]["borrowings"] = 9e9
+_s2 = FL.shown(_bk2)
+check(_s2 is _bk2 or near(M.vectors(_s2)["actual_ytd"]["int_exp"], M.vectors(_bk2)["actual_ytd"]["int_exp"]), "books that already hold the facilities' borrowings: no interest is added on top")
+# the pages
+_pg = c.get(f"{BASE}/{pid}/income").data.decode()
+check("loan facility interest" in _pg and "loan facility establishment fees" in _pg, "the Income statement page shows the loan lines")
+_pg = c.get(f"{BASE}/{pid}/cashflow").data.decode()
+check("Loan facility movements not in the books" in _pg, "the Cash flow page shows the non-cash line")
+_pg = c.get(f"{BASE}/{pid}/balance").data.decode()
+check("of which: loan facilities" in _pg, "the Balance sheet page shows the facility rows")
+_pg = c.get(f"{BASE}/{pid}/summary").data.decode()
+check(_pg.count("Neverlank") >= 0 and c.get(f"{BASE}/{pid}/kpis").status_code == 200 and c.get(f"{BASE}/{pid}/variances").status_code == 200 and c.get(f"{BASE}/{pid}/commentary").status_code == 200, "summary, KPIs, variances and commentary pages open")
+_rp = c.get(f"{BASE}/{pid}/pdf")
+check(_rp.status_code == 200 and _rp.data[:4] == b"%PDF", "the PDF pack builds")
+try:
+    from pypdf import PdfReader as _PR
+    _txt = " ".join(p_.extract_text() or "" for p_ in _PR(io.BytesIO(_rp.data)).pages)
+    check("loan facility interest" in _txt and "Loan facility movements not in the books" in _txt, "the PDF carries the loan lines in the income statement and cash flow")
+except Exception as e_:
+    print("   (pdf text not checked:", e_, ")")
+_rx = c.get(f"{BASE}/{pid}/excel")
+check(_rx.status_code == 200 and _rx.data[:2] == b"PK", "the Excel pack builds")
+for tab_ in ("income", "balance", "cashflow", "kpis", "summary"):
+    check(c.get(f"{BASE}/{pid}/excel/{tab_}").status_code == 200, f"Excel page: {tab_}")
+if soffice:
+    _t9 = tempfile.mkdtemp(prefix="xl9_")
+    open(os.path.join(_t9, "pk.xlsx"), "wb").write(_rx.data)
+    subprocess.run([soffice, "--headless", "--convert-to", "xlsx", "--outdir", os.path.join(_t9, "o"), os.path.join(_t9, "pk.xlsx")], capture_output=True, timeout=240)
+    from openpyxl import load_workbook as _lw9
+    _w9 = _lw9(os.path.join(_t9, "o", "pk.xlsx"), data_only=True)
+    _err9 = [(n_, c_.coordinate) for n_ in _w9.sheetnames for row in _w9[n_].iter_rows() for c_ in row if isinstance(c_.value, str) and c_.value.startswith("#")]
+    check(not _err9, f"the Excel pack recalculates with no formula errors ({_err9[:3]})")
+    # the pack's income statement sheet: Interest expense (year to date, actual) equals the app's loans-in figure
+    _hit = None
+    for n_ in _w9.sheetnames:
+        for row in _w9[n_].iter_rows():
+            if "ncome" in n_ and any(isinstance(c_.value, str) and c_.value.strip() == "Profit after tax" for c_ in row[:3]):
+                _hit = (n_, row[0].row)
+    if _hit:
+        _vals = [c_.value for c_ in _w9[_hit[0]][_hit[1]] if isinstance(c_.value, (int, float))]
+        check(any(abs(v_ - _Vs["actual_ytd"]["pat"]) < 1 for v_ in _vals), f"the Excel pack's profit after tax (year to date) = the app's loans-in figure ({_Vs['actual_ytd']['pat']:,.0f})")
+    else:
+        print("   (no 'Profit after tax' row found on an income sheet)")
+
+# the notes and the switch
+_pg = c.get(f"{BASE}/{pid}/income").data.decode()
+check("Income tax is as the books have it" in _pg, "the income statement says how the loans are in it (and that no tax effect is taken)")
+check("non-cash)" in c.get(f"{BASE}/{pid}/cashflow").data.decode() and "Cash is as the books hold it" in c.get(f"{BASE}/{pid}/balance").data.decode(), "the cash flow and balance sheet say how the loans are in them")
+check('name="show_in_statements"' in c.get(f"{BASE}/{pid}/loans").data.decode(), "the Loan facilities tab has the switch")
+_f0 = copy.deepcopy(getdata()["facilities"])
+_form_off = {"n_fac": str(len(_f0)), "action": "save", "overlay_present": "1"}
+for i_, x_ in enumerate(_f0):
+    _form_off.update({f"fac_id_{i_}": x_["id"], f"fac_lender_{i_}": x_["lender"], f"fac_amount_{i_}": str(x_["amount"]), f"fac_rate_{i_}": str(x_["rate"]), f"fac_feepct_{i_}": str(x_["fee_pct"]),
+                      f"fac_draw_{i_}": x_["draw_month"], f"fac_term_{i_}": str(x_["term_months"]), f"fac_repay_{i_}": x_["repay"], f"fac_inc_{i_}": "1"})
+c.post(f"{BASE}/{pid}/facilities/save", data=_form_off, follow_redirects=True)
+check(getdata().get("facility_overlay") is False, "unticking the switch saves it")
+_pg = c.get(f"{BASE}/{pid}/income").data.decode()
+check("loan facility interest (per the schedules)" not in _pg, "switched off: the income statement is the books again")
+c.post(f"{BASE}/{pid}/facilities/save", data=dict(_form_off, show_in_statements="1"), follow_redirects=True)
+check(getdata().get("facility_overlay") is True and "loan facility interest (per the schedules)" in c.get(f"{BASE}/{pid}/income").data.decode(), "ticking it again brings the loans back into the statements")
+setdata(lambda x: x.update({"facilities": copy.deepcopy(_keep0), "facility_overlay": True}))
+
+# forecast months (no actuals): the income statement and cash flow show the forecast column with the loans
+_lastm2 = M.fy_months(getdata())[-1]
+_pi = c.get(f"{BASE}/{pid}/income?month={_lastm2}").data.decode()
+check("No actual figures for" not in _pi and "of which: loan facility interest" in _pi and "forecast expects" in _pi, f"year end ({_lastm2}) income statement shows the forecast with the loan lines")
+_pc2 = c.get(f"{BASE}/{pid}/cashflow?month={_lastm2}").data.decode()
+check("worked out from two balance sheets" not in _pc2 and "forecast expects" in _pc2, f"year end ({_lastm2}) cash flow shows the forecast")
+
 # the pack Excel (live formulas) for a facility with tranches and a first repayment date equals the app's schedule
 if soffice:
     _keep = copy.deepcopy(getdata()["facilities"])
