@@ -842,6 +842,28 @@ def import_confirm(engagement_id, token):
     if not sums:
         flash("Nothing was assigned to a register asset, so nothing was imported.", "danger")
         return _import_redirect(engagement)
+    if request.form.get("use") == "closing":
+        # The values ARE the register's closing balances: each asset's cost becomes its value, with no accumulated depreciation and no
+        # charge for the year, so it closes at that value. No revaluation is recorded (there is no earlier carrying amount to revalue from).
+        for aid, total in sums.items():
+            a = eligible[aid]
+            a.cost = r2(total)
+            a.opening_accumulated_depreciation = 0.0
+            a.current_year_depreciation = 0.0
+            a.disposal_cost = 0.0
+            a.disposal_accumulated_depreciation = 0.0
+        db.session.commit()
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+        msg = (f"Register closing balances set from the valuer's list: {len(sums)} asset(s), cost {sum(sums.values()):,.2f} with nil accumulated depreciation "
+               f"and no depreciation charge, so the register closes at these values{f' ({created} asset(s) added)' if created else ''}. Opening balances are the same "
+               "figures because the file has no earlier amounts - enter a different opening cost or accumulated depreciation where you have it.")
+        if left:
+            msg += f" {left} line(s) totalling {left_total:,.2f} were not assigned to an asset and are not in the register."
+        flash(msg, "warning" if left else "success")
+        return _import_redirect(engagement)
     existing = {l.asset_id: l for l in rec.lines}
     n_new = n_upd = 0
     for aid, total in sums.items():

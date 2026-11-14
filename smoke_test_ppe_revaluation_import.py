@@ -132,6 +132,28 @@ with app.app_context():
     calc2 = pr.calculate(Engagement.query.get(EID2), rec2)
     check(not any("no cost in the register" in i for i in calc2["issues"]), "...and the block lifts once each asset has a cost")
 
+# ---- the values as the register's closing balances
+with app.app_context():
+    e3 = Engagement(client_id=Client.query.first().id, title="Audit 2025 (closing balances)", type="Audit", partner_id=UID, manager_id=UID,
+                    acceptance_required=False, period_end=date(2025, 12, 31), reporting_framework="ifrs_for_smes")
+    db.session.add(e3); db.session.commit(); EID3 = e3.id
+r = c.post(f"/engagements/{EID3}/revaluation/import/upload", data={"file": (io.BytesIO(XLSX), "valuation.xlsx")}, content_type="multipart/form-data")
+h = r.data.decode()
+check('name="use" value="closing"' in h, "the check screen offers the values as the register's closing balances")
+token3 = re.search(r"/import/([0-9a-f]{32})/confirm", h).group(1)
+r = c.post(f"/engagements/{EID3}/revaluation/import/{token3}/confirm", data={"ext": ".xlsx", "filename": "valuation", "create_missing": "1", "use": "closing"}, follow_redirects=True)
+with app.app_context():
+    import asset_schedules as sched, financials as fin_
+    eng3 = Engagement.query.get(EID3)
+    check(PPEAsset.query.filter_by(engagement_id=EID3).count() == 7, "seven assets were set up")
+    check(near(sum(a.cost for a in PPEAsset.query.filter_by(engagement_id=EID3).all()), 527050.5), "their cost is the valuer's value: 527,050.50")
+    import engagements as eng_mod
+    _, _, cd_, ad_ = eng_mod._ppe_plain_data(EID3)
+    mv_ = fin_.build_ppe_movement_schedule(cd_, ad_, eng3.period_end)
+    check(near(mv_["total"]["closing_nbv"], 527050.5) and near(mv_["total"]["closing_acc_dep"], 0) and near(mv_["total"]["charge"], 0), "the register closes at 527,050.50 with nil accumulated depreciation and no charge")
+    check(pr.get(EID3) is None or not pr.get(EID3).lines, "no revaluation is recorded")
+    check(not pr.calculate(eng3, pr.get(EID3))["totals"]["count"], "the revaluation card has nothing to apply")
+
 # an applied revaluation is locked against importing
 with app.app_context():
     rec = pr.get(EID); rec.status = "Applied"; db.session.commit()

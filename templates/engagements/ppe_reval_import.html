@@ -26,6 +26,11 @@
   <form method="post" action="{{ url_for('ppereval.import_confirm', engagement_id=engagement.id, token=token) }}">
     <input type="hidden" name="ext" value="{{ ext }}"><input type="hidden" name="filename" value="{{ filename }}">
     <div style="margin:0 0 8px;padding:8px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:12.5px;">
+      <div><strong>Use these figures as</strong></div>
+      <label style="display:block;"><input type="radio" name="use" value="closing"> The register's closing balances - each asset's cost becomes its value, with no accumulated depreciation and no depreciation charge, so the register closes at the valuer's figures. Replaces the cost already entered for an asset that is matched. No revaluation is recorded.</label>
+      <label style="display:block;"><input type="radio" name="use" value="fair_value" checked> Fair values for a revaluation - the cost and depreciation already in the register are kept, and the draft revaluation works out the surplus or deficit.</label>
+    </div>
+    <div style="margin:0 0 8px;padding:8px 10px;border:1px solid #e5e5e5;border-radius:6px;font-size:12.5px;">
       <label><input type="checkbox" name="create_missing" value="1" {% if n_matched < items|length %}checked{% endif %}> Add a register asset for every line I have not assigned (class from the table, serial or registration number as the code). The file has only a value, so their cost and accumulated depreciation are left at nil for you to enter before the revaluation is applied.</label>
     </div>
     <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px;">
