@@ -556,6 +556,43 @@ def carry_over_old_assets(engagement, valued, eligible, ps, pe):
             "(they can be put back under 'Recently deleted'). The revaluation now starts from the carrying amount already in the accounts.")
 
 
+def carry_over_from_tb(engagement, valued, eligible, ps, pe):
+    """The valued assets were entered at the valuer's figures (cost = fair value, nothing depreciated - the 'closing balances' import) and the
+    old register line is gone, so there is no historical cost to revalue FROM. The amounts the trial balance already holds for property, plant and
+    equipment (cost, accumulated depreciation, depreciation charge: the trial balance with its other adjustments, not the register's own journal)
+    are spread over the valued assets in proportion to their fair values, so the revaluation starts from what is in the accounts and the
+    surplus is the real one. Returns the message, or '' when the assets do not look like that or the trial balance holds nothing."""
+    import asset_recon
+    tb = TrialBalance.query.filter_by(engagement_id=engagement.id).first()
+    ids = [i for i in valued if i in eligible]
+    if tb is None or not tb.lines or not ids:
+        return ""
+    if any(abs((eligible[i].cost or 0.0) - valued[i]) > 0.005 or (eligible[i].opening_accumulated_depreciation or 0.0) or (eligible[i].current_year_depreciation or 0.0)
+           or (eligible[i].disposal_cost or 0.0) for i in ids):
+        return ""
+    pos = asset_recon.position(tb)
+    cost = pos["current"]["cost"] + pos["other_adj"]["cost"]
+    acc = -(pos["current"]["acc"] + pos["other_adj"]["acc"])
+    dep = pos["current"]["dep"] + pos["other_adj"]["dep"]
+    if cost <= 0.005 and acc <= 0.005:
+        return ""
+    open_acc = max(acc - dep, 0.0)
+    tot = sum(valued[i] for i in ids)
+    left_c, left_a, left_d = r2(cost), r2(open_acc), r2(dep)
+    for k, i in enumerate(ids):
+        a = eligible[i]
+        share = valued[i] / tot if tot else 1.0 / len(ids)
+        last = k == len(ids) - 1
+        c_ = left_c if last else r2(cost * share)
+        a_ = left_a if last else r2(open_acc * share)
+        d_ = left_d if last else r2(dep * share)
+        a.cost, a.opening_accumulated_depreciation, a.current_year_depreciation = c_, a_, d_
+        left_c, left_a, left_d = r2(left_c - c_), r2(left_a - a_), r2(left_d - d_)
+    return (f" The {len(ids)} valued assets had been entered at the valuer's figures, so the cost ({cost:,.2f}), accumulated depreciation ({acc:,.2f}) and "
+            f"depreciation charge ({dep:,.2f}) already in the trial balance were spread over them in proportion to their values; the revaluation starts from that "
+            "carrying amount.")
+
+
 @ppereval_bp.route("/<int:engagement_id>/revaluation/apply", methods=["POST"])
 @login_required
 def apply(engagement_id):
@@ -584,6 +621,8 @@ def apply(engagement_id):
         valued = {l.asset_id: l.fair_value for l in rec.lines if l.fair_value is not None}
         if any((eligible[i].cost or 0.0) <= 0 for i in valued if i in eligible):
             quick_msg = carry_over_old_assets(engagement, valued, eligible, ps, pe)
+        else:
+            quick_msg = carry_over_from_tb(engagement, valued, eligible, ps, pe)
         db.session.flush()
         rec = get(engagement.id)
     calc = calculate(engagement, rec)
