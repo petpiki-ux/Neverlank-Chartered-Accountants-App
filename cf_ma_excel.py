@@ -707,9 +707,9 @@ def _loan_sheets(wb, meta, d):
         nrows = len(FL.schedule(fac))
         items = (("rate", "Interest rate (% a year)", fac["rate"], "0.00"),
                  ("feepct", "Establishment fee (% of each amount drawn)", fac["fee_pct"], "0.00"), ("feefix", "Establishment fee (fixed amount, with the first drawdown)", fac["fee_fixed"], NUM),
-                 ("firstrep", "First repayment date (instalments fall at each month end from that month)", _rdate(FL.repay_start(fac)), "dd mmm yyyy"),
+                 ("firstrep", "First repayment date (instalments fall at each month end from that month)", _rdate(FL.repay_start(fac)[:10]), "dd mmm yyyy"),
                  ("ninst", "Number of instalments (a bullet has one)", FL.instalments_of(fac), "0"),
-                 ("type", "Repayment (level / straight / bullet)", fac["repay"], "@"))
+                 ("type", "Repayment (level / straight / bullet / custom)", fac["repay"], "@"))
         rr = r + 1
         for key, label, val, fmt in items:
             wl.cell(row=rr, column=1, value=label)
@@ -737,6 +737,40 @@ def _loan_sheets(wb, meta, d):
         d_rng, a_rng, f_rng = f"$B${t0}:$B${t1}", f"$C${t0}:$C${t1}", f"$D${t0}:$D${t1}"
         rr = t1 + 1
         rows["tr"] = (d_rng, a_rng, f_rng)
+        custom = fac["repay"] == "custom"
+        if custom:
+            # repayments on set dates: a date and a % (or an amount) each, two spare lines; the amount scheduled is worked out per line
+            wl.cell(row=rr, column=1, value="")
+            for j, h in enumerate(("Repayments (capital, paid at the end of the month of the date)", "Date", "% of facility", "Amount (used instead of %)", "Scheduled"), start=1):
+                c = wl.cell(row=rr, column=j, value=h)
+                c.font, c.fill = Font(bold=True), FILL_SUB
+                c.alignment = Alignment(horizontal="left" if j == 1 else "right")
+            reps = [x for x in fac["repays"] if x["month"]]
+            u0 = rr + 1
+            nrp = len(reps) + 2
+            u1 = u0 + nrp - 1
+            amt_addr = f"$B${u1 + 1}"                       # the 'Amount (all drawdowns)' row that follows the table
+            for k in range(nrp):
+                x = u0 + k
+                wl.cell(row=x, column=1, value=f"   Repayment {k + 1}")
+                rx = reps[k] if k < len(reps) else None
+                dc = wl.cell(row=x, column=2, value=(_rdate(rx["date"]) if rx and rx["date"] else (_mdate(rx["month"]) if rx else None)))
+                dc.number_format, dc.font, dc.fill = "dd mmm yyyy", F_INPUT, FILL_INPUT
+                pc = wl.cell(row=x, column=3, value=(rx["pct"] or None) if rx else None)
+                pc.number_format, pc.font, pc.fill = "0.00", F_INPUT, FILL_INPUT
+                ac = wl.cell(row=x, column=4, value=(rx["amount"] or None) if rx else None)
+                ac.number_format, ac.font, ac.fill = NUM, F_INPUT, FILL_INPUT
+                wl.cell(row=x, column=5, value=f'=IF(B{x}="",0,IF(N(D{x})>0,D{x},N(C{x})/100*{amt_addr}))').number_format = NUM
+            rd_rng, rs_rng = f"$B${u0}:$B${u1}", f"$E${u0}:$E${u1}"
+            for key, formula in (("firstrep", f"=MIN({rd_rng})"),
+                                 ("ninst", f"=(YEAR(MAX({rd_rng}))-YEAR(MIN({rd_rng})))*12+MONTH(MAX({rd_rng}))-MONTH(MIN({rd_rng}))+1")):
+                cc = wl[rows[key].replace("$", "")]
+                cc.value = formula
+                cc.font, cc.fill = Font(color="000000"), PatternFill(fill_type=None)
+                cc.number_format = "dd mmm yyyy" if key == "firstrep" else "0"
+            wl.cell(row=int(rows["ninst"].replace("$", "")[1:]), column=1, value="Months from the first to the last repayment (calculated)")
+            wl.cell(row=int(rows["firstrep"].replace("$", "")[1:]), column=1, value="First repayment date (calculated from the repayments below)")
+            rr = u1 + 1
         calc = (("amt", "Amount (all drawdowns)", f"=SUM({a_rng})", NUM),
                 ("draw", "First drawdown date", f"=MIN({d_rng})", "dd mmm yyyy"),
                 ("fee", "Establishment fee in total (% of each drawdown + the fixed fee)", f"=$B${rr}*{rows['feepct']}/100+{rows['feefix']}", NUM),
@@ -787,8 +821,10 @@ def _loan_sheets(wb, meta, d):
             ann = f'IF({rows["type"]}="level",IF({rows["mr"]}=0,(C{x}+D{x})/{left},(C{x}+D{x})*{rows["mr"]}/(1-(1+{rows["mr"]})^(-{left}))),(C{x}+D{x})/{left})'
             prev = "0" if n == 1 else f"I{x - 1}"
             wl.cell(row=x, column=9, value=f'=IF(AND(A{x}>{rows["grace"]},{left}>0,OR(A{x}={rows["grace"]}+1,D{x}>0)),{ann},{prev})').number_format = NUM
-            wl.cell(row=x, column=7, value=(f'=IF(A{x}<={rows["grace"]},0,IF(OR(A{x}={rows["term"]},A{x}={rows["nrows"]}),C{x}+D{x},IF({rows["type"]}="bullet",0,'
-                                            f'IF({rows["type"]}="straight",MIN(C{x}+D{x},I{x}),MIN(C{x}+D{x},MAX(0,I{x}-E{x}))))))')).number_format = NUM
+            cust = (f'IF({rows["type"]}="custom",MIN(C{x}+D{x},SUMPRODUCT({rs_rng}*({rd_rng}>=B{x})*({rd_rng}<EDATE(B{x},1)))),' if custom else "")
+            tail = ")" if custom else ""
+            wl.cell(row=x, column=7, value=(f'=IF(A{x}<={rows["grace"]},0,IF(OR(A{x}={rows["term"]},A{x}={rows["nrows"]}),C{x}+D{x},{cust}IF({rows["type"]}="bullet",0,'
+                                            f'IF({rows["type"]}="straight",MIN(C{x}+D{x},I{x}),MIN(C{x}+D{x},MAX(0,I{x}-E{x})))){tail})')).number_format = NUM
             wl.cell(row=x, column=8, value=f"=C{x}+D{x}-G{x}").number_format = NUM
         last = first + nrows - 1
         tot = last + 1

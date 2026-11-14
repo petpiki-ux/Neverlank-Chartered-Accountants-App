@@ -45,17 +45,41 @@
       {% if not locked and x.draws|length < max_draws %}<button class="btn small secondary" type="submit" name="action" value="adddraw:{{ x.id }}" formnovalidate>+ Add a drawdown</button>{% endif %}
     </div>
     <div class="form-row">
+      {% if x.repay != 'custom' %}
       <div><label>{{ 'Date capital is repaid' if x.repay == 'bullet' else 'First repayment date' }}</label><input type="date" class="cf-in" name="fac_firstrepay_{{ i }}" value="{{ repay_start(x) }}" {{ 'disabled' if locked }}></div>
       <div><label>Number of instalments</label><input type="number" min="1" max="240" class="cf-in" name="fac_ninst_{{ i }}" value="{{ instalments_of(x) }}" {{ 'disabled' if locked or x.repay == 'bullet' }}></div>
+      {% endif %}
       <div style="min-width:280px;"><label>Repayment</label><select class="cf-in" name="fac_repay_{{ i }}" {{ 'disabled' if locked }}>{% for k, lab in repay_types %}<option value="{{ k }}" {% if x.repay == k %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
       <div><label>&nbsp;</label><label style="font-weight:normal;"><input type="checkbox" name="fac_inc_{{ i }}" value="1" {% if x.include %}checked{% endif %} {{ 'disabled' if locked }}> In use</label></div>
     </div>
+    <input type="hidden" name="fac_rn_{{ i }}" value="{{ x.repays|length }}">
+    <details style="margin:4px 0 8px;" {% if x.repay == 'custom' %}open{% endif %}>
+      <summary style="cursor:pointer;"><strong>Repayments on set dates</strong> &ndash; a different % (or amount) in each month{% if x.repay == 'custom' and x.repays %} &middot; {{ repayments_of(x)|length }} month(s){% endif %}</summary>
+      <p class="cf-sub" style="margin:6px 0;">Capital is paid at the end of each month listed, interest runs on the balance as usual, and the last month listed clears whatever is left. A % is of the total drawn; an amount, if entered, is used instead.
+        Choose &ldquo;Repayments on set dates&rdquo; above, or paste the schedule below (one line per repayment, for example <code>5%  Nov 2026</code>) and press &ldquo;Use pasted schedule&rdquo;.</p>
+      {% for rl in x.repays %}{% set j = loop.index0 %}
+      <div class="form-row" style="margin-bottom:4px;align-items:flex-end;">
+        <div style="max-width:190px;"><input type="date" class="cf-in" name="fac_rd_{{ i }}_{{ j }}" value="{{ rl.date or ((rl.month ~ '-01') if rl.month else '') }}" {{ 'disabled' if locked }} aria-label="Repayment {{ j + 1 }} date"></div>
+        <div style="max-width:130px;"><input type="number" step="any" min="0" class="cf-in" name="fac_rp_{{ i }}_{{ j }}" value="{{ rl.pct|cfin if rl.pct else '' }}" placeholder="% of facility" {{ 'disabled' if locked }} aria-label="Repayment {{ j + 1 }} percent"></div>
+        <div style="max-width:170px;"><input type="number" step="any" min="0" class="cf-in" name="fac_ra_{{ i }}_{{ j }}" value="{{ rl.amount|cfin if rl.amount else '' }}" placeholder="or amount" {{ 'disabled' if locked }} aria-label="Repayment {{ j + 1 }} amount"></div>
+        {% if not locked %}<div><button class="btn small danger" type="submit" name="action" value="delrepay:{{ i }}:{{ j }}" formnovalidate title="Remove this repayment">&times;</button></div>{% endif %}
+      </div>
+      {% endfor %}
+      {% if x.repay == 'custom' and x.repays and x.amount > 0 %}{% set rp = repayments_of(x) %}{% set tot = rp|sum(attribute='amount') %}
+      <div class="cf-sub">Total repayments {{ tot|cfn }} = {{ (tot / x.amount * 100)|round(1) }}% of the {{ x.amount|cfn }} drawn{% if (tot - x.amount)|abs > 0.5 %} &ndash; <span class="cf-bad">not 100%</span>{% else %} <span class="cf-ok">&ndash; fully repaid</span>{% endif %}.</div>
+      {% endif %}
+      {% if not locked %}
+      <div style="margin-top:6px;"><button class="btn small secondary" type="submit" name="action" value="addrepay:{{ x.id }}" formnovalidate>+ Add a repayment</button></div>
+      <div style="margin-top:6px;"><textarea class="cf-in" name="fac_paste_{{ x.id }}" rows="4" style="width:100%;max-width:420px;" placeholder="Paste here, one repayment per line:&#10;5%  Nov 2026&#10;15%  Dec 2026&#10;25,000  Jan 2027"></textarea><br>
+        <button class="btn small secondary" type="submit" name="action" value="pasterepay:{{ x.id }}" formnovalidate>Use pasted schedule</button></div>
+      {% endif %}
+    </details>
     <div class="form-row">
       <div style="flex:2;"><label>Security / notes (optional)</label><input type="text" class="cf-in" name="fac_sec_{{ i }}" value="{{ x.security }}" maxlength="200" {{ 'disabled' if locked }}></div>
     </div>
     <div class="cf-sub">
       {% if x.amount > 0 %}Establishment fee {{ fee_of(x)|cfn }} ({{ cur }}) &middot; {{ x.draws_n }} drawdown{{ 's' if x.draws_n != 1 }} from {{ x.draw_date|string if x.draw_date else month_label(x.draw_month, False) }}
-        &middot; {{ repay_short[x.repay] }}{% if x.repay != 'bullet' %} ({{ instalments_of(x) }} instalment{{ 's' if instalments_of(x) != 1 }}){% endif %}{% if x.grace_months %}, interest only for the first {{ x.grace_months }} month(s){% endif %}, term {{ x.term_months }} months.{% endif %}
+        &middot; {{ repay_short[x.repay] }}{% if x.repay != 'bullet' %} ({{ instalments_of(x) }} {{ 'repayment' if x.repay == 'custom' else 'instalment' }}{{ 's' if instalments_of(x) != 1 }}){% endif %}{% if x.grace_months %}, interest only for the first {{ x.grace_months }} month(s){% endif %}, term {{ x.term_months }} months.{% endif %}
       {% if not locked %}<button class="btn small danger" type="submit" name="action" value="del:{{ i }}" formnovalidate onclick="return confirm('Remove this facility?');" style="margin-left:8px;">Remove</button>{% endif %}
     </div>
   </div>

@@ -290,7 +290,7 @@ def _loans_ctx(pack, d):
         if model is not None and (model.client_id != pack.client_id or not _can_see(model)):
             model = None
     return dict(gap_info=LK.opening_gap_info(d), gap_adj=FL.adjust_of(d), facs=facs, ps=FL.pack_schedule(d, facs), fac_checks=FL.checks(d, facs), int_check=FL.interest_check(d, facs),
-                repay_types=FL.REPAY_TYPES, repay_short=FL.REPAY_SHORT, fee_of=FL.fee_of, label_of=FL.label_of, repay_start=FL.repay_start, instalments_of=FL.instalments_of, max_draws=FL.MAX_DRAWS,
+                repay_types=FL.REPAY_TYPES, repay_short=FL.REPAY_SHORT, fee_of=FL.fee_of, label_of=FL.label_of, repay_start=FL.repay_start, instalments_of=FL.instalments_of, max_draws=FL.MAX_DRAWS, repayments_of=FL.repayments,
                 default_month=M.report_month(d), link=link, link_model=model, max_facilities=FL.MAX_FACILITIES,
                 life={x['id']: FL.schedule(x) for x in facs if x['include'] and x['amount'] > 0})
 
@@ -322,6 +322,34 @@ def pack_facilities_save(pack_id):
         except ValueError:
             fi, dj = -1, -1
         facs = FL.parse_form(request.form, d, skip_draw=(fi, dj))
+    elif action.startswith("addrepay:"):
+        for x in facs:
+            if x["id"] == action[9:]:
+                if len(x["repays"]) >= FL.MAX_REPAYS:
+                    flash(f"A facility can have up to {FL.MAX_REPAYS} repayment lines.", "warning")
+                else:
+                    x["repays"].append({"date": "", "month": "", "pct": 0.0, "amount": 0.0})
+                x["repay"] = "custom"
+    elif action.startswith("delrepay:"):
+        try:
+            fi, rj = (int(v) for v in action[9:].split(":"))
+        except ValueError:
+            fi, rj = -1, -1
+        facs = FL.parse_form(request.form, d, skip_repay=(fi, rj))
+    elif action.startswith("pasterepay:"):
+        fid = action[11:]
+        text = request.form.get(f"fac_paste_{fid}") or ""
+        lines, bad = FL.parse_repay_text(text)
+        for k_, x in enumerate(facs):
+            if x["id"] == fid:
+                if lines:
+                    facs[k_] = FL.normalise_facility(dict(x, repay="custom", repays=lines), k_, M.report_month(d))
+                    flash(f"{len(lines)} repayment line(s) read from the pasted text: {', '.join(('%g%%' % l_['pct']) if l_['pct'] else ('%s' % format(l_['amount'], ',.0f')) for l_ in lines)}. "
+                          "The facility now repays on these dates.", "success")
+                else:
+                    flash("No repayment lines could be read. Use one line per repayment, for example '5%  Nov 2026' or '25,000  Dec 2026'.", "warning")
+        if bad:
+            flash("These pasted lines were not read: " + "; ".join(bad[:5]), "warning")
     elif action.startswith("del:"):
         try:
             gone = int(action[4:])
@@ -364,6 +392,10 @@ def pack_facilities_save(pack_id):
         flash("A drawdown line was added. Enter its date and amount and save.", "info")
     elif action.startswith("deldraw:"):
         flash("The drawdown line was removed.", "success")
+    elif action.startswith("addrepay:"):
+        flash("A repayment line was added. Enter its date and % (or amount) and save.", "info")
+    elif action.startswith("delrepay:"):
+        flash("The repayment line was removed.", "success")
     elif action.startswith("del:"):
         flash("The facility was removed.", "success")
     else:

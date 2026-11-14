@@ -20,6 +20,8 @@ A facility can be drawn in several tranches (`draws`: a date and an amount each)
 above applies to every tranche) and carries its own establishment fee % when drawn (the fixed fee goes with the first tranche). Repayments can be
 given as a FIRST REPAYMENT DATE and a NUMBER OF INSTALMENTS: interest only until the month of that date, then one instalment at the end of each month.
 A level instalment is worked out on the balance when repayments start and is worked out again whenever a further tranche is drawn after that.
+Repayments can also be set date by date (`repays`: a month and a % of the facility, or an amount, for each): capital is paid at the end of
+each of those months, interest runs on the balance as usual, and the last month listed clears whatever is left.
 Facilities entered earlier with one amount, one date, a term and a grace period behave exactly as before.
 """
 import calendar
@@ -35,11 +37,14 @@ REPAY_TYPES = [
     ("level", "Equal monthly instalments (capital + interest the same every month)"),
     ("straight", "Equal capital instalments (interest falls as the balance falls)"),
     ("bullet", "Interest monthly, capital in one amount at the end"),
+    ("custom", "Repayments on set dates: a % of the facility (or an amount) for each month"),
 ]
-REPAY_SHORT = {"level": "equal monthly instalments", "straight": "equal capital instalments", "bullet": "bullet at the end"}
+REPAY_SHORT = {"level": "equal monthly instalments", "straight": "equal capital instalments", "bullet": "bullet at the end",
+               "custom": "repayments on the dates and percentages entered"}
 MAX_FACILITIES = 10
 MAX_TERM = 240
 MAX_DRAWS = 12
+MAX_REPAYS = 36
 DEFAULT_TERM = 12
 
 
@@ -116,6 +121,83 @@ def _draw_lines(raw, default_month):
     return lines
 
 
+def _repay_lines(raw):
+    """The repayment lines as entered: [{date, month, pct, amount}], oldest first. A line has a % of the facility or an amount (an amount wins)."""
+    out = []
+    src = raw.get("repays")
+    if isinstance(src, list):
+        for x in src[:MAX_REPAYS]:
+            if not isinstance(x, dict):
+                continue
+            dt = _date(x.get("date"))
+            out.append({"date": dt, "month": dt[:7] if dt else _month(x.get("month"), ""),
+                        "pct": max(0.0, min(1000.0, f(x.get("pct")))), "amount": max(0.0, f(x.get("amount")))})
+    out.sort(key=lambda x: (x["month"] or "9999-99", x["date"]))
+    return out
+
+
+def repayments(fac):
+    """The repayments that count for a facility on set dates: [{month, amount}] by month, oldest first (a % is of the total drawn)."""
+    by = {}
+    for x in fac.get("repays") or []:
+        if not x["month"]:
+            continue
+        amt = x["amount"] if x["amount"] > 0 else fac["amount"] * x["pct"] / 100.0
+        if amt > 0:
+            by[x["month"]] = by.get(x["month"], 0.0) + amt
+    return [{"month": m, "amount": by[m]} for m in sorted(by)]
+
+
+_MONTHS = {"jan": 1, "feb": 2, "mar": 3, "apr": 4, "may": 5, "jun": 6, "jul": 7, "aug": 8, "sep": 9, "oct": 10, "nov": 11, "dec": 12}
+
+
+def parse_repay_text(text):
+    """Repayment lines pasted as text, one per line, e.g. '5%  May 2027', 'Apr-27  16%', '2026-11  5%', '25,000  Nov 2026' (a number without % is an amount).
+    Returns ([{date, pct, amount}], [lines that could not be read]). Each repayment is dated the last day of its month (capital is paid at month end)."""
+    import re
+    lines, bad = [], []
+    for raw_line in str(text or "").splitlines():
+        t = raw_line.strip()
+        if not t:
+            continue
+        month = ""
+        m = re.search(r"(?<![A-Za-z])(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)[a-z]*\.?[\s\-/,']*((?:19|20)?\d{2})(?!\d)", t, re.I)
+        if m:
+            yy = int(m.group(2))
+            yy = yy + 2000 if yy < 100 else yy
+            month = f"{yy:04d}-{_MONTHS[m.group(1).lower()[:3]]:02d}"
+            t2 = t[:m.start()] + " " + t[m.end():]
+        else:
+            m = re.search(r"((?:19|20)\d{2})-(\d{1,2})(?:-\d{1,2})?", t)
+            if m:
+                month = f"{int(m.group(1)):04d}-{int(m.group(2)):02d}"
+                t2 = t[:m.start()] + " " + t[m.end():]
+            else:
+                m = re.search(r"(?:\d{1,2}/)?(\d{1,2})/((?:19|20)\d{2})", t)
+                if m:
+                    month = f"{int(m.group(2)):04d}-{int(m.group(1)):02d}"
+                    t2 = t[:m.start()] + " " + t[m.end():]
+                else:
+                    t2 = t
+        if not _month(month, ""):
+            bad.append(raw_line.strip())
+            continue
+        pm = re.search(r"(\d+(?:[.,]\d+)?)\s*%", t2)
+        pct, amount = 0.0, 0.0
+        if pm:
+            pct = float(pm.group(1).replace(",", "."))
+        else:
+            nm = re.search(r"\d[\d,\s]*(?:\.\d+)?", t2)
+            if nm and f(nm.group(0).replace(",", "").replace(" ", "")) > 0:
+                amount = f(nm.group(0).replace(",", "").replace(" ", ""))
+        if pct <= 0 and amount <= 0:
+            bad.append(raw_line.strip())
+            continue
+        y, mo = int(month[:4]), int(month[5:])
+        lines.append({"date": datetime.date(y, mo, calendar.monthrange(y, mo)[1]).isoformat(), "pct": pct, "amount": amount})
+    return lines[:MAX_REPAYS], bad
+
+
 def tranches(fac):
     """The drawdowns that count (amount above nil): [{date, month, amount}], oldest first; a line with no date takes the previous line's month."""
     out, prev = [], fac.get("draw_month") or ""
@@ -161,9 +243,21 @@ def normalise_facility(raw, i, default_month):
             grace = min(gap, MAX_TERM - 1)
             n_inst = max(1, min(n_inst, MAX_TERM - grace))
             term = grace + n_inst
+    repays = _repay_lines(raw)
+    if repay == "custom":
+        # repayments on set dates: the first and last month listed fix the interest-only period and the term
+        # (a % is of the total drawn, so the amounts are worked out below once the amount is known)
+        act = [x for x in repays if x["month"] and (x["pct"] > 0 or x["amount"] > 0)]
+        if act and draw_month:
+            gap = max(0, _months_between(draw_month, act[0]["month"]))
+            last = max(gap, _months_between(draw_month, act[-1]["month"]))
+            grace = min(gap, MAX_TERM - 1)
+            term = int(max(grace + 1, min(MAX_TERM, last + 1)))
+            n_inst = len({x["month"] for x in act})
+            first_repay = act[0]["date"] or (act[0]["month"] + "-01")
     return {
         "id": str(raw.get("id") or facility_id(i))[:24], "lender": str(raw.get("lender") or "").strip()[:60],
-        "amount": amount, "rate": max(0.0, min(200.0, f(raw.get("rate")))),
+        "amount": amount, "repays": repays, "rate": max(0.0, min(200.0, f(raw.get("rate")))),
         "fee_pct": max(0.0, min(100.0, f(raw.get("fee_pct")))), "fee_fixed": max(0.0, f(raw.get("fee_fixed"))),
         "draw_month": draw_month, "draw_date": draw_date, "draws": lines, "first_repay": first_repay if n_inst else "", "n_inst": n_inst,
         "term_months": term, "grace_months": grace, "repay": repay,
@@ -185,6 +279,8 @@ def instalments_of(fac):
     """Number of capital instalments (a bullet has one)."""
     if fac["repay"] == "bullet":
         return 1
+    if fac["repay"] == "custom" and repayments(fac):
+        return len(repayments(fac))
     return max(1, int(fac["term_months"]) - int(fac["grace_months"]))
 
 
@@ -231,6 +327,7 @@ def schedule(fac):
     """Every month of the facility from the first drawdown month to its final repayment.
     Rows: {month, n, open, draw, draw_frac, interest, fee, repay, close, payment}. Capital outstanding after the last month is nil.
     Interest = opening balance x rate/12 + each tranche drawn in the month x rate/12 x its share of the month outstanding.
+    Repayments on set dates: the amount entered for each month (capital paid at month end).
     Capital: nothing until the capital grace months have passed; then the instalment (level: re-worked whenever a further tranche is drawn;
     equal capital: balance / instalments left, re-worked the same way); the last month repays whatever is left."""
     rate, term, grace = fac["rate"], int(fac["term_months"]), int(fac["grace_months"])
@@ -246,6 +343,7 @@ def schedule(fac):
         by_m = {fac["draw_month"]: {"amt": 0.0, "w": 0.0, "fee": 0.0}}
     last_draw = max(_months_between(fac["draw_month"], mo) for mo in by_m)
     n_rows = max(term, last_draw + 1)                  # a tranche drawn after the term ends extends the facility to that month
+    rep_by = {x["month"]: x["amount"] for x in repayments(fac)} if fac["repay"] == "custom" else {}
     rows, bal, step = [], 0.0, 0.0
     for i in range(n_rows):
         month = M.shift_month(fac["draw_month"], i)
@@ -256,7 +354,7 @@ def schedule(fac):
         interest = r * (op + (e["w"] if e else 0.0))   # a tranche drawn part-way through its month: only the days it is outstanding
         fee = (e["fee"] if e else 0.0) + (fac["fee_fixed"] if i == 0 else 0.0)
         left = k_pay - (i - grace)                      # instalments still to pay, this month included
-        if i >= grace and (i == grace or draw > 0) and left > 0:
+        if fac["repay"] != "custom" and i >= grace and (i == grace or draw > 0) and left > 0:
             # the instalment is (re)set when repayments start and whenever more is drawn after that
             step = _annuity(base, r, left) if fac["repay"] == "level" else base / left
         if i < grace:
@@ -265,6 +363,8 @@ def schedule(fac):
             repay = base                                # the last instalment clears whatever is left
         elif fac["repay"] == "bullet":
             repay = 0.0
+        elif fac["repay"] == "custom":
+            repay = min(base, rep_by.get(month, 0.0))      # the amount set for this month (the last month listed clears the rest)
         elif fac["repay"] == "straight":
             repay = min(base, step)
         else:
@@ -381,6 +481,19 @@ def checks(d, facs=None):
                 msgs.append(f"{label_of(fac)}: a drawdown after repayments have started adds to the balance; the instalment is worked out again over the instalments that are left.")
         if tr and tr[-1]["month"] > M.shift_month(fac["draw_month"], int(fac["term_months"]) - 1):
             msgs.append(f"{label_of(fac)}: the last drawdown ({M.month_label(tr[-1]['month'], False)}) is after the final instalment, so the facility runs on to that month and clears then. Check the dates.")
+        if fac["repay"] == "custom":
+            rp = repayments(fac)
+            if not rp:
+                msgs.append(f"{label_of(fac)}: repayments are set by date but none are entered, so the whole facility is repaid at its term end ({M.month_label(sched[-1]['month'], False)}).")
+            else:
+                tot = sum(x["amount"] for x in rp)
+                pct = tot / fac["amount"] * 100 if fac["amount"] else 0
+                if abs(tot - fac["amount"]) > 0.5:
+                    msgs.append(f"{label_of(fac)}: the repayments entered total {tot:,.2f} ({pct:.1f}% of the {fac['amount']:,.2f} drawn). "
+                                + ("The last repayment month clears the rest." if tot < fac["amount"] else "The balance is repaid first and the excess is ignored."))
+                early = [x for x in rp if x["month"] < fac["draw_month"]]
+                if early:
+                    msgs.append(f"{label_of(fac)}: a repayment is dated before the first drawdown ({M.month_label(early[0]['month'], False)}) and is ignored.")
         if any(x["amount"] > 0 and not x["month"] for x in fac["draws"]):
             msgs.append(f"{label_of(fac)}: a drawdown has no date; it is taken as drawn in the same month as the one before it.")
     # schedule against the books
@@ -504,9 +617,13 @@ def fingerprint(d):
     # (the same goes for the later fields: a facility with one drawdown and a term/grace hashes as before; with several tranches or a first
     # repayment date, only the drawdowns that count and the dates enter the hash, so an empty extra line does not flag the forecast)
     def _fp(fac):
-        out = {k: v for k, v in fac.items() if not ((k == "draw_date" and not v) or (k == "first_repay" and not v) or (k == "n_inst" and not v) or k == "draws")}
+        out = {k: v for k, v in fac.items() if not ((k == "draw_date" and not v) or (k == "first_repay" and not v) or (k == "n_inst" and not v) or (k == "repays" and not v) or k == "draws")}
         if len(tranches(fac)) > 1:
             out["draws"] = [[t["date"], t["month"], t["amount"]] for t in tranches(fac)]
+        if fac.get("repay") == "custom":
+            out["repays"] = [[x["month"], x["amount"]] for x in repayments(fac)]       # only the repayments that count
+        else:
+            out.pop("repays", None)
         return out
     facs = [_fp(fac) for fac in facs]
     adj = adjust_of(d)
@@ -515,7 +632,7 @@ def fingerprint(d):
     return hashlib.md5(json.dumps(facs, sort_keys=True).encode()).hexdigest()[:12]
 
 
-def parse_form(form, d, skip=None, skip_draw=None):
+def parse_form(form, d, skip=None, skip_draw=None, skip_repay=None):
     """Facilities from the Loan facilities form: fields fac_<field>_<i>, count in n_fac. `skip` drops facility i; `skip_draw` = (i, j) drops drawdown line j of facility i."""
     try:
         default_month = M.fy_months(d)[0]
@@ -551,6 +668,21 @@ def parse_form(form, d, skip=None, skip_draw=None):
                 lines.append({"date": dd, "amount": da})
             raw["draws"] = lines
             raw["amount"] = sum(max(0.0, f(x["amount"])) for x in lines)
+        # repayment lines (fac_rn_<i> count, fac_rd_<i>_<j> date, fac_rp_<i>_<j> %, fac_ra_<i>_<j> amount)
+        if form.get(f"fac_rn_{i}") is not None:
+            try:
+                nr = int(form.get(f"fac_rn_{i}") or 0)
+            except ValueError:
+                nr = 0
+            reps = []
+            for j in range(min(nr, MAX_REPAYS + 5)):
+                if skip_repay is not None and skip_repay == (i, j):
+                    continue
+                rd, rp, ra = form.get(f"fac_rd_{i}_{j}"), form.get(f"fac_rp_{i}_{j}"), form.get(f"fac_ra_{i}_{j}")
+                if not str(rd or "").strip() and f(rp) <= 0 and f(ra) <= 0:
+                    continue
+                reps.append({"date": rd, "pct": rp, "amount": ra})
+            raw["repays"] = reps
         if not (str(raw["lender"] or "").strip() or f(raw["amount"]) > 0):
             continue
         out.append(normalise_facility(raw, len(out), default_month))

@@ -228,7 +228,7 @@ bst = FL.schedule(dict(ND, repay="bullet", term_months=6))
 check(near(bst[0]["interest"], 500000 * 0.18 / 12 * 17 / 31) and all(near(x["interest"], 7500) for x in bst[1:]), "bullet: only the first month is part-month")
 # a pack saved before the date existed hashes exactly as before
 _dfp = {"facilities": [dict(NBS)]}
-_NEWKEYS = ("draws", "first_repay", "n_inst")        # fields added with the drawdown lines / first repayment date: absent from the hash when not used
+_NEWKEYS = ("draws", "first_repay", "n_inst", "repays")        # fields added with the drawdown lines / first repayment date: absent from the hash when not used
 _old = __import__("hashlib").md5(__import__("json").dumps([{k: v for k, v in NBS.items() if k not in _NEWKEYS}], sort_keys=True).encode()).hexdigest()[:12]
 _nodate = {k: v for k, v in NBS.items() if k not in ("draw_date",) + _NEWKEYS}
 _old2 = __import__("hashlib").md5(__import__("json").dumps([_nodate], sort_keys=True).encode()).hexdigest()[:12]
@@ -761,6 +761,78 @@ check(_nl and _nl[0].get("draws") and len(_nl[0]["draws"]) >= 1, "the linked mod
 # put the original facilities back for the tests that follow
 setdata(lambda x: x.update({"facilities": copy.deepcopy(_keep0)}))
 
+# =========================================================================== repayments on set dates (a different % each month)
+print("--- repayments on set dates")
+_txt = """5%\tMay 2027
+16%\tApr-27
+22%\t Mar 2027
+8%\t Feb 2027
+29%\t Jan 2027
+15%\t Dec 2026
+5%\t Nov 2026"""
+_pl, _bad = FL.parse_repay_text(_txt)
+check(len(_pl) == 7 and not _bad and sum(x["pct"] for x in _pl) == 100, "the pasted schedule (5% May 2027 ... 5% Nov 2026) is read: 7 lines, 100%")
+check(FL.parse_repay_text("25,000 Nov 2026\n2026-12 10%\n31/01/2027 1 500\nnonsense")[0][0]["amount"] == 25000 and len(FL.parse_repay_text("25,000 Nov 2026\n2026-12 10%\n31/01/2027 1 500\nnonsense")[0]) == 3
+      and FL.parse_repay_text("25,000 Nov 2026\nnonsense")[1] == ["nonsense"], "amounts, yyyy-mm and dd/mm/yyyy forms are read; an unreadable line is reported")
+CN = FL.normalise_facility({"lender": "NBS", "amount": 500000, "rate": 18, "fee_pct": 3, "draw_date": "2026-06-15", "repay": "custom", "repays": _pl}, 0, "2026-01")
+check(CN["grace_months"] == 5 and CN["term_months"] == 12 and CN["n_inst"] == 7 and CN["first_repay"] == "2026-11-30", "custom: interest only June-Oct (5 months), last repayment May 2027 (12 months), 7 repayments")
+rc = FL.schedule(CN)
+want = {"2026-11": 5, "2026-12": 15, "2027-01": 29, "2027-02": 8, "2027-03": 22, "2027-04": 16, "2027-05": 5}
+check(all(near(x["repay"], 500000 * want.get(x["month"], 0) / 100) for x in rc), "capital repaid each month = the % of 500,000 set for it (25,000 / 75,000 / 145,000 / 40,000 / 110,000 / 80,000 / 25,000)")
+check(near(rc[-1]["close"], 0) and near(sum(x["repay"] for x in rc), 500000) and rc[-1]["month"] == "2027-05", "cleared in May 2027")
+check(near(rc[5]["interest"], 500000 * 0.18 / 12) and near(rc[6]["interest"], 475000 * 0.18 / 12) and near(rc[7]["open"], 400000), "interest runs on the balance after each repayment")
+check(near(rc[0]["interest"], 500000 * 0.18 / 12 * 16 / 30) and near(rc[0]["fee"], 15000), "part-month first interest and the fee are unchanged")
+# amounts, several repayments in one month, a total under 100% (the last month clears the rest) and over 100% (excess ignored)
+C2 = FL.normalise_facility({"lender": "A", "amount": 100000, "rate": 12, "draw_date": "2026-01-01", "repay": "custom",
+                            "repays": [{"date": "2026-03-10", "amount": 20000}, {"date": "2026-03-25", "pct": 10}, {"date": "2026-04-30", "pct": 30}]}, 0, "2026-01")
+r2 = FL.schedule(C2)
+check(near(r2[2]["repay"], 30000) and near(r2[3]["repay"], 30000 if False else r2[3]["repay"]) and near(r2[-1]["close"], 0) and r2[-1]["month"] == "2026-04", "two repayments in a month are added; a total under 100% is cleared in the last month listed")
+check(near(r2[3]["repay"], 70000), "the last month listed repays the rest (70,000)")
+C3 = FL.normalise_facility({"lender": "B", "amount": 100000, "rate": 12, "draw_date": "2026-01-01", "repay": "custom",
+                            "repays": [{"date": "2026-02-28", "pct": 70}, {"date": "2026-03-31", "pct": 70}]}, 0, "2026-01")
+r3 = FL.schedule(C3)
+check(near(r3[1]["repay"], 70000) and near(r3[2]["repay"], 30000) and near(r3[-1]["close"], 0), "a total over 100% is capped by the balance")
+dC, _sC = build()
+dC["facilities"] = [CN, dict(C2, id="fac2")]
+msgs = " | ".join(FL.checks(dC))
+check("total 50" not in msgs and "100.0%" not in msgs, "no total warning for a schedule that adds to 100%")
+dC["facilities"] = [C2]
+check(any("repayments entered total" in m_ for m_ in FL.checks({**dC, "facilities": [dict(C2, repays=C2["repays"][:2])]})), "a total other than 100% is flagged")
+# the forecast model follows the dated repayments
+dC2, _ = build()
+dC2["facilities"] = [dict(CN, draw_date="2026-07-15", draw_month="2026-07", repays=[{"date": "2026-11-30", "pct": 5}, {"date": "2026-12-31", "pct": 15}, {"date": "2027-01-31", "pct": 29},
+                      {"date": "2027-02-28", "pct": 8}, {"date": "2027-03-31", "pct": 22}, {"date": "2027-04-30", "pct": 16}, {"date": "2027-05-31", "pct": 5}])]
+aC, iC = LK.continuation_assumptions(dC2, {"years": 2}, "USD")
+resC = E.run(aC)
+sC = FL.schedule(FL.facilities_of(dC2)[0])
+okC = all(near(resC["periods"][j]["loans"][0][k], sC[j][k], 0.01) for j in range(len(sC)) for k in ("open", "draw", "interest", "fee", "repay", "close"))
+check(okC and resC["checks"]["balance_ok"] and resC["checks"]["cash_ok"], "forecast model = schedule month by month for repayments on set dates; model balances")
+# fingerprint: changing a repayment % changes it; an unused empty line does not
+_b = {"settings": {"fy_start_month": 1, "fy_start_year": 2026}, "structure": build()[0]["structure"]}
+_f1 = FL.fingerprint(dict(_b, facilities=[CN]))
+check(_f1 != FL.fingerprint(dict(_b, facilities=[dict(CN, repays=[dict(CN["repays"][0], pct=6)] + CN["repays"][1:])])), "fingerprint changes when a repayment % changes")
+check(_f1 == FL.fingerprint(dict(_b, facilities=[dict(CN, repays=CN["repays"] + [{"date": "", "month": "", "pct": 0.0, "amount": 0.0}])])), "an empty repayment line does not change the fingerprint")
+# the form: paste, add, remove, save
+_rr = c.post(f"{BASE}/{pid}/facilities/save", data=tr_form(), follow_redirects=True)
+_pasted = c.post(f"{BASE}/{pid}/facilities/save", data=tr_form({"fac_paste_fac1": _txt, "fac_rn_0": "0"}, action="pasterepay:fac1"), follow_redirects=True)
+_sv = getdata()["facilities"][0]
+check(_sv["repay"] == "custom" and len(_sv["repays"]) == 7 and _sv["term_months"] > 0 and "7 repayment line(s)" in _pasted.data.decode(), "'Use pasted schedule' switches the facility to repayments on set dates and stores the 7 lines")
+_pg = _pasted.data.decode()
+check('name="fac_rd_0_0"' in _pg and 'name="fac_rp_0_6"' in _pg and "fully repaid" in _pg, "the lines are shown with their total (fully repaid)")
+def rep_form(action="save", extra=None):
+    f_ = tr_form({"fac_repay_0": "custom", "fac_rn_0": "7"}, action=action)
+    for j, x in enumerate(_pl):
+        f_.update({f"fac_rd_0_{j}": x["date"], f"fac_rp_0_{j}": str(x["pct"]), f"fac_ra_0_{j}": ""})
+    f_.update(extra or {})
+    return f_
+c.post(f"{BASE}/{pid}/facilities/save", data=rep_form(), follow_redirects=True)
+check(len(getdata()["facilities"][0]["repays"]) == 7, "saving the form keeps the 7 repayment lines")
+c.post(f"{BASE}/{pid}/facilities/save", data=rep_form("delrepay:0:6"), follow_redirects=True)
+check(len(getdata()["facilities"][0]["repays"]) == 6, "the x button removes a repayment line")
+c.post(f"{BASE}/{pid}/facilities/save", data=rep_form("addrepay:fac1"), follow_redirects=True)
+check(len(getdata()["facilities"][0]["repays"]) == 8 and getdata()["facilities"][0]["repay"] == "custom", "'+ Add a repayment' adds an empty line")
+setdata(lambda x: x.update({"facilities": copy.deepcopy(_keep0)}))
+
 # the pack Excel (live formulas) for a facility with tranches and a first repayment date equals the app's schedule
 if soffice:
     _keep = copy.deepcopy(getdata()["facilities"])
@@ -804,6 +876,46 @@ if soffice:
     _rw = [r_ for r_ in range(1, _s4.max_row + 1) if _s4.cell(row=r_, column=1).value == "Drawdown"][0]
     check(abs(sum((_s4.cell(row=_rw, column=2 + j).value or 0) for j in range(12)) - 400000) < 0.5, "removing a drawdown amount in the schedule sheet recalculates the year view (drawn 600,000 -> 400,000)")
     setdata(lambda x: x.update({"facilities": _keep}))
+
+# the pack Excel for repayments on set dates: live formulas equal the app; changing a % in the sheet recalculates
+if soffice:
+    _CX = {"lender": "NBS", "rate": 18, "fee_pct": 3, "repay": "custom", "include": True, "draws": [{"date": "2026-06-15", "amount": 500000}], "repays": _pl}
+    setdata(lambda x: x.update({"facilities": [_CX]}))
+    _page = c.get(f"{BASE}/{pid}/excel/loans")
+    _t5 = tempfile.mkdtemp(prefix="xl5_")
+    open(os.path.join(_t5, "p.xlsx"), "wb").write(_page.data)
+    subprocess.run([soffice, "--headless", "--convert-to", "xlsx", "--outdir", os.path.join(_t5, "o"), os.path.join(_t5, "p.xlsx")], capture_output=True, timeout=180)
+    from openpyxl import load_workbook as _lw5
+    _w5 = _lw5(os.path.join(_t5, "o", "p.xlsx"), data_only=True)
+    _s5 = _w5["Loan facilities"]
+    _p5 = FL.pack_schedule(getdata())
+    _ok5 = True
+    for key, lab in (("interest", "Interest"), ("repay", "Capital repaid"), ("close", "Closing balance")):
+        _rw = [r_ for r_ in range(1, _s5.max_row + 1) if _s5.cell(row=r_, column=1).value == lab][0]
+        for j, mk in enumerate(_p5["months"]):
+            got = _s5.cell(row=_rw, column=2 + j).value or 0
+            if abs(got - _p5["facilities"][0]["rows"][mk][key]) > 0.5:
+                _ok5 = False
+                print("   xl custom mismatch", key, mk, got, _p5["facilities"][0]["rows"][mk][key])
+    check(_ok5, "Excel with repayments on set dates: live formulas equal the app (interest, capital repaid, closing, every month)")
+    _wl5 = _w5["Loan schedules"]
+    _sch5 = FL.schedule(FL.facilities_of(getdata())[0])
+    _hd = next(r_ for r_ in range(1, _wl5.max_row + 1) if _wl5.cell(row=r_, column=1).value == "No.")
+    check(all(abs((_wl5.cell(row=_hd + 1 + i, column=7).value or 0) - _sch5[i]["repay"]) < 0.5 for i in range(len(_sch5))) and len(_sch5) == 12, "the whole life in the Loan schedules sheet equals the app (to May 2027)")
+    _e5 = [c_.coordinate for n_ in _w5.sheetnames for row in _w5[n_].iter_rows() for c_ in row if isinstance(c_.value, str) and c_.value.startswith("#")]
+    check(not _e5, f"no formula errors with repayments on set dates ({_e5[:3]})")
+    from openpyxl import load_workbook as _lw6
+    _w6 = _lw6(os.path.join(_t5, "p.xlsx"))
+    _l6 = _w6["Loan schedules"]
+    _rr6 = next(r_ for r_ in range(1, _l6.max_row + 1) if str(_l6.cell(row=r_, column=1).value).strip() == "Repayment 1")
+    _l6.cell(row=_rr6, column=3).value = 10          # first repayment 5% -> 10%
+    _w6.save(os.path.join(_t5, "p2.xlsx"))
+    subprocess.run([soffice, "--headless", "--convert-to", "xlsx", "--outdir", os.path.join(_t5, "o"), os.path.join(_t5, "p2.xlsx")], capture_output=True, timeout=180)
+    _l6o = _lw5(os.path.join(_t5, "o", "p2.xlsx"), data_only=True)["Loan schedules"]
+    _h6 = next(r_ for r_ in range(1, _l6o.max_row + 1) if _l6o.cell(row=r_, column=1).value == "No.")
+    _reps6 = [(_l6o.cell(row=_h6 + 1 + i, column=7).value or 0) for i in range(12)]
+    check(abs(_reps6[5] - 50000) < 0.5 and abs(sum(_reps6) - 500000) < 0.5 and abs((_l6o.cell(row=_h6 + 12, column=8).value or 0)) < 0.5, "changing the first % to 10% in the sheet: Nov repays 50,000 and the facility still clears to nil")
+    setdata(lambda x: x.update({"facilities": copy.deepcopy(_keep0)}))
 
 # the model's own Excel carries the tranche drawdowns and fees (values) and recalculates to the engine's figures
 import cf_excel as CX
