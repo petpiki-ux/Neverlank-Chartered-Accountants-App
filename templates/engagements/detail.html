@@ -396,7 +396,7 @@
 
       {% if ppe_movement %}
       <div style="margin-top:14px;">
-        <h4 style="margin-bottom:4px;">Movement schedule preview (feeds the PPE note)</h4>
+        <h4 style="margin-bottom:4px;">Movement schedule preview (feeds the PPE note){% if ppe_reval_draft %} - includes the draft valuation, not yet posted{% endif %}</h4>
         <table style="font-size:12px;">
           <thead><tr><th>Asset class</th><th class="text-right">Opening NBV</th><th class="text-right">Additions</th><th class="text-right">Disposals</th>{% if (ppe_movement.total.revaluation or 0)|abs >= 0.5 %}<th class="text-right">Revaluation</th>{% endif %}<th class="text-right">Depreciation charge</th><th class="text-right">Closing NBV</th></tr></thead>
           <tbody>

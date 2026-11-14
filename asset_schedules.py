@@ -356,6 +356,11 @@ def _recon(engagement):
     return asset_recon.reconcile(engagement, args.get("open_to") or "retained_earnings", args.get("rest_to") or "suspense", args.get("basis") or "class", asset_recon.legs_from(args))
 
 
+def _reval_draft(engagement):
+    import ppe_revaluation
+    return ppe_revaluation.draft_with_values(engagement.id)
+
+
 def _reval_card(engagement):
     import ppe_revaluation
     return ppe_revaluation.card_context(engagement)
@@ -365,7 +370,7 @@ def tab_context(engagement):
     """Template variables for the Asset Register tab (and the opening column of the Capital Allowances tab)."""
     import engagements as eng
     ps, pe, as_at = bounds(engagement)
-    classes, assets, class_dicts, asset_dicts = eng._ppe_plain_data(engagement.id)
+    classes, assets, class_dicts, asset_dicts = eng._ppe_plain_data(engagement.id, include_draft=True)     # the draft valuation is previewed here
     openings, additions, later = split_assets(assets, ps, pe)
     disposals = [disposal_view(a) for a in assets if (a.disposal_cost or 0) or a.tax_disposed_on]
     movement = fin.build_ppe_movement_schedule(class_dicts, asset_dicts, pe)
@@ -381,6 +386,7 @@ def tab_context(engagement):
     return {
         "as_period_start": ps, "as_period_end": pe, "as_opening_as_at": as_at,
         "as_reval": _reval_card(engagement),
+        "as_reval_draft": _reval_draft(engagement),
         "as_openings": openings, "as_additions": additions, "as_later": later, "as_disposals": disposals,
         "as_disposable": [a for a in assets if not (a.disposal_cost or 0) and not a.tax_disposed_on],
         "as_classes": classes, "as_movement": movement,

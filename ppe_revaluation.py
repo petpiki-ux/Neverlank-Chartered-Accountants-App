@@ -71,13 +71,20 @@ def is_applied(rec):
     return rec is not None and rec.status == "Applied"
 
 
-def applied_values(engagement_id):
+def applied_values(engagement_id, include_draft=False):
     """{asset id: fair value} of the assets revalued by an APPLIED revaluation; {} while it is a draft or there is none. This is what
-    feeds the Asset Register movement schedule (as "revalued_to")."""
+    feeds the Asset Register movement schedule (as "revalued_to") behind the statements and the note. With include_draft the draft
+    valuation's figures count too: that is the preview the Asset Register tab shows before the revaluation is applied."""
     rec = get(engagement_id)
-    if not is_applied(rec):
+    if rec is None or (not include_draft and not is_applied(rec)):
         return {}
     return {l.asset_id: float(l.fair_value) for l in rec.lines if l.fair_value is not None}
+
+
+def draft_with_values(engagement_id):
+    """True while a valuation with figures exists that has not been applied (the Asset Register tab previews it)."""
+    rec = get(engagement_id)
+    return rec is not None and not is_applied(rec) and any(l.fair_value is not None for l in rec.lines)
 
 
 def revalued_class_ids(engagement_id):

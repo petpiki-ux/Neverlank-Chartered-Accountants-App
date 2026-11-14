@@ -157,6 +157,14 @@ def view_engagement(engagement_id):
     # the "Property, plant and equipment" accounting policy paragraph.
     ppe_asset_classes, ppe_assets, ppe_class_dicts, ppe_asset_dicts = _ppe_plain_data(engagement_id)
     ppe_movement, ppe_policy_text = _ppe_movement_and_policy(ppe_class_dicts, ppe_asset_dicts, engagement.period_end)
+    # The movement schedule SHOWN on the Asset Register tab includes a draft valuation (a preview, marked as such); the statements, the
+    # note and the tax figures below keep using only what has been applied.
+    import ppe_revaluation
+    ppe_reval_draft = ppe_revaluation.draft_with_values(engagement_id)
+    ppe_movement_shown = ppe_movement
+    if ppe_reval_draft:
+        _, _, pv_classes, pv_assets = _ppe_plain_data(engagement_id, include_draft=True)
+        ppe_movement_shown = fin.build_ppe_movement_schedule(pv_classes, pv_assets, engagement.period_end)
     # The Financial Statements are always built from the ADJUSTED trial
     # balance (preliminary TB + audit adjustments, current year only) -
     # Analytical Review and Substantive Procedures work from the preliminary
@@ -665,7 +673,8 @@ def view_engagement(engagement_id):
         ppe_asset_classes=ppe_asset_classes,
         ppe_assets=ppe_assets,
         ppe_depreciation_methods=PPE_DEPRECIATION_METHODS,
-        ppe_movement=ppe_movement,
+        ppe_movement=ppe_movement_shown,
+        ppe_reval_draft=ppe_reval_draft,
         directors_statement=directors_statement,
         suggested_directors=suggested_directors,
         default_directors_statement_text=fin.default_directors_statement_text(engagement),

@@ -1073,7 +1073,7 @@ def _get_or_create_substantive_area(engagement_id, area_name):
 
 # ---------- PPE Depreciation policy / Asset Register (Substantive Procedures > Property, Plant and Equipment) ----------
 
-def _ppe_plain_data(engagement_id):
+def _ppe_plain_data(engagement_id, include_draft=False):
     """Depreciation policy (PPEAssetClass) and Asset Register (PPEAsset)
     rows for an engagement, both as ORM objects (for the template to render
     and edit) and as the plain dicts financials.py's
@@ -1083,7 +1083,8 @@ def _ppe_plain_data(engagement_id):
     classes = PPEAssetClass.query.filter_by(engagement_id=engagement_id).order_by(PPEAssetClass.order, PPEAssetClass.id).all()
     assets = PPEAsset.query.filter_by(engagement_id=engagement_id).order_by(PPEAsset.order, PPEAsset.id).all()
     import ppe_revaluation
-    revalued = ppe_revaluation.applied_values(engagement_id)            # {asset id: fair value} once a revaluation is applied
+    # {asset id: fair value} once a revaluation is applied; with include_draft the draft valuation's figures too (the Asset Register tab's preview)
+    revalued = ppe_revaluation.applied_values(engagement_id, include_draft=include_draft)
     revalued_classes = ppe_revaluation.revalued_class_ids(engagement_id)
     class_dicts = [
         {"id": c.id, "name": c.name, "depreciation_method": c.depreciation_method,

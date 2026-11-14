@@ -112,6 +112,19 @@ with app.app_context():
     check(not calc["issues"], "no blocking issue: %s" % calc["issues"])
     check(any("whole class" in w or "IAS 16.36" in w for w in calc["warnings"]) is False, "every asset of both classes is valued - no whole-class warning")
 
+# the Asset Register tab previews the draft valuation; the statements do not use it
+with app.app_context():
+    import engagements as eng_m, asset_schedules as sched_m
+    eng_d = Engagement.query.get(EID)
+    ctx_ = sched_m.tab_context(eng_d)
+    tot_ = ctx_["as_movement"]["total"]
+    check(ctx_["as_reval_draft"] and near(tot_["closing_nbv"], 655000) and near(tot_["revaluation"], 202000), "the register schedule previews the draft: closing 655,000 with a revaluation of 202,000")
+    _, _, cd_a, ad_a = eng_m._ppe_plain_data(EID)
+    check(near(fin.build_ppe_movement_schedule(cd_a, ad_a, eng_d.period_end)["total"]["closing_nbv"], 453000), "...while the movement behind the statements and the note stays at 453,000 until applied")
+h = c.get(f"/engagements/{EID}?tab=asset_register").data.decode()
+check("includes the <strong>draft valuation</strong>" in h and "Eliminated on revaluation" in h, "the schedule card says it includes the draft and shows the Revaluation columns")
+check("includes the draft valuation, not yet posted" in h, "the movement schedule preview heading says so too")
+
 # draft changes nothing yet
 with app.app_context():
     tbr = TrialBalance.query.filter_by(engagement_id=EID).first()
