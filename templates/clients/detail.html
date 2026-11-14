@@ -65,6 +65,7 @@
       </div>
       <button type="submit" class="btn small secondary">Save colours</button>
       {% if client.cover_primary or client.cover_accent %}<button type="submit" name="reset" value="1" class="btn small">Use the logo's colours</button>{% endif %}
+      <a href="{{ url_for('covers.edit', kind='client', ref_id=client.id) }}" class="btn small gold" style="margin-left:6px;" title="Design, colour theme, who it is prepared by and the status line, for every cover made for this client">Cover designs &amp; defaults</a>
     </form>
   </div>
 </div>

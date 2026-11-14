@@ -338,39 +338,25 @@ def _plain_cover_page(doc, engagement):
 
 
 def _cover_page(doc, engagement):
-    """The designed cover: full-page artwork (cover_art.py) in the colours of the client's logo, placed behind the page so the
-    page margins and the rest of the pack are untouched. The first page carries no footer. If the artwork cannot be made for any
-    reason (an unreadable logo, a missing font library) the plain cover below is used instead - a pack is never lost to a cover."""
+    """The designed cover (cover_pages.py / cover_kit.py): full-page artwork in the design and colours chosen for this engagement, placed behind
+    the page so the margins and the rest of the pack are untouched. The first page carries no footer. If covers are switched off for this
+    engagement the plain cover is used; if the artwork cannot be made for any reason (an unreadable logo, a missing font library) the earlier
+    cover_art design is tried and then the plain one - a pack is never lost to a cover."""
+    try:
+        import cover_pages
+        if not cover_pages.is_enabled("fs", engagement):
+            return _plain_cover_page(doc, engagement)
+        if cover_pages.word_cover(doc, "fs", engagement, alt=f"Cover page: {engagement.client.name if engagement.client else ''} - Financial Statements for the year ended {_fmt_date(engagement.period_end)}"):
+            return
+    except Exception:
+        pass
     try:
         import cover_art
-        from docx.oxml import parse_xml
-        from docx.oxml.ns import nsdecls
         sec = doc.sections[0]
         page_w, page_h = int(sec.page_width), int(sec.page_height)
         png, pal = cover_art.render_for_engagement(engagement, aspect=page_h / float(page_w))
-        sec.different_first_page_header_footer = True
-        p = doc.add_paragraph()
-        run = p.add_run()
-        run.add_picture(png, width=page_w, height=page_h)
-        inline = run._r.find(".//" + qn("wp:inline"))
-        anchor = parse_xml(
-            '<wp:anchor %s distT="0" distB="0" distL="0" distR="0" simplePos="0" relativeHeight="0" behindDoc="1" locked="1" '
-            'layoutInCell="1" allowOverlap="1"><wp:simplePos x="0" y="0"/>'
-            '<wp:positionH relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionH>'
-            '<wp:positionV relativeFrom="page"><wp:posOffset>0</wp:posOffset></wp:positionV></wp:anchor>' % nsdecls("wp"))
-        anchor.append(inline.find(qn("wp:extent")))
-        anchor.append(parse_xml('<wp:effectExtent %s l="0" t="0" r="0" b="0"/>' % nsdecls("wp")))
-        anchor.append(parse_xml("<wp:wrapNone %s/>" % nsdecls("wp")))
-        docpr = inline.find(qn("wp:docPr"))
-        client = engagement.client
-        docpr.set("name", "Financial statements cover")
-        docpr.set("descr", f"Cover page: {client.name if client else ''} - Financial Statements for the year ended {_fmt_date(engagement.period_end)}")
-        anchor.append(docpr)
-        for tag in ("wp:cNvGraphicFramePr", "a:graphic"):
-            el = inline.find(qn(tag))
-            if el is not None:
-                anchor.append(el)
-        inline.getparent().replace(inline, anchor)
+        import cover_pages
+        cover_pages.place_word_picture(doc, png, "Financial statements cover")
         doc.add_page_break()
     except Exception:
         # take back anything half-added to the body, then fall back

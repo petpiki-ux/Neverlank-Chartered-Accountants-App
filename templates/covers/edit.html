@@ -1,0 +1,189 @@
+{% extends "base.html" %}
+{% block title %}Cover page - {{ doc_title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<style>
+  .cv-wrap { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+  .cv-form { flex: 1 1 520px; min-width: 300px; max-width: 760px; }
+  .cv-side { flex: 0 0 auto; width: {{ '470px' if land else '360px' }}; position: sticky; top: 12px; }
+  @media (max-width: 1100px) { .cv-side { position: static; width: 100%; max-width: 520px; } }
+  .cv-prev { width: 100%; border: 1px solid var(--border); border-radius: 6px; box-shadow: 0 3px 14px rgba(15,41,66,.18); background: #eef0f3; display: block; min-height: 120px; }
+  .cv-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax({{ '170px' if land else '120px' }}, 1fr)); gap: 10px; }
+  .cv-d { position: relative; cursor: pointer; display: block; border: 2px solid transparent; border-radius: 7px; padding: 3px; background: #fff; }
+  .cv-d:hover { border-color: #c9d2de; }
+  .cv-d input { position: absolute; opacity: 0; pointer-events: none; }
+  .cv-d img { width: 100%; display: block; border-radius: 4px; box-shadow: 0 1px 5px rgba(0,0,0,.2); background: #eef0f3; min-height: 60px; }
+  .cv-d span { display: block; font-size: 12px; font-weight: 600; margin-top: 4px; text-align: center; }
+  .cv-d:has(input:checked) { border-color: var(--gold, #c8a24a); background: #fff9e8; }
+  .cv-themes { display: flex; flex-wrap: wrap; gap: 8px; }
+  .cv-t { cursor: pointer; display: flex; align-items: center; gap: 7px; border: 2px solid transparent; border-radius: 20px; padding: 3px 10px 3px 4px; background: #fff; font-size: 12.5px; }
+  .cv-t input { position: absolute; opacity: 0; pointer-events: none; }
+  .cv-t i { display: inline-block; width: 26px; height: 26px; border-radius: 50%; border: 1px solid rgba(0,0,0,.2); }
+  .cv-t:has(input:checked) { border-color: var(--gold, #c8a24a); background: #fff9e8; font-weight: 600; }
+  .cv-g { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px 14px; }
+  .cv-g label { font-size: 12px; font-weight: 600; display: block; margin-bottom: 2px; }
+  .cv-g input[type=text], .cv-g input[type=date], .cv-g select { width: 100%; box-sizing: border-box; }
+  .cv-sec h3 { margin: 0 0 6px; font-size: 15px; }
+  .cv-sec { margin-bottom: 14px; }
+  .cv-chk { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }
+  .cv-chk label { font-weight: 400; display: inline-flex; gap: 6px; align-items: center; }
+  .cv-chk .off { color: #98a2b0; }
+</style>
+
+<div class="page-header">
+  <div>
+    <h1>Cover page</h1>
+    <div class="subtitle">{{ kind_label }}{% if kind != 'client' %} &middot; {{ doc_title }}{% endif %} &middot; {{ client.name }}</div>
+  </div>
+  <div><a href="{{ back_url }}" class="btn secondary">Back</a></div>
+</div>
+
+{% if kind == 'client' %}
+<p class="muted" style="font-size:13px;margin-top:0;">These choices are the starting point for every cover made for {{ client.name }}: Financial Statements, management accounts, valuations, forecasts and appraisals. Each document can still change them on its own cover page.</p>
+{% elif client_has_defaults %}
+<p class="muted" style="font-size:13px;margin-top:0;">Starts from {{ client.name }}'s cover defaults (<a href="{{ url_for('covers.edit', kind='client', ref_id=client_id) }}">change them</a>). Anything set here applies to this document only.</p>
+{% else %}
+<p class="muted" style="font-size:13px;margin-top:0;">Leave anything blank to use the usual wording. You can also set a design and colours for all of {{ client.name }}'s covers on the <a href="{{ url_for('covers.edit', kind='client', ref_id=client_id) }}">client's cover defaults</a>.</p>
+{% endif %}
+
+<form method="post" id="cvform">
+<div class="cv-wrap">
+  <div class="cv-form">
+
+    {% if kind != 'client' %}
+    <div class="card cv-sec">
+      <label class="cv-chk" style="display:flex;"><span><input type="checkbox" name="enabled" value="1" {{ 'checked' if st.enabled else '' }}> <b>Use a designed cover page on this document</b></span></label>
+      <div class="muted" style="font-size:12px;">Untick to go back to the plain first page.</div>
+    </div>
+    {% else %}<input type="hidden" name="enabled" value="1">{% endif %}
+
+    <div class="card cv-sec">
+      <h3>1. Design</h3>
+      <div class="cv-gallery">
+        {% for key, label, desc in designs %}
+        <label class="cv-d" title="{{ desc }}">
+          <input type="radio" name="design" value="{{ key }}" {{ 'checked' if st.design == key else '' }}>
+          <img loading="lazy" data-design="{{ key }}" alt="{{ label }}" src="{{ url_for('covers.thumb', kind=kind, ref_id=ref_id, design=key, theme=st.theme, o=('l' if land else 'p')) }}">
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="card cv-sec">
+      <h3>2. Colours</h3>
+      <div class="cv-themes">
+        {% for key, label, cols in themes %}
+        <label class="cv-t">
+          <input type="radio" name="theme" value="{{ key }}" {{ 'checked' if st.theme == key else '' }}>
+          <i style="background: {% if cols %}linear-gradient(135deg, #{{ cols[0] }} 55%, #{{ cols[1] }} 55%){% else %}conic-gradient(#d8dde5, #fff, #c8a24a, #d8dde5){% endif %};"></i>
+          {{ label }}
+        </label>
+        {% endfor %}
+      </div>
+      <div class="muted" style="font-size:12px;margin-top:6px;">"{{ themes[0][1] }}" follows the client's logo, or the colours typed on the client page{% if not has_logo %} (no logo uploaded yet, so it uses the firm's navy and gold){% endif %}.</div>
+    </div>
+
+    <div class="card cv-sec">
+      <h3>3. Wording</h3>
+      <div class="cv-g">
+        {% if kind != 'client' %}
+        <div><label for="f_title">Title</label><input type="text" id="f_title" name="title" maxlength="120" value="{{ saved.title or '' }}" placeholder="{{ facts.title }}"></div>
+        <div><label for="f_subtitle">Subtitle</label><input type="text" id="f_subtitle" name="subtitle" maxlength="200" value="{{ saved.subtitle or '' }}" placeholder="{{ facts.subtitle or facts.period or 'None' }}"></div>
+        <div><label for="f_big">Large year or figure</label><input type="text" id="f_big" name="big" maxlength="12" value="{{ saved.big or '' }}" placeholder="{{ facts.big or 'None' }}"></div>
+        <div><label for="f_prepared_for">Prepared for</label><input type="text" id="f_prepared_for" name="prepared_for" maxlength="120" value="{{ saved.prepared_for or '' }}" placeholder="{{ facts.prepared_for or 'None' }}"></div>
+        {% endif %}
+        <div><label for="f_prepared_by">Prepared by</label><input type="text" id="f_prepared_by" name="prepared_by" maxlength="120" value="{{ saved.prepared_by or '' }}" placeholder="{{ firm.name }}"></div>
+        {% if kind != 'client' %}
+        <div><label for="f_issue_date">Date issued</label><input type="date" id="f_issue_date" name="issue_date" value="{{ saved.issue_date or '' }}"><div class="muted" style="font-size:11px;">Blank = the day it is downloaded.</div></div>
+        <div><label for="f_reference">Reference</label><input type="text" id="f_reference" name="reference" maxlength="60" value="{{ saved.reference or '' }}" placeholder="{{ facts.reference or 'None' }}"></div>
+        <div><label for="f_version">Version</label><input type="text" id="f_version" name="version" maxlength="40" value="{{ saved.version or '' }}" placeholder="e.g. v2"></div>
+        {% endif %}
+        <div><label for="f_kicker">Confidentiality line</label><input type="text" id="f_kicker" name="kicker" maxlength="80" value="{{ saved.kicker or '' }}" placeholder="{{ default_kicker }}"><div class="muted" style="font-size:11px;">Type a dash (-) to leave it off.</div></div>
+      </div>
+    </div>
+
+    <div class="card cv-sec">
+      <h3>4. Status</h3>
+      <div class="cv-g">
+        <div>
+          <label for="f_status_mode">Status line</label>
+          <select id="f_status_mode" name="status_mode">
+            {% for key, label in status_modes %}<option value="{{ key }}" {{ 'selected' if st.status_mode == key else '' }}>{{ label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div id="status_custom" {% if st.status_mode != 'custom' %}style="display:none;"{% endif %}>
+          <label for="f_status_text">Your wording</label>
+          <input type="text" id="f_status_text" name="status_text" list="status_list" maxlength="40" value="{{ saved.status_text or '' }}" placeholder="e.g. For review">
+          <datalist id="status_list">{% for s in status_choices %}<option value="{{ s }}">{% endfor %}</datalist>
+        </div>
+      </div>
+      {% if kind != 'client' %}<div class="muted" style="font-size:12px;margin-top:4px;">Automatic follows the document: Draft until it is finalised, then Final{% if kind == 'fs' %} (the engagement's status: Review shows "For review", Completed shows "Final"){% endif %}{% if kind == 'vm' %}; Signed once the Managing Partner has signed{% endif %}.</div>{% endif %}
+    </div>
+
+    <div class="card cv-sec">
+      <h3>5. Show on the cover</h3>
+      <div class="cv-chk">
+        <label class="{{ '' if has_logo else 'off' }}"><input type="checkbox" name="show_logo" value="1" {{ 'checked' if st.show_logo else '' }}> The client's logo{% if not has_logo %} (none uploaded){% endif %}</label>
+        <label><input type="checkbox" name="show_reg" value="1" {{ 'checked' if st.show_reg else '' }}> Registration number</label>
+        <label class="{{ '' if (has_framework or kind == 'client') else 'off' }}"><input type="checkbox" name="show_framework" value="1" {{ 'checked' if st.show_framework else '' }}> Reporting framework{% if kind not in ('fs', 'client') %} (Financial Statements only){% endif %}</label>
+        <label class="{{ '' if has_bankers else 'off' }}"><input type="checkbox" name="show_bankers" value="1" {{ 'checked' if st.show_bankers else '' }}> The client's bankers{% if not has_bankers %} (none entered){% endif %}</label>
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button type="submit" class="btn gold">Save cover</button>
+      {% if has_own %}<button type="submit" name="reset" value="1" class="btn secondary" onclick="return confirm('Remove this cover\'s own choices and go back to {{ 'the standard cover' if kind == 'client' else 'the client\'s defaults' }}?');">Reset</button>{% endif %}
+      <a href="{{ back_url }}" class="btn secondary">Cancel</a>
+    </div>
+  </div>
+
+  <div class="cv-side">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+      <b>Preview</b>
+      {% if kind == 'vm' %}
+      <select id="prev_shape" style="font-size:12px;">
+        <option value="p|report">Valuation report (portrait)</option>
+        <option value="l|model">Valuation model (landscape)</option>
+      </select>
+      {% endif %}
+    </div>
+    <img id="cv_prev" class="cv-prev" alt="Cover preview" src="{{ url_for('covers.preview', kind=kind, ref_id=ref_id, o=('l' if land else 'p')) }}">
+    <div id="cv_msg" class="muted" style="font-size:12px;margin-top:6px;">The preview updates as you change the choices; nothing is saved until you press Save cover.</div>
+  </div>
+</div>
+</form>
+
+<script>
+(function () {
+  var form = document.getElementById('cvform'), img = document.getElementById('cv_prev'), msg = document.getElementById('cv_msg');
+  var shape = document.getElementById('prev_shape'), timer = null, seq = 0, lastUrl = null;
+  var DEF_O = {{ ('"l"' if land else '"p"')|safe }};
+  var URL_PREVIEW = {{ url_for('covers.preview', kind=kind, ref_id=ref_id)|tojson }};
+  function orient() { return shape ? shape.value.split('|')[0] : DEF_O; }
+  function variant() { return shape ? shape.value.split('|')[1] : ''; }
+  function refresh() {
+    var me = ++seq, fd = new FormData(form);
+    msg.textContent = 'Updating the preview...';
+    fetch(URL_PREVIEW + '?o=' + orient() + '&variant=' + variant() + '&w=900', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { if (!r.ok) { return r.text().then(function (t) { throw new Error((t.match(/<p>(.*?)<\/p>/) || [0, 'The cover could not be drawn'])[1]); }); } return r.blob(); })
+      .then(function (b) { if (me !== seq) return; if (lastUrl) URL.revokeObjectURL(lastUrl); lastUrl = URL.createObjectURL(b); img.src = lastUrl; msg.textContent = 'The preview updates as you change the choices; nothing is saved until you press Save cover.'; })
+      .catch(function (e) { if (me === seq) msg.textContent = 'Preview not updated: ' + e.message; });
+  }
+  function later() { clearTimeout(timer); timer = setTimeout(refresh, 450); }
+  form.addEventListener('input', later);
+  form.addEventListener('change', function (ev) {
+    if (ev.target.name === 'theme') {
+      document.querySelectorAll('.cv-d img').forEach(function (im) {
+        im.src = {{ url_for('covers.thumb', kind=kind, ref_id=ref_id, design='DESIGN')|tojson }}.replace('DESIGN', im.dataset.design) + '?theme=' + encodeURIComponent(ev.target.value) + '&o=' + orient();
+      });
+    }
+    if (ev.target.name === 'status_mode') document.getElementById('status_custom').style.display = ev.target.value === 'custom' ? '' : 'none';
+    later();
+  });
+  if (shape) shape.addEventListener('change', function () {
+    document.querySelectorAll('.cv-d img').forEach(function (im) { im.src = im.src.replace(/o=[pl]/, 'o=' + orient()) + (im.src.indexOf('variant=') < 0 ? '&variant=' + variant() : ''); });
+    refresh();
+  });
+})();
+</script>
+{% endblock %}

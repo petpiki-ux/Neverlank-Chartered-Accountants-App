@@ -406,7 +406,7 @@ def save_cover_colours(client_id):
 @clients_bp.route("/<int:client_id>/cover-preview.png")
 @login_required
 def cover_preview(client_id):
-    """A picture of what this client's Financial Statements cover will look like now (latest engagement's year end), A4."""
+    """A picture of what this client's Financial Statements cover will look like now (the client's cover defaults, latest engagement's year end), A4."""
     import cover_art
     from flask import send_file
     client = Client.query.get_or_404(client_id)
@@ -416,9 +416,17 @@ def cover_preview(client_id):
     for e in sorted(client.engagements, key=lambda e: e.period_end or date.min, reverse=True):
         framework = cover_art.FRAMEWORK_LABELS.get(e.reporting_framework)
         break
-    pal = cover_art.palette_for_client(client)
-    png = cover_art.render_cover(client.name, period_end, pal, logo_path=cover_art.logo_path_for(client),
-                                 reg_no=client.company_number, framework=framework, width_px=900)
+    try:
+        import cover_pages
+        eng = next((e for e in sorted(client.engagements, key=lambda e: e.period_end or date.min, reverse=True)), None)
+        st = cover_pages.effective_settings("client", client)
+        if eng is not None:
+            st = cover_pages.effective_settings("fs", eng)
+        png = cover_pages.render_png("fs" if eng is not None else "client", eng if eng is not None else client, st, 1.4142, width_px=900)
+    except Exception:
+        pal = cover_art.palette_for_client(client)
+        png = cover_art.render_cover(client.name, period_end, pal, logo_path=cover_art.logo_path_for(client),
+                                     reg_no=client.company_number, framework=framework, width_px=900)
     resp = send_file(png, mimetype="image/png")
     resp.headers["Cache-Control"] = "no-store"
     return resp

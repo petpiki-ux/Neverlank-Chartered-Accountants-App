@@ -82,10 +82,19 @@ def build_report_pdf(vm, signed=False):
     buf = io.BytesIO()
     doc = Doc(buf, pagesize=A4, leftMargin=16 * mm, rightMargin=16 * mm, topMargin=12 * mm, bottomMargin=20 * mm,
               title=f"{vm.vm_number} Valuation report", author=firm.get("name", ""))
-    story = [brand.pdf_letterhead(W, "Valuation Report", number=vm.vm_number, sub=("Signed" if signed else f"{vm.status} - for review"), firm=firm), Spacer(1, 14 * mm)]
-    story.append(Paragraph("STRICTLY PRIVATE AND CONFIDENTIAL", ParagraphStyle("c0", parent=note, fontName="Helvetica-Bold", textColor=GOLD, fontSize=8.5)))
-    story.append(Spacer(1, 3 * mm))
-    story.append(Paragraph(escape(vm.name), ParagraphStyle("c1", parent=h1, fontSize=24, leading=29, spaceAfter=6)))
+    cover = []
+    try:
+        import cover_pages
+        cover = cover_pages.pdf_cover("vm", vm, A4, variant="report", signed=signed)
+    except Exception:
+        cover = []
+    story = cover + [brand.pdf_letterhead(W, "Valuation Report", number=vm.vm_number, sub=("Signed" if signed else f"{vm.status} - for review"), firm=firm), Spacer(1, 14 * mm)]
+    if not cover:                         # the designed cover already carries the title
+        story.append(Paragraph("STRICTLY PRIVATE AND CONFIDENTIAL", ParagraphStyle("c0", parent=note, fontName="Helvetica-Bold", textColor=GOLD, fontSize=8.5)))
+        story.append(Spacer(1, 3 * mm))
+        story.append(Paragraph(escape(vm.name), ParagraphStyle("c1", parent=h1, fontSize=24, leading=29, spaceAfter=6)))
+    else:
+        story.append(Paragraph("Summary of the valuation", ParagraphStyle("c1", parent=h1, fontSize=18, leading=22, spaceAfter=6)))
     story.append(Paragraph(escape(f"Valuation of {'the Group' if F['whole'] else 'a ' + R.pc(F['g']['stake_pct']) + ' shareholding'} - {F['client']}"), ParagraphStyle("c2", parent=base, fontSize=12.5, leading=17, textColor=MUTED, alignment=0)))
     story.append(Spacer(1, 8 * mm))
     story.append(brand.pdf_meta_strip(W, [("Valuation date", F["vdate_s"]), ("Basis of value", F["basis"]), ("Currency", cur), ("Reference", vm.vm_number)]))
@@ -260,6 +269,12 @@ def build_report_docx(vm, signed=False):
     doc = Document()
     brand.setup_document(doc, margins_in=0.9, base_size=10.5)
     brand.branded_footer(doc, firm, center=vm.vm_number)
+    has_cover = False
+    try:
+        import cover_pages
+        has_cover = cover_pages.word_cover(doc, "vm", vm, variant="report", signed=signed, alt=f"Cover page: {vm.name} - valuation report")
+    except Exception:
+        pass
     brand.letterhead_band(doc, "Valuation Report", sub=("Signed" if signed else f"{vm.status} - for review"), number=vm.vm_number, firm=firm)
     width = brand.usable_width_in(doc)
 
@@ -286,8 +301,11 @@ def build_report_docx(vm, signed=False):
         if pos < len(text):
             brand._run(p, text[pos:], size=size, bold=bold, italic=italic, colour=colour)
 
-    para("STRICTLY PRIVATE AND CONFIDENTIAL", size=8.5, bold=True, colour=brand.GOLD, after=14)
-    para(vm.name, size=24, bold=True, colour=brand.NAVY, after=4)
+    if not has_cover:                     # the designed cover already carries the title
+        para("STRICTLY PRIVATE AND CONFIDENTIAL", size=8.5, bold=True, colour=brand.GOLD, after=14)
+        para(vm.name, size=24, bold=True, colour=brand.NAVY, after=4)
+    else:
+        para("Summary of the valuation", size=15, bold=True, colour=brand.NAVY, after=4)
     para(f"Valuation of {'the Group' if F['whole'] else 'a ' + R.pc(F['g']['stake_pct']) + ' shareholding'} - {F['client']}", size=13, colour=brand.MUTED, after=14)
     brand.meta_strip(doc, [("Valuation date", F["vdate_s"]), ("Basis of value", F["basis"]), ("Currency", cur), ("Reference", vm.vm_number)])
     tgt = F["target"]

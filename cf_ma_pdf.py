@@ -305,6 +305,15 @@ def _loan_table(story, t, cur):
     story.append(KeepTogether([Spacer(1, 3 * mm), Paragraph(t["title"], _h3), tb, _p(f"{cur}. {t['note']}", _note_style)]))
 
 
+def _cover(kind, obj, pagesize, **kw):
+    """The designed cover page (cover_pages.py) as flowables, or nothing when covers are off / cannot be made."""
+    try:
+        import cover_pages
+        return cover_pages.pdf_cover(kind, obj, pagesize, **kw)
+    except Exception:
+        return []
+
+
 def build_pack_pdf(pack, meta, d, firm, opts=None):
     opts = opts or {}
     var = opts.get("var", True)
@@ -320,7 +329,7 @@ def build_pack_pdf(pack, meta, d, firm, opts=None):
     status = M.data_status(d)
     com = d.get("commentary") or {}
     title_style = ParagraphStyle("t", parent=_base, fontName="Helvetica-Bold", fontSize=16, leading=20, textColor=NAVY)
-    story = [_band(firm, "MANAGEMENT ACCOUNTS", pack.pack_number, f"{cur}  ·  {labels['month']}  ·  {pack.status}"), Spacer(1, 5 * mm)]
+    story = _cover("ma", pack, doc.pagesize) + [_band(firm, "MANAGEMENT ACCOUNTS", pack.pack_number, f"{cur}  ·  {labels['month']}  ·  {pack.status}"), Spacer(1, 5 * mm)]
     story.append(Paragraph(escape(pack.name), title_style))
     story.append(Spacer(1, 2 * mm))
     story.append(_kv([

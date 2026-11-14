@@ -125,13 +125,15 @@ with app.app_context():
     check("Client Details" in [p.text for p in d.paragraphs], "the Client Details page follows the cover")
     check(len(d.part.package.image_parts) >= 1, "the artwork is embedded in the file")
     # fallback to the plain cover
-    orig = ca.render_for_engagement
+    import cover_kit as _ck
+    orig, orig_kit = ca.render_for_engagement, _ck.render
     def boom(*a, **k): raise RuntimeError("no fonts")
     ca.render_for_engagement = boom
+    _ck.render = boom
     try:
         d2 = Document(wp.build_financial_statements_docx(e, st, None))
     finally:
-        ca.render_for_engagement = orig
+        ca.render_for_engagement, _ck.render = orig, orig_kit
     texts = [p.text for p in d2.paragraphs]
     check("Financial Statements" in texts and "Client Details" in texts and "<wp:anchor" not in d2.element.body.xml, "if the artwork fails, the plain cover is used and the pack is still produced")
 

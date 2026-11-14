@@ -155,13 +155,22 @@ def _pc(v, dp=1):
 
 # =========================================================================== forecast model report
 
+def _cover(kind, obj, pagesize, **kw):
+    """The designed cover page (cover_pages.py) as flowables, or nothing when covers are off / cannot be made."""
+    try:
+        import cover_pages
+        return cover_pages.pdf_cover(kind, obj, pagesize, **kw)
+    except Exception:
+        return []
+
+
 def build_model_pdf(model, scenario, result, firm, valuation=None, scenarios=None, bva=None):
     a = result["a"]
     cur = a["currency"]
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=PAGE, leftMargin=MARGIN, rightMargin=MARGIN, topMargin=11 * mm, bottomMargin=16 * mm,
                             title=f"{model.model_number} {model.name}", author=firm.get("name", ""))
-    story = [_band(firm, "FINANCIAL FORECAST", model.model_number, f"{cur}  ·  {model.status}"), Spacer(1, 5 * mm)]
+    story = _cover("fm", model, doc.pagesize) + [_band(firm, "FINANCIAL FORECAST", model.model_number, f"{cur}  ·  {model.status}"), Spacer(1, 5 * mm)]
     head = R.headline(result)
     story.append(Paragraph(escape(model.name), ParagraphStyle("t", parent=_base, fontName="Helvetica-Bold", fontSize=16, leading=20, textColor=NAVY)))
     story.append(Spacer(1, 2 * mm))
@@ -357,7 +366,7 @@ def build_project_pdf(proj, inputs, an, sens, narrative, firm):
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=PAGE, leftMargin=MARGIN, rightMargin=MARGIN, topMargin=11 * mm, bottomMargin=16 * mm,
                             title=f"{proj.project_number} {proj.name}", author=firm.get("name", ""))
-    story = [_band(firm, "INVESTMENT APPRAISAL", proj.project_number, f"{cur}  ·  {proj.status}"), Spacer(1, 5 * mm)]
+    story = _cover("ip", proj, doc.pagesize) + [_band(firm, "INVESTMENT APPRAISAL", proj.project_number, f"{cur}  ·  {proj.status}"), Spacer(1, 5 * mm)]
     story.append(Paragraph(escape(proj.name), ParagraphStyle("t", parent=_base, fontName="Helvetica-Bold", fontSize=16, leading=20, textColor=NAVY)))
     story.append(Spacer(1, 2 * mm))
     story.append(_kv([("Client", proj.client.name), ("Engagement", proj.engagement.title if proj.engagement else "-"),

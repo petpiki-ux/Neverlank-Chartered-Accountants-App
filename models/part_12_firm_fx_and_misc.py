@@ -1,4 +1,4 @@
-"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine.
+"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting.
 
 See __init__.py: all parts share one set of names, exactly as the single file models.py did."""
 
@@ -160,3 +160,18 @@ class CashFlowPriorLine(db.Model):
     label = db.Column(db.String(200), nullable=False)
     amount = db.Column(db.Float, default=0.0)
     sort_order = db.Column(db.Integer, default=0)
+
+
+class CoverSetting(db.Model):
+    """How a document's cover page looks (cover_pages.py). One row per document: `kind` says which sort ("client" = the client's defaults for every
+    cover, "fs" = an engagement's Financial Statements, "ma" = a management accounts pack, "vm" = a valuation model and its report, "fm" = a
+    forecast model, "ip" = an investment appraisal) and `ref_id` is that document's id (the client's id for "client"). `data_json` holds the choices:
+    design, colour theme, the wording and the status line. No row = the firm's defaults, so nothing has to be set up for a cover to appear."""
+    __tablename__ = "cover_setting"
+    id = db.Column(db.Integer, primary_key=True)
+    kind = db.Column(db.String(12), nullable=False)
+    ref_id = db.Column(db.Integer, nullable=False)
+    data_json = db.Column(db.Text)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    __table_args__ = (db.UniqueConstraint("kind", "ref_id", name="uq_cover_setting"),)

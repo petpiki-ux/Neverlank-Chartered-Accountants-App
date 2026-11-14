@@ -941,6 +941,8 @@ def create_app():
     app.register_blueprint(cfprior_bp)
     app.register_blueprint(wpedit_bp)
     app.register_blueprint(dtadj_bp)
+    from cover_pages import covers_bp
+    app.register_blueprint(covers_bp)
     from backup import backup_bp, nav_state as _backup_nav_state, start_scheduler as _start_backups
     app.register_blueprint(backup_bp)
 

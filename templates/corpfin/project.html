@@ -13,6 +13,7 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap;">
     <a class="btn secondary" href="{{ url_for('corpfin.project_excel', project_id=proj.id) }}">Excel (live formulas)</a>
     <a class="btn secondary" href="{{ url_for('corpfin.project_pdf', project_id=proj.id) }}" target="_blank">PDF report</a>
+    <a class="btn secondary" href="{{ url_for('covers.edit', kind='ip', ref_id=proj.id) }}" title="Choose the cover page design, colours and wording">Cover page</a>
     <a class="btn secondary" href="{{ url_for('corpfin.dashboard') }}">All work</a>
   </div>
 </div>

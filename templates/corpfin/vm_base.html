@@ -12,6 +12,7 @@
     <a class="btn secondary" href="{{ url_for('corpfin.vm_excel', vm_id=vm.id) }}" title="Consolidation with live formulas">Excel (live formulas)</a>
     <a class="btn secondary" href="{{ url_for('corpfin.vm_pdf', vm_id=vm.id) }}" target="_blank">PDF report</a>
     <a class="btn secondary" href="{{ url_for('corpfin.vm_docx', vm_id=vm.id) }}">Word report</a>
+    <a class="btn secondary" href="{{ url_for('covers.edit', kind='vm', ref_id=vm.id) }}" title="Choose the cover page design, colours and wording (valuation model and valuation report)">Cover page</a>
     <a class="btn secondary" href="{{ url_for('corpfin.vm_tab', vm_id=vm.id, tab='writer') }}" title="Draft the full written valuation report">Full report</a>
     <a class="btn secondary" href="{{ url_for('corpfin.engagement_valuations', engagement_id=vm.engagement_id) if vm.engagement_id else url_for('corpfin.dashboard') }}">All valuation models</a>
   </div>

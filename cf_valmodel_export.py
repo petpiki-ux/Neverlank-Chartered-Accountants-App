@@ -404,7 +404,7 @@ def build_pdf(vm, signed=False):
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=P.PAGE, leftMargin=P.MARGIN, rightMargin=P.MARGIN, topMargin=11 * mm, bottomMargin=16 * mm,
                             title=f"{vm.vm_number} {vm.name}", author=firm.get("name", ""))
-    story = [P._band(firm, "VALUATION MODEL", vm.vm_number, f"{cur}  ·  {vm.status}" + ("  ·  Signed" if signed else "")), Spacer(1, 5 * mm)]
+    story = P._cover("vm", vm, doc.pagesize, variant="model", signed=signed) + [P._band(firm, "VALUATION MODEL", vm.vm_number, f"{cur}  ·  {vm.status}" + ("  ·  Signed" if signed else "")), Spacer(1, 5 * mm)]
     story.append(Paragraph(P.escape(vm.name), ParagraphStyle("t", parent=P._base, fontName="Helvetica-Bold", fontSize=16, leading=20, textColor=P.NAVY)))
     story.append(Spacer(1, 2 * mm))
     story.append(P._kv(_facts(vm, d)))
@@ -539,6 +539,11 @@ def build_docx(vm, signed=False):
         s.page_width, s.page_height = Mm(297), Mm(210)
     brand.setup_document(doc, margins_in=0.7, base_size=10)
     brand.branded_footer(doc, firm, center=vm.vm_number)
+    try:
+        import cover_pages
+        cover_pages.word_cover(doc, "vm", vm, variant="model", signed=signed, alt=f"Cover page: {vm.name} - valuation model")
+    except Exception:
+        pass
     brand.letterhead_band(doc, "Valuation Model", sub=f"{cur} · {vm.status}" + (" · Signed" if signed else ""), number=vm.vm_number, firm=firm)
     brand.meta_strip(doc, [("Valuation date", vm.valuation_date.strftime("%d %B %Y") if vm.valuation_date else "-"), ("Basis of value", d["basis_of_value"]),
                            ("Currency", cur), ("Components", str(res["count"]))])
