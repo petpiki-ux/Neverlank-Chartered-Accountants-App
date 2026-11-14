@@ -149,6 +149,15 @@
     </div>
   </form>
 
+  {% if rec and rec.lines and not rv.applied %}
+  <div style="margin-top:10px;padding:10px 12px;border:1px solid #c9a227;background:#fffbea;border-radius:4px;">
+    <form method="post" action="{{ url_for('ppereval.apply', engagement_id=engagement.id) }}" onsubmit="return confirm('Post the saved valuation to the Movement Schedule, the PPE note and the financial statements now?\n\nThis confirms the revaluation model for the whole of each class revalued, dates the valuation at the year end if no date is set, and lets assets valued without a cost take over the cost and depreciation of the register\'s other assets (which are removed - restorable under Recently deleted). You can undo it.');">
+      <input type="hidden" name="quick" value="1">
+      <button type="submit" class="btn gold">Post to Movement Schedule and Financial Statements</button>
+      <span class="muted" style="font-size:12px;margin-left:8px;">One click: saved valuation figures, journal REVAL, movement schedule, notes and statements.</span>
+    </form>
+  </div>
+  {% endif %}
   <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
     <form method="post" action="{{ url_for('ppereval.apply', engagement_id=engagement.id) }}" onsubmit="return confirm('Post journal REVAL and revalue the register and notes? You can undo it.');">
       <button type="submit" class="btn small" {% if not calc or calc.issues %}disabled title="Fix the points above first"{% endif %}>Apply the revaluation (post REVAL)</button>

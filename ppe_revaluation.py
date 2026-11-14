@@ -520,6 +520,42 @@ def spread(engagement_id):
     return _back(engagement)
 
 
+def carry_over_old_assets(engagement, valued, eligible, ps, pe):
+    """The register's other assets (an old lump-sum line, say) are what the valued assets REPLACE: their cost, accumulated depreciation and
+    charge are spread over the valued assets that have no cost yet, in proportion to the valuer's figures, and the old assets are removed
+    (restorable). The revaluation then starts from the carrying amount already in the accounts, so the surplus is the real one.
+    `valued` maps asset id -> fair value. Returns the message to show."""
+    import asset_schedules as sched_
+    targets = [eligible[a_] for a_ in valued if a_ in eligible and (eligible[a_].cost or 0.0) <= 0]
+    olds = [a for a in PPEAsset.query.filter_by(engagement_id=engagement.id).all() if a.id not in valued and not (a.disposal_cost or 0.0)]
+    if not (targets and olds):
+        return " Nothing to carry over: there are no valued assets without a cost, or no other assets in the register."
+    tot_fv = sum(valued[t.id] for t in targets)
+    old_cost = sum(a.cost or 0.0 for a in olds)
+    old_acc = sum(a.opening_accumulated_depreciation or 0.0 for a in olds if not (a.date_acquired and ps and pe and ps <= a.date_acquired <= pe))
+    old_dep = sum(a.current_year_depreciation or 0.0 for a in olds)
+    dates = {a.date_acquired for a in olds}
+    when = dates.pop() if len(dates) == 1 else None
+    left_c, left_a, left_d = old_cost, old_acc, old_dep
+    for i, t in enumerate(targets):
+        share = valued[t.id] / tot_fv if tot_fv else 1.0 / len(targets)
+        last = i == len(targets) - 1
+        c_ = left_c if last else r2(old_cost * share)
+        a_ = left_a if last else r2(old_acc * share)
+        d_ = left_d if last else r2(old_dep * share)
+        t.cost, t.opening_accumulated_depreciation, t.current_year_depreciation = c_, a_, d_
+        t.date_acquired = when
+        left_c, left_a, left_d = r2(left_c - c_), r2(left_a - a_), r2(left_d - d_)
+    for a in olds:
+        for l in list(PPERevaluationLine.query.filter_by(asset_id=a.id).all()):
+            db.session.delete(l)
+        sched_.archive_asset(a, current_user.id)
+        db.session.delete(a)
+    return (f" The cost ({old_cost:,.2f}), accumulated depreciation ({old_acc:,.2f}) and depreciation charge ({old_dep:,.2f}) of the {len(olds)} other register "
+            f"asset(s) were spread over the {len(targets)} valued assets in proportion to their values, and those assets were removed "
+            "(they can be put back under 'Recently deleted'). The revaluation now starts from the carrying amount already in the accounts.")
+
+
 @ppereval_bp.route("/<int:engagement_id>/revaluation/apply", methods=["POST"])
 @login_required
 def apply(engagement_id):
@@ -529,11 +565,34 @@ def apply(engagement_id):
     if rec is None:
         flash("Enter the valuation first.", "danger")
         return _back(engagement)
+    quick_msg = ""
+    if request.form.get("quick") == "1":
+        # One click: the figures are the ones already saved, and the click is the confirmation of the whole-class policy. The valuation date
+        # defaults to the year end, assets valued without a cost take over the cost of the register's other assets, and the REVAL journal is posted.
+        import asset_schedules as sched
+        if is_applied(rec):
+            flash("The revaluation is already applied. Undo it first if the figures must change.", "info")
+            return _back(engagement)
+        ps, pe, _ = sched.bounds(engagement)
+        if not rec.lines:
+            flash("There are no valuation figures yet. Import the valuer's list (or enter the fair values) first.", "danger")
+            return _back(engagement)
+        if not rec.valuation_date:
+            rec.valuation_date = pe
+        rec.policy_confirmed = True
+        eligible = {a.id: a for a in PPEAsset.query.filter_by(engagement_id=engagement.id).all() if asset_figures(a, ps, pe)["eligible"]}
+        valued = {l.asset_id: l.fair_value for l in rec.lines if l.fair_value is not None}
+        if any((eligible[i].cost or 0.0) <= 0 for i in valued if i in eligible):
+            quick_msg = carry_over_old_assets(engagement, valued, eligible, ps, pe)
+        db.session.flush()
+        rec = get(engagement.id)
     calc = calculate(engagement, rec)
     if calc["issues"]:
+        db.session.commit()
         flash("Not applied: " + " ".join(calc["issues"]), "danger")
         return _back(engagement)
     if not calc["balanced"] or not calc["journal"]:
+        db.session.rollback()
         flash("The revaluation journal would not balance, so nothing was posted.", "danger")
         return _back(engagement)
     tb = calc["tb"]
@@ -544,7 +603,7 @@ def apply(engagement_id):
     db.session.commit()
     flash(f"Revaluation applied: adjustment {asset_recon.journal_label(tb, REFERENCE)} {st}. The Asset Register, the property, plant and equipment note, "
           "the equity statement and the cash flow now carry the revalued amounts. Review and partner sign-off are on the Finalisation tab; "
-          "refresh the deferred tax journal on the Deferred Tax tab if it was posted before.", "success")
+          "refresh the deferred tax journal on the Deferred Tax tab if it was posted before." + quick_msg, "success")
     return _back(engagement)
 
 
@@ -909,39 +968,7 @@ def import_confirm(engagement_id, token):
         return _import_redirect(engagement)
     carried_msg = ""
     if request.form.get("carry_over") == "1":
-        # The register's other assets (an old lump-sum line, say) are what the valued assets REPLACE: their cost, accumulated depreciation and
-        # charge are spread over the valued assets that have no cost yet, in proportion to the valuer's figures, and the old assets are removed
-        # (restorable). The valuation then revalues from the carrying amount that was already in the accounts, so the surplus is the real one.
-        import asset_schedules as sched_
-        targets = [eligible[a_] for a_ in sums if (eligible[a_].cost or 0.0) <= 0]
-        olds = [a for a in PPEAsset.query.filter_by(engagement_id=engagement.id).all() if a.id not in sums and not (a.disposal_cost or 0.0)]
-        if targets and olds:
-            tot_fv = sum(sums[t.id] for t in targets)
-            old_cost = sum(a.cost or 0.0 for a in olds)
-            old_acc = sum(a.opening_accumulated_depreciation or 0.0 for a in olds if not (a.date_acquired and ps and pe and ps <= a.date_acquired <= pe))
-            old_dep = sum(a.current_year_depreciation or 0.0 for a in olds)
-            dates = {a.date_acquired for a in olds}
-            when = dates.pop() if len(dates) == 1 else None
-            left_c, left_a, left_d = old_cost, old_acc, old_dep
-            for i, t in enumerate(targets):
-                share = sums[t.id] / tot_fv if tot_fv else 1.0 / len(targets)
-                last = i == len(targets) - 1
-                c_ = left_c if last else r2(old_cost * share)
-                a_ = left_a if last else r2(old_acc * share)
-                d_ = left_d if last else r2(old_dep * share)
-                t.cost, t.opening_accumulated_depreciation, t.current_year_depreciation = c_, a_, d_
-                t.date_acquired = when
-                left_c, left_a, left_d = r2(left_c - c_), r2(left_a - a_), r2(left_d - d_)
-            for a in olds:
-                for l in list(PPERevaluationLine.query.filter_by(asset_id=a.id).all()):
-                    db.session.delete(l)
-                sched_.archive_asset(a, current_user.id)
-                db.session.delete(a)
-            carried_msg = (f" The cost ({old_cost:,.2f}), accumulated depreciation ({old_acc:,.2f}) and depreciation charge ({old_dep:,.2f}) of the {len(olds)} other register "
-                           f"asset(s) were spread over the {len(targets)} valued assets in proportion to their values, and those assets were removed "
-                           "(they can be put back under 'Recently deleted'). The revaluation now starts from the carrying amount already in the accounts.")
-        else:
-            carried_msg = " Nothing to carry over: there are no valued assets without a cost, or no other assets in the register."
+        carried_msg = carry_over_old_assets(engagement, sums, eligible, ps, pe)
     existing = {l.asset_id: l for l in rec.lines}
     n_new = n_upd = 0
     for aid, total in sums.items():
