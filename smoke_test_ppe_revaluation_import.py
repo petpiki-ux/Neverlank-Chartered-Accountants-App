@@ -101,6 +101,37 @@ check("Imported the valuer" in h, "the page confirms the import")
 # the second Hilux (AFX 0988) is not in the register: it is reported, not silently dropped
 check("not assigned" in h or "not in the revaluation" in h, "a line with no register asset is reported (the second Hilux, 40,000)")
 
+# ---- an engagement with no register yet: the list creates the assets
+with app.app_context():
+    e2 = Engagement(client_id=Client.query.first().id, title="Audit 2025 (empty register)", type="Audit", partner_id=UID, manager_id=UID,
+                    acceptance_required=False, period_end=date(2025, 12, 31), reporting_framework="ifrs_for_smes")
+    db.session.add(e2); db.session.commit(); EID2 = e2.id
+    tb2 = TrialBalance(engagement_id=EID2); db.session.add(tb2); db.session.flush()
+    db.session.add(TrialBalanceLine(trial_balance_id=tb2.id, account_name="Bank", fs_category="cash", current_debit=1, current_credit=0, prior_debit=0, prior_credit=0))
+    db.session.commit()
+r = c.post(f"/engagements/{EID2}/revaluation/import/upload", data={"file": (io.BytesIO(XLSX), "valuation.xlsx")}, content_type="multipart/form-data")
+h = r.data.decode()
+check("Add a register asset for every line" in h and 'name="create_missing" value="1" checked' in h, "with nothing matched, the check screen offers to add the assets (ticked)")
+token2 = re.search(r"/import/([0-9a-f]{32})/confirm", h).group(1)
+r = c.post(f"/engagements/{EID2}/revaluation/import/{token2}/confirm", data={"ext": ".xlsx", "filename": "valuation", "create_missing": "1"}, follow_redirects=True)
+with app.app_context():
+    assets = PPEAsset.query.filter_by(engagement_id=EID2).all()
+    check(len(assets) == 7, "seven register assets were created from the seven lines")
+    names = sorted(a.asset_class.name for a in assets)
+    check(set(names) == {"Machinery", "Motor Vehicles"}, "in two classes taken from the file: %s" % sorted(set(names)))
+    check(all((a.cost or 0) == 0 and (a.opening_accumulated_depreciation or 0) == 0 for a in assets), "their cost and accumulated depreciation are left at nil")
+    check(any(a.asset_code == "AFX 7094" for a in assets), "the registration number is the asset code")
+    check(any("2022" in a.description for a in assets), "the year is added to the description of a vehicle")
+    rec2 = pr.get(EID2)
+    check(len(rec2.lines) == 7 and near(sum(l.fair_value for l in rec2.lines), 416550.5 + 110500), "every asset carries the valuer's value, total 527,050.50")
+    calc2 = pr.calculate(Engagement.query.get(EID2), rec2)
+    check(any("no cost in the register" in i for i in calc2["issues"]), "applying is blocked until the cost and accumulated depreciation are entered")
+    for a in assets:
+        a.cost = a.cost or 1000.0
+    db.session.commit()
+    calc2 = pr.calculate(Engagement.query.get(EID2), rec2)
+    check(not any("no cost in the register" in i for i in calc2["issues"]), "...and the block lifts once each asset has a cost")
+
 # an applied revaluation is locked against importing
 with app.app_context():
     rec = pr.get(EID); rec.status = "Applied"; db.session.commit()

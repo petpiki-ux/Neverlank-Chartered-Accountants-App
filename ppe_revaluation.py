@@ -134,7 +134,7 @@ def calculate(engagement, rec):
     import asset_schedules as sched
     ps, pe, _ = sched.bounds(engagement)
     default_rate = default_dt_rate(engagement.id)
-    lines, issues, warnings = [], [], []
+    lines, issues, warnings, no_cost = [], [], [], []
     by_class = {}
     for l in (rec.lines if rec is not None else []):
         a = l.asset
@@ -157,6 +157,8 @@ def calculate(engagement, rec):
             continue
         if l.fair_value < 0:
             issues.append(f"{a.description or 'An asset'}: the fair value cannot be negative.")
+        if (a.cost or 0.0) <= 0 and l.fair_value > 0:
+            no_cost.append(a)
         change = l.fair_value - fig["nbv"]
         oci, pl = split_change(change, l.prior_reserve, l.prior_deficit_pl)
         rate = row["rate"] / 100.0
@@ -172,6 +174,10 @@ def calculate(engagement, rec):
     classes = sorted(by_class.values(), key=lambda g: g["class_name"].lower())
     tot = {k: sum(g[k] for g in classes) for k in ("cost", "acc", "nbv", "fair_value", "change", "oci", "pl", "pl_inc", "pl_dec", "dt_oci", "dt_pl", "prior_reserve", "prior_reserve_net")}
     tot["count"] = sum(g["count"] for g in classes)
+
+    if no_cost:
+        issues.append(f"{len(no_cost)} asset(s) have no cost in the register (for example {no_cost[0].description}). Enter each asset's historical cost and "
+                      "accumulated depreciation first (step 1 above) - without them the surplus cannot be worked out.")
 
     # the whole-class rule (IAS 16.36): every asset in a class that has one revalued should be revalued
     valued_ids = {r["asset"].id for r in lines if r["fair_value"] is not None}
@@ -812,11 +818,21 @@ def import_confirm(engagement_id, token):
     ps, pe, _ = sched.bounds(engagement)
     eligible = {a.id: a for a in PPEAsset.query.filter_by(engagement_id=engagement.id).all() if asset_figures(a, ps, pe)["eligible"]}
     bulk = request.form.get("bulk_asset", type=int)
+    create = request.form.get("create_missing") == "1"
+    classes_by_key, created = {}, 0
+    if create:
+        for c_ in PPEAssetClass.query.filter_by(engagement_id=engagement.id).all():
+            classes_by_key[_norm(c_.name)] = c_
     sums, counts, left, left_total = {}, {}, 0, 0.0
     for it in parsed["items"]:
         aid = request.form.get(f"asset_{it['idx']}", type=int)
         if aid is None and bulk:
             aid = bulk
+        if aid not in eligible and create and not request.form.get(f"asset_{it['idx']}"):
+            a = _create_asset(engagement, it, classes_by_key)
+            eligible[a.id] = a
+            aid = a.id
+            created += 1
         if aid in eligible:
             sums[aid] = sums.get(aid, 0.0) + it["value"]
             counts[aid] = counts.get(aid, 0) + 1
@@ -844,7 +860,36 @@ def import_confirm(engagement_id, token):
         pass
     msg = (f"Imported the valuer's figures: {len(sums)} register asset(s) now carry a fair value ({n_new} new, {n_upd} replaced) from "
            f"{sum(counts.values())} line(s) totalling {sum(sums.values()):,.2f}.")
+    if created:
+        msg += (f" {created} new asset(s) were added to the register with cost and accumulated depreciation at nil: enter the historical cost and "
+                "accumulated depreciation of each (Asset Register tab, step 1) before applying - the revaluation will not apply while an asset has no cost.")
     if left:
         msg += f" {left} line(s) totalling {left_total:,.2f} were not assigned to an asset and are not in the revaluation - add them to the register or assign them and import again."
     flash(msg, "warning" if left else "success")
     return _import_redirect(engagement)
+
+
+def _create_asset(engagement, it, classes_by_key):
+    """A register asset for a line of the valuer's list that is not in the register yet: class from the table's category or title, code from the
+    serial or registration number, cost and accumulated depreciation left at nil for the preparer to enter (the file has only a value)."""
+    label = it["category"] or re.sub(r"\s*(register|schedule|list)\s*$", "", it["section"] or "", flags=re.I).strip() or "Property, plant and equipment"
+    key = _norm(label)
+    cls = classes_by_key.get(key)
+    if cls is None:
+        cls = next((c_ for k, c_ in classes_by_key.items() if k and (k in key or key in k)), None)
+    if cls is None:
+        n = PPEAssetClass.query.filter_by(engagement_id=engagement.id).count()
+        cls = PPEAssetClass(engagement_id=engagement.id, name=label.title() if label.isupper() else label, order=n + 1)
+        db.session.add(cls)
+        db.session.flush()
+        classes_by_key[key] = cls
+    desc = it["description"]
+    if it.get("year") and str(it["year"]) not in desc:
+        desc = f"{desc} ({it['year']})"
+    code = (it["serial"] or "")[:40] or ("%s-%s" % ((it["dept"] or label)[:3].upper(), it["item"]) if it["item"] else "")
+    n_assets = PPEAsset.query.filter_by(engagement_id=engagement.id).count()
+    a = PPEAsset(engagement_id=engagement.id, asset_class_id=cls.id, asset_code=code[:40] or None, description=desc[:200], cost=0.0,
+                 opening_accumulated_depreciation=0.0, current_year_depreciation=0.0, order=n_assets + 1)
+    db.session.add(a)
+    db.session.flush()
+    return a
