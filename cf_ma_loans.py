@@ -420,9 +420,9 @@ ADJ_LABEL = "Loan facilities not yet in the books (adjustment)"
 
 def with_facilities(bal, d, facs=None):
     """The balance sheet rows with the loan facilities shown inside the table, under Borrowings: the facilities' balance (from their
-    schedule), and how much of it falls due within 12 months / after. Presentation only: no total, balance check or other line changes,
-    so the statement still ties to the books. The Borrowings line itself is the books (actual) or the forecast, which may not hold the
-    facilities - the card under the table shows the difference. Returns `bal` unchanged when there are no facilities in use."""
+    schedule), and how much of it falls due within 12 months / after. Where the books hold less borrowings than the facilities, the Borrowings
+    line and the totals include the facilities (see `_include_facilities_in_totals`), so the balance check shows what is still to be
+    fixed. Returns `bal` unchanged when there are no facilities in use."""
     facs = [x for x in (facilities_of(d) if facs is None else facs) if x["include"] and x["amount"] > 0]
     if not facs or not bal or not bal.get("rows"):
         return bal
@@ -462,7 +462,49 @@ def with_facilities(bal, d, facs=None):
         rows.append(r)
         if r.get("key") == "borrowings":
             rows += extra
+    rows = _include_facilities_in_totals(rows, balance, at)
     return dict(bal, rows=rows)
+
+
+def _include_facilities_in_totals(rows, balance, at):
+    """Where the books (the Actual and Last month columns, and the prior year end) hold less borrowings than the facilities' schedule, the
+    Borrowings line is raised to the facilities' balance and flows into total liabilities, total equity and liabilities, net debt and the
+    balance check. The balance check then shows what the books still need on the other side (stock, payables, reserves) - the preparer
+    fixes that in the actuals. Forecast and budget columns are left alone (the forecast already follows the facilities)."""
+    by = {r["key"]: r for r in rows}
+    if "borrowings" not in by:
+        return rows
+    short = {}
+    for col in ("lm", "a", "py"):
+        book = by["borrowings"].get(col)
+        if book is None:
+            continue
+        sh = balance(at[col]) - book
+        if sh > 0.5:
+            short[col] = sh
+    if not short:
+        return rows
+    out = []
+    for r in rows:
+        k = r.get("key")
+        if k in ("borrowings", "liabilities", "el", "netdebt"):
+            r = dict(r)
+            for col, sh in short.items():
+                if r.get(col) is not None:
+                    r[col] = r[col] + sh
+        elif k == "check":
+            r = dict(r)
+            for col, sh in short.items():
+                if r.get(col) is not None:
+                    r[col] = r[col] - sh
+        else:
+            out.append(r)
+            continue
+        r["var"] = M._dv(r.get("a"), r.get("b"))
+        r["chg_year"] = M._dv(r.get("a"), r.get("py"))
+        r["chg_month"] = M._dv(r.get("a"), r.get("lm"))
+        out.append(r)
+    return out
 
 
 def cashflow_with_facilities(cfl, d):
@@ -542,7 +584,7 @@ def statement_analysis(d, facs=None):
     bal = [sum(fx["rows"][m]["close"] for fx in ps["facilities"]) for m in at]
     rows.append(row("Loan facility borrowings", bal, "total"))
     bs_b = [(f(b.get("borrowings")) if b else None) for b in (bs_cur, bs_end)]
-    rows.append(row("Borrowings per balance sheet", bs_b, "line"))
+    rows.append(row("Borrowings per the books / forecast", bs_b, "line"))
     rows.append(row("Borrowings not in the facilities (balance)", [sub(bs_b[i], bal[i]) for i in range(2)], "memo"))
     due = [sum(_due_within_12(full[fx["fac"]["id"]], m) for fx in ps["facilities"]) for m in at]
     due = [min(due[i], bal[i]) for i in range(2)]
