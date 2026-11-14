@@ -415,13 +415,13 @@ def unbooked_gap(d):
     return gap if gap > 1.0 else 0.0
 
 
-ADJ_LABEL = "Loan facilities not yet in the books (reduces retained earnings)"
+ADJ_LABEL = "Loan facilities not yet in the books (Dr retained earnings)"
 
 
 def with_facilities(bal, d, facs=None):
     """The balance sheet rows with the loan facilities shown inside the table, under Borrowings: the facilities' balance (from their
     schedule), and how much of it falls due within 12 months / after. Where the books hold less borrowings than the facilities, the Borrowings
-    line and the totals include the facilities and the same amount reduces retained earnings (see `_include_facilities_in_totals`), so the
+    line and the totals include the facilities, with the matching debit to retained earnings (see `_include_facilities_in_totals`), so the
     sheet balances. Returns `bal` unchanged when there are no facilities in use."""
     facs = [x for x in (facilities_of(d) if facs is None else facs) if x["include"] and x["amount"] > 0]
     if not facs or not bal or not bal.get("rows"):
@@ -449,16 +449,8 @@ def with_facilities(bal, d, facs=None):
     extra = [mk("fac_total", "of which: loan facilities (per their schedule)", balance),
              mk("fac_current", "due within 12 months", due),
              mk("fac_noncurrent", "due after 12 months", lambda m: balance(m) - due(m))]
-    gap = unbooked_gap(d)
     rows = []
     for r in bal["rows"]:
-        if gap and r.get("key") == "retained":
-            # reserves run on from the actuals; the cut the facilities cause is shown on its own line (total equity is unchanged)
-            r = dict(r, **{c: (None if r.get(c) is None else r[c] + gap) for c in ("f", "ffy")})
-            rows.append(r)
-            rows.append({"key": "fac_gap", "label": ADJ_LABEL, "kind": "line", "lm": None, "a": None, "b": None, "bfy": None, "py": None, "var": None,
-                         "chg_year": None, "chg_month": None, "f": (None if r["f"] is None else -gap), "ffy": (None if r["ffy"] is None else -gap)})
-            continue
         rows.append(r)
         if r.get("key") == "borrowings":
             rows += extra
@@ -468,9 +460,9 @@ def with_facilities(bal, d, facs=None):
 
 def _include_facilities_in_totals(rows, balance, at):
     """Where the books (the Actual and Last month columns, and the prior year end) hold less borrowings than the facilities' schedule, the
-    Borrowings line is raised to the facilities' balance and flows into total liabilities and net debt. The same amount reduces retained
-    earnings, shown on its own line under them (and so total equity), so the balance sheet still balances. Forecast and budget columns are
-    left alone (the forecast already follows the facilities)."""
+    entry is made in the statement: Dr Retained earnings, Cr Borrowings. Borrowings is raised to the facilities' balance (and so total
+    liabilities and net debt), retained earnings and total equity are cut by the same amount, and the sheet still balances. The Forecast and
+    Budget columns are left alone: the forecast already follows the facilities and its retained earnings already carry the cut."""
     by = {r["key"]: r for r in rows}
     if "borrowings" not in by:
         return rows
@@ -484,7 +476,7 @@ def _include_facilities_in_totals(rows, balance, at):
             short[col] = sh
     if not short:
         return rows
-    sign = {"borrowings": 1, "liabilities": 1, "netdebt": 1, "equity": -1}
+    sign = {"borrowings": 1, "liabilities": 1, "netdebt": 1, "retained": -1, "equity": -1}
     out = []
     for r in rows:
         k = r.get("key")
@@ -496,19 +488,7 @@ def _include_facilities_in_totals(rows, balance, at):
             r["var"] = M._dv(r.get("a"), r.get("b"))
             r["chg_year"] = M._dv(r.get("a"), r.get("py"))
             r["chg_month"] = M._dv(r.get("a"), r.get("lm"))
-        elif k == "fac_gap":
-            r = dict(r, **{col: -sh for col, sh in short.items()})
-            r["chg_year"] = M._dv(r.get("a"), r.get("py"))
-            r["chg_month"] = M._dv(r.get("a"), r.get("lm"))
         out.append(r)
-        if k == "retained" and "fac_gap" not in by:
-            out.append({"key": "fac_gap", "label": ADJ_LABEL, "kind": "line", "lm": short.get("lm"), "a": short.get("a"), "b": None, "bfy": None,
-                        "py": short.get("py"), "var": None, "f": None, "ffy": None, "chg_year": None, "chg_month": None})
-            for col in ("lm", "a", "py"):
-                if col in short:
-                    out[-1][col] = -short[col]
-            out[-1]["chg_year"] = M._dv(out[-1]["a"], out[-1]["py"])
-            out[-1]["chg_month"] = M._dv(out[-1]["a"], out[-1]["lm"])
     return out
 
 

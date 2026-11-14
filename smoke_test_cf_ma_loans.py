@@ -260,8 +260,8 @@ bal0 = M.balance_rows(dB2)
 balF = FL.with_facilities(bal0, dB2)
 kk = [r["key"] for r in balF["rows"]]
 check(kk[kk.index("borrowings") + 1:kk.index("borrowings") + 4] == ["fac_total", "fac_current", "fac_noncurrent"], "facility rows sit directly under Borrowings")
-_chg = ("borrowings", "liabilities", "netdebt", "equity")
-check(len(balF["rows"]) == len(bal0["rows"]) + 4 and [r for r in balF["rows"] if r["key"] not in ("fac_total", "fac_current", "fac_noncurrent", "fac_gap") + _chg] == [r for r in bal0["rows"] if r["key"] not in _chg], "only the facility rows and the adjustment line are added; every other line is untouched")
+_chg = ("borrowings", "liabilities", "netdebt", "retained", "equity")
+check(len(balF["rows"]) == len(bal0["rows"]) + 3 and [r for r in balF["rows"] if r["key"] not in ("fac_total", "fac_current", "fac_noncurrent") + _chg] == [r for r in bal0["rows"] if r["key"] not in _chg], "only the three facility rows are added; every other line is untouched")
 ft = [r for r in balF["rows"] if r["key"] == "fac_total"][0]
 fc = [r for r in balF["rows"] if r["key"] == "fac_current"][0]
 fn_ = [r for r in balF["rows"] if r["key"] == "fac_noncurrent"][0]
@@ -274,7 +274,7 @@ _sh = max(0.0, ft["a"] - [r for r in bal0["rows"] if r["key"] == "borrowings"][0
 _B = {r["key"]: r for r in balF["rows"]}; _B0 = {r["key"]: r for r in bal0["rows"]}
 check(_sh > 1000 and near(_B["borrowings"]["a"], _B0["borrowings"]["a"] + _sh) and near(_B["borrowings"]["a"], ft["a"]), f"Borrowings (Actual) is raised to the facilities' balance ({_B0['borrowings']['a']:,.0f} -> {_B['borrowings']['a']:,.0f})")
 check(near(_B["liabilities"]["a"], _B0["liabilities"]["a"] + _sh) and near(_B["netdebt"]["a"], _B0["netdebt"]["a"] + _sh), "total liabilities and net debt include the facilities")
-check("fac_gap" in _B and near(_B["fac_gap"]["a"], -_sh) and near(_B["equity"]["a"], _B0["equity"]["a"] - _sh) and near(_B["retained"]["a"], _B0["retained"]["a"]), "the same amount reduces retained earnings on its own line, and so total equity")
+check(near(_B["retained"]["a"], _B0["retained"]["a"] - _sh) and near(_B["equity"]["a"], _B0["equity"]["a"] - _sh), "Dr retained earnings: retained earnings and total equity are cut by the same amount")
 check(near(_B["el"]["a"], _B0["el"]["a"]) and near(_B["assets"]["a"], _B["el"]["a"]) and abs(_B["check"]["a"]) < 1.0, "the balance sheet still balances (check is nil)")
 check(near(_B["borrowings"]["lm"], max(_B0["borrowings"]["lm"], ft["lm"])), "the last-month column is raised the same way")
 check(FL.with_facilities(bal0, build()[0]) is bal0, "no facilities: the balance sheet is returned unchanged")
@@ -567,23 +567,20 @@ _v = M.pl_vector(M.normalise_structure(dg["structure"]), M.forecast_months(dg)[_
 check(near(_a_ret - (_first["retained"] - (_v["pat"] - _v["div"])), gap, 0.5), "the gap equals the reserves the engine removed at the start of the forecast")
 balG = FL.with_facilities(M.balance_rows(dg), dg)
 keysG = [r["key"] for r in balG["rows"]]
-check("fac_gap" in keysG and keysG.index("fac_gap") == keysG.index("retained") + 1, "the adjustment line sits directly under retained earnings")
 rG = [r for r in balG["rows"] if r["key"] == "retained"][0]
-aG = [r for r in balG["rows"] if r["key"] == "fac_gap"][0]
 rawG = [r for r in M.balance_rows(dg)["rows"] if r["key"] == "retained"][0]
 eqG = [r for r in balG["rows"] if r["key"] == "equity"][0]
 rawEq = [r for r in M.balance_rows(dg)["rows"] if r["key"] == "equity"][0]
+check("fac_gap" not in keysG, "no separate adjustment line: the cut is in retained earnings itself")
 if rawG["ffy"] is not None:
-    check(near(rG["ffy"] + aG["ffy"], rawG["ffy"]) and near(aG["ffy"], -gap), "year end: retained + adjustment = the balance sheet's own retained earnings")
-    check(near(eqG["ffy"], rawEq["ffy"]), "total equity is unchanged")
-    check(rG["ffy"] > rawG["ffy"] and abs(rG["ffy"] - _a_ret) < 0.5 * _a_ret, f"reserves now run on from the actuals ({_a_ret:,.0f} -> {rG['ffy']:,.0f})")
+    check(near(rG["ffy"], rawG["ffy"]) and near(eqG["ffy"], rawEq["ffy"]), "forecast columns: retained earnings and total equity are the forecast's own (already cut)")
+    check(abs([r for r in balG["rows"] if r["key"] == "check"][0]["ffy"]) < 1.0, "forecast year end balances")
 cfG = FL.cashflow_with_facilities(M.cashflow_rows(dg), dg)
 cf0 = {r["key"]: r for r in M.cashflow_rows(dg)["rows"]}
 cf1 = {r["key"]: r for r in cfG["rows"]}
 if cf0["other_equity"]["ffy"] is not None:
     check("fac_gap" in cf1 and near(cf1["fac_gap"]["ffy"], -gap) and near(cf1["other_equity"]["ffy"] + cf1["fac_gap"]["ffy"], cf0["other_equity"]["ffy"]), "cash flow: the gap is split out of other equity movements (non-cash)")
     check(near(cf1["cff"]["ffy"], cf0["cff"]["ffy"]) and near(cf1["net"]["ffy"], cf0["net"]["ffy"]), "cash flow totals are unchanged")
-check("Loan facilities not yet in the books" in c.get(f"{BASE}/{pid}/balance").data.decode(), "the Balance sheet tab shows the adjustment line")
 check(FL.unbooked_gap(getdata()) == gap and FL.unbooked_gap({**dg, "forecast": {}}) == 0.0, "no gap when the forecast is not a continuation")
 
 # =========================================================================== the opening gap is absorbed by stock, payables and reserves
