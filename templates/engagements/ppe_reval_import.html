@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Import the valuer's list - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div><h1>Import the valuer's list</h1>
+  <div class="subtitle">{{ engagement.client.name }} - {{ engagement.title }} - {{ filename }}{{ ext }}. Check which register asset each line belongs to, then import. Nothing is posted: the figures go into the draft valuation.</div></div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">What was found</h3>
+  <table style="font-size:12.5px;max-width:720px;">
+    <thead><tr><th>Table in the file</th><th class="text-right">Lines</th><th class="text-right">Total</th><th>Total stated in the file</th></tr></thead>
+    <tbody>
+    {% for s in sections %}
+      <tr><td>{{ s.name }}</td><td class="text-right">{{ s.count }}</td><td class="text-right">{{ '{:,.2f}'.format(s.total) }}</td>
+        <td>{% if s.agrees is none %}<span class="muted">none</span>{% elif s.agrees %}<span style="color:#1e7e34;">agrees ({{ '{:,.2f}'.format(s.stated) }})</span>{% else %}<span style="color:#b02a2a;">differs ({{ '{:,.2f}'.format(s.stated) }}) - check the file</span>{% endif %}</td></tr>
+    {% endfor %}
+      <tr><td><strong>All lines</strong></td><td class="text-right"><strong>{{ items|length }}</strong></td><td class="text-right"><strong>{{ '{:,.2f}'.format(file_total) }}</strong></td><td></td></tr>
+    </tbody>
+  </table>
+  <p style="font-size:12.5px;">{{ n_matched }} of {{ items|length }} line(s) were matched to a register asset ({{ '{:,.2f}'.format(matched_total) }} of {{ '{:,.2f}'.format(file_total) }}). Choose the asset for the rest, or send them all to one asset below. When several lines go to the same asset, their values are added.</p>
+  {% if not assets %}<div class="flash warning">This engagement has no asset in the register that can be revalued. Enter the register first (Asset Register tab, steps 1 and 2).</div>{% endif %}
+</div>
+
+<div class="card">
+  <form method="post" action="{{ url_for('ppereval.import_confirm', engagement_id=engagement.id, token=token) }}">
+    <input type="hidden" name="ext" value="{{ ext }}"><input type="hidden" name="filename" value="{{ filename }}">
+    <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:8px;">
+      <div><label style="font-size:12px;">Send every line I have not assigned to</label>
+        <select name="bulk_asset" style="margin-bottom:0;min-width:260px;"><option value="">- leave them out -</option>
+          {% for a in assets %}<option value="{{ a.id }}">{{ a.asset_code or '' }} {{ a.description }} ({{ a.asset_class.name if a.asset_class else 'Unclassified' }})</option>{% endfor %}</select></div>
+      <button type="submit" class="btn small gold">Import into the draft valuation</button>
+      <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='asset_register') }}#revaluation" class="btn small secondary">Cancel</a>
+    </div>
+    <div style="overflow-x:auto;">
+    <table style="font-size:12px;">
+      <thead><tr><th>#</th><th>Table</th><th>Description in the valuer's list</th><th>Serial / reg.</th><th class="text-right">Value</th><th>Matched by</th><th>Register asset</th></tr></thead>
+      <tbody>
+      {% for it in items %}
+        <tr {% if not it.asset_id %}style="background:#fff8e1;"{% endif %}>
+          <td>{{ it.item or loop.index }}</td><td>{{ it.dept or it.category or it.section }}</td><td>{{ it.description }}</td><td>{{ it.serial }}</td>
+          <td class="text-right">{{ '{:,.2f}'.format(it.value) }}</td><td>{{ it.how or '-' }}</td>
+          <td><select name="asset_{{ it.idx }}" style="margin-bottom:0;max-width:300px;"><option value="">- not assigned -</option>
+            {% for a in assets %}<option value="{{ a.id }}" {% if it.asset_id == a.id %}selected{% endif %}>{{ a.asset_code or '' }} {{ a.description }} ({{ a.asset_class.name if a.asset_class else 'Unclassified' }})</option>{% endfor %}</select></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    <div style="margin-top:8px;"><button type="submit" class="btn small gold">Import into the draft valuation</button></div>
+  </form>
+</div>
+{% endblock %}

@@ -568,3 +568,283 @@ def delete(engagement_id):
     db.session.commit()
     flash("The draft valuation was deleted.", "success")
     return _back(engagement)
+
+
+# ---------------------------------------------------------------------------------------------------- importing the valuer's list (Excel / CSV)
+
+import os
+import re
+import uuid
+import difflib
+from flask import render_template, current_app
+
+MAX_IMPORT_BYTES = 8 * 1024 * 1024
+
+_H_VALUE = re.compile(r"^\W*((fair|market|assessed|insured|replacement|revalued?)\W*)?(value|valuation|amount)s?\b|\bvalue\s*(us\$|usd|zwg|zig|\$)", re.I)
+_H_SERIAL = re.compile(r"serial|registration|\breg\b|reg\.|chassis|\bvin\b|plate", re.I)
+_H_YEAR = re.compile(r"^\W*year", re.I)
+_H_DEPT = re.compile(r"depart|location|\bsite\b|\barea\b|section", re.I)
+_H_CAT = re.compile(r"categ|\bclass\b|\btype\b", re.I)
+_H_ITEM = re.compile(r"^\W*(item|no\b|code|asset\s*(code|no))", re.I)
+_H_DESC = re.compile(r"make|model|descr|asset|name|particular|\bitem\b", re.I)
+_TOTALS = re.compile(r"^\W*(grand\s+|sub\s*-?\s*)?totals?\b", re.I)
+
+
+def _t(v):
+    if v is None:
+        return ""
+    if isinstance(v, float) and v.is_integer():
+        v = int(v)
+    return " ".join(str(v).split())
+
+
+def _norm(v):
+    return re.sub(r"[^a-z0-9]+", "", str(v or "").lower())
+
+
+def _header_map(row):
+    """{role: column} when the row is a header row (it names a value column and something to identify the asset by), else None."""
+    m = {}
+    for i, c in enumerate(row):
+        s = _t(c)
+        if not s or len(s) > 40:
+            continue
+        for role, rx in (("value", _H_VALUE), ("serial", _H_SERIAL), ("year", _H_YEAR), ("dept", _H_DEPT), ("category", _H_CAT), ("item", _H_ITEM), ("desc", _H_DESC)):
+            if role not in m and rx.search(s):
+                m[role] = i
+                break
+    if "value" in m and ("desc" in m or "serial" in m):
+        return m
+    return None
+
+
+def parse_valuation(rows):
+    """The valuer's list as [{"row", "section", "category", "dept", "item", "description", "serial", "year", "value"}] plus the totals the
+    file states for itself. A file may hold several tables (machinery, then vehicles), each with its own header row and title."""
+    from asset_import import to_num
+    items, stated, notes = [], [], []
+    hmap, section, title = None, "", ""
+    for ri, row in enumerate(rows):
+        row = list(row) + [None] * 12
+        new = _header_map(row)
+        if new is not None:
+            hmap = new
+            section = title or section
+            continue
+        texts = [_t(c) for c in row if _t(c)]
+        if hmap is None or not any(to_num(c) is not None for c in row):
+            if texts and not any(to_num(c) is not None for c in row):
+                title = texts[0]                             # a title line such as "Motor Vehicles Register" ahead of the next table
+            if hmap is None:
+                continue
+        val = to_num(row[hmap["value"]])
+        desc = _t(row[hmap["desc"]]) if "desc" in hmap else ""
+        serial = _t(row[hmap["serial"]]) if "serial" in hmap else ""
+        if val is None:
+            if len(texts) == 1 or (texts and not any(to_num(c) is not None for c in row)):
+                title = texts[0]                             # a title line such as "Motor Vehicles Register" ahead of the next table
+            continue
+        if not desc and not serial:
+            if val and not _t(row[hmap["item"]] if "item" in hmap else ""):
+                stated.append({"row": ri + 1, "section": section, "value": val})
+            continue
+        if _TOTALS.search(desc):
+            stated.append({"row": ri + 1, "section": section, "value": val})
+            continue
+        if val <= 0:
+            continue
+        items.append({"row": ri + 1, "idx": len(items), "section": section,
+                      "category": _t(row[hmap["category"]]) if "category" in hmap else "", "dept": _t(row[hmap["dept"]]) if "dept" in hmap else "",
+                      "item": _t(row[hmap["item"]]) if "item" in hmap else "", "description": desc or serial, "serial": serial,
+                      "year": _t(row[hmap["year"]]) if "year" in hmap else "", "value": float(val)})
+    return {"items": items, "stated": stated, "notes": notes}
+
+
+def _tokens(s):
+    return {w[:6] for w in re.findall(r"[a-z]{4,}", (s or "").lower())}
+
+
+def match_items(engagement, items):
+    """Suggest the register asset for each line of the valuer's list. Returns the eligible assets and, per line, "asset_id" and "how"
+    (serial / description / similar description / only asset of the class / ""). A register asset is claimed by one line at a time."""
+    import asset_schedules as sched
+    ps, pe, _ = sched.bounds(engagement)
+    assets = [a for a in PPEAsset.query.filter_by(engagement_id=engagement.id).order_by(PPEAsset.order, PPEAsset.id).all() if asset_figures(a, ps, pe)["eligible"]]
+    taken = set()
+    for it in items:
+        it["asset_id"], it["how"] = None, ""
+
+    def claim(it, a, how):
+        it["asset_id"], it["how"] = a.id, how
+        taken.add(a.id)
+
+    # 1. serial or registration number found in the asset's code or description
+    for it in items:
+        sn = _norm(it["serial"])
+        if len(sn) >= 4:
+            for a in assets:
+                if a.id not in taken and (sn in _norm(a.asset_code) or sn in _norm(a.description) or _norm(a.asset_code) == sn):
+                    claim(it, a, "serial number")
+                    break
+    # 2. the same description
+    for it in items:
+        if it["asset_id"] is None:
+            d = _norm(it["description"])
+            for a in assets:
+                if a.id not in taken and d and d == _norm(a.description):
+                    claim(it, a, "same description")
+                    break
+    # 3. a similar description (best, and clearly the best)
+    for it in items:
+        if it["asset_id"] is None:
+            d = _norm(it["description"])
+            scored = sorted(((difflib.SequenceMatcher(None, d, _norm(a.description)).ratio(), a) for a in assets if a.id not in taken), key=lambda x: -x[0])
+            if scored and d and scored[0][0] >= 0.82 and (len(scored) == 1 or scored[0][0] - scored[1][0] >= 0.05):
+                claim(it, scored[0][1], "similar description")
+    # 4. the only asset in a class whose name fits the table's title or category (the register holds the class as one asset)
+    by_class = {}
+    for a in assets:
+        by_class.setdefault(a.asset_class_id, []).append(a)
+    for it in items:
+        if it["asset_id"] is None:
+            hint = _tokens(" ".join([it["category"], it["section"]]))
+            fits = [lst for cid, lst in by_class.items() if lst and lst[0].asset_class is not None and hint & _tokens(lst[0].asset_class.name)]
+            if len(fits) == 1 and len(fits[0]) == 1:
+                it["asset_id"], it["how"] = fits[0][0].id, "only asset in the class"   # many lines may share it, so it is not "taken"
+    return assets
+
+
+def _import_redirect(engagement):
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement.id, tab="asset_register") + "#revaluation")
+
+
+def _import_path(engagement_id, token, ext):
+    if not re.fullmatch(r"[0-9a-f]{32}", token or ""):
+        abort(404)
+    return os.path.join(current_app.config["UPLOAD_FOLDER"], f"revalimp_{engagement_id}_{token}{ext}")
+
+
+def _summaries(parsed):
+    from collections import OrderedDict
+    secs = OrderedDict()
+    for it in parsed["items"]:
+        secs.setdefault(it["section"] or "(untitled)", []).append(it)
+    out = []
+    for name, lst in secs.items():
+        total = sum(i["value"] for i in lst)
+        stated = [s["value"] for s in parsed["stated"] if (s["section"] or "(untitled)") == name]
+        out.append({"name": name, "count": len(lst), "total": total, "agrees": any(abs(s - total) < 0.5 for s in stated) if stated else None,
+                    "stated": max(stated) if stated else None})
+    return out
+
+
+@ppereval_bp.route("/<int:engagement_id>/revaluation/import/upload", methods=["POST"])
+@login_required
+def import_upload(engagement_id):
+    from asset_import import read_rows
+    engagement = _engagement(engagement_id)
+    rec = get(engagement.id)
+    if _locked(rec, engagement):
+        return _back(engagement)
+    f = request.files.get("file")
+    if not f or not f.filename:
+        flash("Choose the valuer's list first.", "danger")
+        return _back(engagement)
+    data = f.read(MAX_IMPORT_BYTES + 1)
+    if len(data) > MAX_IMPORT_BYTES:
+        flash("That file is too large (8 MB limit).", "danger")
+        return _back(engagement)
+    ext = os.path.splitext(f.filename)[1].lower()
+    try:
+        rows = _all_rows(data, f.filename)
+    except Exception as e:
+        flash(str(e) if isinstance(e, ValueError) else f"The file could not be read: {e}", "danger")
+        return _back(engagement)
+    token = uuid.uuid4().hex
+    with open(_import_path(engagement.id, token, ext), "wb") as out:
+        out.write(data)
+    return _import_preview(engagement, token, ext, os.path.splitext(f.filename)[0], rows)
+
+
+def _all_rows(data, filename):
+    """Every row of every sheet of the file, one after the other (a valuer may put the vehicles on a second sheet)."""
+    import io
+    ext = os.path.splitext(filename or "")[1].lower()
+    if ext in (".xlsx", ".xlsm"):
+        import openpyxl
+        wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True, read_only=True)
+        rows = []
+        for ws in wb.worksheets:
+            rows.extend([list(r) for r in ws.iter_rows(values_only=True)][:5000])
+        return rows
+    from asset_import import read_rows
+    return read_rows(data, filename)
+
+
+def _import_preview(engagement, token, ext, filename, rows):
+    parsed = parse_valuation(rows)
+    if not parsed["items"]:
+        flash("No valuation lines were found. The file needs a header row with a value column (Value, Fair value, Amount ...) and a description or serial number column.", "danger")
+        return _import_redirect(engagement)
+    assets = match_items(engagement, parsed["items"])
+    taken_total = sum(i["value"] for i in parsed["items"] if i["asset_id"])
+    return render_template("engagements/ppe_reval_import.html", engagement=engagement, token=token, ext=ext, filename=filename, items=parsed["items"],
+                           assets=assets, sections=_summaries(parsed), file_total=sum(i["value"] for i in parsed["items"]), matched_total=taken_total,
+                           n_matched=sum(1 for i in parsed["items"] if i["asset_id"]))
+
+
+@ppereval_bp.route("/<int:engagement_id>/revaluation/import/<token>/confirm", methods=["POST"])
+@login_required
+def import_confirm(engagement_id, token):
+    engagement = _engagement(engagement_id)
+    ext, filename = request.form.get("ext", ""), request.form.get("filename", "")
+    path = _import_path(engagement.id, token, ext)
+    if not os.path.exists(path):
+        flash("That upload has expired - please choose the file again.", "danger")
+        return _import_redirect(engagement)
+    rec = get_or_create(engagement)
+    if _locked(rec, engagement):
+        return _import_redirect(engagement)
+    with open(path, "rb") as fh:
+        rows = _all_rows(fh.read(), filename + ext)
+    parsed = parse_valuation(rows)
+    import asset_schedules as sched
+    ps, pe, _ = sched.bounds(engagement)
+    eligible = {a.id: a for a in PPEAsset.query.filter_by(engagement_id=engagement.id).all() if asset_figures(a, ps, pe)["eligible"]}
+    bulk = request.form.get("bulk_asset", type=int)
+    sums, counts, left, left_total = {}, {}, 0, 0.0
+    for it in parsed["items"]:
+        aid = request.form.get(f"asset_{it['idx']}", type=int)
+        if aid is None and bulk:
+            aid = bulk
+        if aid in eligible:
+            sums[aid] = sums.get(aid, 0.0) + it["value"]
+            counts[aid] = counts.get(aid, 0) + 1
+        else:
+            left += 1
+            left_total += it["value"]
+    if not sums:
+        flash("Nothing was assigned to a register asset, so nothing was imported.", "danger")
+        return _import_redirect(engagement)
+    existing = {l.asset_id: l for l in rec.lines}
+    n_new = n_upd = 0
+    for aid, total in sums.items():
+        l = existing.get(aid)
+        if l is None:
+            l = PPERevaluationLine(revaluation_id=rec.id, asset_id=aid, prior_reserve=0.0, prior_deficit_pl=0.0)
+            db.session.add(l)
+            n_new += 1
+        else:
+            n_upd += 1
+        l.fair_value = r2(total)
+    db.session.commit()
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+    msg = (f"Imported the valuer's figures: {len(sums)} register asset(s) now carry a fair value ({n_new} new, {n_upd} replaced) from "
+           f"{sum(counts.values())} line(s) totalling {sum(sums.values()):,.2f}.")
+    if left:
+        msg += f" {left} line(s) totalling {left_total:,.2f} were not assigned to an asset and are not in the revaluation - add them to the register or assign them and import again."
+    flash(msg, "warning" if left else "success")
+    return _import_redirect(engagement)

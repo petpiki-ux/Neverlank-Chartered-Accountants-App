@@ -68,6 +68,15 @@
   </form>
   {% else %}
 
+  <div style="margin:10px 0;padding:10px 12px;border:1px solid #e5e5e5;border-radius:6px;">
+    <h4 class="mt-0" style="margin-bottom:4px;">Import the valuer's list</h4>
+    <p class="muted" style="font-size:12px;margin-top:0;">Upload the valuer's schedule (Excel or CSV, any layout with a value column). Each line is matched to a register asset by serial number or description; you check the matches before anything is saved. The figures go into the draft below.</p>
+    <form method="post" action="{{ url_for('ppereval.import_upload', engagement_id=engagement.id) }}" enctype="multipart/form-data" style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;">
+      <div><input type="file" name="file" accept=".xlsx,.xlsm,.csv,.txt,.tsv" required style="margin-bottom:0;"></div>
+      <button type="submit" class="btn small gold">Read the file</button>
+    </form>
+  </div>
+
   {% if rv.classes %}
   <h4 style="margin-bottom:4px;">Value a whole class from the valuer's total</h4>
   <p class="muted" style="font-size:12px;margin-top:0;">When the valuer gives one figure for a class, it is spread over the assets in proportion to their carrying amounts. Replace any figure below that the valuer gave for a particular asset.</p>
