@@ -534,6 +534,7 @@ def _render_legislative_updates(**extra):
         case_authority_statuses=CASE_AUTHORITY_STATUSES, case_authority_labels=CASE_AUTHORITY_LABELS,
         ask_question=None, ask_status=None, ask_answer=None, ask_citations=None, ask_candidates=None,
         ask_from_cache=False, ask_cache_hit_count=None, ask_cache_id=None, ask_lesson=None,
+        ask_structured=None, ask_sources=None, ask_understood=None, ask_followup_of=None, ask_memo=None, ask_cite=None,
     )
     context.update(extra)
     return render_template("tax/legislative_updates.html", **context)

@@ -366,7 +366,7 @@ def _add_missing_columns():
         "firm_tax_asset_rule": [("sia_first_percent", "FLOAT")],
         "prohibited_deduction_setup": [("assoc_fee_a", "FLOAT"), ("assoc_fee_b", "FLOAT"), ("assoc_fee_c", "FLOAT"), ("assoc_fee_pretrade", "BOOLEAN DEFAULT 0")],
         # helpful/unhelpful feedback on cached "Ask the library" answers (learning.py)
-        "legislative_ask_cache": [("helpful_count", "INTEGER DEFAULT 0"), ("unhelpful_count", "INTEGER DEFAULT 0")],
+        "legislative_ask_cache": [("helpful_count", "INTEGER DEFAULT 0"), ("unhelpful_count", "INTEGER DEFAULT 0"), ("structured_json", "TEXT")],  # structured_json: the structured answer, see models.LegislativeAskCache
         # doc_type/related_reference/customs_duty - see models.VAT_DOC_TYPES:
         # credit notes, Bills of Entry and export sales. Existing rows
         # default to a plain 'Invoice', exactly what they were.

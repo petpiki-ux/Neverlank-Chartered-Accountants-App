@@ -15,12 +15,15 @@ def ask_legislative_updates():
         flash("Please enter a question to ask.", "danger")
         return _render_legislative_updates()
 
-    status, payload = legislation_search.ask(question, asked_by_id=current_user.id)
+    prior_q = request.form.get("prior_q", "").strip()[:500]
+    prior_a = request.form.get("prior_a", "").strip()[:900]
+    history = (prior_q, prior_a) if prior_q and prior_a else None
+    status, payload = legislation_search.ask(question, asked_by_id=current_user.id, history=history)
     if status == "not_configured":
         flash("Automatic question-answering isn't set up yet (ANTHROPIC_API_KEY is not set) - see the README.", "danger")
         return _render_legislative_updates(ask_question=question, ask_status=status)
     if status == "no_candidates":
-        return _render_legislative_updates(ask_question=question, ask_status=status)
+        return _render_legislative_updates(ask_question=question, ask_status=status, ask_followup_of=prior_q or None)
     if status == "verified":
         return _render_legislative_updates(ask_question=question, ask_status=status, ask_answer=payload["answer"],
                                            ask_lesson=payload["lesson"])
@@ -29,17 +32,49 @@ def ask_legislative_updates():
             ask_question=question, ask_status=status,
             ask_answer=payload["answer"], ask_candidates=payload["candidates"],
             ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
+            ask_understood=payload.get("understood") or [], ask_followup_of=prior_q or None,
         )
     if status == "error":
         flash(f"Couldn't answer that: {payload}", "danger")
         return _render_legislative_updates(ask_question=question, ask_status=status)
     # status == "done"
+    import json as _json
+    import legislation_memo
+    memo = None
+    if payload.get("structured"):
+        try:
+            memo = _json.dumps(legislation_memo.memo_from_ask(question, payload))
+        except Exception:
+            memo = None
     return _render_legislative_updates(
         ask_question=question, ask_status=status,
         ask_answer=payload["answer"], ask_citations=payload["citations"],
         ask_from_cache=payload.get("from_cache", False), ask_cache_hit_count=payload.get("cache_hit_count"),
-        ask_cache_id=payload.get("cache_id"),
+        ask_cache_id=payload.get("cache_id"), ask_structured=payload.get("structured"), ask_sources=payload.get("sources"),
+        ask_understood=payload.get("understood") or [], ask_followup_of=prior_q or None, ask_memo=memo,
+        ask_cite=legislation_search.render_citations,
     )
+
+
+@tax_bp.route("/legislative-updates/memo.docx", methods=["POST"])
+@login_required
+def legislative_memo_docx():
+    """The answer or drafted advice just shown, as a Word memo in the firm's letterhead style. The page posts the memo it displayed; this only
+    lays it out (legislation_memo.build_docx) - it searches nothing, asks nothing of the AI and files nothing."""
+    import json as _json
+    import legislation_memo
+    raw = request.form.get("memo", "")
+    if not raw or len(raw) > 400000:
+        flash("There is nothing to download - ask the question or draft the advice again.", "danger")
+        return redirect(url_for("tax.list_legislative_updates"))
+    try:
+        buf = legislation_memo.build_docx(_json.loads(raw))
+    except Exception:
+        flash("Couldn't make the Word memo from that - ask again and retry.", "danger")
+        return redirect(url_for("tax.list_legislative_updates"))
+    kind = "advice" if "advice" in (request.form.get("kind") or "") else "answer"
+    return send_file(buf, as_attachment=True, download_name=f"Library {kind} {datetime.now().strftime('%Y-%m-%d')}.docx",
+                     mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
 
 
 def _search_filters():
@@ -64,7 +99,7 @@ def _search_filters():
 def _render_search(**extra):
     q = (request.values.get("q") or "").strip()
     filters = _search_filters()
-    sort = request.values.get("sort") if request.values.get("sort") in ("relevance", "newest") else "relevance"
+    sort = request.values.get("sort") if request.values.get("sort") in ("relevance", "newest", "weight") else "relevance"
     page = request.values.get("page", type=int) or 1
     ctx = dict(q=q, filters=filters, sort=sort, page=page, result=None, brief=None, tax_heads=TAX_HEADS, areas=LEGISLATIVE_UPDATE_AREAS,
                instrument_types=LEGISLATIVE_UPDATE_TYPES, type_labels=LEGISLATIVE_UPDATE_TYPE_LABELS, advice=None, advice_status=None,
@@ -76,6 +111,16 @@ def _render_search(**extra):
         else:
             ctx["result"] = legislation_index.search(q, filters, sort=sort, page=page)
         ctx["explain"] = legislation_index.describe(ctx["result"].plan)
+        try:
+            ctx["understood"] = legislation_understand.understand(q)["lines"] if not ctx["result"].scenario else []
+            shown = [h.update for h in (ctx["result"].hits or [])]
+            ctx["flags"] = legislation_understand.supersession_flags(shown) if shown else {}
+        except Exception:
+            ctx["understood"], ctx["flags"] = [], {}
+    ctx.setdefault("understood", [])
+    ctx.setdefault("flags", {})
+    ctx["weight_label"] = legislation_understand.weight_label
+    ctx["weight_colour"] = legislation_understand.weight_colour
     ctx.update(extra)
     return render_template("tax/legislative_search.html", **ctx)
 
@@ -102,7 +147,16 @@ def advise_legislative_updates():
         flash("Drafting advice isn't set up yet (ANTHROPIC_API_KEY is not set). The search below still works.", "danger")
     elif status == "error":
         flash(f"Couldn't draft that: {payload}", "danger")
-    return _render_search(advice=payload if status == "done" else None, advice_status=status)
+    memo = None
+    if status == "done":
+        import json as _json
+        import legislation_memo
+        try:
+            memo = _json.dumps(legislation_memo.memo_from_advice(q, payload))
+        except Exception:
+            memo = None
+    return _render_search(advice=payload if status == "done" else None, advice_status=status, advice_memo=memo,
+                          cite=legislation_search.render_citations)
 
 
 @tax_bp.route("/legislative-updates/<int:update_id>/read")

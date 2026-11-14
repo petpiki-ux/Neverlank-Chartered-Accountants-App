@@ -1,0 +1,98 @@
+{# The "Ask the library" answer card: the short answer first, then the reasoning, the figures, the exact words, what to check and the numbered sources.
+   Used by legislative_updates.html. Variables: ask_status ('done' or 'no_answer'), ask_question, ask_answer (plain text), ask_structured, ask_sources, ask_citations,
+   ask_candidates, ask_understood, ask_followup_of, ask_from_cache, ask_cache_hit_count, ask_memo, ask_cite (turns [#id] into numbered links). #}
+{% include "tax/_lib_style.html" %}
+
+{% macro weight_pill(s) %}<span class="lib-w" style="background:{{ s.colour }};">{{ s.label }}</span>{% endmacro %}
+
+{% if ask_status == 'no_answer' %}
+<div class="lib-card" style="border-left-color:#9a9a9a;">
+  <p class="lib-kicker" style="color:#6B7684;">Not covered by what is filed</p>
+  {% if ask_followup_of %}<p class="lib-why">Follow-up to: {{ ask_followup_of }}</p>{% endif %}
+  {% if ask_from_cache %}<p class="reuse">&#8635; Reused from an earlier, very similar question{% if ask_cache_hit_count %} (asked {{ ask_cache_hit_count }} time{{ 's' if ask_cache_hit_count != 1 else '' }}){% endif %} - not re-searched just now.</p>{% endif %}
+  <p class="lib-bottom" style="font-weight:500;">{{ ask_answer }}</p>
+  {% if ask_candidates %}
+  <p class="lib-h">Closest filed items (none clearly answers it - worth checking by hand)</p>
+  {% for u in ask_candidates %}<div class="lib-src"><span class="n">{{ loop.index }}</span><div><a href="#legislative-update-{{ u.id }}">{{ u.title }}</a> <span class="muted">{{ u.type_label }}{% if u.source_reference %} &middot; {{ u.source_reference }}{% endif %}</span></div></div>{% endfor %}
+  {% endif %}
+  <p class="lib-why" style="margin-top:10px;">Try rephrasing, name the Act or tax head, or use <a href="{{ url_for('tax.search_legislative_updates', q=ask_question) }}">Search the library</a> to look through every passage.</p>
+</div>
+
+{% elif ask_status == 'done' and ask_structured %}
+{% set st = ask_structured %}
+{% set order = ask_sources|map(attribute='doc')|map(attribute='id')|list %}
+{% set cf = st.confidence or {} %}
+<div class="lib-card">
+  <p class="lib-kicker">Answer
+    {% if cf.level %}<span class="lib-pill lib-{{ cf.level|lower }}" title="{{ cf.reason }}">{{ cf.level }} confidence</span>{% endif %}
+    {% if ask_from_cache %}<span style="text-transform:none;letter-spacing:0;font-weight:400;color:#6B7684;">&#8635; reused from an earlier, very similar question{% if ask_cache_hit_count %} (asked {{ ask_cache_hit_count }} time{{ 's' if ask_cache_hit_count != 1 else '' }}){% endif %}</span>{% endif %}
+  </p>
+  {% if ask_followup_of %}<p class="lib-why">Follow-up to: {{ ask_followup_of }}</p>{% endif %}
+  {% if ask_understood %}<p class="lib-why">{{ ask_understood|join(' ') }}</p>{% endif %}
+  <p class="lib-bottom">{{ ask_cite(st.bottom_line, order) }}</p>
+  {% if cf.reason %}<p class="lib-why">{{ cf.reason }}</p>{% endif %}
+
+  {% for part in st.explanation %}
+    {% if part.heading %}<p class="lib-h">{{ part.heading }}</p>{% endif %}
+    <p class="lib-text">{{ ask_cite(part.text, order) }}</p>
+  {% endfor %}
+
+  {% if st.key_figures %}
+  <p class="lib-h">Key figures</p>
+  <table class="lib-fig"><thead><tr><th>Item</th><th>Figure</th><th>Applies from</th><th>Source</th></tr></thead><tbody>
+    {% for f in st.key_figures %}<tr><td>{{ f.label }}</td><td class="v">{{ f.value }}</td><td>{{ f.applies_from or '' }}</td>
+      <td>{% if f.source_id in order %}<sup><a class="cite" href="#src-{{ f.source_id }}">{{ order.index(f.source_id) + 1 }}</a></sup>{% endif %}{% if f.checked is defined and not f.checked %} <span class="lib-pill lib-medium" title="This figure was not found word for word in the passage supplied - check it against the source.">check</span>{% endif %}</td></tr>{% endfor %}
+  </tbody></table>
+  {% endif %}
+
+  {% if st.quotes %}
+  <p class="lib-h">In the words of the source</p>
+  {% for q in st.quotes %}<div class="lib-quote">&ldquo;{{ q.text }}&rdquo;<small>{% if q.source_id in order %}<a class="cite" href="#src-{{ q.source_id }}">[{{ order.index(q.source_id) + 1 }}]</a> {% endif %}{% for s in ask_sources if s.doc.id == q.source_id %}{{ s.doc.title }}{% endfor %}</small></div>{% endfor %}
+  {% endif %}
+
+  {% if st.watch_points %}
+  <div class="lib-watch"><b>Check before relying on this</b><ul>{% for w in st.watch_points %}<li>{{ ask_cite(w, order) }}</li>{% endfor %}</ul></div>
+  {% endif %}
+
+  <p class="lib-h">Sources</p>
+  {% for s in ask_sources %}
+  <div class="lib-src" id="src-{{ s.doc.id }}"><span class="n">{{ loop.index }}</span>
+    <div><a href="{{ url_for('tax.read_legislative_update', update_id=s.doc.id, q=ask_question) }}"><strong>{{ s.doc.title }}</strong></a>{{ weight_pill(s) }}
+      <div class="muted" style="font-size:12px;">{% if s.doc.source_reference %}{{ s.doc.source_reference }}{% endif %}{% if s.doc.effective_date %}{% if s.doc.source_reference %} &middot; {% endif %}effective {{ s.doc.effective_date.strftime('%d %b %Y') }}{% endif %}{% if s.passage %} &middot; {{ s.passage }}{% endif %}</div>
+      {% for f in s.flags %}<div class="flag">{{ f }}</div>{% endfor %}
+    </div></div>
+  {% endfor %}
+
+  {% if st.follow_ups %}
+  <p class="lib-h">Ask next</p>
+  <form method="post" action="{{ url_for('tax.ask_legislative_updates') }}" class="lib-chips">
+    <input type="hidden" name="prior_q" value="{{ ask_question }}"><input type="hidden" name="prior_a" value="{{ st.bottom_line }}">
+    {% for f in st.follow_ups %}<button type="submit" name="question" value="{{ f }}">{{ f }}</button>{% endfor %}
+  </form>
+  {% endif %}
+  <form method="post" action="{{ url_for('tax.ask_legislative_updates') }}" class="form-row" style="margin-top:8px;">
+    <input type="hidden" name="prior_q" value="{{ ask_question }}"><input type="hidden" name="prior_a" value="{{ st.bottom_line }}">
+    <div style="flex:4;"><input type="text" name="question" placeholder="Ask a follow-up, e.g. &quot;and for 2023?&quot;" style="font-size:13px;"></div>
+    <div><button type="submit" class="btn secondary small">Ask</button></div>
+  </form>
+
+  <div class="lib-actions">
+    {% if ask_memo %}<form method="post" action="{{ url_for('tax.legislative_memo_docx') }}" style="margin:0;"><input type="hidden" name="memo" value="{{ ask_memo }}"><input type="hidden" name="kind" value="answer"><button class="btn small secondary" type="submit">Download as a Word memo</button></form>{% endif %}
+    <a class="btn small secondary" href="{{ url_for('tax.search_legislative_updates', q=ask_question) }}">See every matching passage</a>
+  </div>
+  {% include "tax/_ask_feedback.html" %}
+</div>
+
+{% elif ask_status == 'done' %}
+{# an answer saved before structured answers existed: shown as it was, with the sources listed #}
+<div class="lib-card">
+  <p class="lib-kicker">Answer {% if ask_from_cache %}<span style="text-transform:none;letter-spacing:0;font-weight:400;color:#6B7684;">&#8635; reused from an earlier, very similar question{% if ask_cache_hit_count %} (asked {{ ask_cache_hit_count }} time{{ 's' if ask_cache_hit_count != 1 else '' }}){% endif %}</span>{% endif %}</p>
+  <p class="lib-text" style="white-space:pre-wrap;">{{ ask_answer }}</p>
+  {% if ask_citations %}
+  <p class="lib-h">Sources</p>
+  {% for u in ask_citations %}<div class="lib-src"><span class="n">{{ loop.index }}</span><div><a href="#legislative-update-{{ u.id }}"><strong>{{ u.title }}</strong></a>{% if u.source_reference %} <span class="muted">({{ u.source_reference }})</span>{% endif %}</div></div>{% endfor %}
+  {% endif %}
+  <p class="lib-why" style="margin-top:10px;">Asking again gives the newer, fuller layout.</p>
+  {% include "tax/_ask_feedback.html" %}
+</div>
+{% endif %}

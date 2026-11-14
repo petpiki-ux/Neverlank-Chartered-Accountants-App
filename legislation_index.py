@@ -722,8 +722,14 @@ def search(query, filters=None, sort="relevance", page=1, per_page=PAGE_SIZE):
             d = idx.docs[h.doc_id]
             return d["effective"] or d["gazette"] or (d["created"].date() if d["created"] else date.min)
         show.sort(key=lambda h: (h.partial, -when(h).toordinal(), -h.score))
+    elif sort == "weight":
+        # law first (Acts, Statutory Instruments, Notices), then cases, commentary, news; best match within each
+        import legislation_understand as _lu
+        show.sort(key=lambda h: (h.partial, -_lu.WEIGHT.get(idx.docs[h.doc_id]["type"], 2), -h.score))
     else:
-        show.sort(key=lambda h: (h.partial, -h.score))
+        # best match, with a light lean to the law: a close commentary can still beat a poor Act, but not an equally good one
+        import legislation_understand as _lu
+        show.sort(key=lambda h: (h.partial, -h.score * (1 + 0.04 * _lu.WEIGHT.get(idx.docs[h.doc_id]["type"], 2))))
     res.total = len(show)
     res.pages = max(1, math.ceil(len(show) / per_page))
     res.page = min(max(1, page), res.pages)

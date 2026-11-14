@@ -1,0 +1,40 @@
+{# Shared look for the library answer card, the advice memo and the search results. #}
+<style>
+  .lib-card{background:#fff;border:1px solid #e3e8ee;border-left:4px solid #B8934A;border-radius:8px;padding:16px 18px;margin-top:12px;}
+  .lib-kicker{font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;font-weight:700;color:#B8934A;margin:0 0 6px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;}
+  .lib-pill{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:600;letter-spacing:0;text-transform:none;}
+  .lib-high{background:#e4f3ea;color:#1d6b3f;} .lib-medium{background:#fbf0d6;color:#8a5a00;} .lib-low{background:#fbe4e1;color:#a2281c;}
+  .lib-bottom{font-size:16.5px;line-height:1.5;font-weight:600;color:#0F2942;margin:2px 0 4px;}
+  .lib-why{font-size:12px;color:#6B7684;margin:0 0 10px;}
+  .lib-h{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:#0F2942;margin:16px 0 4px;}
+  .lib-text{font-size:13.5px;line-height:1.6;margin:0 0 4px;color:#1F2933;}
+  .lib-card sup a.cite{color:#0F2942;font-weight:700;text-decoration:none;padding:0 1px;}
+  .lib-card sup a.cite:hover{text-decoration:underline;}
+  table.lib-fig{border-collapse:collapse;width:100%;font-size:13px;margin:2px 0;}
+  table.lib-fig th{text-align:left;font-size:10.5px;letter-spacing:.06em;text-transform:uppercase;color:#6B7684;border-bottom:1px solid #e3e8ee;padding:4px 8px 4px 0;}
+  table.lib-fig td{padding:6px 8px 6px 0;border-bottom:1px solid #f0f2f5;vertical-align:top;}
+  table.lib-fig td.v{font-weight:700;color:#0F2942;white-space:nowrap;}
+  .lib-quote{margin:6px 0;padding:6px 12px;border-left:3px solid #D4AF6A;background:#faf8f2;font-size:13px;line-height:1.55;font-style:italic;}
+  .lib-quote small{display:block;font-style:normal;color:#6B7684;margin-top:3px;font-size:11.5px;}
+  .lib-watch{background:#fdf6e3;border:1px solid #f0dfa8;border-radius:6px;padding:8px 12px;margin-top:14px;font-size:12.5px;}
+  .lib-watch b{color:#8a5a00;} .lib-watch ul{margin:4px 0 0 16px;padding:0;}
+  .lib-src{display:flex;gap:10px;padding:7px 0;border-bottom:1px solid #f0f2f5;font-size:13px;}
+  .lib-src .n{flex:0 0 22px;font-weight:700;color:#0F2942;}
+  .lib-src .flag{font-size:11.5px;color:#9a6b00;font-style:italic;margin-top:2px;}
+  .lib-w{display:inline-block;border-radius:4px;padding:1px 6px;font-size:10.5px;font-weight:600;color:#fff;margin-left:6px;vertical-align:1px;}
+  .lib-chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;}
+  .lib-chips button{background:#fff;border:1px solid #d9cfae;border-radius:999px;padding:5px 12px;font-size:12.5px;color:#0F2942;cursor:pointer;text-align:left;}
+  .lib-chips button:hover{background:#faf8f2;border-color:#B8934A;}
+  .lib-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid #e3e8ee;}
+  .lib-card .reuse{font-size:11.5px;color:#6B7684;margin:0 0 6px;}
+  .lib-hit{padding:12px 0;border-bottom:1px solid #e3e8ee;}
+  .lib-hit .meta{font-size:12px;color:#6B7684;margin:3px 0;}
+  .lib-hit .flag{font-size:11.5px;color:#9a6b00;font-style:italic;margin:2px 0;}
+  .lib-pass{font-size:13px;margin:6px 0 0;padding-left:10px;border-left:3px solid #d9cfae;line-height:1.55;}
+  .lib-cov{display:inline-block;border-radius:4px;padding:1px 7px;font-size:10.5px;font-weight:700;margin-left:8px;vertical-align:1px;}
+  .lib-cov.c1{background:#e4f3ea;color:#1d6b3f;} .lib-cov.c2{background:#fbf0d6;color:#8a5a00;} .lib-cov.c3{background:#eceff2;color:#59636e;}
+  .lib-sec{padding:12px 0;border-top:1px solid #e3e8ee;}
+  .lib-act{display:flex;gap:10px;margin:6px 0;font-size:13.5px;line-height:1.5;}
+  .lib-act .n{flex:0 0 24px;height:24px;border-radius:50%;background:#0F2942;color:#fff;font-size:12px;font-weight:700;display:flex;align-items:center;justify-content:center;}
+  .lib-card.green{border-left-color:#2e7d4f;}
+</style>

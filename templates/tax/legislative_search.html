@@ -1,30 +1,33 @@
 {% extends "base.html" %}
 {% block title %}Search the library - {{ firm_name }}{% endblock %}
 {% block content %}
+{% include "tax/_lib_style.html" %}
 {% macro hit(h, q, res) %}
-  <div style="padding:12px 0;border-bottom:1px solid var(--border);" {% if h.partial %}class="partial-hit"{% endif %}>
+  <div class="lib-hit {% if h.partial %}partial-hit{% endif %}">
     <p style="margin:0;">
       <a href="{{ url_for('tax.read_legislative_update', update_id=h.update.id, q=q) }}"><strong>{{ highlight(h.update.title, res.plan) }}</strong></a>
+      <span class="lib-w" style="background:{{ weight_colour(h.update) }};">{{ weight_label(h.update) }}</span>
       {% if h.update.instrument_type %}<span class="badge">{{ h.update.type_label }}</span>{% endif %}
       {% if h.update.tax_head %}<span class="badge">{{ h.update.tax_head }}</span>{% endif %}
       {% if h.update.is_reviewed %}<span class="badge status-Completed">Reviewed</span>{% endif %}
     </p>
-    <p class="muted" style="font-size:12px;margin:3px 0;">
+    <p class="meta">
       {% if h.update.gazette_date %}gazetted {{ h.update.gazette_date.strftime('%d %b %Y') }} &middot; {% endif %}
       effective {{ h.update.effective_date.strftime('%d %b %Y') if h.update.effective_date else '&mdash;'|safe }}
       {% if h.update.source_reference %}&middot; {{ h.update.source_reference }}{% endif %}
       {% if h.partial and h.missing_labels %}&middot; <span style="color:#a15c00;">partial match &mdash; no sign of: {{ h.missing_labels[:6]|join(', ') }}</span>{% endif %}
       {% if res.scenario and h.matched_labels %}&middot; covers {{ h.matched_labels|length }} of {{ res.plan.groups|length }} key concepts{% endif %}
     </p>
+    {% for note in flags.get(h.update.id, []) %}<p class="flag">{{ note }}</p>{% endfor %}
     {% for chunk, score, cg in h.passages %}
-      <p style="font-size:13px;margin:6px 0 0;padding-left:10px;border-left:3px solid #d9cfae;">
-        {% if chunk.heading %}<span class="muted" style="font-size:11.5px;">{{ chunk.heading }}</span><br>{% endif %}
+      <p class="lib-pass">
+        {% if chunk.heading %}<span class="muted" style="font-size:11.5px;font-weight:600;">{{ chunk.heading }}</span><br>{% endif %}
         {{ snippet(chunk.text, res.plan) }}
         <a href="{{ url_for('tax.read_legislative_update', update_id=h.update.id, q=q, _anchor='chunk-%d' % chunk.id) }}" style="font-size:12px;white-space:nowrap;">open this passage &rarr;</a>
       </p>
     {% else %}
       {% set sm = h.update.ai_summary or h.update.summary %}
-      {% if sm %}<p style="font-size:13px;margin:6px 0 0;padding-left:10px;border-left:3px solid #d9cfae;">{{ snippet(sm, res.plan) }}</p>
+      {% if sm %}<p class="lib-pass">{{ snippet(sm, res.plan) }}</p>
       <p class="muted" style="font-size:11.5px;margin:2px 0 0;">Matched on the title, summary or details; no filed text to search for this entry.</p>{% endif %}
     {% endfor %}
   </div>
@@ -44,11 +47,12 @@
       <div><label style="margin:0;">Practice area</label><select name="area" style="margin:0;"><option value="">Any</option>{% for a in areas %}<option {% if filters.area == a %}selected{% endif %}>{{ a }}</option>{% endfor %}</select></div>
       <div style="width:90px;"><label style="margin:0;">Year</label><input type="number" name="year" min="1900" max="2100" value="{{ filters.year or '' }}" style="margin:0;"></div>
       <div><label style="font-weight:400;margin:0;"><input type="checkbox" name="reviewed" value="1" style="width:auto;" {% if filters.reviewed %}checked{% endif %}> reviewed only</label></div>
-      <div><label style="margin:0;">Order</label><select name="sort" style="margin:0;"><option value="relevance" {% if sort == 'relevance' %}selected{% endif %}>Best match</option><option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest first</option></select></div>
+      <div><label style="margin:0;">Order</label><select name="sort" style="margin:0;"><option value="relevance" {% if sort == 'relevance' %}selected{% endif %}>Best match</option><option value="weight" {% if sort == 'weight' %}selected{% endif %}>Law first</option><option value="newest" {% if sort == 'newest' %}selected{% endif %}>Newest first</option></select></div>
     </div>
     <div style="margin-top:10px;">
       <button class="btn gold" type="submit">Search</button>
-      {% if q %}<button class="btn secondary" type="submit" formaction="{{ url_for('tax.advise_legislative_updates') }}" formmethod="post" title="Draft advice topic by topic, using only what is filed in the library (needs the AI key)">Draft advice from the library</button>{% endif %}
+      {% if q %}<button class="btn secondary" type="submit" formaction="{{ url_for('tax.advise_legislative_updates') }}" formmethod="post" title="Draft advice topic by topic, using only what is filed in the library (needs the AI key)">Draft advice from the library</button>
+      <button class="btn secondary" type="submit" formaction="{{ url_for('tax.ask_legislative_updates') }}" formmethod="post" name="question" value="{{ q }}" title="Answer this as a question, with the sources cited (needs the AI key)" {% if q|length > 300 %}disabled{% endif %}>Answer this as a question</button>{% endif %}
     </div>
   </form>
 </div>
@@ -57,25 +61,54 @@
 <div class="card"><p class="muted" style="margin:0;">Nothing filed in the library matches this situation, so no advice could be drafted from it.</p></div>
 {% endif %}
 {% if advice %}
-<div class="card" style="border-left:4px solid #2e7d4f;">
-  <h3 class="mt-0">Draft advice from the filed library</h3>
-  <p class="muted" style="font-size:12px;">A draft for your review. It uses only the filed material below and your description of the facts; where the library is silent it says so. Check it against the actual law before it goes to the client.</p>
-  <p style="font-size:13.5px;">{{ advice.summary }}</p>
+{% set order = advice.source_ids %}
+<div class="lib-card green">
+  <p class="lib-kicker" style="color:#2e7d4f;">Draft advice from the filed library <span class="lib-pill lib-medium">Draft for partner review</span></p>
+  {% if advice.headline %}<p class="lib-bottom">{{ advice.headline }}</p>{% endif %}
+  <p class="lib-text">{{ cite(advice.summary, order) }}</p>
+
+  {% if advice.recommended_actions %}
+  <p class="lib-h">What to do next</p>
+  {% for a in advice.recommended_actions %}
+  <div class="lib-act"><span class="n">{{ loop.index }}</span><div><strong>{{ a.action }}</strong>{% if a.why %}<br><span style="color:#4a5561;">{{ cite(a.why, order) }}</span>{% endif %}
+    {% if a.citation_ids and '[#' not in (a.action ~ ' ' ~ (a.why or '')) %}<sup>[{% for i in a.citation_ids %}{% if i in order %}<a class="cite" href="#src-{{ i }}">{{ order.index(i) + 1 }}</a>{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]</sup>{% endif %}</div></div>
+  {% endfor %}
+  {% endif %}
+
+  <p class="lib-h">Topic by topic</p>
   {% for sec in advice.sections %}
-  <div style="margin-top:12px;">
-    <p style="margin:0;"><strong>{{ sec.topic }}</strong></p>
-    <p style="font-size:13px;margin:3px 0;white-space:pre-wrap;">{{ sec.finding }}</p>
-    {% if sec.planning_points %}<ul style="font-size:13px;margin:2px 0;">{% for pt in sec.planning_points %}<li>{{ pt }}</li>{% endfor %}</ul>{% endif %}
-    {% if sec.citations %}<p class="muted" style="font-size:12px;margin:2px 0;">Sources: {% for u in sec.citations %}<a href="{{ url_for('tax.read_legislative_update', update_id=u.id, q=q) }}">{{ u.title }}</a>{% if not loop.last %}; {% endif %}{% endfor %}</p>{% endif %}
+  <div class="lib-sec">
+    <p style="margin:0;"><strong style="font-size:14.5px;color:#0F2942;">{{ sec.topic }}</strong>
+      <span class="lib-cov {{ 'c1' if sec.coverage == 'Covered' else ('c2' if sec.coverage == 'Partly covered' else 'c3') }}">{{ sec.coverage }}</span></p>
+    <p class="lib-text" style="margin-top:4px;">{{ cite(sec.finding, order) }}{% if sec.citation_ids and '[#' not in sec.finding %} <sup>[{% for i in sec.citation_ids %}<a class="cite" href="#src-{{ i }}">{{ order.index(i) + 1 }}</a>{% if not loop.last %}, {% endif %}{% endfor %}]</sup>{% endif %}</p>
+    {% if sec.key_figures %}<table class="lib-fig"><tbody>{% for f in sec.key_figures %}<tr><td>{{ f.label }}</td><td class="v">{{ f.value }}</td><td>{% if f.source_id in order %}<sup><a class="cite" href="#src-{{ f.source_id }}">{{ order.index(f.source_id) + 1 }}</a></sup>{% endif %}{% if not f.checked %} <span class="lib-pill lib-medium" title="Not found word for word in the passage supplied - check it against the source.">check</span>{% endif %}</td></tr>{% endfor %}</tbody></table>{% endif %}
+    {% if sec.planning_points %}<ul style="font-size:13.5px;margin:4px 0 0 18px;line-height:1.55;">{% for pt in sec.planning_points %}<li>{{ cite(pt, order) }}</li>{% endfor %}</ul>{% endif %}
   </div>
   {% endfor %}
-  {% if advice.not_covered %}<p style="font-size:13px;margin-top:14px;"><strong>Not covered by the filed library &mdash; check before advising:</strong> {{ advice.not_covered }}</p>{% endif %}
-  {% if advice.facts_to_confirm %}<p style="font-size:13px;margin:8px 0 2px;"><strong>Facts to confirm with the client:</strong></p><ul style="font-size:13px;margin-top:0;">{% for f in advice.facts_to_confirm %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+
+  {% if advice.not_covered %}<div class="lib-watch"><b>Not covered by the filed library &mdash; check before advising</b><div style="margin-top:3px;">{{ advice.not_covered }}</div></div>{% endif %}
+  {% if advice.watch_points %}<div class="lib-watch"><b>Check before relying on this</b><ul>{% for w in advice.watch_points %}<li>{{ cite(w, order) }}</li>{% endfor %}</ul></div>{% endif %}
+  {% if advice.facts_to_confirm %}<p class="lib-h">Facts to confirm with the client</p><ul style="font-size:13.5px;margin:0 0 0 18px;line-height:1.55;">{% for f in advice.facts_to_confirm %}<li>{{ f }}</li>{% endfor %}</ul>{% endif %}
+
+  <p class="lib-h">Sources</p>
+  {% for s in advice.sources %}
+  <div class="lib-src" id="src-{{ s.doc.id }}"><span class="n">{{ loop.index }}</span>
+    <div><a href="{{ url_for('tax.read_legislative_update', update_id=s.doc.id, q=q) }}"><strong>{{ s.doc.title }}</strong></a><span class="lib-w" style="background:{{ s.colour }};">{{ s.label }}</span>
+      <div class="muted" style="font-size:12px;">{% if s.doc.source_reference %}{{ s.doc.source_reference }}{% endif %}{% if s.doc.effective_date %}{% if s.doc.source_reference %} &middot; {% endif %}effective {{ s.doc.effective_date.strftime('%d %b %Y') }}{% endif %}</div>
+      {% for f in s.flags %}<div class="flag">{{ f }}</div>{% endfor %}</div></div>
+  {% endfor %}
+
+  <div class="lib-actions">
+    {% if advice_memo %}<form method="post" action="{{ url_for('tax.legislative_memo_docx') }}" style="margin:0;"><input type="hidden" name="memo" value="{{ advice_memo }}"><input type="hidden" name="kind" value="advice"><button class="btn small secondary" type="submit">Download as a Word memo</button></form>{% endif %}
+    <span class="muted" style="font-size:12px;">A draft from the filed material and your description only. Check it against the actual law before it goes to the client.</span>
+  </div>
 </div>
 {% endif %}
 
 {% if q %}
-  {% if explain %}<div class="card" style="padding:8px 14px;"><p class="muted" style="font-size:12px;margin:0;">{{ explain|join(' ') }}</p></div>{% endif %}
+  {% if understood or explain %}<div class="card" style="padding:8px 14px;">
+    {% if understood %}<p style="font-size:12.5px;margin:0 0 3px;color:#0F2942;"><strong>Understood:</strong> {{ understood|join(' ') }}</p>{% endif %}
+    {% if explain %}<p class="muted" style="font-size:12px;margin:0;">{{ explain|join(' ') }}</p>{% endif %}</div>{% endif %}
   {% if result and result.scenario %}
   <div class="card" style="padding:8px 14px;">
     <p class="muted" style="font-size:12.5px;margin:0;"><strong>Read as a description.</strong> Key concepts searched: {{ result.plan.concepts|join(', ') }}.

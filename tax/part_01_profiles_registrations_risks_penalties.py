@@ -31,7 +31,7 @@ import requests
 import openpyxl
 from bs4 import BeautifulSoup
 
-from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_from_directory
+from flask import Blueprint, render_template, redirect, url_for, request, flash, abort, send_from_directory, send_file
 from flask_login import login_required, current_user
 from werkzeug.utils import secure_filename
 
@@ -67,6 +67,7 @@ import sanctions_data
 import legislation_summary
 import legislation_search
 import legislation_index
+import legislation_understand
 import legislation_chunking
 import act_import
 import vat_checks

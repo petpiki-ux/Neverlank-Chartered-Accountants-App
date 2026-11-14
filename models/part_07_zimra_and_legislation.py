@@ -599,6 +599,7 @@ class LegislativeAskCache(db.Model):
     last_hit_at = db.Column(db.DateTime)
     helpful_count = db.Column(db.Integer, default=0)    # "Helpful" clicks from the people it was shown to
     unhelpful_count = db.Column(db.Integer, default=0)  # "Not right" clicks - see learning.py
+    structured_json = db.Column(db.Text)  # the structured answer (bottom line, key figures, quotes, watch points...) as JSON; NULL on older rows, which show the plain `answer`
 
     asked_by = db.relationship("User", foreign_keys=[asked_by_id])
 

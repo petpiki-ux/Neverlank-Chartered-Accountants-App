@@ -41,29 +41,8 @@
 
   {% if ask_status == 'no_candidates' %}
   <p class="muted" style="font-size:12.5px;margin-top:10px;">Nothing filed in the library shares any keywords with that question - it may not be covered yet, or try rephrasing.</p>
-  {% elif ask_status == 'no_answer' %}
-  <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;">
-    {% if ask_from_cache %}<p class="muted" style="font-size:11.5px;margin:0 0 6px;">&#8635; Reused from an earlier, very similar question{% if ask_cache_hit_count %} (asked {{ ask_cache_hit_count }} time{{ 's' if ask_cache_hit_count != 1 else '' }}){% endif %} - not re-searched just now.</p>{% endif %}
-    <p style="font-size:13px;margin:0;">{{ ask_answer }}</p>
-    {% if ask_candidates %}
-    <p class="muted" style="font-size:12px;margin:8px 0 2px;">Closest matches considered (none clearly answered it - worth checking by hand):</p>
-    <ul style="margin-top:0;font-size:12.5px;">
-      {% for u in ask_candidates %}<li><a href="#legislative-update-{{ u.id }}">{{ u.title }}</a></li>{% endfor %}
-    </ul>
-    {% endif %}
-  </div>
-  {% elif ask_status == 'done' %}
-  <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;">
-    {% if ask_from_cache %}<p class="muted" style="font-size:11.5px;margin:0 0 6px;">&#8635; Reused from an earlier, very similar question{% if ask_cache_hit_count %} (asked {{ ask_cache_hit_count }} time{{ 's' if ask_cache_hit_count != 1 else '' }}){% endif %} - not re-searched just now.</p>{% endif %}
-    <p style="font-size:13px;margin:0;">{{ ask_answer }}</p>
-    {% if ask_citations %}
-    <p class="muted" style="font-size:12px;margin:8px 0 2px;">Sources:</p>
-    <ul style="margin-top:0;font-size:12.5px;">
-      {% for u in ask_citations %}<li><a href="#legislative-update-{{ u.id }}">{{ u.title }}</a>{% if u.source_reference %} <span class="muted">({{ u.source_reference }})</span>{% endif %}</li>{% endfor %}
-    </ul>
-    {% endif %}
-    {% include "tax/_ask_feedback.html" %}
-  </div>
+  {% elif ask_status == 'no_answer' or ask_status == 'done' %}
+  {% include "tax/_ask_answer.html" %}
   {% elif ask_status == 'verified' %}
   <div style="background:#f7f5ef;border-radius:6px;padding:10px;margin-top:10px;border-left:4px solid #2e7d4f;">
     <p class="muted" style="font-size:11.5px;margin:0 0 6px;"><strong>Verified by the firm</strong>{% if ask_lesson.decided_by %} - approved by {{ ask_lesson.decided_by.name }}{% if ask_lesson.decided_at %} on {{ ask_lesson.decided_at.strftime('%d %b %Y') }}{% endif %}{% endif %}{% if ask_lesson.review_due %}; to be re-checked by {{ ask_lesson.review_due.strftime('%d %b %Y') }}{% endif %}. Not re-searched just now - if the law has changed, tell us it is not right.</p>
