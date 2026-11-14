@@ -859,6 +859,7 @@ def import_confirm(engagement_id, token):
             a.current_year_depreciation = 0.0
             a.disposal_cost = 0.0
             a.disposal_accumulated_depreciation = 0.0
+        posted_msg = ""
         removed = []
         if request.form.get("remove_others") == "1":
             # the register's other assets (for example an old lump-sum line from the trial balance) are not part of the valuer's list: archive
@@ -873,6 +874,13 @@ def import_confirm(engagement_id, token):
                 removed.append(a)
                 db.session.delete(a)
         db.session.commit()
+        if request.form.get("post_tb") == "1":
+            import asset_recon
+            ok, text = asset_recon.post_register_to_tb(engagement, "revaluation", "suspense")
+            db.session.commit()
+            posted_msg = (" " + text + ". The increase over the old trial balance figure is credited to the revaluation surplus (other comprehensive income); "
+                          "the financial statements and the PPE note now follow the register. Review and partner sign-off are on the Finalisation tab; "
+                          "post the deferred tax on the surplus from the Deferred Tax tab.") if ok else (" Not posted to the trial balance: " + text)
         try:
             os.remove(path)
         except OSError:
@@ -897,8 +905,43 @@ def import_confirm(engagement_id, token):
         if others:
             msg += (f" That is {sum(sums.values()):,.2f} from this file plus {len(others)} other asset(s) already in the register ({other_nbv:,.2f}) that "
                     "are not in the valuer's list - delete them from the register if they are not part of this valuation.")
-        flash(msg, "warning" if (left or others) else "success")
+        flash(msg + posted_msg, "warning" if (left or others) else "success")
         return _import_redirect(engagement)
+    carried_msg = ""
+    if request.form.get("carry_over") == "1":
+        # The register's other assets (an old lump-sum line, say) are what the valued assets REPLACE: their cost, accumulated depreciation and
+        # charge are spread over the valued assets that have no cost yet, in proportion to the valuer's figures, and the old assets are removed
+        # (restorable). The valuation then revalues from the carrying amount that was already in the accounts, so the surplus is the real one.
+        import asset_schedules as sched_
+        targets = [eligible[a_] for a_ in sums if (eligible[a_].cost or 0.0) <= 0]
+        olds = [a for a in PPEAsset.query.filter_by(engagement_id=engagement.id).all() if a.id not in sums and not (a.disposal_cost or 0.0)]
+        if targets and olds:
+            tot_fv = sum(sums[t.id] for t in targets)
+            old_cost = sum(a.cost or 0.0 for a in olds)
+            old_acc = sum(a.opening_accumulated_depreciation or 0.0 for a in olds if not (a.date_acquired and ps and pe and ps <= a.date_acquired <= pe))
+            old_dep = sum(a.current_year_depreciation or 0.0 for a in olds)
+            dates = {a.date_acquired for a in olds}
+            when = dates.pop() if len(dates) == 1 else None
+            left_c, left_a, left_d = old_cost, old_acc, old_dep
+            for i, t in enumerate(targets):
+                share = sums[t.id] / tot_fv if tot_fv else 1.0 / len(targets)
+                last = i == len(targets) - 1
+                c_ = left_c if last else r2(old_cost * share)
+                a_ = left_a if last else r2(old_acc * share)
+                d_ = left_d if last else r2(old_dep * share)
+                t.cost, t.opening_accumulated_depreciation, t.current_year_depreciation = c_, a_, d_
+                t.date_acquired = when
+                left_c, left_a, left_d = r2(left_c - c_), r2(left_a - a_), r2(left_d - d_)
+            for a in olds:
+                for l in list(PPERevaluationLine.query.filter_by(asset_id=a.id).all()):
+                    db.session.delete(l)
+                sched_.archive_asset(a, current_user.id)
+                db.session.delete(a)
+            carried_msg = (f" The cost ({old_cost:,.2f}), accumulated depreciation ({old_acc:,.2f}) and depreciation charge ({old_dep:,.2f}) of the {len(olds)} other register "
+                           f"asset(s) were spread over the {len(targets)} valued assets in proportion to their values, and those assets were removed "
+                           "(they can be put back under 'Recently deleted'). The revaluation now starts from the carrying amount already in the accounts.")
+        else:
+            carried_msg = " Nothing to carry over: there are no valued assets without a cost, or no other assets in the register."
     existing = {l.asset_id: l for l in rec.lines}
     n_new = n_upd = 0
     for aid, total in sums.items():
@@ -917,7 +960,8 @@ def import_confirm(engagement_id, token):
         pass
     msg = (f"Imported the valuer's figures: {len(sums)} register asset(s) now carry a fair value ({n_new} new, {n_upd} replaced) from "
            f"{sum(counts.values())} line(s) totalling {sum(sums.values()):,.2f}.")
-    if created:
+    msg += carried_msg
+    if created and not carried_msg.startswith(" The cost"):
         msg += (f" {created} new asset(s) were added to the register with cost and accumulated depreciation at nil: enter the historical cost and "
                 "accumulated depreciation of each (Asset Register tab, step 1) before applying - the revaluation will not apply while an asset has no cost.")
     if left:

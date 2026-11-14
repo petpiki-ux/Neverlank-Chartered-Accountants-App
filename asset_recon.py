@@ -39,7 +39,8 @@ REFERENCE_PY = "PPE-REG-PY"          # the prior-year (comparatives) adjustment,
 TOL = 0.005
 OPEN_TO = {"retained_earnings": "Retained earnings of this year (no restatement)",
            "restate_prior": "Restate the comparatives (prior-year adjustment PPE-REG-PY)",
-           "profit_loss": "Profit or loss for the year"}
+           "profit_loss": "Profit or loss for the year",
+           "revaluation": "Revaluation surplus (other comprehensive income) - the register was set to a valuation"}
 REST_TO = {"suspense": "Suspense (to be cleared before sign-off)", "profit_loss": "Profit or loss for the year",
            "retained_earnings": "Retained earnings"}
 
@@ -511,6 +512,8 @@ def proposal(reg, pos, open_to="retained_earnings", rest_to="suspense", units=No
     if open_to == "profit_loss":
         o_name = "Opening net book value difference on property, plant and equipment (per Asset Register)"
         o_cat = "other_income" if credit_open > 0 else "other_expenses"
+    elif open_to == "revaluation":
+        o_name, o_cat = "Revaluation surplus on property, plant and equipment (OCI)", "oci_items"
     else:
         o_name, o_cat = "Retained earnings - correction of the opening net book value of property, plant and equipment", "retained_earnings"
     _entry(lines, o_name, o_cat, -credit_open, "Register net book value brought forward less the prior-year column of the trial balance")
@@ -689,6 +692,31 @@ def _upsert(tb, reference, lines, description, applies_to="current"):
     db.session.refresh(existing)
     eng._touch_adjustment(existing)
     return status
+
+
+def post_register_to_tb(engagement, open_to="retained_earnings", rest_to="suspense"):
+    """Post the Asset Register to the trial balance as PPE-REG without the reconciliation card (the same journal the card's button posts, class
+    by class), so the financial statements and the Property, plant and equipment note follow the register. Returns (ok, message)."""
+    rc = reconcile(engagement, open_to, rest_to, "class", {})
+    if not rc.get("ok"):
+        return False, rc.get("reason") or "Nothing to post."
+    tb, prop = rc["tb"], rc["proposal"]
+    if not prop["balanced"] or not prop["py_balanced"]:
+        return False, "The adjustment would not balance, so nothing was posted."
+    reg = rc["reg"]
+    ye = reg["period_end"].strftime("%d %B %Y") if reg["period_end"] else ""
+    done = []
+    if prop["py_lines"]:
+        st = _upsert(tb, REFERENCE_PY, prop["py_lines"], f"Restatement of the comparatives (IAS 8): property, plant and equipment brought forward restated to the Asset Register. Posted from the Asset Register tab.", "prior")
+        if st:
+            done.append(f"{journal_label(tb, REFERENCE_PY)} {st}")
+    st = _upsert(tb, REFERENCE, prop["lines"], f"Asset Register to trial balance, year ended {ye}: brings property, plant and equipment (cost and accumulated depreciation, "
+                 f"class by class) and the depreciation charge to the register. The opening net book value difference goes to {OPEN_TO[prop['open_to']].lower()}. Posted from the Asset Register tab.", "current")
+    if st:
+        done.append(f"{journal_label(tb, REFERENCE)} {st}")
+    if not done:
+        return True, "The register already agrees to the trial balance - nothing to post."
+    return True, f"Trial balance adjustment {', '.join(done)} ({len(prop['lines']) + len(prop['py_lines'])} lines)"
 
 
 def journal_label(tb, key):
