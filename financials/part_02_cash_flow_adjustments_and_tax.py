@@ -384,7 +384,7 @@ def general_information_note(client, engagement):
         sentences.append("The entity's main banker is " + bankers[0] + "." if len(bankers) == 1 else
                          "The entity's main bankers are " + ", ".join(bankers[:-1]) + " and " + bankers[-1] + ".")
     if engagement.period_end:
-        sentences.append(f"These financial statements are for the year ended {engagement.period_end.strftime('%d %B %Y')}.")
+        sentences.append(f"These financial statements are for the {period_phrase(getattr(engagement, 'period_start', None), engagement.period_end)}.")
     return " ".join(sentences)
 
 
@@ -506,14 +506,17 @@ def default_statutory_report_text(period_end):
     )
 
 
-def default_audit_opinion_paragraphs(report_basis, modification, client_name, period_end, framework_label):
+def default_audit_opinion_paragraphs(report_basis, modification, client_name, period_end, framework_label, period_start=None):
+    # "for the year then ended"; for a period that is not twelve months "for the 10 months then ended" (or "the period then ended")
+    months = period_months(period_start, period_end)
+    then = "year" if not is_short_period(period_start, period_end) else (f"{months} months" if months else "period")
     period_str = period_end.strftime("%d %B %Y") if period_end else "[period end]"
     framework_label = framework_label or "[the applicable financial reporting framework]"
     is_audit = report_basis != "review"
     noun = "audit" if is_audit else "review"
     fair_presentation = (
         f"present fairly, in all material respects, the financial position of {client_name} as at "
-        f"{period_str}, and its financial performance and cash flows for the year then ended in "
+        f"{period_str}, and its financial performance and cash flows for the {then} then ended in "
         f"accordance with {framework_label}"
     )
 
@@ -535,7 +538,7 @@ def default_audit_opinion_paragraphs(report_basis, modification, client_name, pe
         opinion = (
             f"{lead} described in the Basis for Adverse {'Opinion' if is_audit else 'Conclusion'} section below, the accompanying financial "
             f"statements do not present fairly, in all material respects, the financial position of {client_name} "
-            f"as at {period_str} and its financial performance and cash flows for the year then ended in "
+            f"as at {period_str} and its financial performance and cash flows for the {then} then ended in "
             f"accordance with {framework_label}."
         )
         basis_matter = "[Describe the matter giving rise to the adverse opinion/conclusion, and its financial effect if determinable.]"
@@ -704,16 +707,13 @@ def build_deferred_tax_computation(tax_rate_percent, ppe_accounting_nbv, ppe_tax
     return {"rows": rows, "total_deferred_tax": total_deferred_tax, "classification": classification}
 
 
-def _infer_period_start(period_end):
-    """Best-effort start of the 12-month reporting period ending on
-    period_end. The app doesn't record a separate period-start date on
-    Engagement (only period_end), so this assumes a standard 12-month
-    period - the ordinary case - purely to decide, in
-    build_ppe_movement_schedule() below, whether an Asset Register entry's
-    date_acquired falls inside the current year (an addition) or before it
-    (an opening balance). A genuinely short or long period should have its
-    Asset Register entries reviewed with that in mind - this is a
-    disclosed approximation, not a stored fact about the engagement."""
+def _infer_period_start(period_end, period_start=None):
+    """Start of the reporting period ending on period_end. The engagement's own period start (Engagement.period_start, entered when the
+    financial statements are not for twelve months, e.g. Broxmen's first ten months) wins; without one a standard 12-month period is assumed,
+    purely to decide in build_ppe_movement_schedule() below whether an Asset Register entry's date_acquired falls inside the current year
+    (an addition) or before it (an opening balance). That assumption is disclosed, not a stored fact about the engagement."""
+    if period_start:
+        return period_start
     if not period_end:
         return None
     year = period_end.year - 1
@@ -724,3 +724,69 @@ def _infer_period_start(period_end):
         except ValueError:
             # e.g. period_end of 29 Feb in a leap year, prior year isn't one
             day -= 1
+
+
+def period_months(period_start, period_end):
+    """The number of whole months from period_start to period_end when the period is whole months (starts on the 1st and ends on a month
+    end, or ends the day before the same day-of-month a whole number of months later); None when it is not. 12 for an ordinary year."""
+    if not period_start or not period_end or period_end < period_start:
+        return None
+    import calendar
+    months = (period_end.year - period_start.year) * 12 + period_end.month - period_start.month
+    if period_start.day == 1 and period_end.day == calendar.monthrange(period_end.year, period_end.month)[1]:
+        return months + 1
+    if period_start.day > 1 and period_end.day == period_start.day - 1 and months > 0:
+        return months                                # 15 March to 14 March of the next year: twelve months
+    return None
+
+
+def is_short_period(period_start, period_end):
+    """True when the financial statements are not for twelve months (shorter or longer) - needs a period start date to know."""
+    if not period_start or not period_end:
+        return False
+    m = period_months(period_start, period_end)
+    if m is not None:
+        return m != 12
+    return abs((period_end - period_start).days + 1 - 365) > 3
+
+
+def _long_date(d):
+    return f"{d.day} {d.strftime('%B %Y')}"
+
+
+def period_phrase(period_start, period_end):
+    """What follows "for the" in a statement's heading: "year ended 31 October 2026" for an ordinary year, "10 months ended 31 October 2026"
+    for a period of whole months, "period from 5 January 2026 to 31 October 2026" otherwise. "" with no period end."""
+    if not period_end:
+        return ""
+    end = _long_date(period_end)
+    if not is_short_period(period_start, period_end):
+        return f"year ended {end}"
+    m = period_months(period_start, period_end)
+    if m is not None:
+        return f"{m} month{'s' if m != 1 else ''} ended {end}"
+    return f"period from {_long_date(period_start)} to {end}"
+
+
+def period_column_label(period_start, period_end):
+    """The current-year column heading's year part: "2026" for an ordinary year, "2026 (10 months)" for a short or long one."""
+    if not period_end:
+        return None
+    y = str(period_end.year)
+    if not is_short_period(period_start, period_end):
+        return y
+    m = period_months(period_start, period_end)
+    return f"{y} ({m} months)" if m is not None else f"{y} (period)"
+
+
+def short_period_basis_sentence(period_start, period_end):
+    """The IAS 1.36 disclosure for a period that is not twelve months: the period, the reason for it to be completed by the preparer, and that
+    the comparatives are not entirely comparable. "" for an ordinary year."""
+    if not is_short_period(period_start, period_end) or not period_end:
+        return ""
+    m = period_months(period_start, period_end)
+    length = f"{m} months" if m is not None else f"{(period_end - period_start).days + 1} days"
+    return (f" These financial statements cover the period of {length} from {_long_date(period_start)} to {_long_date(period_end)}, "
+            "and not a period of twelve months. The comparative amounts are for the preceding financial year, and the amounts presented "
+            "in the statement of profit or loss and other comprehensive income, the statement of changes in equity, the statement of cash flows "
+            "and the related notes are therefore not entirely comparable. [State why the period is not twelve months, e.g. a change in the financial year end.]")

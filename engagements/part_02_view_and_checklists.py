@@ -156,7 +156,7 @@ def view_engagement(engagement_id):
     # place of the plain trial-balance-account list, once populated) and
     # the "Property, plant and equipment" accounting policy paragraph.
     ppe_asset_classes, ppe_assets, ppe_class_dicts, ppe_asset_dicts = _ppe_plain_data(engagement_id)
-    ppe_movement, ppe_policy_text = _ppe_movement_and_policy(ppe_class_dicts, ppe_asset_dicts, engagement.period_end)
+    ppe_movement, ppe_policy_text = _ppe_movement_and_policy(ppe_class_dicts, ppe_asset_dicts, engagement.period_end, engagement.period_start)
     # The movement schedule SHOWN on the Asset Register tab includes a draft valuation (a preview, marked as such); the statements, the
     # note and the tax figures below keep using only what has been applied.
     import ppe_revaluation
@@ -164,7 +164,7 @@ def view_engagement(engagement_id):
     ppe_movement_shown = ppe_movement
     if ppe_reval_draft:
         _, _, pv_classes, pv_assets = _ppe_plain_data(engagement_id, include_draft=True)
-        ppe_movement_shown = fin.build_ppe_movement_schedule(pv_classes, pv_assets, engagement.period_end)
+        ppe_movement_shown = fin.build_ppe_movement_schedule(pv_classes, pv_assets, engagement.period_end, engagement.period_start)
     # The Financial Statements are always built from the ADJUSTED trial
     # balance (preliminary TB + audit adjustments, current year only) -
     # Analytical Review and Substantive Procedures work from the preliminary
@@ -195,6 +195,7 @@ def view_engagement(engagement_id):
         (audit_opinion.report_basis if audit_opinion else ("audit" if engagement.type == "Audit" else "review")),
         (audit_opinion.modification if audit_opinion else "unmodified"),
         engagement.client.name, engagement.period_end, REPORTING_FRAMEWORK_LABELS.get(engagement.reporting_framework),
+        period_start=engagement.period_start,
     )
     income_tax_computation = IncomeTaxComputation.query.filter_by(engagement_id=engagement_id).first()
     profit_before_tax = statements["pl"]["profit_before_tax"]["current"] if statements else None
@@ -624,7 +625,7 @@ def view_engagement(engagement_id):
         reporting_frameworks=REPORTING_FRAMEWORKS,
         reporting_framework_labels=REPORTING_FRAMEWORK_LABELS,
         general_information_note=fin.general_information_note(engagement.client, engagement),
-        default_basis_of_preparation=fin.default_basis_of_preparation(engagement.reporting_framework, (statements or {}).get("asset_models")),
+        default_basis_of_preparation=fin.default_basis_of_preparation(engagement.reporting_framework, (statements or {}).get("asset_models"), engagement.period_start, engagement.period_end),
         asset_model_choices=(("", "Work it out from the journals"), ("cost", "Cost model"), ("revaluation", "Revaluation model")),
         default_closing_notes=fin.DEFAULT_CLOSING_NOTE_TEXT,
         cash_flow_methods=CASH_FLOW_METHODS,

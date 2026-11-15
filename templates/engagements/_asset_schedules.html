@@ -223,7 +223,7 @@
 </div>
 
 <div class="card" id="schedule">
-  <h3 class="mt-0">4. Asset Register schedule{% if as_period_end %} - year ended {{ as_period_end.strftime('%d %B %Y') }}{% endif %}</h3>
+  <h3 class="mt-0">4. Asset Register schedule{% if as_period_end %} - {{ as_period_phrase }}{% endif %}</h3>
   {% if as_reval_draft %}<div class="alert" style="background:#fff8e1;border:1px solid #ffe08a;padding:6px 10px;border-radius:4px;font-size:12.5px;margin:4px 0;">This schedule includes the <strong>draft valuation</strong> (see 6. Revaluation below): the Revaluation columns show the valuer's figures. Nothing is posted to the trial balance, the statements or the note until you apply the revaluation.</div>{% endif %}
   {% if as_movement %}
   {% set rvon = (as_movement.total.revaluation or 0)|abs >= 0.5 %}
@@ -303,7 +303,7 @@
   </p>
   {% endif %}
 
-  <h4 style="margin-bottom:4px;">Closing - year ended {{ rc.reg.period_end.strftime('%d %B %Y') if rc.reg.period_end else '' }}</h4>
+  <h4 style="margin-bottom:4px;">Closing - {{ as_period_phrase }}</h4>
   <table style="font-size:12px;">
     <thead><tr><th></th><th class="text-right">Asset Register</th><th class="text-right">Trial balance (with other adjustments)</th><th class="text-right">Difference</th><th class="text-right">Pushed ({{ 'PPE-REG' }})</th><th class="text-right">Still unreconciled</th></tr></thead>
     <tbody>

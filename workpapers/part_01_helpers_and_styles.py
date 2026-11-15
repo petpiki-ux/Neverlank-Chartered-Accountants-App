@@ -177,7 +177,8 @@ def _statement_banner(doc, label):
     r.bold = True
     p = doc.add_paragraph()
     p.paragraph_format.space_after = Pt(6)
-    r = p.add_run(("as at " if label == "as_at" else "for the year ended ") + _fmt_date(period_end))
+    phrase = getattr(doc, "_fs_period", "") or ""
+    r = p.add_run(("as at " + _fmt_date(period_end)) if label == "as_at" else ("for the " + phrase if phrase else "for the year ended " + _fmt_date(period_end)))
     r.italic = True
 
 
@@ -331,7 +332,7 @@ def _plain_cover_page(doc, engagement):
 
     period_p = doc.add_paragraph()
     period_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    period_run = period_p.add_run(f"for the year ended {_fmt_date(engagement.period_end)}")
+    period_run = period_p.add_run(("for the " + fin.period_phrase(engagement.period_start, engagement.period_end)) if engagement.period_end else "for the year ended " + _fmt_date(engagement.period_end))
     period_run.font.size = Pt(13)
 
     doc.add_page_break()
@@ -378,7 +379,7 @@ def _start_notes_section(doc, engagement):
     brand.statement_page_header(sec, [
         (client.name if client else "").upper(),
         "NOTES TO THE FINANCIAL STATEMENTS",
-        f"For the year ended {_fmt_date(engagement.period_end)}",
+        ("For the " + fin.period_phrase(engagement.period_start, engagement.period_end)) if engagement.period_end else f"For the year ended {_fmt_date(engagement.period_end)}",
     ])
 
 
@@ -530,7 +531,7 @@ def _audit_opinion_section(doc, audit_opinion, engagement=None):
     # The auditor's / reviewer's report is the firm's own: it starts under the Neverlank letterhead. The financial statements that follow are the client's and are not.
     client = engagement.client if engagement is not None else None
     brand.letterhead_band(doc, "Independent Auditor's Report" if is_audit else "Independent Reviewer's Report",
-                          sub=(f"{client.name} - year ended {_fmt_date(engagement.period_end)}" if client else None))
+                          sub=(f"{client.name} - {fin.period_phrase(engagement.period_start, engagement.period_end) or 'year ended ' + _fmt_date(engagement.period_end)}" if client else None))
     _add_heading(doc, "Independent Auditor's Report" if is_audit else "Independent Reviewer's Report", level=1)
     if not audit_opinion:
         doc.add_paragraph("Not yet prepared within the app.")

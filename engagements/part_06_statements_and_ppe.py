@@ -2,7 +2,7 @@
 
 See __init__.py: all parts share one set of names, exactly as the single file engagements.py did."""
 
-def _ppe_movement_and_policy(class_dicts, asset_dicts, period_end):
+def _ppe_movement_and_policy(class_dicts, asset_dicts, period_end, period_start=None):
     """The (ppe_movement, ppe_policy_text) pair fin.build_all_statements()
     takes to replace the generic PPE note/policy with the Asset Register's
     own movement schedule and the Depreciation policy's own wording - both
@@ -10,7 +10,7 @@ def _ppe_movement_and_policy(class_dicts, asset_dicts, period_end):
     any rows yet, so an engagement that hasn't touched this feature is
     completely unaffected. Takes the plain dicts _ppe_plain_data() already
     built, rather than re-querying, since callers usually need both."""
-    ppe_movement = fin.build_ppe_movement_schedule(class_dicts, asset_dicts, period_end)
+    ppe_movement = fin.build_ppe_movement_schedule(class_dicts, asset_dicts, period_end, period_start)
     ppe_policy_text = fin.ppe_accounting_policy_text(class_dicts)
     # An applied revaluation (ppe_revaluation.py): its IAS 16.77 disclosures ride on the movement, and its policy paragraph is added
     # to the depreciation policy (class dicts carry the engagement id and a "revalued" flag from _ppe_plain_data).
@@ -101,7 +101,7 @@ def _get_or_create_audit_opinion(engagement):
         report_basis = "audit" if engagement.type == "Audit" else "review"
         defaults = fin.default_audit_opinion_paragraphs(
             report_basis, "unmodified", engagement.client.name, engagement.period_end,
-            REPORTING_FRAMEWORK_LABELS.get(engagement.reporting_framework),
+            REPORTING_FRAMEWORK_LABELS.get(engagement.reporting_framework), period_start=engagement.period_start,
         )
         record = AuditOpinion(engagement_id=engagement.id, report_basis=report_basis, modification="unmodified", report_date=engagement.period_end, **defaults)
         db.session.add(record)
@@ -150,7 +150,7 @@ def regenerate_audit_opinion_wording(engagement_id):
     modification = request.form.get("modification") if request.form.get("modification") in OPINION_MODIFICATIONS else record.modification
     defaults = fin.default_audit_opinion_paragraphs(
         report_basis, modification, engagement.client.name, engagement.period_end,
-        REPORTING_FRAMEWORK_LABELS.get(engagement.reporting_framework),
+        REPORTING_FRAMEWORK_LABELS.get(engagement.reporting_framework), period_start=engagement.period_start,
     )
     record.report_basis = report_basis
     record.modification = modification
@@ -1080,7 +1080,7 @@ def generate_financial_statements_docx(engagement_id):
         flash("Enter or import the trial balance (Trial Balance tab) before generating the financial statements working paper.", "danger")
         return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
     _, _, ppe_class_dicts, ppe_asset_dicts = _ppe_plain_data(engagement_id)
-    ppe_movement, ppe_policy_text = _ppe_movement_and_policy(ppe_class_dicts, ppe_asset_dicts, engagement.period_end)
+    ppe_movement, ppe_policy_text = _ppe_movement_and_policy(ppe_class_dicts, ppe_asset_dicts, engagement.period_end, engagement.period_start)
     statements = fin.build_all_statements(
         trial_balance.lines, trial_balance.adjustments,
         reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,

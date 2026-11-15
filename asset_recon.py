@@ -205,7 +205,7 @@ def register_figures(engagement):
     import engagements as eng
     ps, pe, as_at = sched.bounds(engagement)
     classes, assets, class_dicts, asset_dicts = eng._ppe_plain_data(engagement.id)
-    movement = fin.build_ppe_movement_schedule(class_dicts, asset_dicts, pe)
+    movement = fin.build_ppe_movement_schedule(class_dicts, asset_dicts, pe, ps)
     if not movement:
         return None
     t = movement["total"]

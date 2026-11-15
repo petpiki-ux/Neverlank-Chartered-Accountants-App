@@ -871,6 +871,9 @@ class Engagement(db.Model):
     accounting_services = db.Column(db.Text)
     status = db.Column(db.String(30), nullable=False, default="Planning")
     period_end = db.Column(db.Date)
+    # First day of the financial period, only entered when the financial statements are NOT for twelve months (a first period, a changed
+    # year end): blank means the twelve months ending on period_end.
+    period_start = db.Column(db.Date)
     start_date = db.Column(db.Date, default=date.today)
     deadline = db.Column(db.Date)
     description = db.Column(db.Text)

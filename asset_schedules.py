@@ -99,7 +99,7 @@ def bounds(engagement):
     pe = engagement.period_end
     if not pe:
         return None, None, None
-    ps = fin._infer_period_start(pe)
+    ps = fin._infer_period_start(pe, getattr(engagement, "period_start", None))
     return ps, pe, ps - timedelta(days=1)
 
 
@@ -373,7 +373,7 @@ def tab_context(engagement):
     classes, assets, class_dicts, asset_dicts = eng._ppe_plain_data(engagement.id, include_draft=True)     # the draft valuation is previewed here
     openings, additions, later = split_assets(assets, ps, pe)
     disposals = [disposal_view(a) for a in assets if (a.disposal_cost or 0) or a.tax_disposed_on]
-    movement = fin.build_ppe_movement_schedule(class_dicts, asset_dicts, pe)
+    movement = fin.build_ppe_movement_schedule(class_dicts, asset_dicts, pe, ps)
 
     open_cost = sum(a.cost or 0.0 for a in openings)
     open_acc = sum(a.opening_accumulated_depreciation or 0.0 for a in openings)
@@ -385,6 +385,7 @@ def tab_context(engagement):
     open_nbv = open_cost - open_acc
     return {
         "as_period_start": ps, "as_period_end": pe, "as_opening_as_at": as_at,
+        "as_period_phrase": fin.period_phrase(getattr(engagement, "period_start", None), pe) if pe else "",
         "as_reval": _reval_card(engagement),
         "as_reval_draft": _reval_draft(engagement),
         "as_openings": openings, "as_additions": additions, "as_later": later, "as_disposals": disposals,

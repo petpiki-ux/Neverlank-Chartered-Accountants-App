@@ -24,7 +24,9 @@ def _par_text(par):
 def year_headers(engagement, client):
     cur = currency_of(client)
     y = engagement.period_end.year if engagement.period_end else None
-    return [f"{y} {cur}" if y else f"Current year {cur}", f"{y - 1} {cur}" if y else f"Prior year {cur}"]
+    import financials as _fin
+    label = _fin.period_column_label(getattr(engagement, "period_start", None), engagement.period_end)    # "2026", or "2026 (10 months)" for a short period
+    return [f"{label} {cur}" if y else f"Current year {cur}", f"{y - 1} {cur}" if y else f"Prior year {cur}"]
 
 
 def prior_owner_loan_openings(engagement):

@@ -102,7 +102,7 @@ def position(engagement, oci_current=0.0):
     rate = rec.tax_rate_percent / 100.0
     prate = (rec.prior_tax_rate_percent if rec.prior_tax_rate_percent is not None else rec.tax_rate_percent) / 100.0
     _, _, cdicts, adicts = eng._ppe_plain_data(engagement.id)
-    movement, _txt = eng._ppe_movement_and_policy(cdicts, adicts, engagement.period_end)
+    movement, _txt = eng._ppe_movement_and_policy(cdicts, adicts, engagement.period_end, engagement.period_start)
     ca_ctx = engagement_tax.capital_allowance_context(engagement) if (engagement.has_tax_module or engagement.has_asset_schedules) else None
     ppe = engagement_tax.deferred_tax_ppe(ca_ctx, movement, rec)
 

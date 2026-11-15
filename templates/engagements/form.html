@@ -108,6 +108,10 @@
         <input type="date" id="period_end" name="period_end" value="{{ engagement.period_end.isoformat() if engagement and engagement.period_end else '' }}">
       </div>
       <div>
+        <label for="period_start">Period start <span class="muted" style="font-weight:400;">(only if not 12 months)</span></label>
+        <input type="date" id="period_start" name="period_start" value="{{ engagement.period_start.isoformat() if engagement and engagement.period_start else '' }}" title="Leave blank for an ordinary twelve-month period ending on the period end. Enter the first day of the period when the financial statements are for fewer or more than twelve months (a first period, a changed year end).">
+      </div>
+      <div>
         <label for="deadline">Deadline</label>
         <input type="date" id="deadline" name="deadline" value="{{ engagement.deadline.isoformat() if engagement and engagement.deadline else '' }}">
       </div>

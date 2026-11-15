@@ -170,7 +170,7 @@ def _facts(kind, obj, variant=None):
         return f
     if kind == "fs":
         pe = obj.period_end
-        f.update(title="Financial Statements", period=f"for the year ended {_dmy(pe)}" if pe else "", big=str(pe.year) if pe else "",
+        f.update(title="Financial Statements", period=("for the " + __import__("financials").period_phrase(getattr(obj, "period_start", None), pe)) if pe else "", big=str(pe.year) if pe else "",
                  prepared_for="The Directors", framework=cover_art.FRAMEWORK_LABELS.get(getattr(obj, "reporting_framework", None), ""),
                  status={"Completed": "Final", "Review": "For review"}.get(obj.status, "Draft"))
         return f

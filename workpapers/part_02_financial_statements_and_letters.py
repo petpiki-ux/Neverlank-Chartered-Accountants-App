@@ -25,6 +25,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
 
     # The financial statements are the client's, not the firm's: no Neverlank letterhead from here on (the auditor's report above carries it).
     doc._fs_ctx = (engagement.client.name if engagement.client else "", engagement.period_end)
+    doc._fs_period = fin.period_phrase(engagement.period_start, engagement.period_end)
     import client_notes
     doc._fs_years = [h.replace(" ", "\n", 1) for h in client_notes.year_headers(engagement, engagement.client)]
     draft = not financial_statements or not financial_statements.is_partner_signed
@@ -279,7 +280,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
 
         _add_heading(doc, "2. Basis of preparation", level=2)
         basis_text = (financial_statements.basis_of_preparation if financial_statements else "") or fin.default_basis_of_preparation(
-            engagement.reporting_framework, statements.get("asset_models"))
+            engagement.reporting_framework, statements.get("asset_models"), engagement.period_start, engagement.period_end)
         doc.add_paragraph(basis_text)
 
         policy_notes = [n for n in statements["notes"] if n.get("policy")]

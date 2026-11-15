@@ -341,6 +341,21 @@ def directory():
     )
 
 
+def _period_start_from_form(period_end):
+    """The Period start box of the engagement form: the first day of a period that is not twelve months, or None (blank, not a date, or not before the period end)."""
+    raw = (request.form.get("period_start") or "").strip()
+    if not raw:
+        return None
+    try:
+        ps = datetime.strptime(raw, "%Y-%m-%d").date()
+    except ValueError:
+        return None
+    if period_end and ps >= period_end:
+        flash("The period start must be before the period end, so it was not saved.", "warning")
+        return None
+    return ps
+
+
 @engagements_bp.route("/new", methods=["GET", "POST"])
 @login_required
 def new_engagement():
@@ -387,6 +402,7 @@ def new_engagement():
         engagement.start_date = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else date.today()
         engagement.deadline = datetime.strptime(deadline, "%Y-%m-%d").date() if deadline else None
         engagement.period_end = datetime.strptime(period_end, "%Y-%m-%d").date() if period_end else None
+        engagement.period_start = _period_start_from_form(engagement.period_end)
 
         team_ids = request.form.getlist("team_members")
         if team_ids:
@@ -445,6 +461,7 @@ def edit_engagement(engagement_id):
         engagement.start_date = datetime.strptime(start_date, "%Y-%m-%d").date() if start_date else engagement.start_date
         engagement.deadline = datetime.strptime(deadline, "%Y-%m-%d").date() if deadline else None
         engagement.period_end = datetime.strptime(period_end, "%Y-%m-%d").date() if period_end else None
+        engagement.period_start = _period_start_from_form(engagement.period_end)
 
         team_ids = request.form.getlist("team_members")
         engagement.team_members = User.query.filter(User.id.in_(team_ids)).all() if team_ids else []

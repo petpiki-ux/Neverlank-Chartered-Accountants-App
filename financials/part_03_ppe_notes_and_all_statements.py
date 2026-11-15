@@ -2,7 +2,7 @@
 
 See __init__.py: all parts share one set of names, exactly as the single file financials.py did."""
 
-def build_ppe_movement_schedule(asset_classes, assets, period_end):
+def build_ppe_movement_schedule(asset_classes, assets, period_end, period_start=None):
     """Builds the Property, Plant and Equipment movement schedule (IAS
     16.73(e): a reconciliation of the carrying amount at the beginning and
     end of the period) from the Asset Register, grouped by Depreciation
@@ -34,7 +34,7 @@ def build_ppe_movement_schedule(asset_classes, assets, period_end):
     "revalued_to"."""
     if not assets:
         return None
-    period_start = _infer_period_start(period_end)
+    period_start = _infer_period_start(period_end, period_start)
 
     def _blank():
         return {
@@ -275,7 +275,7 @@ def extra_accounting_policies(lines, adjustments=None, models=None):
     return [{"title": "Right-of-use assets and leases", "text": text}]
 
 
-def default_basis_of_preparation(reporting_framework, models=None):
+def default_basis_of_preparation(reporting_framework, models=None, period_start=None, period_end=None):
     """The default Note 2 text: the framework's compliance sentence and the standard tail, with the historical cost sentence saying which
     assets are measured at revalued amounts instead (`models` from asset_measurement_models())."""
     text = REPORTING_FRAMEWORK_COMPLIANCE_TEXT.get(reporting_framework, "") + DEFAULT_BASIS_OF_PREPARATION_TAIL
@@ -283,7 +283,7 @@ def default_basis_of_preparation(reporting_framework, models=None):
     if revalued:
         text = text.replace("on the historical cost basis, except where stated otherwise,",
                             "on the historical cost basis, except for " + " and ".join(revalued) + ", which are measured at revalued amounts, and except where stated otherwise,")
-    return text
+    return text + short_period_basis_sentence(period_start, period_end)
 
 
 # Checked in the order line items appear on the face of the primary

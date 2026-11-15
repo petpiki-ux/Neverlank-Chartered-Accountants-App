@@ -992,7 +992,7 @@ def import_confirm(engagement_id, token):
         import engagements as eng_mod
         import financials as fin_mod
         _, all_assets, cdicts, adicts = eng_mod._ppe_plain_data(engagement.id)
-        mv = fin_mod.build_ppe_movement_schedule(cdicts, adicts, engagement.period_end)
+        mv = fin_mod.build_ppe_movement_schedule(cdicts, adicts, engagement.period_end, engagement.period_start)
         closing = mv["total"]["closing_nbv"]
         if removed:
             msg += (f" {len(removed)} other asset(s) not in the list were removed from the register (cost {sum(a.cost or 0.0 for a in removed):,.2f}) - "

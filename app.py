@@ -305,7 +305,7 @@ def _add_missing_columns():
         "engagement": [
             ("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0"),
             ("reporting_framework", "VARCHAR(20) DEFAULT 'full_ifrs'"),
-            ("cash_flow_method", "VARCHAR(10) DEFAULT 'indirect'"), ("prior_year_first_year", "BOOLEAN DEFAULT 0"),
+            ("cash_flow_method", "VARCHAR(10) DEFAULT 'indirect'"), ("prior_year_first_year", "BOOLEAN DEFAULT 0"), ("period_start", "DATE"),
             ("pie_listed", "BOOLEAN DEFAULT 0"), ("pie_financial_institution", "BOOLEAN DEFAULT 0"),
             ("pie_insurer", "BOOLEAN DEFAULT 0"), ("pie_asset_manager", "BOOLEAN DEFAULT 0"),
             ("pie_pension_fund", "BOOLEAN DEFAULT 0"), ("pie_medical_aid", "BOOLEAN DEFAULT 0"),
