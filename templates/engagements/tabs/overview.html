@@ -1,0 +1,116 @@
+{# Engagement page, tab "overview". Included by templates/engagements/detail.html, which supplies every variable and macro used here. #}
+  {% if engagement.is_corporate_finance %}
+  <div class="card">
+    <h3 class="mt-0">Advisory work on this engagement</h3>
+    <div class="form-row">
+      <div><strong>Forecast models:</strong> {{ engagement.cf_models|length }}
+        {% if engagement.cf_models %}<div class="muted" style="font-size:12px;">Latest: <a href="{{ url_for('corpfin.model_tab', model_id=engagement.cf_models[0].id, tab='overview') }}">{{ engagement.cf_models[0].model_number }} {{ engagement.cf_models[0].name }}</a> ({{ engagement.cf_models[0].status }})</div>{% endif %}</div>
+      <div><strong>Management accounts:</strong> {{ engagement.cf_packs|length }}
+        {% if engagement.cf_packs %}<div class="muted" style="font-size:12px;">Latest: <a href="{{ url_for('corpfin.pack_tab', pack_id=engagement.cf_packs[0].id, tab='summary') }}">{{ engagement.cf_packs[0].pack_number }} {{ engagement.cf_packs[0].name }}</a> ({{ engagement.cf_packs[0].status }})</div>{% endif %}</div>
+      <div><strong>Investment appraisals:</strong> {{ engagement.cf_projects|length }}
+        {% if engagement.cf_projects %}<div class="muted" style="font-size:12px;">Latest: <a href="{{ url_for('corpfin.view_project', project_id=engagement.cf_projects[0].id) }}">{{ engagement.cf_projects[0].project_number }} {{ engagement.cf_projects[0].name }}</a> ({{ engagement.cf_projects[0].status }})</div>{% endif %}</div>
+    </div>
+    {% if acceptance_cleared or current_user.role == 'admin' %}
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+      <a class="btn gold" href="{{ url_for('corpfin.new_model', client_id=engagement.client_id, engagement_id=engagement.id) }}">New forecast model</a>
+      <a class="btn gold" href="{{ url_for('corpfin.new_pack', client_id=engagement.client_id, engagement_id=engagement.id) }}">New management accounts</a>
+      <a class="btn" href="{{ url_for('corpfin.new_project', client_id=engagement.client_id, engagement_id=engagement.id) }}">New investment appraisal</a>
+      <a class="btn secondary" href="{{ url_for('corpfin.engagement_packs', engagement_id=engagement.id) }}">All packs</a>
+      <a class="btn secondary" href="{{ url_for('corpfin.engagement_models', engagement_id=engagement.id) }}">All models</a>
+      <a class="btn secondary" href="{{ url_for('corpfin.engagement_projects', engagement_id=engagement.id) }}">All appraisals</a>
+    </div>
+    {% else %}
+    <div class="muted" style="font-size:12px;">&#128274; Models and appraisals unlock once Client Acceptance &amp; Continuance is signed off.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+  <div class="card">
+    <div class="form-row">
+      <div><strong>Partner:</strong> {{ engagement.partner.name if engagement.partner else '—' }}</div>
+      <div><strong>Manager:</strong> {{ engagement.manager.name if engagement.manager else '—' }}</div>
+    </div>
+    <div class="form-row">
+      <div><strong>Start date:</strong> {{ engagement.start_date.strftime('%d %b %Y') if engagement.start_date else '—' }}</div>
+      <div><strong>Period end:</strong> {{ engagement.period_end.strftime('%d %b %Y') if engagement.period_end else '—' }}</div>
+      <div><strong>Deadline:</strong> {{ engagement.deadline.strftime('%d %b %Y') if engagement.deadline else '—' }}</div>
+    </div>
+    <div><strong>Team members:</strong>
+      {% if engagement.team_members %}{{ engagement.team_members|map(attribute='name')|join(', ') }}{% else %}—{% endif %}
+    </div>
+    {% if engagement.description %}
+    <p class="section-title">Scope / description</p>
+    <p>{{ engagement.description }}</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Staffing</h3>
+    <p class="muted" style="font-size:12.5px;">Book a staff member onto this engagement for a specific date range and % of their time - feeds the firm-wide staffing grid on <a href="{{ url_for('hr.planner') }}">HR &amp; Admin &gt; Planner</a>.</p>
+    <form method="post" action="{{ url_for('engagements.add_staff_allocation', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div>
+        <label for="user_id">Staff member</label>
+        <select id="user_id" name="user_id" required>
+          {% for u in users %}<option value="{{ u.id }}">{{ u.name }}</option>{% endfor %}
+        </select>
+      </div>
+      <div><label for="start_date">From</label><input type="date" id="start_date" name="start_date" required></div>
+      <div><label for="end_date">To</label><input type="date" id="end_date" name="end_date" required></div>
+      <div><label for="allocation_pct">% of time</label><input type="number" id="allocation_pct" name="allocation_pct" min="1" max="100" value="100"></div>
+      <div><label for="notes">Notes</label><input type="text" id="notes" name="notes" placeholder="optional"></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add allocation</button></div>
+    </form>
+    {% if engagement.allocations %}
+    <table>
+      <thead><tr><th>Staff</th><th>From</th><th>To</th><th>% of time</th><th>Notes</th><th></th></tr></thead>
+      <tbody>
+      {% for a in engagement.allocations|sort(attribute='start_date') %}
+        <tr>
+          <td>{{ a.user.name }}</td>
+          <td>{{ a.start_date.strftime('%d %b %Y') }}</td>
+          <td>{{ a.end_date.strftime('%d %b %Y') }}</td>
+          <td>{{ a.allocation_pct }}%</td>
+          <td class="muted">{{ a.notes or '—' }}</td>
+          <td><form method="post" action="{{ url_for('engagements.delete_staff_allocation', allocation_id=a.id) }}" class="inline" onsubmit="return confirm('Remove this allocation?')"><button type="submit" class="btn small danger">Remove</button></form></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No staffing booked for this engagement yet.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <div class="page-header" style="margin-bottom:10px;">
+      <h3 class="mt-0">Invoices</h3>
+      <a href="{{ url_for('quotations.new_quotation', client_id=engagement.client_id, engagement_id=engagement.id) }}" class="btn small secondary">+ New Quotation</a>
+      <a href="{{ url_for('invoicing.new_invoice', client_id=engagement.client_id, engagement_id=engagement.id) }}" class="btn small gold">+ New Invoice</a>
+    </div>
+    {% if engagement.invoices %}
+    <table>
+      <thead><tr><th>Invoice #</th><th>Issue date</th><th class="text-right">Total</th><th>Status</th></tr></thead>
+      <tbody>
+        {% for inv in engagement.invoices %}
+        <tr{% if inv.is_overdue %} class="danger"{% endif %}>
+          <td><a href="{{ url_for('invoicing.view_invoice', invoice_id=inv.id) }}">{{ inv.invoice_number }}</a></td>
+          <td>{{ inv.issue_date.strftime('%d %b %Y') if inv.issue_date else '—' }}</td>
+          <td class="text-right">{{ inv.currency }} {{ '%.2f'|format(inv.total) }}</td>
+          <td><span class="badge status-{{ inv.status }}">{{ inv.status }}</span></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No invoices for this engagement yet.</div>
+    {% endif %}
+  </div>
+
+  {% if user_has_permission(current_user, 'delete_engagements') %}
+  <form method="post" action="{{ url_for('engagements.delete_engagement', engagement_id=engagement.id) }}" onsubmit="return confirm('Delete this engagement and all its checklist items, risks, documents and tasks? This cannot be undone.');">
+    <button type="submit" class="btn danger small">Delete engagement</button>
+  </form>
+  {% endif %}
+
+  {{ qmacros.render_queries(engagement, 'overview', queries_by_section.get('overview', [])) }}
+
+

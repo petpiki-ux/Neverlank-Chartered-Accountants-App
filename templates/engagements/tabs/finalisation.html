@@ -1,0 +1,933 @@
+{# Engagement page, tab "finalisation". Included by templates/engagements/detail.html, which supplies every variable and macro used here. #}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+  {% if statements %}
+  <div class="card" style="padding:10px 16px;">
+    <a href="#cf-statement"><strong>Prior-year cash flow (comparative)</strong></a>
+    <span class="muted" style="font-size:12.5px;"> - type last year's figures straight into the prior-year column of the Statement of Cash Flows
+      ({% if cf_prior_lines %}{{ cf_prior_lines|length }} line(s) saved{% else %}not entered yet{% endif %}).</span>
+  </div>
+  {% endif %}
+  {% macro finalisation_checklist_row(item, responses) %}
+    <form method="post" action="{{ url_for('engagements.update_finalisation_checklist_item', item_id=item.id) }}" class="checklist-row">
+      <span class="item-text">{{ item.item_text }}</span>
+      <select name="response">
+        <option value="" {% if not item.response %}selected{% endif %}>—</option>
+        {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+      </select>
+      <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Save</button>
+      <button type="submit" formaction="{{ url_for('engagements.delete_finalisation_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+    </form>
+  {% endmacro %}
+
+  {% macro finalisation_checklist_section(items, prefix, engagement, responses) %}
+    {% set matched = [] %}
+    {% for item in items %}{% if item.section == prefix %}{{ matched.append(item) or "" }}{% endif %}{% endfor %}
+    <div class="card">
+      <h3 class="mt-0">{{ prefix }}</h3>
+      {% if matched %}
+        {% for item in matched %}{{ finalisation_checklist_row(item, responses) }}{% endfor %}
+      {% else %}
+      <div class="empty-state" style="padding:16px 0;">No checklist items for this section yet - add one below, or load the firm's default checklist at the top of this tab.</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('engagements.add_finalisation_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+        <input type="hidden" name="section" value="{{ prefix }}">
+        <div style="flex:2;"><input type="text" name="item_text" placeholder="Add a checklist item for this section" required></div>
+        <div><button type="submit" class="btn small secondary" style="margin-bottom:0;">Add item</button></div>
+      </form>
+    </div>
+  {% endmacro %}
+
+  <div class="card">
+    <h3 class="mt-0">Finalisation checklist</h3>
+    <p class="muted" style="font-size:12.5px;">
+      {% if engagement.type == 'Investigative Engagement' %}What's left to close out this investigation - findings and conclusions, reporting and referral decisions, evidence and chain-of-custody wrap-up, and file completion.{% elif engagement.type == 'Business Intelligence and IT Engagements' %}What's left to close this engagement - consolidating findings and recommendations, reporting and communication, evidence and documentation, and file completion.{% elif engagement.type == 'Secretarial' %}What's left to close this COBE-compliant secretarial engagement - registry &amp; reconciliations, the board &amp; governance audit trail, UBO &amp; capital reconciliation, the final deliverable reporting pack, and billing &amp; archiving.{% else %}What's left to close this engagement - subsequent events and going concern, overall conclusions, management communication, and file completion/archiving.{% endif %}
+    </p>
+    {% if finalisation_checklist and finalisation_checklist.checklist_assessment %}
+    <div class="flash {{ finalisation_checklist.checklist_assessment.level }}" style="margin-bottom:4px;">
+      {{ finalisation_checklist.checklist_assessment.label }}
+    </div>
+    {% endif %}
+    {% if not finalisation_checklist or not finalisation_checklist.checklist_items %}
+    <form method="post" action="{{ url_for('engagements.seed_finalisation_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist</button></form>
+    {% endif %}
+  </div>
+
+  {% if engagement.type == 'Investigative Engagement' %}
+  {% set finalisation_sections = ['Findings & Conclusions', 'Reporting & Referral', 'Evidence & Chain of Custody', 'File Completion'] %}
+  {% elif engagement.type == 'Business Intelligence and IT Engagements' %}
+  {% set finalisation_sections = ['Findings & Recommendations', 'Reporting & Communication', 'Evidence & Documentation', 'File Completion'] %}
+  {% elif engagement.type == 'Secretarial' %}
+  {% set finalisation_sections = ['Registry & Reconciliations', 'Board & Governance Audit Trail', 'UBO & Capital Reconciliation', 'Final Deliverable Reporting Pack', 'Billing & Archiving'] %}
+  {% else %}
+  {% set finalisation_sections = ['Subsequent Events & Going Concern', 'Overall Conclusions', 'Management Communication', 'File Completion & Archiving'] %}
+  {% endif %}
+  {% for section in finalisation_sections %}
+    {% if finalisation_checklist %}{{ finalisation_checklist_section(finalisation_checklist.checklist_items, section, engagement, finalisation_checklist_responses) }}{% endif %}
+  {% endfor %}
+
+  {% if finalisation_checklist and finalisation_checklist.checklist_items %}
+  <div class="card">
+    <h3 class="mt-0">Finalisation sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ finalisation_checklist.completed_by.name if finalisation_checklist.completed_by else '—' }} on {{ (finalisation_checklist.completed_at|cat).strftime('%d %b %Y') if finalisation_checklist.completed_at else '—' }}.
+      {% if finalisation_checklist.is_reviewed %}Reviewed by {{ finalisation_checklist.reviewed_by.name }} on {{ (finalisation_checklist.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if finalisation_checklist.is_partner_signed %}Partner sign-off by {{ finalisation_checklist.partner_signed_by.name }} on {{ (finalisation_checklist.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if finalisation_checklist.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_finalisation_checklist', record_id=finalisation_checklist.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif finalisation_checklist.is_complete and finalisation_checklist.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_finalisation_checklist', record_id=finalisation_checklist.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif finalisation_checklist.is_complete and effectively_reviewed(finalisation_checklist) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+      {% elif finalisation_checklist.is_complete %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Every item needs a response before this can be reviewed</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if finalisation_checklist.is_partner_signed %}
+      <form method="post" action="{{ url_for('engagements.partner_unsign_finalisation_checklist', record_id=finalisation_checklist.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif finalisation_checklist.is_complete and finalisation_checklist.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_finalisation_checklist', record_id=finalisation_checklist.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% elif finalisation_checklist.is_complete %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h3 class="mt-0">Directors' Statement</h3>
+    {% if engagement.type == 'Business Intelligence and IT Engagements' %}
+    <p class="muted" style="font-size:12.5px;">Goes into the IT &amp; Cyber Assurance Report itself, right after the cover page - the directors' statement of responsibility for the IT governance, cyber security and AML/CFT control environment reported on - with space for two directors to sign. Tailor the wording below to the entity, then keep the director names and date current.</p>
+    {% elif engagement.type == 'Accounting & Bookkeeping' %}
+    <p class="muted" style="font-size:12.5px;">Goes into the Financial Statements / management accounts themselves - right after the Client Details / Table of Contents page - with space for two directors to sign. Since this is a compilation/bookkeeping engagement rather than an audit or review, the wording below is management's statement of responsibility for the records and figures Neverlank has prepared/compiled, not an audit-style responsibility statement. Tailor the wording below to the entity, then keep the director names and date current.</p>
+    {% else %}
+    <p class="muted" style="font-size:12.5px;">Goes into the Financial Statements themselves - right after the Client Details / Table of Contents page and before the Audit Opinion/Review Report (if any) - with space for two directors to sign. Tailor the wording below to the entity, then keep the director names and date current.</p>
+    {% endif %}
+    <form method="post" action="{{ url_for('engagements.save_directors_statement', engagement_id=engagement.id) }}">
+      <label for="ds_statement_text">Statement text</label>
+      <textarea id="ds_statement_text" name="statement_text" rows="8">{{ directors_statement.statement_text if directors_statement and directors_statement.statement_text else default_directors_statement_text }}</textarea>
+      <div class="form-row">
+        <div><label for="ds_director1_name">Director 1 - name</label><input type="text" id="ds_director1_name" name="director1_name" value="{{ directors_statement.director1_name if directors_statement and directors_statement.director1_name else (suggested_directors[0].full_name if suggested_directors|length > 0 else '') }}"></div>
+        <div><label for="ds_director1_title">Director 1 - title</label><input type="text" id="ds_director1_title" name="director1_title" value="{{ directors_statement.director1_title if directors_statement and directors_statement.director1_title else 'Director' }}"></div>
+      </div>
+      <div class="form-row">
+        <div><label for="ds_director2_name">Director 2 - name</label><input type="text" id="ds_director2_name" name="director2_name" value="{{ directors_statement.director2_name if directors_statement and directors_statement.director2_name else (suggested_directors[1].full_name if suggested_directors|length > 1 else '') }}"></div>
+        <div><label for="ds_director2_title">Director 2 - title</label><input type="text" id="ds_director2_title" name="director2_title" value="{{ directors_statement.director2_title if directors_statement and directors_statement.director2_title else 'Director' }}"></div>
+      </div>
+      <div class="form-row">
+        <div><label for="ds_statement_date">Statement date</label><input type="date" id="ds_statement_date" name="statement_date" value="{{ directors_statement.statement_date.strftime('%Y-%m-%d') if directors_statement and directors_statement.statement_date else (engagement.period_end.strftime('%Y-%m-%d') if engagement.period_end else '') }}"></div>
+      </div>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+    <form method="post" action="{{ url_for('engagements.use_directors_on_file', engagement_id=engagement.id) }}" class="inline" style="margin-top:6px;">
+      <button type="submit" class="btn small secondary">Use directors on file</button>
+    </form>
+    {% if directors_statement and directors_statement.updated_at %}
+    <p class="muted" style="font-size:11px;margin-top:8px;">Last updated by {{ directors_statement.updated_by.name if directors_statement.updated_by else '—' }} on {{ (directors_statement.updated_at|cat).strftime('%d %b %Y') }}.</p>
+    {% endif %}
+  </div>
+
+  {% if engagement.type in ('Audit', 'Assurance') %}
+  <div class="card">
+    <h3 class="mt-0">Audit Opinion / Review Report</h3>
+    <p class="muted" style="font-size:12.5px;">One flexible tab for either report basis - pick an Audit opinion (ISA 700) or a Review / limited assurance conclusion (ISRE 2400), and the modification type. "Regenerate wording" rebuilds all four paragraphs as a fresh starting draft for whatever basis/modification is currently selected below (overwriting anything typed into them) - tailor the result to the engagement before issuing. Only a Partner sign-off actually issues the report.</p>
+    <form method="post" action="{{ url_for('engagements.save_audit_opinion', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        <div>
+          <label for="ao_report_basis">Report basis</label>
+          <select id="ao_report_basis" name="report_basis">
+            {% for b in audit_opinion_bases %}<option value="{{ b }}" {% if (audit_opinion.report_basis if audit_opinion else ('audit' if engagement.type == 'Audit' else 'review'))==b %}selected{% endif %}>{{ audit_opinion_basis_labels[b] }}</option>{% endfor %}
+          </select>
+        </div>
+        <div>
+          <label for="ao_modification">Modification</label>
+          <select id="ao_modification" name="modification">
+            {% for m in opinion_modifications %}<option value="{{ m }}" {% if (audit_opinion.modification if audit_opinion else 'unmodified')==m %}selected{% endif %}>{{ opinion_modification_labels[m] }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><label for="ao_report_date">Report date</label><input type="date" id="ao_report_date" name="report_date" value="{{ audit_opinion.report_date.strftime('%Y-%m-%d') if audit_opinion and audit_opinion.report_date else (engagement.period_end.strftime('%Y-%m-%d') if engagement.period_end else '') }}"></div>
+      </div>
+      {% if (audit_opinion.modification if audit_opinion else 'unmodified') != 'unmodified' %}
+      <label for="ao_basis_for_modification">Basis for modification (internal note - describe the matter)</label>
+      <textarea id="ao_basis_for_modification" name="basis_for_modification" rows="3">{{ audit_opinion.basis_for_modification if audit_opinion else '' }}</textarea>
+      {% endif %}
+      <label for="ao_opinion_paragraph">Opinion / Conclusion paragraph</label>
+      <textarea id="ao_opinion_paragraph" name="opinion_paragraph" rows="4">{{ audit_opinion.opinion_paragraph if audit_opinion else default_opinion_paragraphs.opinion_paragraph }}</textarea>
+      <label for="ao_basis_paragraph">Basis for Opinion / Conclusion paragraph</label>
+      <textarea id="ao_basis_paragraph" name="basis_paragraph" rows="4">{{ audit_opinion.basis_paragraph if audit_opinion else default_opinion_paragraphs.basis_paragraph }}</textarea>
+      <label for="ao_management_responsibility_paragraph">Directors' Responsibility paragraph</label>
+      <textarea id="ao_management_responsibility_paragraph" name="management_responsibility_paragraph" rows="4">{{ audit_opinion.management_responsibility_paragraph if audit_opinion else default_opinion_paragraphs.management_responsibility_paragraph }}</textarea>
+      <label for="ao_auditor_responsibility_paragraph">Auditor's / Reviewer's Responsibility paragraph</label>
+      <textarea id="ao_auditor_responsibility_paragraph" name="auditor_responsibility_paragraph" rows="4">{{ audit_opinion.auditor_responsibility_paragraph if audit_opinion else default_opinion_paragraphs.auditor_responsibility_paragraph }}</textarea>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+    <form method="post" action="{{ url_for('engagements.regenerate_audit_opinion_wording', engagement_id=engagement.id) }}" class="inline" style="margin-top:6px;">
+      <input type="hidden" name="report_basis" value="{{ audit_opinion.report_basis if audit_opinion else ('audit' if engagement.type == 'Audit' else 'review') }}">
+      <input type="hidden" name="modification" value="{{ audit_opinion.modification if audit_opinion else 'unmodified' }}">
+      <button type="submit" class="btn small secondary">Regenerate wording for the basis/modification above</button>
+    </form>
+
+    {% if audit_opinion %}
+    <p class="muted" style="font-size:12.5px;margin-top:10px;">
+      Drafted by {{ audit_opinion.completed_by.name if audit_opinion.completed_by else '—' }} on {{ (audit_opinion.completed_at|cat).strftime('%d %b %Y') if audit_opinion.completed_at else '—' }}.
+      {% if audit_opinion.is_reviewed %}Reviewed by {{ audit_opinion.reviewed_by.name }} on {{ (audit_opinion.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if audit_opinion.is_partner_signed %}Partner sign-off by {{ audit_opinion.partner_signed_by.name }} on {{ (audit_opinion.partner_signed_at|cat).strftime('%d %b %Y') }} - report issued.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if audit_opinion.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_audit_opinion', opinion_id=audit_opinion.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif audit_opinion.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_audit_opinion', opinion_id=audit_opinion.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(audit_opinion) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if audit_opinion.is_partner_signed %}
+      <form method="post" action="{{ url_for('engagements.partner_unsign_audit_opinion', opinion_id=audit_opinion.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif audit_opinion.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_audit_opinion', opinion_id=audit_opinion.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off (issues the report)</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h3 class="mt-0">Working papers</h3>
+    <p class="muted" style="font-size:12.5px;">Generate working papers directly from the data already captured on this engagement - each one is FILED under Working Papers (following the firm's Filing Index reference where one applies) rather than downloaded straight away; download the filed copy whenever you actually need the file. Regenerating keeps every earlier version on file rather than replacing it. References (see the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a>): {% if engagement.type != 'Business Intelligence and IT Engagements' %}{{ filing_reference('financials') }} (financial statements), N1000 (trial balance &amp; adjustments), {% endif %}{{ filing_reference('rep_letter') }} (management representation letter), {{ filing_reference('report_to_management') }} (report to management), {{ filing_reference('finalisation') }} (finalisation checklist){% if engagement.type == 'Investigative Engagement' %}, FR-1 (forensic investigation report - no filing-index code, outside the scope of the audit filing policy){% elif engagement.type == 'Business Intelligence and IT Engagements' %}, ITR-1 (IT &amp; Cyber Assurance Report - no filing-index code, outside the scope of the audit filing policy){% endif %}.</p>
+
+    {% if engagement.type != 'Business Intelligence and IT Engagements' %}
+    <h4 class="mt-0" style="margin-bottom:4px;">Financial statements (Word, Ref. {{ filing_reference('financials') }})</h4>
+    <form method="post" action="{{ url_for('engagements.generate_financial_statements_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    <a href="{{ url_for('clients.cover_preview', client_id=engagement.client_id) }}" target="_blank" class="muted" style="font-size:12px; margin-left:8px;">Preview the cover page</a>
+    <a href="{{ url_for('covers.edit', kind='fs', ref_id=engagement.id) }}" class="btn small secondary" style="margin-left:6px;" title="Choose the design, colours, wording and status line of the Financial Statements cover">Cover page: design &amp; wording</a>
+    {{ filed_workpapers('financial_statements') }}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">Trial balance &amp; adjustments (Excel, Ref. N1000)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_trial_balance_xlsx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('trial_balance_adjustments') }}
+    {% endif %}
+
+    <h4 {% if engagement.type == 'Business Intelligence and IT Engagements' %}class="mt-0" {% endif %}style="margin-bottom:4px;{% if engagement.type != 'Business Intelligence and IT Engagements' %}margin-top:16px;{% endif %}">Finalisation checklist (Word, Ref. {{ filing_reference('finalisation') }})</h4>
+    <form method="post" action="{{ url_for('engagements.generate_finalisation_checklist_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('finalisation_checklist') }}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">Management representation letter (Word, Ref. {{ filing_reference('rep_letter') }})</h4>
+    <form method="post" action="{{ url_for('engagements.generate_rep_letter_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('rep_letter') }}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">Report to management (Word, Ref. {{ filing_reference('report_to_management') }})</h4>
+    <form method="post" action="{{ url_for('engagements.generate_report_to_management_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {% set rtm = workpaper_narratives.get('report_to_management') %}
+    <div style="margin:6px 0;font-size:12.5px;">
+      {% if rtm and rtm.id and mp_signed(rtm) %}
+        <span class="badge status-Completed">Signed by the Managing Partner</span> {{ (rtm.mp_signed_at|cat).strftime('%d %b %Y') }}.
+        {% if mp_is_signer(current_user) %}<form method="post" action="{{ url_for('mpsign.unsign', kind='report_to_management', doc_id=rtm.id) }}" class="inline" onsubmit="return confirm('Remove your signature from the Report to Management letter?');"><button type="submit" class="btn small secondary">Remove signature</button></form>{% endif %}
+      {% elif mp_is_signer(current_user) %}
+        <form method="post" action="{{ url_for('mpsign.sign_report_to_management', engagement_id=engagement.id) }}" class="inline" onsubmit="return confirm('Apply your signature as Managing Partner to the Report to Management letter? Generate it again afterwards to file a signed copy.');"><button type="submit" class="btn small gold">Sign as Managing Partner</button></form>
+        <span class="muted">The letter is generated unsigned until you do.</span>
+      {% else %}
+        <span class="muted">Unsigned - only the Managing Partner (Admin) can sign this letter.</span>
+      {% endif %}
+    </div>
+    {{ filed_workpapers('report_to_management') }}
+
+    {% if engagement.type == 'Investigative Engagement' %}
+    <h4 style="margin-bottom:4px;margin-top:16px;">Forensic investigation report (Word, Ref. FR-1 - outside the filing policy's scope)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_forensic_report_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('forensic_report') }}
+    {% endif %}
+
+    {% if engagement.type == 'Business Intelligence and IT Engagements' %}
+    <h4 style="margin-bottom:4px;margin-top:16px;">IT &amp; Cyber Assurance Report (Word, Ref. ITR-1 - outside the filing policy's scope)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_it_audit_report_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file</button></form>
+    {{ filed_workpapers('it_audit_report') }}
+    {% endif %}
+
+    <h4 style="margin-bottom:4px;margin-top:16px;">Engagement file summary (PDF)</h4>
+    <form method="post" action="{{ url_for('engagements.generate_engagement_file_summary_pdf', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small gold">Generate &amp; file</button></form>
+    {{ filed_workpapers('file_summary') }}
+  </div>
+
+  {% macro narrative_editor(kind, title) %}
+    {% set narrative = workpaper_narratives.get(kind) %}
+    <div class="card">
+      <h3 class="mt-0">{{ title }}</h3>
+      <form method="post" action="{{ url_for('engagements.save_workpaper_narrative', engagement_id=engagement.id, kind=kind) }}">
+        <textarea name="body" rows="8" placeholder="One point per line - each becomes a bullet in the downloaded document.">{{ narrative.body if narrative else '' }}</textarea>
+        <button type="submit" class="btn gold">Save</button>
+      </form>
+      {% if narrative and narrative.id %}
+      <p class="muted" style="font-size:12.5px;margin-top:10px;">
+        Prepared by {{ narrative.completed_by.name if narrative.completed_by else '—' }} on {{ (narrative.completed_at|cat).strftime('%d %b %Y') if narrative.completed_at else '—' }}.
+        {% if narrative.is_reviewed %}Reviewed by {{ narrative.reviewed_by.name }} on {{ (narrative.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+        {% if narrative.is_partner_signed %}Partner sign-off by {{ narrative.partner_signed_by.name }} on {{ (narrative.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      </p>
+      {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+        {% if narrative.is_reviewed %}
+        <form method="post" action="{{ url_for('engagements.unreview_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+        {% elif narrative.completed_by_id != current_user.id %}
+        <form method="post" action="{{ url_for('engagements.review_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+        {% elif effectively_reviewed(narrative) %}
+        <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+        {% else %}
+        <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+        {% endif %}
+      {% endif %}
+      {% if current_user.role in ('partner', 'admin') %}
+        {% if narrative.is_partner_signed %}
+        <form method="post" action="{{ url_for('engagements.partner_unsign_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+        {% elif narrative.completed_by_id != current_user.id %}
+        <form method="post" action="{{ url_for('engagements.partner_sign_workpaper_narrative', narrative_id=narrative.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+        {% else %}
+        <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+        {% endif %}
+      {% endif %}
+      {% else %}
+      <p class="muted" style="font-size:11.5px;margin-top:10px;">Not saved yet - shown above is the firm's default starting wording. Edit and Save to make this engagement's own persistent copy.</p>
+      {% endif %}
+    </div>
+  {% endmacro %}
+
+  {{ narrative_editor('rep_letter', 'Management Representation Letter - body (Ref. ' + filing_reference('rep_letter') + ')') }}
+  {{ narrative_editor('report_to_management', 'Report to Management - body (Ref. ' + filing_reference('report_to_management') + ')') }}
+  {% if engagement.type == 'Investigative Engagement' %}
+  {{ narrative_editor('forensic_executive_summary', 'Forensic Investigation Report - Executive Summary (Ref. FR-1)') }}
+  {% endif %}
+  {% if engagement.type == 'Business Intelligence and IT Engagements' %}
+  {{ narrative_editor('it_audit_report_summary', 'IT & Cyber Assurance Report - Executive Summary (Ref. ITR-1)') }}
+  {% endif %}
+
+  {% if engagement.type != 'Business Intelligence and IT Engagements' %}
+  <div class="card">
+    <h3 class="mt-0">Trial Balance</h3>
+    <p class="muted" style="font-size:12.5px;">The preliminary trial balance is entered on its own <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab (so it can drive Analytical Review earlier in the engagement) - come back here once it exists to propose audit adjustments and generate the financial statements below.</p>
+    {% if not trial_balance or not trial_balance.lines %}
+    <div class="empty-state">No trial balance yet - <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">enter or import it on the Trial Balance tab</a> first.</div>
+    {% else %}
+    <p class="muted" style="font-size:11.5px;">{{ trial_balance.lines|length }} account(s){% if trial_balance.completed_by %}, last updated by {{ trial_balance.completed_by.name }} on {{ (trial_balance.completed_at|cat).strftime('%d %b %Y') }}{% endif %}. {{ trial_balance.unmapped_count }} unmapped.</p>
+    {% endif %}
+  </div>
+
+  {% if trial_balance %}
+  <div class="card">
+    <h3 class="mt-0">Audit adjustments</h3>
+    <p class="muted" style="font-size:12.5px;">Journal entries proposed against the preliminary trial balance above - the Financial Statements below are computed from the preliminary trial balance PLUS these adjustments. A <strong>current-year</strong> adjustment changes the year under audit only. A <strong>prior-year</strong> adjustment restates the comparative column (IAS 8): choose "Prior year" when you add it. By default it also restates this year's opening balances - its balance sheet lines are repeated in the current year and its profit and loss lines go to the retained earnings brought forward - so last year's closing and this year's opening still agree; untick that if the same correction has already been made in the current year's trial balance. Each adjustment carries its own Preparer/Reviewer/Partner sign-off, same as any other workpaper.</p>
+    <form method="post" action="{{ url_for('engagements.add_audit_adjustment', tb_id=trial_balance.id) }}" class="form-row" style="align-items:flex-end;">
+      <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" placeholder="e.g. AJE 1"></div>
+      <div style="grid-column: span 2;"><label for="adj_description">Description</label><input type="text" id="adj_description" name="description" placeholder="e.g. Accrue December audit fee"></div>
+      <div><label for="adj_applies">Adjusts</label><select id="adj_applies" name="applies_to"><option value="current">Current year</option><option value="prior">Prior year (restates comparatives)</option></select></div>
+      <div><label for="adj_carry">If prior year</label><select id="adj_carry" name="carry_to_current"><option value="1">Also restate this year's opening balances</option><option value="0">Comparatives only</option></select></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add adjustment</button></div>
+    </form>
+
+    {% if trial_balance.adjustments %}
+    {# A journal is "concluded" once it is reviewed AND partner-signed: it starts collapsed to one line so the working area stays short. Journals still being worked on stay open. #}
+    <div class="adj-toolbar" style="display:flex;gap:8px;align-items:center;margin:4px 0 8px;">
+      <button type="button" class="btn small secondary" id="adjCollapseAll">Collapse all</button>
+      <button type="button" class="btn small secondary" id="adjExpandAll">Expand all</button>
+      <span class="muted" style="font-size:11.5px;">Concluded journals (reviewed and partner-signed) start collapsed.</span>
+    </div>
+    {% for adj in trial_balance.adjustments %}
+    {% set adj_concluded = adj.is_reviewed and adj.is_partner_signed %}
+    <details class="card adj-card" style="background:#faf9f6;" id="adj{{ adj.id }}" data-adj-id="{{ adj.id }}" data-concluded="{{ 1 if adj_concluded else 0 }}"{% if not adj_concluded %} open{% endif %}>
+      <summary style="cursor:pointer;font-size:13px;display:flex;flex-wrap:wrap;gap:6px 10px;align-items:center;">
+        <strong>{{ adj.reference or 'No reference' }}</strong>
+        <span>{{ adj.description or '(no description)' }}</span>
+        <span class="muted" style="font-size:12px;">{{ 'Prior year' if adj.is_prior_year else 'Current year' }} - Dr {{ '%.2f'|format(adj.total_debit) }} / Cr {{ '%.2f'|format(adj.total_credit) }}</span>
+        {% if not adj.is_balanced %}<span class="badge" style="background:#f8d7da;color:#b02a2a;">Out of balance</span>
+        {% elif adj_concluded %}<span class="badge status-Completed">Concluded</span>
+        {% elif adj.is_reviewed %}<span class="badge status-Review">Reviewed - awaiting partner</span>
+        {% else %}<span class="badge status-Review">Awaiting review</span>{% endif %}
+      </summary>
+      {% if adj.is_prior_year %}<div style="margin-bottom:6px;"><span class="badge status-Review">Prior year - restates the comparatives{% if adj.carry_to_current is not false %} and this year's opening balances{% endif %}</span></div>{% endif %}
+      <form method="post" action="{{ url_for('engagements.update_audit_adjustment', adjustment_id=adj.id) }}" class="form-row" style="align-items:flex-end;">
+        <div><label>Reference</label><input type="text" name="reference" value="{{ adj.reference or '' }}" style="width:100px;"></div>
+        <div style="grid-column: span 2;"><label>Description</label><input type="text" name="description" value="{{ adj.description or '' }}"></div>
+        <div><label>Adjusts</label><select name="applies_to"><option value="current" {% if not adj.is_prior_year %}selected{% endif %}>Current year</option><option value="prior" {% if adj.is_prior_year %}selected{% endif %}>Prior year (restates comparatives)</option></select></div>
+        <div><label>If prior year</label><select name="carry_to_current"><option value="1" {% if adj.carry_to_current is not false %}selected{% endif %}>Also restate this year's opening balances</option><option value="0" {% if adj.carry_to_current is false %}selected{% endif %}>Comparatives only</option></select></div>
+        <div>
+          <button type="submit" class="btn small secondary" style="margin-bottom:14px;">Save</button>
+          <button type="submit" formaction="{{ url_for('engagements.delete_audit_adjustment', adjustment_id=adj.id) }}" class="btn small danger" style="margin-bottom:14px;" onclick="return confirm('Delete this adjustment and all its lines?')">Delete</button>
+        </div>
+      </form>
+
+      {% if adj.lines %}
+      <table>
+        <thead><tr><th>Account</th><th>IAS 1 category</th><th>Debit</th><th>Credit</th><th></th></tr></thead>
+        <tbody>
+        {% for line in adj.lines %}
+          <tr>
+            <form method="post" action="{{ url_for('engagements.update_audit_adjustment_line', line_id=line.id) }}" class="inline">
+            <td><input type="text" name="account_name" value="{{ line.account_name }}" style="width:160px;margin-bottom:0;"></td>
+            <td>
+              <select name="fs_category" style="margin-bottom:0;">
+                {% for group_label, choices in category_choices %}
+                <optgroup label="{{ group_label }}">
+                  {% for code, label in choices %}<option value="{{ code }}" {% if line.fs_category==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+                </optgroup>
+                {% endfor %}
+              </select>
+            </td>
+            <td><input type="number" step="0.01" name="debit" value="{{ line.debit or 0 }}" style="width:95px;margin-bottom:0;"></td>
+            <td><input type="number" step="0.01" name="credit" value="{{ line.credit or 0 }}" style="width:95px;margin-bottom:0;"></td>
+            <td>
+              <button type="submit" class="btn small secondary">Save</button>
+              <button type="submit" formaction="{{ url_for('engagements.delete_audit_adjustment_line', line_id=line.id) }}" class="btn small danger" onclick="return confirm('Delete this line?')">Delete</button>
+            </td>
+            </form>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      <p class="muted" style="font-size:11.5px;{% if not adj.is_balanced %}color:#b02a2a;{% endif %}">Total debit {{ '%.2f'|format(adj.total_debit) }}, total credit {{ '%.2f'|format(adj.total_credit) }}.{% if not adj.is_balanced %} Out of balance - debits must equal credits before this can be reviewed or signed off.{% else %} Balanced.{% endif %}</p>
+      {% else %}
+      <div class="empty-state">No lines yet - add at least one debit and one credit line below.</div>
+      {% endif %}
+
+      <form method="post" action="{{ url_for('engagements.add_audit_adjustment_line', adjustment_id=adj.id) }}" class="form-row" style="align-items:flex-end;">
+        <div><label>Account name</label><input type="text" name="account_name" placeholder="e.g. Audit fee accrual" required></div>
+        <div>
+          <label>Category</label>
+          <select name="fs_category" required>
+            <option value="">Select...</option>
+            {% for group_label, choices in category_choices %}
+            <optgroup label="{{ group_label }}">
+              {% for code, label in choices %}<option value="{{ code }}">{{ label }}</option>{% endfor %}
+            </optgroup>
+            {% endfor %}
+          </select>
+        </div>
+        <div><label>Debit</label><input type="number" step="0.01" name="debit"></div>
+        <div><label>Credit</label><input type="number" step="0.01" name="credit"></div>
+        <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add line</button></div>
+      </form>
+
+      <p class="muted" style="font-size:12px;margin-top:10px;">
+        Prepared by {{ adj.completed_by.name if adj.completed_by else '—' }} on {{ (adj.completed_at|cat).strftime('%d %b %Y') if adj.completed_at else '—' }}.
+        {% if adj.is_reviewed %}Reviewed by {{ adj.reviewed_by.name }} on {{ (adj.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+        {% if adj.is_partner_signed %}Partner sign-off by {{ adj.partner_signed_by.name }} on {{ (adj.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      </p>
+      {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+        {% if adj.is_reviewed %}
+        <form method="post" action="{{ url_for('engagements.unreview_audit_adjustment', adjustment_id=adj.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+        {% elif adj.completed_by_id != current_user.id %}
+        <form method="post" action="{{ url_for('engagements.review_audit_adjustment', adjustment_id=adj.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+        {% elif effectively_reviewed(adj) %}
+        <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+        {% else %}
+        <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+        {% endif %}
+      {% endif %}
+      {% if current_user.role in ('partner', 'admin') %}
+        {% if adj.is_partner_signed %}
+        <form method="post" action="{{ url_for('engagements.partner_unsign_audit_adjustment', adjustment_id=adj.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+        {% elif adj.completed_by_id != current_user.id %}
+        <form method="post" action="{{ url_for('engagements.partner_sign_audit_adjustment', adjustment_id=adj.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+        {% else %}
+        <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+        {% endif %}
+      {% endif %}
+    </details>
+    {% endfor %}
+    <script>
+    (function () {
+      var cards = document.querySelectorAll('details.adj-card');
+      if (!cards.length) return;
+      var key = 'nl_adj_state';
+      var saved = {};
+      try { saved = JSON.parse(localStorage.getItem(key) || '{}') || {}; } catch (e) { saved = {}; }
+      var target = (location.hash || '').replace('#', '');
+      cards.forEach(function (d) {
+        var id = d.getAttribute('data-adj-id'), concl = d.getAttribute('data-concluded');
+        var s = saved[id];
+        // remembered choice only counts while the journal is in the same state (concluded or not) as when it was saved
+        if (s && s.c === concl) { d.open = !!s.o; }
+        if (d.id === target) { d.open = true; }
+        d.addEventListener('toggle', function () {
+          saved[id] = { o: d.open ? 1 : 0, c: concl };
+          try { localStorage.setItem(key, JSON.stringify(saved)); } catch (e) {}
+        });
+      });
+      function setAll(v) { cards.forEach(function (d) { d.open = v; }); }
+      var c = document.getElementById('adjCollapseAll'), x = document.getElementById('adjExpandAll');
+      if (c) c.addEventListener('click', function () { setAll(false); });
+      if (x) x.addEventListener('click', function () { setAll(true); });
+    })();
+    </script>
+    {% else %}
+    <div class="empty-state">No adjustments proposed yet - the financial statements below are computed straight from the preliminary trial balance.</div>
+    {% endif %}
+  </div>
+  {% endif %}
+  {% endif %}
+
+  {% if statements %}
+  {% if trial_balance.unmapped_count > 0 %}
+  <div class="card"><div class="empty-state">{{ trial_balance.unmapped_count }} account(s) above still need a category - the statements below exclude anything unmapped, so treat them as a draft until every account is mapped.</div></div>
+  {% endif %}
+  {% if trial_balance.adjustments %}
+  <div class="card"><p class="muted" style="font-size:12px;margin:0;">The statements below include {{ trial_balance.adjustments|length }} audit adjustment(s) on top of the preliminary trial balance (see "Audit adjustments" above){% set pys = trial_balance.adjustments|selectattr('is_prior_year')|list %}{% if pys %}, of which {{ pys|length }} restate{{ 's' if pys|length == 1 else '' }} the prior year comparatives ({% for a in pys %}{{ a.reference }}{% if not loop.last %}, {% endif %}{% endfor %}){% else %} - the prior year comparative is unadjusted{% endif %}.</p></div>
+  {% endif %}
+
+  <div class="card">
+    <h3 class="mt-0">Statement of Financial Position</h3>
+    <table>
+      <thead><tr><th></th><th>Note</th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
+      <tbody>
+        <tr><td class="section-title" colspan="4">Non-current assets</td></tr>
+        {% for r in statements.sfp.non_current_assets %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total non-current assets</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.nca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.nca_total.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="4">Current assets</td></tr>
+        {% for r in statements.sfp.current_assets %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total current assets</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.ca_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.ca_total.prior) }}</strong></td></tr>
+        <tr><td><strong>Total assets</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_assets.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_assets.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="4">Equity</td></tr>
+        {% for r in statements.sfp.equity %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total equity</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_equity.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_equity.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="4">Non-current liabilities</td></tr>
+        {% for r in statements.sfp.non_current_liabilities %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total non-current liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.ncl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.ncl_total.prior) }}</strong></td></tr>
+        <tr><td class="section-title" colspan="4">Current liabilities</td></tr>
+        {% for r in statements.sfp.current_liabilities %}<tr><td>{{ r.label }}</td><td>{{ r.note or '' }}</td><td class="text-right">{{ '%.0f'|format(r.current) }}</td><td class="text-right">{{ '%.0f'|format(r.prior) }}</td></tr>{% endfor %}
+        <tr><td><strong>Total current liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.cl_total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.cl_total.prior) }}</strong></td></tr>
+        <tr><td><strong>Total equity and liabilities</strong></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_equity_and_liabilities.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.sfp.total_equity_and_liabilities.prior) }}</strong></td></tr>
+      </tbody>
+    </table>
+    {% set bc = statements.sfp.balance_check %}
+    {% if statements.whole_numbers %}
+    <p class="muted" style="font-size:11.5px;">Figures are rounded to the nearest whole number; every total is added up from the rounded lines.{% for a in statements.rounding.absorbed %} A rounding difference of {{ '%.0f'|format(a.amount|abs) }} is included in {{ a.label|lower }} ({{ a.period }} year) so the statement balances.{% endfor %}</p>
+    {% endif %}
+    <p class="muted" style="font-size:11.5px;{% if bc.current|abs > 0.01 or bc.prior|abs > 0.01 %}color:#b02a2a;{% endif %}">
+      Balance check (assets less equity and liabilities): current year {{ '%.0f'|format(bc.current) }}, prior year {{ '%.0f'|format(bc.prior) }}.
+      {% if bc.current|abs > 0.01 or bc.prior|abs > 0.01 %}Non-zero - check every account is mapped to the right category and that the trial balance above balances.{% else %}Ties out.{% endif %}
+    </p>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Statement of Profit or Loss and Other Comprehensive Income</h3>
+    <table>
+      <thead><tr><th></th><th>Note</th><th class="text-right">Current year</th><th class="text-right">Prior year</th></tr></thead>
+      <tbody>
+      {% for r in statements.pl.rows %}
+        <tr>
+          <td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}</td>
+          <td>{{ r.note or '' }}</td>
+          <td class="text-right">{% if r.bold %}<strong>{{ '%.0f'|format(r.current) }}</strong>{% else %}{{ '%.0f'|format(r.current) }}{% endif %}</td>
+          <td class="text-right">{% if r.bold %}<strong>{{ '%.0f'|format(r.prior) }}</strong>{% else %}{{ '%.0f'|format(r.prior) }}{% endif %}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Statement of Changes in Equity</h3>
+    <table>
+      <thead><tr><th>Component</th><th class="text-right">Opening</th><th></th><th class="text-right">Movement</th><th class="text-right">Closing</th></tr></thead>
+      <tbody>
+      {% for r in statements.equity.rows %}
+        <tr>
+          <td>{{ r.label }}</td>
+          <td class="text-right">{{ '%.0f'|format(r.opening) }}</td>
+          <td class="muted" style="font-size:11.5px;">{{ r.movement_desc }}</td>
+          <td class="text-right">{{ '%.0f'|format(r.movement) }}</td>
+          <td class="text-right"><strong>{{ '%.0f'|format(r.closing) }}</strong></td>
+        </tr>
+        {% if r.label == 'Retained earnings' %}
+        <tr><td colspan="5" class="muted" style="font-size:11px;{% if r.opening_variance|abs > 0.01 %}color:#b02a2a;{% endif %}">Opening balance should agree with prior year's closing retained earnings ({{ '%.0f'|format(r.opening_check) }}){% if r.opening_variance|abs > 0.01 %} - currently differs by {{ '%.0f'|format(r.opening_variance) }} (may reflect dividends posted directly to retained earnings, a prior period adjustment, or a mapping to review).{% else %} - agrees.{% endif %}</td></tr>
+        {% endif %}
+      {% endfor %}
+        <tr><td><strong>Total equity</strong></td><td class="text-right"><strong>{{ '%.0f'|format(statements.equity.total_opening) }}</strong></td><td></td><td></td><td class="text-right"><strong>{{ '%.0f'|format(statements.equity.total_closing) }}</strong></td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <div class="card" id="cf-statement">
+    {% set cfp = statements.cf.prior %}
+    {% set cfy = statements.year_labels or ['Current year', 'Prior year'] %}
+    <h3 class="mt-0">Statement of Cash Flows ({{ cash_flow_method_labels.get(statements.cf.method, 'Indirect method') }})</h3>
+    <p class="muted" style="font-size:12px;">Type last year's figures straight into the <strong>{{ cfy[1].replace(' ', ' ', 1) }}</strong> column, from last year's signed financial statements (outflows with a minus sign, e.g. -1,200), then press <em>Save prior-year figures</em>. Profit before tax is taken from the prior-year income statement. Subtotals, the closing cash and the check against the prior-year cash in the trial balance are worked out when you save. Use the same headings as this year; a line this year does not have can be added below the statement. Investing activities this year are the net movement in each non-current asset's carrying value, so depreciation is not added back in this year's operating activities (see the memo line); last year's depreciation charge, when it was added back, goes on its own line. Change the method in "Basis of preparation &amp; sign-off" - investing and financing activities, and every subtotal from "Cash generated from operations" onward, are identical either way (IAS 7).</p>
+    {% macro cfline(label, cur, pri, bold=False, note='', memo=False) %}
+    <tr{% if memo %} class="muted"{% endif %}><td>{% if bold %}<strong>{{ label }}</strong>{% else %}{{ label }}{% endif %}</td><td>{{ note or '' }}</td>
+      <td class="text-right">{% if bold %}<strong>{{ '%.0f'|format(cur) }}</strong>{% else %}{{ '%.0f'|format(cur) }}{% endif %}</td>
+      <td class="text-right">{% if pri is not none %}{% if bold %}<strong>{{ '%.0f'|format(pri) }}</strong>{% else %}{{ '%.0f'|format(pri) }}{% endif %}{% endif %}</td></tr>
+    {% endmacro %}
+    {% macro cfrow(r) %}
+    <tr{% if r.memo and not r.dep_merged %} class="muted"{% endif %}><td>{% if r.bold %}<strong>{{ r.label }}</strong>{% else %}{{ r.label }}{% endif %}{% if r.prior_only and r.current == 0 and r.prior and not r.bold %} <span class="muted" style="font-size:10.5px;">(last year only)</span>{% endif %}</td><td>{{ r.note or '' }}</td>
+      <td class="text-right">{% if r.bold %}<strong>{{ '%.0f'|format(r.current) }}</strong>{% else %}{{ '%.0f'|format(r.current) }}{% endif %}</td>
+      <td class="text-right">
+        {% if r.bold %}<strong>{{ '%.0f'|format(r.prior) }}</strong>
+        {% elif r.memo and not r.dep_merged %}
+        {% elif r.linked %}{{ '%.0f'|format(r.prior) }} <span class="muted" style="font-size:10.5px;" title="From the prior-year income statement">(income statement)</span>
+        {% else %}<input type="hidden" name="row_sec" value="{{ r.sec }}"><input type="hidden" name="row_lab" value="{{ r.save_label or r.label }}"><input type="number" step="0.01" name="row_amt" value="{{ '%.2f'|plainfmt(r.prior) if r.prior and r.prior|abs >= 0.005 else '' }}" class="text-right" style="margin:0;width:128px;" aria-label="{{ r.label }} - prior year">
+        {% endif %}
+      </td></tr>
+    {% endmacro %}
+    <form method="post" action="{{ url_for('cfprior.save_inline', engagement_id=engagement.id) }}">
+    <table>
+      <thead><tr><th></th><th>Note</th><th class="text-right" style="white-space:pre-line;">{{ cfy[0].replace(' ', '\n', 1) }}</th><th class="text-right" style="white-space:pre-line;">{{ cfy[1].replace(' ', '\n', 1) }}</th></tr></thead>
+      <tbody>
+        <tr><td class="section-title" colspan="4">Operating activities</td></tr>
+        {% for r in statements.cf.operating_rows %}{% if not r.nil %}{{ cfrow(r) }}{% endif %}{% endfor %}
+        {{ cfline('Net cash from operating activities', statements.cf.net_operating, cfp.net_operating, true) }}
+        <tr><td class="section-title" colspan="4">Investing activities</td></tr>
+        {% for r in statements.cf.investing_rows %}{% if not r.nil %}{{ cfrow(r) }}{% endif %}{% endfor %}
+        {{ cfline('Net cash used in investing activities', statements.cf.net_investing, cfp.net_investing, true) }}
+        <tr><td class="section-title" colspan="4">Financing activities</td></tr>
+        {% for r in statements.cf.financing_rows %}{% if not r.nil %}{{ cfrow(r) }}{% endif %}{% endfor %}
+        {{ cfline('Net cash from financing activities', statements.cf.net_financing, cfp.net_financing, true) }}
+        {{ cfline('Net increase/(decrease) in cash', statements.cf.net_movement, cfp.net_movement, true) }}
+        <tr><td>Cash at beginning of year</td><td></td><td class="text-right">{{ '%.0f'|format(statements.cf.cash_open) }}</td>
+          <td class="text-right"><input type="number" step="0.01" name="cash_open_amt" value="{{ '%.2f'|plainfmt(cfp.cash_open) if cfp.cash_open and cfp.cash_open|abs >= 0.005 else '' }}" class="text-right" style="margin:0;width:128px;" aria-label="Cash at beginning of year - prior year"></td></tr>
+        {{ cfline('Cash at end of year (computed)', statements.cf.cash_close_computed, cfp.cash_close_computed, true) }}
+        {{ cfline('Cash at end of year (per trial balance)', statements.cf.cash_close_actual, cfp.cash_close_actual) }}
+      </tbody>
+    </table>
+    {% set nil_rows = [] %}
+    {% for r in statements.cf.operating_rows + statements.cf.investing_rows + statements.cf.financing_rows %}{% if r.nil and not r.memo or r.nil and r.dep_merged %}{% set _ = nil_rows.append(r) %}{% endif %}{% endfor %}
+    {% if nil_rows %}
+    <details style="margin:10px 0;">
+      <summary style="cursor:pointer;font-size:12.5px;">{{ nil_rows|length }} heading(s) with no figure in either year are left out - open to type last year's figure for one of them</summary>
+      <table style="max-width:700px;margin-top:6px;"><tbody>
+        {% for r in nil_rows %}<tr><td style="width:22%;" class="muted">{{ {'operating': 'Operating', 'investing': 'Investing', 'financing': 'Financing'}.get(r.sec, r.sec) }}</td><td>{{ r.save_label or r.label }}</td>
+          <td style="width:26%;"><input type="hidden" name="row_sec" value="{{ r.sec }}"><input type="hidden" name="row_lab" value="{{ r.save_label or r.label }}"><input type="number" step="0.01" name="row_amt" value="" class="text-right" style="margin:0;" aria-label="{{ r.label }} - prior year"></td></tr>{% endfor %}
+      </tbody></table>
+    </details>
+    {% endif %}
+    <details style="margin:10px 0;">
+      <summary style="cursor:pointer;font-size:12.5px;">Add a prior-year line that is not in this year's statement</summary>
+      <table style="max-width:700px;margin-top:6px;"><tbody id="cfx_rows"></tbody></table>
+      <button type="button" class="btn small secondary" onclick="cfxAddRow()">Add a line</button>
+    </details>
+    <p><button type="submit" class="btn gold">Save prior-year figures</button></p>
+    </form>
+    <script>
+      function cfxAddRow() {
+        var tr = document.createElement('tr');
+        tr.innerHTML = '<td style="width:22%;"><select name="x_sec" style="margin:0;"><option value="operating">Operating</option><option value="investing">Investing</option><option value="financing">Financing</option></select></td>'
+          + '<td><input type="text" name="x_lab" placeholder="Line name" style="margin:0;"></td><td style="width:26%;"><input type="number" step="0.01" name="x_amt" class="text-right" style="margin:0;" aria-label="Amount"></td>';
+        document.getElementById('cfx_rows').appendChild(tr);
+      }
+    </script>
+    <p class="muted" style="font-size:11.5px;{% if statements.cf.variance|abs > 0.01 %}color:#b02a2a;{% endif %}">
+      {% if statements.cf.variance|abs > 0.01 %}This year: computed closing cash differs from the trial balance by {{ '%.0f'|format(statements.cf.variance) }} - likely additions/disposals not visible from net asset movements, or linked to the retained earnings continuity check above. Review and adjust.{% else %}This year ties out to the trial balance.{% endif %}
+    </p>
+    {% if not cfp.empty %}<p class="muted" style="font-size:11.5px;{% if cfp.variance|abs > 0.01 %}color:#b02a2a;{% endif %}">Prior year: {% if cfp.variance|abs > 0.01 %}computed closing cash differs from the prior-year cash in the trial balance by {{ '%.0f'|format(cfp.variance) }} - check the figures typed above.{% else %}ties out to the trial balance.{% endif %}</p>
+    {% else %}<p class="muted" style="font-size:11.5px;">Prior year: not entered yet - the Word pack keeps a single column until you save prior-year figures.</p>{% endif %}
+  </div>
+
+  <div class="card" id="cf-prior">
+    <h3 class="mt-0">Import last year's cash flow</h3>
+    <form method="post" action="{{ url_for('cfprior.import_lines', engagement_id=engagement.id) }}" enctype="multipart/form-data" style="margin:6px 0;padding:12px;border:1px dashed #ccd;border-radius:6px;">
+      <div class="muted" style="font-size:12px;margin:2px 0 8px;">Optional - from an Excel or CSV file (or paste the rows copied from Excel); the figures then appear in the prior-year column above to check and correct. Section headings (Operating / Investing / Financing activities) place each line; when the sheet has a column headed with last year ({{ engagement.period_end.year - 1 if engagement.period_end else 'prior year' }}) that column is read, otherwise the last column of figures. Names are matched to this year's headings (e.g. Taxation paid = Income tax paid) so the figures line up on the same row. Finance costs are split into the add-back (positive) and the payment (negative), a depreciation charge is added back with the other adjustments, and prepayments go to other current assets. Profit before tax and subtotals are left out - Profit before tax comes from the income statement and subtotals are worked out here. This replaces the figures already saved.</div>
+      <input type="file" name="file" accept=".xlsx,.xlsm,.csv,.tsv,.txt" style="margin-bottom:6px;">
+      <textarea name="pasted" rows="4" placeholder="...or paste rows here: line name, then amount" style="margin-bottom:6px;"></textarea>
+      <button type="submit" class="btn small secondary">Import</button>
+    </form>
+  </div>
+
+  {% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %}
+  <div class="card">
+    <h3 class="mt-0">Notes to the Financial Statements</h3>
+    <p class="muted" style="font-size:11.5px;">
+      Prepared under {{ reporting_framework_labels.get(engagement.reporting_framework) }}. Note 1 and the account
+      breakdown notes are rebuilt fresh from the trial balance every time you open this tab - if a note looks wrong,
+      fix the account mapping rather than this text. The framework can be changed below.
+    </p>
+
+    <h4>1. General information</h4>
+    <p>{{ general_information_note }}</p>
+
+    <h4>2. Basis of preparation</h4>
+    <p>{{ (financial_statements.basis_of_preparation if financial_statements else '') or default_basis_of_preparation }}</p>
+
+    {% set policy_notes = statements.notes|selectattr('policy')|list %}
+    {% if policy_notes %}
+    <h4>3. Significant accounting policies</h4>
+    {% for note in policy_notes %}
+    {% if note.policy_parts %}
+    <p><strong>({{ loop.index }}) {{ note.title }}</strong></p>
+    {% for para in note.policy_parts.paragraphs %}<p>{{ para }}</p>{% endfor %}
+    <table style="max-width:640px;">
+      <thead><tr>{% for h in note.policy_parts.table.headers %}<th{% if loop.index > 2 %} style="text-align:right;"{% endif %}>{{ h }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for r in note.policy_parts.table.rows %}<tr>{% for v in r %}<td{% if loop.index > 2 %} style="text-align:right;"{% endif %}>{{ v }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table>
+    <p>{{ note.policy_parts.after }}</p>
+    {% else %}
+    <p><strong>({{ loop.index }}) {{ note.title }}.</strong> {{ note.policy }}</p>
+    {% endif %}
+    {% endfor %}
+    {% endif %}
+
+{% set yl = statements.year_labels or ['Current year', 'Prior year'] %}
+    {% macro fmtv(v) %}{% if v is none or v|abs < 0.5 %}-{% elif v < 0 %}({{ '{:,.0f}'.format(-v) }}){% else %}{{ '{:,.0f}'.format(v) }}{% endif %}{% endmacro %}
+    {% macro lines_table(ll) %}
+    <table style="max-width:640px;border:0;">
+      <thead><tr><th style="width:56%;"></th>{% for h in ll.headers %}<th class="text-right" style="width:22%;white-space:pre-line;">{{ h.replace(' ', '\n', 1) }}</th>{% endfor %}</tr></thead>
+      <tbody>
+      {% for ln in ll.lines %}
+        {% if ln.style == 'gap' %}<tr><td colspan="3" style="border:0;height:8px;"></td></tr>
+        {% elif ln.style == 'head' %}<tr><td colspan="3" style="border:0;"><strong>{{ ln.label }}</strong></td></tr>
+        {% else %}{% set deco = {'sub': 'border-top:1px solid #222;', 'total': 'border-top:1px solid #222;border-bottom:4px double #222;', 'double': 'border-bottom:4px double #222;', 'under': 'border-bottom:1px solid #222;', 'end': 'border-bottom:1px solid #222;'}.get(ln.style, '') %}
+        <tr><td style="border:0;">{{ ln.label }}</td><td class="text-right" style="border:0;{{ deco }}">{{ fmtv(ln.cur) }}</td><td class="text-right" style="border:0;{{ deco }}">{{ fmtv(ln.pri) }}</td></tr>
+        {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+    {% endmacro %}
+    {% for note in statements.notes %}
+    <h4>{{ note.number }}. {{ note.title }}</h4>
+    {% if note.share_layout or (note.loan_layout and note.loan_layout.replaces_breakdown) %}
+    {% set ll = note.share_layout or note.loan_layout %}
+    {{ lines_table(ll) }}
+    {% if ll.check %}<p class="muted" style="font-size:11.5px;color:#B02A2A;">Issued shares x nominal value differs from the share capital in the trial balance - check the share particulars on the client page.</p>{% endif %}
+    {% if ll.after %}<p>{{ ll.after }}</p>{% endif %}
+    {% elif note.movement %}
+    <p class="muted" style="font-size:11.5px;">From the Asset Register (Substantive Procedures &gt; Property, Plant and Equipment) rather than the trial balance account list.</p>
+    <table>
+      <thead><tr><th>Asset class</th><th class="text-right">Opening NBV</th><th class="text-right">Additions</th><th class="text-right">Disposals</th>{% if (note.movement_total.revaluation or 0)|abs >= 0.5 %}<th class="text-right">Revaluation</th>{% endif %}<th class="text-right">Depreciation charge</th><th class="text-right">Closing NBV</th></tr></thead>
+      <tbody>
+        {% for r in note.movement %}
+        <tr>
+          <td>{{ r.class_name }}</td>
+          <td class="text-right">{{ '%.0f'|format(r.opening_nbv) }}</td>
+          <td class="text-right">{{ '%.0f'|format(r.additions) }}</td>
+          <td class="text-right">{{ '%.0f'|format(-(r.disposals_cost - r.disposals_acc_dep)) if r.disposals_cost or r.disposals_acc_dep else '0' }}</td>
+          {% if (note.movement_total.revaluation or 0)|abs >= 0.5 %}<td class="text-right">{{ '%.0f'|format(r.revaluation or 0) }}</td>{% endif %}
+          <td class="text-right">{{ '%.0f'|format(-r.charge) if r.charge else '0' }}</td>
+          <td class="text-right">{{ '%.0f'|format(r.closing_nbv) }}</td>
+        </tr>
+        {% endfor %}
+        <tr>
+          <td><strong>Total</strong></td>
+          <td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.opening_nbv) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.additions) }}</strong></td>
+          <td class="text-right"><strong>{{ '%.0f'|format(-(note.movement_total.disposals_cost - note.movement_total.disposals_acc_dep)) if note.movement_total.disposals_cost or note.movement_total.disposals_acc_dep else '0' }}</strong></td>
+          {% if (note.movement_total.revaluation or 0)|abs >= 0.5 %}<td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.revaluation or 0) }}</strong></td>{% endif %}
+          <td class="text-right"><strong>{{ '%.0f'|format(-note.movement_total.charge) if note.movement_total.charge else '0' }}</strong></td>
+          <td class="text-right"><strong>{{ '%.0f'|format(note.movement_total.closing_nbv) }}</strong></td>
+        </tr>
+      </tbody>
+    </table>
+    {% include "engagements/_ppe_note_revaluation.html" %}
+    {% if note.reconciliation %}
+    {% set rec = note.reconciliation %}
+    <p class="muted" style="font-size:11.5px;{% if not rec.ties_out %}color:#B02A2A;{% endif %}">
+      Per trial balance: {{ '%.0f'|format(rec.tb_current) }} (current), {{ '%.0f'|format(rec.tb_prior) }} (prior). Per Asset Register: {{ '%.0f'|format(rec.register_current) }} (current), {{ '%.0f'|format(rec.register_prior) }} (prior).
+      {% if rec.ties_out %}Ties out to the trial balance.{% else %}Difference of {{ '%.0f'|format(rec.diff_current) }} (current), {{ '%.0f'|format(rec.diff_prior) }} (prior) - basis for a proposed adjustment to the trial balance, or a correction to the Asset Register, as appropriate.{% endif %}
+    </p>
+    {% endif %}
+    {% if note.reconciliation and not note.reconciliation.ties_out and engagement.has_asset_schedules %}
+    {% set pp = asset_push_preview(engagement) %}
+    {% if pp and (pp.proposal.lines or pp.proposal.py_lines) %}
+    {% set pr = pp.proposal %}
+    <div class="card" style="background:#faf9f6;">
+      <h4 class="mt-0">Propose journals from the Asset Register</h4>
+      <p class="muted" style="font-size:12px;">Brings the trial balance to the Asset Register so the final trial balance carries the right cost and accumulated depreciation in <strong>both years</strong>: a prior-year journal (<strong>PPE-REG-PY</strong>) restates the comparatives (and this year's opening balances) to the register's opening cost and accumulated depreciation, and a current-year journal (<strong>PPE-REG</strong>) brings cost, accumulated depreciation and the depreciation charge to the register's closing figures. They are posted as draft adjustments, above, for review and partner sign-off; nothing in the client's trial balance is overwritten.</p>
+      {% for title, lines, td, tc in [('PPE-REG-PY - prior year (restates the comparatives)', pr.py_lines, pr.py_total_debit, pr.py_total_credit), ('PPE-REG - current year', pr.lines, pr.total_debit, pr.total_credit)] %}
+      {% if lines %}
+      <table style="font-size:12px;">
+        <thead><tr><th>{{ title }}</th><th>IAS 1 category</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead>
+        <tbody>
+        {% for l in lines %}<tr><td>{{ l.account_name }}</td><td>{{ l.fs_category }}</td><td class="text-right">{{ '%.2f'|format(l.debit) if l.debit else '' }}</td><td class="text-right">{{ '%.2f'|format(l.credit) if l.credit else '' }}</td></tr>{% endfor %}
+        <tr style="font-weight:600;"><td colspan="2">Total</td><td class="text-right">{{ '%.2f'|format(td) }}</td><td class="text-right">{{ '%.2f'|format(tc) }}</td></tr>
+        </tbody>
+      </table>
+      {% endif %}
+      {% endfor %}
+      {% if pr.balancing|abs >= 0.005 %}<p class="muted" style="font-size:11.5px;">{{ '%.2f'|format(pr.balancing|abs) }} of the current-year journal is the other side of the register's movements (the bank, payables or sale proceeds), which the register cannot see; it sits on a suspense line to be cleared before sign-off. Pick "Profit or loss" below if it is a profit or loss on disposal.</p>{% endif %}
+      <form method="post" action="{{ url_for('assetrecon.push_to_tb', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+        <input type="hidden" name="open_to" value="restate_prior">
+        <div style="grid-column: span 2;"><label>The balance of the current-year journal goes to</label>
+          <select name="rest_to"><option value="suspense">Suspense (to be cleared before sign-off)</option><option value="profit_loss">Profit or loss for the year</option></select></div>
+        <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Propose journals</button></div>
+      </form>
+    </div>
+    {% endif %}
+    {% endif %}
+    {% elif note.accounts %}
+    <table style="max-width:640px;table-layout:fixed;">
+      <thead><tr><th style="width:56%;">Account</th><th class="text-right" style="white-space:pre-line;width:22%;">{{ yl[0].replace(' ', '\n', 1) }}</th><th class="text-right" style="white-space:pre-line;width:22%;">{{ yl[1].replace(' ', '\n', 1) }}</th></tr></thead>
+      <tbody>
+        {% for a in note.accounts %}
+        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}{% if a.adj %} <span class="muted" style="font-size:11px;" title="This line includes audit adjustments (see the Adjustments section above)">&mdash; {% if a.from_tb is defined and not a.from_tb %}not in the trial balance; {% endif %}journal {% for j in a.adj %}{{ j.ref }} ({{ 'prior' if j.period == 'prior' else 'current' }} {{ '%.0f'|format(j.amount) }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if a.adj %}</span>{% endif %}</td><td class="text-right">{{ '%.0f'|format(a.current) }}</td><td class="text-right">{{ '%.0f'|format(a.prior) }}</td></tr>
+        {% endfor %}
+        <tr><td><strong>Total</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.prior) }}</strong></td></tr>
+      </tbody>
+    </table>
+    {% else %}
+    <p class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong> ({{ '%.0f'|format(note.total.prior) }} prior year)</p>
+    {% endif %}
+    {% if note.loan_layout and not note.loan_layout.replaces_breakdown %}
+    {{ lines_table(note.loan_layout) }}
+    <p>{{ note.loan_layout.after }}</p>
+    {% endif %}
+    {% for xt in note.extra_tables or [] %}
+    <p style="margin:12px 0 4px;"><strong>{{ xt.title }}</strong></p>
+    <table style="max-width:{{ 640 if xt.headers|length == 2 else 760 }}px;table-layout:fixed;">
+      <thead><tr>{% for h in xt.headers %}<th{% if loop.index > 1 %} class="text-right"{% endif %} style="white-space:pre-line;">{{ yl[0].replace(' ', '\n', 1) if h == 'Current year' else h }}</th>{% endfor %}{% if xt.headers|length == 2 %}<th></th>{% endif %}</tr></thead>
+      <tbody>{% for r in xt.rows %}{% set is_b = xt.total_last and (loop.last or (loop.first and xt.headers|length == 2)) %}
+        <tr>{% for v in r %}<td{% if loop.index > 1 %} class="text-right"{% endif %}>{% if is_b %}<strong>{% endif %}{{ v if v is string else '%.0f'|format(v) }}{% if is_b %}</strong>{% endif %}</td>{% endfor %}{% if xt.headers|length == 2 %}<td></td>{% endif %}</tr>{% endfor %}
+      </tbody>
+    </table>
+    {% endfor %}
+    {% endfor %}
+
+    {% set next_num = (statements.notes[-1].number + 1) if statements.notes else 4 %}
+    <h4>{{ next_num }}. Related party transactions</h4>
+    <p>{{ (financial_statements.related_party_note if financial_statements else '') or default_closing_notes.related_party }}</p>
+    <h4>{{ next_num + 1 }}. Contingencies and commitments</h4>
+    <p>{{ (financial_statements.commitments_note if financial_statements else '') or default_closing_notes.commitments }}</p>
+    <h4>{{ next_num + 2 }}. Events after the reporting period</h4>
+    <p>{{ (financial_statements.subsequent_events_note if financial_statements else '') or default_closing_notes.subsequent_events }}</p>
+  </div>
+  {% endif %}
+
+  <div class="card">
+    <h3 class="mt-0">Company classification</h3>
+    <p class="muted" style="font-size:12px;">Decide this once all adjustments above are final. Zimbabwean company law doesn't set a numeric size threshold for choosing a reporting framework - the Companies and Other Business Entities Act just requires "generally accepted accounting practice" as recognised by PAAB, and PAAB (Pronouncement 2/2016) draws the Full IFRS / IFRS for SMEs line on public accountability instead. Tick anything that applies to this entity:</p>
+    <form method="post" action="{{ url_for('engagements.save_financial_statements_notes', engagement_id=engagement.id) }}">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:2px 16px;">
+        {% for code, label in pie_criteria %}
+        <label style="font-weight:normal;display:flex;align-items:flex-start;gap:6px;">
+          <input type="checkbox" name="{{ code }}" {% if engagement[code] %}checked{% endif %} style="margin-top:3px;">
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+      <p style="margin:10px 0 16px;">
+        {% if engagement.is_public_interest_entity %}
+        <span class="badge status-Completed">Public Interest Entity</span> - recommended framework: <strong>Full IFRS</strong>.
+        {% else %}
+        <span class="badge">Not a Public Interest Entity</span> - eligible for IFRS for SMEs (recommended), though Full IFRS may still be elected.
+        {% endif %}
+        This is guidance only - pick the actual framework to use in the dropdown below.
+      </p>
+
+      <label for="sme_sector" style="margin-top:6px;">Sector (Small and Medium Enterprises Act)</label>
+      <select id="sme_sector" name="sme_sector">
+        <option value="">Not classified</option>
+        {% for sector in sme_act_sectors %}<option value="{{ sector }}" {% if engagement.sme_sector==sector %}selected{% endif %}>{{ sector }}</option>{% endfor %}
+      </select>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:2px 16px;margin-top:10px;">
+        <div>
+          <label for="sme_staff_headcount">Staff headcount</label>
+          <input type="number" id="sme_staff_headcount" name="sme_staff_headcount" min="0" step="1" value="{{ engagement.sme_staff_headcount if engagement.sme_staff_headcount is not none else '' }}">
+        </div>
+        <div>
+          <label for="sme_annual_turnover">Annual turnover (US$)</label>
+          <input type="number" id="sme_annual_turnover" name="sme_annual_turnover" min="0" step="0.01" value="{{ engagement.sme_annual_turnover if engagement.sme_annual_turnover is not none else '' }}">
+        </div>
+        <div>
+          <label for="sme_gross_assets">Gross assets, excl. real estate (US$)</label>
+          <input type="number" id="sme_gross_assets" name="sme_gross_assets" min="0" step="0.01" value="{{ engagement.sme_gross_assets if engagement.sme_gross_assets is not none else '' }}">
+        </div>
+      </div>
+      <details style="margin-top:6px;">
+        <summary style="cursor:pointer;font-size:11.5px;" class="muted">General Small and Medium Enterprises Act size thresholds used for the suggestion below</summary>
+        <table style="margin-top:6px;">
+          <thead><tr><th>Category</th><th>Staff headcount</th><th class="text-right">Max annual turnover</th><th class="text-right">Max gross assets (excl. real estate)</th></tr></thead>
+          <tbody>
+            {% for code, max_staff, max_turnover, max_assets in sme_act_size_thresholds %}
+            <tr><td>{{ sme_act_size_bands|selectattr('0', 'equalto', code)|map(attribute='1')|first }}</td><td>&le; {{ max_staff }}</td><td class="text-right">US$ {{ '%.0f'|format(max_turnover) }}</td><td class="text-right">US$ {{ '%.0f'|format(max_assets) }}</td></tr>
+            {% endfor %}
+            <tr><td>Large</td><td colspan="3">Exceeds every threshold above</td></tr>
+          </tbody>
+        </table>
+        <p class="muted" style="font-size:11px;">A general table applying across most major sectors - the Act's schedule varies slightly by sector, so treat this as a starting point, not the final word on a borderline case.</p>
+      </details>
+
+      <p style="margin:10px 0 6px;">
+        {% if suggested_sme_size_band %}
+        Suggested band based on the figures above: <strong>{{ sme_act_size_bands|selectattr('0', 'equalto', suggested_sme_size_band)|map(attribute='1')|first or 'Large' }}</strong>. Pick the band to record below - it doesn't have to match the suggestion.
+        {% else %}
+        <span class="muted" style="font-size:11.5px;">Enter staff headcount, annual turnover and gross assets above for a suggested band.</span>
+        {% endif %}
+      </p>
+      <label for="sme_size_band">Size band (Small and Medium Enterprises Act)</label>
+      <select id="sme_size_band" name="sme_size_band">
+        <option value="">Not classified</option>
+        {% for code, label in sme_act_size_bands %}<option value="{{ code }}" {% if engagement.sme_size_band==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Recorded for your own client/engagement records - this is a separate, business-development/tax classification (turnover, assets and employees by sector), not an accounting-standards one, and doesn't change the reporting framework above or below.</p>
+
+      <label for="reporting_framework" style="margin-top:14px;">Financial reporting framework</label>
+      <select id="reporting_framework" name="reporting_framework">
+        {% for code, label in reporting_frameworks %}<option value="{{ code }}" {% if engagement.reporting_framework==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Full IFRS and IFRS for SMEs get the numbered Notes to the Financial Statements above, generated from the trial balance. Other/local GAAP keeps the plain statements below with only the free-text notes box.</p>
+
+      <label for="cash_flow_method" style="margin-top:10px;">Cash Flow Statement method</label>
+      <select id="cash_flow_method" name="cash_flow_method">
+        {% for code, label in cash_flow_methods %}<option value="{{ code }}" {% if engagement.cash_flow_method==code %}selected{% endif %}>{{ label }}</option>{% endfor %}
+      </select>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Either method reconciles to the same net cash from operating activities (IAS 7.18) - only the operating activities section's presentation changes.</p>
+
+      <label for="basis_of_preparation" style="margin-top:10px;">Basis of preparation{% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %} (Note 2 above){% endif %}</label>
+      <textarea id="basis_of_preparation" name="basis_of_preparation" rows="3">{{ financial_statements.basis_of_preparation if financial_statements else '' }}</textarea>
+      {% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %}
+      <label for="related_party_note" style="margin-top:10px;">Related party transactions</label>
+      <textarea id="related_party_note" name="related_party_note" rows="2">{{ financial_statements.related_party_note if financial_statements else '' }}</textarea>
+      <label for="commitments_note" style="margin-top:10px;">Contingencies and commitments</label>
+      <textarea id="commitments_note" name="commitments_note" rows="2">{{ financial_statements.commitments_note if financial_statements else '' }}</textarea>
+      <label for="subsequent_events_note" style="margin-top:10px;">Events after the reporting period</label>
+      <textarea id="subsequent_events_note" name="subsequent_events_note" rows="2">{{ financial_statements.subsequent_events_note if financial_statements else '' }}</textarea>
+      <label for="notes_to_financial_statements" style="margin-top:10px;">Other matters</label>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Anything else not covered by a note above.</p>
+      {% else %}
+      <label for="notes_to_financial_statements" style="margin-top:10px;">Notes to the Financial Statements</label>
+      <p class="muted" style="font-size:11.5px;margin-top:-2px;">Free text - accounting policies, breakdowns, commitments/contingencies, related parties, subsequent events, etc. The figures throughout the statements above always come from the Trial Balance and are never set here.</p>
+      {% endif %}
+      <textarea id="notes_to_financial_statements" name="notes_to_financial_statements" rows="10">{{ financial_statements.notes_to_financial_statements if financial_statements else '' }}</textarea>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+    {% if financial_statements %}
+    <p class="muted" style="font-size:12.5px;margin-top:10px;">
+      Prepared by {{ financial_statements.completed_by.name if financial_statements.completed_by else '—' }} on {{ (financial_statements.completed_at|cat).strftime('%d %b %Y') if financial_statements.completed_at else '—' }}.
+      {% if financial_statements.is_reviewed %}Reviewed by {{ financial_statements.reviewed_by.name }} on {{ (financial_statements.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if financial_statements.is_partner_signed %}Partner sign-off by {{ financial_statements.partner_signed_by.name }} on {{ (financial_statements.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if financial_statements.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_financial_statements', fs_id=financial_statements.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif financial_statements.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_financial_statements', fs_id=financial_statements.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(financial_statements) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if financial_statements.is_partner_signed %}
+      <form method="post" action="{{ url_for('engagements.partner_unsign_financial_statements', fs_id=financial_statements.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif financial_statements.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_financial_statements', fs_id=financial_statements.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
+    {% endif %}
+  </div>
+  {% elif trial_balance %}
+  <div class="card"><div class="empty-state">Map every account on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance tab</a> to an IAS 1 category to generate the financial statements here.</div></div>
+  {% endif %}
+
+  {{ qmacros.render_queries(engagement, 'finalisation', queries_by_section.get('finalisation', [])) }}
+
+{% endif %}
+

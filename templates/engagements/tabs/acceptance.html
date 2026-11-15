@@ -1,0 +1,504 @@
+{# Engagement page, tab "acceptance". Included by templates/engagements/detail.html, which supplies every variable and macro used here. #}
+  {% macro checklist_row(item, responses) %}
+    <form method="post" action="{{ url_for('acceptance.update_acceptance_checklist_item', item_id=item.id) }}" class="checklist-row">
+      <span class="item-text">{{ item.item_text }}</span>
+      <select name="response">
+        <option value="" {% if not item.response %}selected{% endif %}>—</option>
+        {% for r in responses %}<option value="{{ r }}" {% if item.response==r %}selected{% endif %}>{{ r }}</option>{% endfor %}
+      </select>
+      <input type="text" name="comment" value="{{ item.comment or '' }}" placeholder="Comment" style="width:200px;margin-bottom:0;">
+      <button type="submit" class="btn small secondary">Save</button>
+      <button type="submit" formaction="{{ url_for('acceptance.delete_acceptance_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+    </form>
+  {% endmacro %}
+
+  {% macro checklist_section(items, prefix, engagement, responses) %}
+    {% set matched = [] %}
+    {% for item in items %}{% if item.section and item.section.startswith(prefix) %}{{ matched.append(item) or "" }}{% endif %}{% endfor %}
+    <div class="card">
+      <h3 class="mt-0" style="font-size:14px;">Detailed checklist</h3>
+      <p class="muted" style="font-size:11.5px;">Tick Yes / No / N/A on each question and add a comment - these feed the system assessment next to the Decision below.</p>
+      {% if matched %}
+        {% set ns = namespace(sub='') %}
+        {% for item in matched %}
+          {% set sub = item.section.split(' - ', 1)[1] if ' - ' in item.section else '' %}
+          {% if sub and sub != ns.sub %}
+            <div class="muted" style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;margin:10px 0 2px;">{{ sub }}</div>
+            {% set ns.sub = sub %}
+          {% endif %}
+          {{ checklist_row(item, responses) }}
+        {% endfor %}
+      {% else %}
+      <div class="empty-state" style="padding:16px 0;">No checklist questions for this section yet - add one below, or load the firm's default checklist at the top of this tab.</div>
+      {% endif %}
+      <form method="post" action="{{ url_for('acceptance.add_acceptance_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;margin-top:10px;">
+        <input type="hidden" name="section" value="{{ prefix }}">
+        <div style="flex:2;"><input type="text" name="item_text" placeholder="Add a checklist question for this section" required></div>
+        <div><button type="submit" class="btn small secondary" style="margin-bottom:0;">Add item</button></div>
+      </form>
+    </div>
+  {% endmacro %}
+
+  {% if engagement.type == 'Investigative Engagement' %}
+  {% set known_prefixes = ['Conflict of Interest & Threat Assessment', 'Enhanced Due Diligence (EDD)', 'Legal Framework & Evidence Control', 'Competence & Scope Realism', 'Engagement letter'] %}
+  {% elif engagement.type == 'Secretarial' %}
+  {% set known_prefixes = ['KYC & Ultimate Beneficial Ownership', 'Authority, Integrity & Client Background', 'Nature of Business & Risk Profile', 'Conflict of Interest & Dispute Assessment', 'Operational Capacity & Commercial Feasibility', 'Engagement letter'] %}
+  {% elif engagement.is_tax_advisory_type %}
+  {% set known_prefixes = ['Taxpayer Identity, KYC & Registrations', 'Tax Compliance History & Standing', 'Scope & Nature of Tax Work', 'Integrity & Tax Risk Appetite', 'Conflicts, Independence & Competence', 'Engagement letter'] %}
+  {% else %}
+  {% set known_prefixes = ['Background check', 'Independence', 'Predecessor', 'Competence', 'Regulatory', 'Engagement letter'] %}
+  {% endif %}
+  {% macro checklist_other(items, prefixes, responses) %}
+    {% set leftover = [] %}
+    {% for item in items %}
+      {% set ns2 = namespace(known=false) %}
+      {% for p in prefixes %}{% if item.section and item.section.startswith(p) %}{% set ns2.known = true %}{% endif %}{% endfor %}
+      {% if not ns2.known %}{{ leftover.append(item) or "" }}{% endif %}
+    {% endfor %}
+    {% if leftover %}
+    <div class="card">
+      <h3 class="mt-0">Other checklist items</h3>
+      <p class="muted" style="font-size:11.5px;">Items that don't belong to one of the sections above (e.g. fee/quality considerations, or a custom section you typed in).</p>
+      {% for item in leftover %}{{ checklist_row(item, responses) }}{% endfor %}
+    </div>
+    {% endif %}
+  {% endmacro %}
+
+  <div class="card">
+    <h3 class="mt-0">Client Acceptance &amp; Continuance</h3>
+    <p class="muted" style="font-size:12.5px;">
+      {% if engagement.type == 'Investigative Engagement' %}
+      Before forensic work starts, the firm works through the Forensic Audit Client Acceptance Questionnaire below and the Engagement Partner records an accept/decline decision.
+      {% elif engagement.type == 'Secretarial' %}
+      Before corporate secretarial work starts, the firm works through the Secretarial Client Acceptance Checklist below (KYC &amp; Ultimate Beneficial Ownership, Authority/Integrity/Client Background, Nature of Business &amp; Risk Profile, Conflict of Interest &amp; Dispute Assessment, and Operational Capacity &amp; Commercial Feasibility) and the Engagement Partner records an accept/decline decision.
+      {% elif engagement.is_tax_advisory_type %}
+      Before tax work starts, the firm works through the Tax Client Acceptance sections below (Taxpayer Identity, KYC &amp; Registrations; Tax Compliance History &amp; Standing; Scope &amp; Nature of Tax Work; Integrity &amp; Tax Risk Appetite; and Conflicts, Independence &amp; Competence) and the Engagement Partner records an accept/decline decision.
+      {% else %}
+      Before any audit work starts, the firm works through these six items and the Engagement Partner records an accept/decline decision.
+      {% endif %}
+      Each section below has its own detailed checklist - tick and comment on each question, and save that section on its own.
+      {% if engagement.acceptance_required %}Until a Partner signs off an "Accepted" decision below, every other tab on this engagement stays locked (Admin can still access them).{% endif %}
+    </p>
+    {% if not engagement.acceptance_required %}
+    <div class="empty-state">This engagement was created before this feature existed, so it isn't gated on acceptance - fill this in if useful, or leave it blank.</div>
+    {% endif %}
+    {% if client_acceptance and not client_acceptance.checklist_items %}
+    <form method="post" action="{{ url_for('acceptance.seed_acceptance_checklist', engagement_id=engagement.id) }}" class="inline" style="display:inline;"><button type="submit" class="btn small gold">Add the firm's default checklist to every section below</button></form>
+    {% endif %}
+    <form method="post" action="{{ url_for('engagements.generate_acceptance_checklist_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file checklist (Word, Ref. {{ filing_reference('acceptance') }})</button></form>
+    {{ filed_workpapers('acceptance_checklist') }}
+  </div>
+
+  {% if engagement.type == 'Investigative Engagement' %}
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_conflict_threat', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">1. Conflict of Interest &amp; Threat Assessment</h3>
+      <p class="muted" style="font-size:12px;">Screen the targets, check our own objectivity, and assess whether our staff need special safety measures.</p>
+      <label><input type="checkbox" name="conflict_threat_clear" style="width:auto;" {% if client_acceptance and client_acceptance.conflict_threat_clear %}checked{% endif %}> Clear - no conflicts or unmitigated threats identified</label>
+      <label for="conflict_threat_notes">Notes</label>
+      <textarea id="conflict_threat_notes" name="conflict_threat_notes" rows="2">{{ client_acceptance.conflict_threat_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save conflict of interest &amp; threat assessment</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Conflict of Interest & Threat Assessment', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_edd', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">2. Enhanced Due Diligence (EDD)</h3>
+      <p class="muted" style="font-size:12px;">Verify the engaging entity, identify beneficial owners, and check for a history of bad faith or vexatious litigation.</p>
+      <label><input type="checkbox" name="edd_completed" style="width:auto;" {% if client_acceptance and client_acceptance.edd_completed %}checked{% endif %}> Completed - no concerns identified</label>
+      <label for="edd_notes">Notes</label>
+      <textarea id="edd_notes" name="edd_notes" rows="2">{{ client_acceptance.edd_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save enhanced due diligence</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Enhanced Due Diligence (EDD)', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_legal_evidence', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">3. Legal Framework &amp; Evidence Control</h3>
+      <p class="muted" style="font-size:12px;">Confirm the client's legal authority over the data, the evidence's integrity, and how we should be contracted.</p>
+      <label><input type="checkbox" name="legal_evidence_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.legal_evidence_satisfactory %}checked{% endif %}> Satisfactory - legal authority and evidence chain confirmed</label>
+      <label for="legal_evidence_notes">Notes</label>
+      <textarea id="legal_evidence_notes" name="legal_evidence_notes" rows="2">{{ client_acceptance.legal_evidence_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save legal framework &amp; evidence control</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Legal Framework & Evidence Control', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_competence_scope', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">4. Competence &amp; Scope Realism</h3>
+      <p class="muted" style="font-size:12px;">Confirm we have the right forensic experts, a clearly defined end goal, and a realistic budget/timeline.</p>
+      <label><input type="checkbox" name="competence_scope_confirmed" style="width:auto;" {% if client_acceptance and client_acceptance.competence_scope_confirmed %}checked{% endif %}> Confirmed - expertise, scope and budget/timeline are realistic</label>
+      <label for="competence_scope_notes">Notes</label>
+      <textarea id="competence_scope_notes" name="competence_scope_notes" rows="2">{{ client_acceptance.competence_scope_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save competence &amp; scope realism</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Competence & Scope Realism', engagement, acceptance_checklist_responses) }}{% endif %}
+  {% elif engagement.type == 'Secretarial' %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_kyc_ubo', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">1. KYC &amp; Ultimate Beneficial Ownership</h3>
+      <p class="muted" style="font-size:12px;">Identify the UBO(s), screen for PEP status and sanctions exposure, and confirm source of funds and identity documents.</p>
+      <label><input type="checkbox" name="kyc_ubo_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.kyc_ubo_satisfactory %}checked{% endif %}> Satisfactory - no concerns identified</label>
+      <label for="kyc_ubo_notes">Notes</label>
+      <textarea id="kyc_ubo_notes" name="kyc_ubo_notes" rows="2">{{ client_acceptance.kyc_ubo_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save KYC &amp; Ultimate Beneficial Ownership</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'KYC & Ultimate Beneficial Ownership', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_authority_background', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">2. Authority, Integrity &amp; Client Background</h3>
+      <p class="muted" style="font-size:12px;">Confirm the instructing individual's authority, and check the client's reputation and reasons for the engagement/change of agent.</p>
+      <label><input type="checkbox" name="authority_background_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.authority_background_satisfactory %}checked{% endif %}> Satisfactory - no concerns identified</label>
+      <label for="authority_background_notes">Notes</label>
+      <textarea id="authority_background_notes" name="authority_background_notes" rows="2">{{ client_acceptance.authority_background_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save authority, integrity &amp; client background</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Authority, Integrity & Client Background', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_nature_of_business', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">3. Nature of Business &amp; Risk Profile</h3>
+      <p class="muted" style="font-size:12px;">Assess the intended principal activity, sector risk, licensing needs, and geographical footprint.</p>
+      <label><input type="checkbox" name="nature_of_business_risk_acceptable" style="width:auto;" {% if client_acceptance and client_acceptance.nature_of_business_risk_acceptable %}checked{% endif %}> Acceptable - no concerns identified</label>
+      <label for="nature_of_business_risk_notes">Notes</label>
+      <textarea id="nature_of_business_risk_notes" name="nature_of_business_risk_notes" rows="2">{{ client_acceptance.nature_of_business_risk_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save nature of business &amp; risk profile</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Nature of Business & Risk Profile', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_conflict_dispute', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">4. Conflict of Interest &amp; Dispute Assessment</h3>
+      <p class="muted" style="font-size:12px;">Check for competing/adversarial parties we already represent, and any internal shareholder or director dispute.</p>
+      <label><input type="checkbox" name="conflict_dispute_clear" style="width:auto;" {% if client_acceptance and client_acceptance.conflict_dispute_clear %}checked{% endif %}> Clear - no conflicts or unresolved disputes identified</label>
+      <label for="conflict_dispute_notes">Notes</label>
+      <textarea id="conflict_dispute_notes" name="conflict_dispute_notes" rows="2">{{ client_acceptance.conflict_dispute_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save conflict of interest &amp; dispute assessment</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Conflict of Interest & Dispute Assessment', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_operational_capacity', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">5. Operational Capacity &amp; Commercial Feasibility</h3>
+      <p class="muted" style="font-size:12px;">Confirm we have the expertise/licensing for this structure, a realistic registry timeline, and agreement on fees/retainer.</p>
+      <label><input type="checkbox" name="operational_capacity_confirmed" style="width:auto;" {% if client_acceptance and client_acceptance.operational_capacity_confirmed %}checked{% endif %}> Confirmed - capacity and fee terms are in order</label>
+      <label for="operational_capacity_notes">Notes</label>
+      <textarea id="operational_capacity_notes" name="operational_capacity_notes" rows="2">{{ client_acceptance.operational_capacity_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save operational capacity &amp; commercial feasibility</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Operational Capacity & Commercial Feasibility', engagement, acceptance_checklist_responses) }}{% endif %}
+  {% elif engagement.is_tax_advisory_type %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_kyc', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">1. Taxpayer Identity, KYC &amp; Registrations</h3>
+      <p class="muted" style="font-size:12px;">Confirm who the taxpayer is, its TIN and every tax it is registered for (income tax, VAT, PAYE, withholding), and who owns and controls it.</p>
+      <label><input type="checkbox" name="tax_kyc_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.tax_kyc_satisfactory %}checked{% endif %}> Satisfactory - no concerns identified</label>
+      <label for="tax_kyc_notes">Notes</label>
+      <textarea id="tax_kyc_notes" name="tax_kyc_notes" rows="2">{{ client_acceptance.tax_kyc_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Taxpayer Identity, KYC &amp; Registrations</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Taxpayer Identity, KYC & Registrations', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_history', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">2. Tax Compliance History &amp; Standing</h3>
+      <p class="muted" style="font-size:12px;">Check the tax clearance certificate, outstanding or late returns, open ZIMRA audits, assessments and disputes, penalties and interest, and why the client is changing adviser.</p>
+      <label><input type="checkbox" name="tax_history_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.tax_history_satisfactory %}checked{% endif %}> Satisfactory - standing with ZIMRA is acceptable</label>
+      <label for="tax_history_notes">Notes</label>
+      <textarea id="tax_history_notes" name="tax_history_notes" rows="2">{{ client_acceptance.tax_history_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Tax Compliance History &amp; Standing</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Tax Compliance History & Standing', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_scope', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">3. Scope &amp; Nature of Tax Work</h3>
+      <p class="muted" style="font-size:12px;">Which services (compliance, advisory, health check, representation), which tax heads and periods, what we rely on the client for, and whether the deadlines are realistic.</p>
+      <label><input type="checkbox" name="tax_scope_clear" style="width:auto;" {% if client_acceptance and client_acceptance.tax_scope_clear %}checked{% endif %}> Clear - scope, responsibilities and deadlines are agreed</label>
+      <label for="tax_scope_notes">Notes</label>
+      <textarea id="tax_scope_notes" name="tax_scope_notes" rows="2">{{ client_acceptance.tax_scope_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Scope &amp; Nature of Tax Work</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Scope & Nature of Tax Work', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_integrity', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">4. Integrity &amp; Tax Risk Appetite</h3>
+      <p class="muted" style="font-size:12px;">The client's attitude to tax risk: any request for a position we could not defend, undisclosed income, arrangements aimed mainly at saving tax, and willingness to correct and disclose errors.</p>
+      <label><input type="checkbox" name="tax_integrity_acceptable" style="width:auto;" {% if client_acceptance and client_acceptance.tax_integrity_acceptable %}checked{% endif %}> Acceptable - no integrity or tax-risk concerns</label>
+      <label for="tax_integrity_notes">Notes</label>
+      <textarea id="tax_integrity_notes" name="tax_integrity_notes" rows="2">{{ client_acceptance.tax_integrity_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Integrity &amp; Tax Risk Appetite</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Integrity & Tax Risk Appetite', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_tax_conflict_competence', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">5. Conflicts, Independence &amp; Competence</h3>
+      <p class="muted" style="font-size:12px;">Conflicts with other clients or parties, the threats where the firm also audits this client, whether the team has the knowledge and time, and whether our indemnity cover and fee basis suit the work.</p>
+      <label><input type="checkbox" name="tax_conflict_competence_clear" style="width:auto;" {% if client_acceptance and client_acceptance.tax_conflict_competence_clear %}checked{% endif %}> Clear - no conflicts, and the team is competent and available</label>
+      <label for="tax_conflict_competence_notes">Notes</label>
+      <textarea id="tax_conflict_competence_notes" name="tax_conflict_competence_notes" rows="2">{{ client_acceptance.tax_conflict_competence_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save Conflicts, Independence &amp; Competence</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Conflicts, Independence & Competence', engagement, acceptance_checklist_responses) }}{% endif %}
+  {% else %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_background', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">1. Background check</h3>
+      <p class="muted" style="font-size:12px;">Evaluate management integrity, reputation, and financial stability.</p>
+      <label><input type="checkbox" name="background_check_satisfactory" style="width:auto;" {% if client_acceptance and client_acceptance.background_check_satisfactory %}checked{% endif %}> Satisfactory - no concerns identified</label>
+      <label for="background_check_notes">Notes</label>
+      <textarea id="background_check_notes" name="background_check_notes" rows="2">{{ client_acceptance.background_check_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save background check</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Background check', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_independence', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">2. Independence assessment</h3>
+      <p class="muted" style="font-size:12px;">Confirm no conflicts of interest or ethical threats exist that compromise objectivity.</p>
+      <label><input type="checkbox" name="independence_threats_identified" style="width:auto;" {% if client_acceptance and client_acceptance.independence_threats_identified %}checked{% endif %}> A threat was identified (describe safeguards below)</label>
+      <label for="independence_notes">Notes</label>
+      <textarea id="independence_notes" name="independence_notes" rows="2">{{ client_acceptance.independence_notes if client_acceptance else '' }}</textarea>
+      <label for="independence_safeguards">Safeguards applied (if a threat was identified)</label>
+      <textarea id="independence_safeguards" name="independence_safeguards" rows="2">{{ client_acceptance.independence_safeguards if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save independence assessment</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Independence', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_predecessor', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">3. Predecessor communication</h3>
+      <p class="muted" style="font-size:12px;">Contact the previous auditor (with client permission) to check for past disagreements or reasons for leaving.</p>
+      <label><input type="checkbox" name="predecessor_not_applicable" style="width:auto;" {% if client_acceptance and client_acceptance.predecessor_not_applicable %}checked{% endif %}> Not applicable - first audit / no predecessor auditor</label>
+      <div class="form-row">
+        <div><label for="predecessor_auditor_name">Predecessor auditor</label><input type="text" id="predecessor_auditor_name" name="predecessor_auditor_name" value="{{ client_acceptance.predecessor_auditor_name if client_acceptance else '' }}"></div>
+        <div><label><input type="checkbox" name="client_permission_obtained" style="width:auto;" {% if client_acceptance and client_acceptance.client_permission_obtained %}checked{% endif %}> Client's permission obtained to contact them</label></div>
+        <div><label><input type="checkbox" name="predecessor_contacted" style="width:auto;" {% if client_acceptance and client_acceptance.predecessor_contacted %}checked{% endif %}> Predecessor contacted / responded</label></div>
+      </div>
+      <label for="predecessor_response_notes">What they said (or note that permission was declined / no response)</label>
+      <textarea id="predecessor_response_notes" name="predecessor_response_notes" rows="2">{{ client_acceptance.predecessor_response_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save predecessor communication</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Predecessor', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_competence', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">4. Competence check</h3>
+      <p class="muted" style="font-size:12px;">Ensure the audit team has the industry expertise and time required for the job.</p>
+      <label><input type="checkbox" name="competence_confirmed" style="width:auto;" {% if client_acceptance and client_acceptance.competence_confirmed %}checked{% endif %}> Confirmed - the assigned team has the expertise and capacity</label>
+      <label for="competence_notes">Notes</label>
+      <textarea id="competence_notes" name="competence_notes" rows="2">{{ client_acceptance.competence_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save competence check</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Competence', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  <form method="post" action="{{ url_for('acceptance.save_acceptance_regulatory', engagement_id=engagement.id) }}">
+    <div class="card">
+      <h3 class="mt-0">5. Regulatory checks (AML / KYC)</h3>
+      <p class="muted" style="font-size:12px;">Complete required anti-money laundering (AML) and Know Your Customer (KYC) steps.</p>
+      <label><input type="checkbox" name="aml_kyc_completed" style="width:auto;" {% if client_acceptance and client_acceptance.aml_kyc_completed %}checked{% endif %}> AML / KYC steps completed</label>
+      <label for="aml_kyc_notes">Notes</label>
+      <textarea id="aml_kyc_notes" name="aml_kyc_notes" rows="2">{{ client_acceptance.aml_kyc_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary">Save regulatory checks</button>
+    </div>
+  </form>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Regulatory', engagement, acceptance_checklist_responses) }}{% endif %}
+  {% endif %}
+
+  <div class="card">
+    <h3 class="mt-0">{% if engagement.type == 'Investigative Engagement' %}5{% else %}6{% endif %}. Engagement letter</h3>
+    <p class="muted" style="font-size:12px;">Send a formal contract outlining the {% if engagement.is_tax_advisory_type %}tax services, tax heads and periods, deadlines, client responsibilities, authority to deal with ZIMRA,{% else %}audit scope, timeline, responsibilities,{% endif %} and fee structure, then secure client sign-off.</p>
+    {% if client_acceptance and client_acceptance.engagement_letter_document %}
+    <p style="font-size:13px;">Signed copy on file: <a href="{{ url_for('engagements.download_document', doc_id=client_acceptance.engagement_letter_document_id) }}">{{ client_acceptance.engagement_letter_document.original_filename }}</a>{% if client_acceptance.engagement_letter_signed_at %} - signed {{ (client_acceptance.engagement_letter_signed_at|cat).strftime('%d %b %Y') }}{% endif %}.</p>
+    {% else %}
+    <div class="empty-state">No signed engagement letter on file yet.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('acceptance.upload_engagement_letter', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
+      <div><label for="letter_file">Upload signed engagement letter</label><input type="file" id="letter_file" name="file" required></div>
+      <div><button type="submit" class="btn secondary" style="margin-bottom:14px;">Upload as signed</button></div>
+    </form>
+  </div>
+  {% if client_acceptance %}{{ checklist_section(client_acceptance.checklist_items, 'Engagement letter', engagement, acceptance_checklist_responses) }}{% endif %}
+
+  {% if client_acceptance %}{{ checklist_other(client_acceptance.checklist_items, known_prefixes, acceptance_checklist_responses) }}{% endif %}
+
+  {% if engagement.type == 'Investigative Engagement' %}
+  <div class="card">
+    <h3 class="mt-0">Forensic Audit Risk Evaluation Matrix</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Score each category from 1 (Low Risk) to 5 (High Risk) against the criteria below, then save - the total
+      (5-25) determines the acceptance path. Purely advisory, like the checklist assessment above: it never
+      sets the Decision for you.
+    </p>
+    <table style="font-size:12px;margin-bottom:14px;">
+      <thead><tr><th>Risk Category</th><th>🟢 Low (1-2)</th><th>🟡 Medium (3)</th><th>🔴 High (4-5)</th></tr></thead>
+      <tbody>
+        {% for field, label, low, medium, high in risk_categories %}
+        <tr><td><strong>{{ loop.index }}. {{ label }}</strong></td><td>{{ low }}</td><td>{{ medium }}</td><td>{{ high }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if client_acceptance %}
+    <div class="flash {{ client_acceptance.risk_assessment.level }}" style="margin-bottom:12px;">
+      <strong>{% if client_acceptance.risk_assessment.tier %}{{ client_acceptance.risk_assessment.tier }}:{% endif %}</strong>
+      {{ client_acceptance.risk_assessment.label }}
+      {% if client_acceptance.risk_assessment.decision %}
+      <br><strong>Decision guidance:</strong> {{ client_acceptance.risk_assessment.decision }}
+      <br><strong>Action:</strong> {{ client_acceptance.risk_assessment.action }}
+      {% endif %}
+    </div>
+    {% endif %}
+    <form method="post" action="{{ url_for('acceptance.save_acceptance_risk_matrix', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        {% set scores = dict(client_acceptance.risk_scores) if client_acceptance else {} %}
+        {% for field, label, low, medium, high in risk_categories %}
+        <div>
+          <label for="{{ field }}">{{ loop.index }}. {{ label }}</label>
+          <select id="{{ field }}" name="{{ field }}">
+            <option value="" {% if not scores.get(field) %}selected{% endif %}>—</option>
+            {% for n in [1, 2, 3, 4, 5] %}<option value="{{ n }}" {% if scores.get(field)==n %}selected{% endif %}>{{ n }}</option>{% endfor %}
+          </select>
+        </div>
+        {% endfor %}
+      </div>
+      <label for="risk_scoring_notes">Risk scoring notes</label>
+      <textarea id="risk_scoring_notes" name="risk_scoring_notes" rows="2">{{ client_acceptance.risk_scoring_notes if client_acceptance else '' }}</textarea>
+      <button type="submit" class="btn secondary" style="margin-top:8px;">Save risk evaluation matrix</button>
+    </form>
+  </div>
+  {% endif %}
+
+  <div>
+    <div class="card">
+      <h3 class="mt-0">Decision</h3>
+      {% if client_acceptance %}
+      <div class="flash {{ client_acceptance.checklist_assessment.level }}" style="margin-bottom:12px;">
+        <strong>System assessment:</strong> {{ client_acceptance.checklist_assessment.label }}
+        <span class="muted" style="font-size:11.5px;">(from the detailed checklists on each section above - advisory only, the decision is always yours)</span>
+      </div>
+      {% if client_acceptance.flagged_issues %}
+      <div class="flash {{ client_acceptance.flagged_issues_summary.level }}" style="margin-bottom:4px;">
+        <strong>Flagged issues:</strong> {{ client_acceptance.flagged_issues_summary.label }}
+      </div>
+      <table style="margin-bottom:12px;">
+        <thead><tr><th>Issue</th><th>Detail</th><th>Review</th><th></th></tr></thead>
+        <tbody>
+          {% for issue in client_acceptance.flagged_issues %}
+          <tr>
+            <td>{{ issue.label }}</td>
+            <td style="font-size:12.5px;">{{ issue.detail }}</td>
+            <td>
+              {% if issue.review %}
+              <span class="badge {% if issue.review.status == 'Consider' %}risk-Medium{% else %}risk-Low{% endif %}">{{ issue.review.status }}</span>
+              <div class="muted" style="font-size:11px;">by {{ issue.review.reviewed_by.name if issue.review.reviewed_by else '—' }} on {{ (issue.review.reviewed_at|cat).strftime('%d %b %Y') if issue.review.reviewed_at else '—' }}{% if issue.review.note %} — {{ issue.review.note }}{% endif %}</div>
+              {% else %}
+              <span class="muted" style="font-size:11.5px;">Not yet reviewed</span>
+              {% endif %}
+            </td>
+            <td>
+              <form method="post" action="{{ url_for('acceptance.review_acceptance_flag', record_id=client_acceptance.id) }}" class="inline">
+                <input type="hidden" name="flag_key" value="{{ issue.key }}">
+                <input type="text" name="note" placeholder="Note (optional)" style="width:130px;margin-bottom:0;font-size:12px;" value="{{ issue.review.note if issue.review else '' }}">
+                <button type="submit" name="status" value="Disregard" class="btn small secondary">Disregard</button>
+                <button type="submit" name="status" value="Consider" class="btn small gold">Consider</button>
+              </form>
+              {% if issue.review %}
+              <form method="post" action="{{ url_for('acceptance.clear_acceptance_flag_review', review_id=issue.review.id) }}" class="inline"><button type="submit" class="btn small danger" style="margin-top:4px;">Clear</button></form>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% endif %}
+      {% endif %}
+      <div style="margin-top:6px;">
+        <strong>Decision to accept the client:</strong>
+        <span class="badge {{ 'status-Completed' if engagement.client.is_accepted_as_client else ('risk-High' if engagement.client.acceptance_status == 'Declined' else 'status-OnHold') }}">{{ engagement.client.acceptance_status }}</span>
+        {% if engagement.client.acceptance_decided_at %}<span class="muted" style="font-size:11.5px;">by {{ engagement.client.acceptance_decided_by.name if engagement.client.acceptance_decided_by else '-' }} on {{ (engagement.client.acceptance_decided_at|cat).strftime('%d %b %Y') }}</span>{% endif %}
+        {% if engagement.client.acceptance_decision_notes %}<div style="font-size:12.5px;white-space:pre-wrap;margin-top:4px;">{{ engagement.client.acceptance_decision_notes }}</div>{% endif %}
+        <p class="muted" style="font-size:12px;margin:6px 0 0;">The Sanctions &amp; AML vetting, its documentation and this decision are made once on the client's page, for every engagement. <a href="{{ url_for('clients.view_client', client_id=engagement.client_id, _anchor='client-decision') }}">Open them on the client's page</a>.</p>
+      </div>
+    </div>
+  </div>
+
+  {% if client_acceptance %}
+  <div class="card">
+    <h3 class="mt-0">Sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ client_acceptance.completed_by.name if client_acceptance.completed_by else '—' }} on {{ (client_acceptance.completed_at|cat).strftime('%d %b %Y') if client_acceptance.completed_at else '—' }}.
+      {% if client_acceptance.is_reviewed %}Reviewed by {{ client_acceptance.reviewed_by.name }} on {{ (client_acceptance.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if client_acceptance.is_authorized_to_continue %}Continuation authorised by {{ client_acceptance.partner_authorized_continue_by.name }} on {{ (client_acceptance.partner_authorized_continue_at|cat).strftime('%d %b %Y') }}{% if client_acceptance.partner_authorized_continue_notes %} - {{ client_acceptance.partner_authorized_continue_notes }}{% endif %}.{% endif %}
+      {% if client_acceptance.is_partner_signed %}Partner sign-off by {{ client_acceptance.partner_signed_by.name }} on {{ (client_acceptance.partner_signed_at|cat).strftime('%d %b %Y') }} - decision: <strong>{{ client_acceptance.decision }}</strong>.{% endif %}
+    </p>
+    {% if not client_acceptance.items_complete %}
+    <p class="muted" style="font-size:11.5px;color:#b02a2a;">All six items above (including the signed engagement letter) need to be filled in before a Partner can sign off the decision.</p>
+      {% if client_acceptance.decision == 'Accepted' and not client_acceptance.is_partner_signed %}
+        {% if client_acceptance.is_authorized_to_continue %}
+        <p class="muted" style="font-size:11.5px;">The rest of the engagement is unlocked on a Partner's continuation authorisation above - still get the full sign-off once every item is complete.</p>
+        {% else %}
+        <p class="muted" style="font-size:11.5px;">If the decision to accept is final but one item above is still in progress (e.g. the client hasn't yet returned the countersigned engagement letter), a Partner can authorise the team to continue now instead of waiting for full sign-off - see below.</p>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if client_acceptance.is_reviewed %}
+      <form method="post" action="{{ url_for('acceptance.unreview_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif client_acceptance.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('acceptance.review_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(client_acceptance) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if client_acceptance.is_partner_signed %}
+      <form method="post" action="{{ url_for('acceptance.partner_unsign_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif client_acceptance.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('acceptance.partner_sign_client_acceptance', record_id=client_acceptance.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off (locks in the decision)</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+
+      {% if not client_acceptance.is_partner_signed %}
+        {% if client_acceptance.is_authorized_to_continue %}
+        <form method="post" action="{{ url_for('acceptance.revoke_continue_authorization', record_id=client_acceptance.id) }}" class="inline" style="margin-top:6px;"><button type="submit" class="btn small secondary">Remove continuation authorisation</button></form>
+        {% elif client_acceptance.decision == 'Accepted' %}
+        <form method="post" action="{{ url_for('acceptance.authorize_continue_client_acceptance', record_id=client_acceptance.id) }}" class="inline" style="margin-top:6px;">
+          <input type="text" name="partner_authorized_continue_notes" placeholder="Optional note, e.g. engagement letter still with client for signature" style="width:340px;display:inline-block;margin-bottom:0;">
+          <button type="submit" class="btn small gold">Authorise continuing with work</button>
+        </form>
+        {% endif %}
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {{ qmacros.render_queries(engagement, 'acceptance', queries_by_section.get('acceptance', [])) }}
+
+

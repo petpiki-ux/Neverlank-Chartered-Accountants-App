@@ -1,0 +1,20 @@
+{# Engagement page, tab "asset_register". Included by templates/engagements/detail.html, which supplies every variable and macro used here. #}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a>.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Asset Register</h3>
+    <p class="muted" style="font-size:12.5px;">
+      The client's property, plant and equipment, asset by asset. The closing balances of the year before are entered once as the <strong>opening balances</strong>; the year's <strong>additions</strong> and <strong>disposals</strong> are then entered as they happen, and the schedules below work themselves out. The <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}">Capital Allowances</a> tab works its tax allowances from this register, and the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='deferred_tax') }}">Deferred Tax Computation</a> takes the accounting carrying amount from it.
+    </p>
+    {% if not as_period_end %}<div class="empty-state">This engagement has no period end, so the opening date cannot be worked out. <a href="{{ url_for('engagements.edit_engagement', engagement_id=engagement.id) }}">Edit the engagement</a> and enter it.</div>{% endif %}
+  </div>
+  {% include "engagements/_asset_schedules.html" %}
+  <div class="card">
+    <h3 class="mt-0">Depreciation policy and the full register</h3>
+    <p class="muted" style="font-size:12.5px;">Every asset in one table, for changing any figure (including those above), and the depreciation policy by asset class.</p>
+    {{ ppe_register_section() }}
+  </div>
+{% endif %}
+
+

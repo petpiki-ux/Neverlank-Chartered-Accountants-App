@@ -1,0 +1,90 @@
+{# Engagement page, tab "documents". Included by templates/engagements/detail.html, which supplies every variable and macro used here. #}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Generate a working paper <span class="badge type-{{ engagement.type|replace(' ', '') }}">{{ engagement.type }}</span></h3>
+    {% if matching_templates %}
+    <p class="muted" style="font-size:12.5px;">Pick a template and press <strong>Generate</strong>: a copy is made for {{ engagement.client.name }}, the client, period and (where the paper asks for them) figures from the trial balance are filled in, and it opens here in the app for you to work in - no download needed. It is filed below, and saves as you type.</p>
+    <table>
+      <thead><tr><th>Ref</th><th>Template</th><th>Format</th><th></th></tr></thead>
+      <tbody>
+      {% for tpl in matching_templates %}
+        <tr>
+          <td class="muted">{{ tpl.ref_code }}</td>
+          <td>{{ tpl.title }}{% if tpl.description %}<div class="muted" style="font-size:11.5px;">{{ tpl.description }}</div>{% endif %}</td>
+          <td>{{ 'Excel' if tpl.file_ext == 'xlsx' else 'Word' }}</td>
+          <td class="text-right">
+            <form method="post" action="{{ url_for('wpedit.generate', engagement_id=engagement.id, template_id=tpl.id) }}" class="inline"><button type="submit" class="btn small gold">Generate</button></form>
+            <a href="{{ url_for('doc_templates.download_template', template_id=tpl.id) }}" class="btn small secondary" title="Blank copy of the template">Blank copy</a>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No {{ engagement.type }} templates in the library yet. Add some from the <a href="{{ url_for('doc_templates.list_templates') }}">Document Templates</a> page.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 class="mt-0">Upload a working paper / document</h3>
+    <form method="post" action="{{ url_for('engagements.upload_document', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
+      <div><label for="file">File *</label><input type="file" id="file" name="file" required></div>
+      <div><label for="category">Category</label><input type="text" id="category" name="category" placeholder="e.g. Working Papers" value="General"></div>
+      <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" placeholder="e.g. A-1"></div>
+      {% if not engagement.is_corporate_finance %}<div><label for="filing_index_id">WP No.</label>{{ filing_index_picker() }}</div>{% endif %}
+      <div><label for="notes">Notes</label><input type="text" id="notes" name="notes"></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Upload</button></div>
+    </form>
+    <p class="muted" style="font-size:12px;">Re-uploading a file with the same name and category creates a new version automatically. Reference is optional free text;{% if not engagement.is_corporate_finance %} WP No. picks a code from the <a href="{{ url_for('filing_index.list_filing_index') }}">Filing Index</a> and follows the firm's N[code]_[Description]_[Year] naming convention on download.{% endif %}</p>
+  </div>
+
+  <div class="card">
+    {% if engagement.documents %}
+    <table>
+      <thead><tr><th>File</th><th>Reference</th>{% if not engagement.is_corporate_finance %}<th>WP No.</th>{% endif %}<th>Category</th>{% if not engagement.is_corporate_finance %}<th>Substantive area</th>{% endif %}<th>Version</th><th>Uploaded by</th><th>Date</th><th></th></tr></thead>
+      <tbody>
+      {% for d in engagement.documents|sort(attribute='uploaded_at', reverse=True) %}
+        <tr>
+          <td>{{ d.original_filename }}{% if d.notes %}<div class="muted" style="font-size:11.5px;">{{ d.notes }}</div>{% endif %}</td>
+          <td class="muted">{{ d.reference or '—' }}</td>
+          {% if not engagement.is_corporate_finance %}<td class="muted">{{ d.filing_index.display_label if d.filing_index else '—' }}</td>{% endif %}
+          <td>{{ d.category }}</td>
+          {% if not engagement.is_corporate_finance %}<td class="muted">{{ d.substantive_area.area if d.substantive_area else '—' }}</td>{% endif %}
+          <td>v{{ d.version }}</td>
+          <td>{{ d.uploaded_by.name if d.uploaded_by else '—' }}</td>
+          <td>{{ (d.uploaded_at|cat).strftime('%d %b %Y %H:%M') }}</td>
+          <td style="white-space:nowrap;">
+            {% if d.original_filename.lower().endswith(('.docx', '.xlsx')) %}<a href="{{ url_for('wpedit.open_doc', doc_id=d.id) }}" class="btn small gold" title="{{ 'Work in this paper in the app' if d.in_app else 'Opens an editable copy as a new version; this upload stays unchanged' }}">{{ 'Open' if d.in_app else 'Open in app' }}</a>{% endif %}
+            <a href="{{ url_for('engagements.download_document', doc_id=d.id) }}" class="btn small secondary">Download</a>
+            {% if user_has_permission(current_user, 'delete_documents') %}
+            <form method="post" action="{{ url_for('engagements.delete_document', doc_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
+            {% endif %}
+            {% if d.is_generated and d.workpaper_kind and d.workpaper_kind.startswith('template_') %}
+            <div style="font-size:11px;margin-top:4px;">
+              {% if d.is_reviewed %}<span class="badge status-Completed">Reviewed</span> {{ d.reviewed_by.name }}
+              {% elif current_user.role in ('supervisor', 'partner', 'admin') and d.uploaded_by_id != current_user.id %}<form method="post" action="{{ url_for('engagements.review_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small secondary" style="font-size:10.5px;">Mark reviewed</button></form>
+              {% else %}<span class="muted">Awaiting review</span>{% endif %}
+              {% if d.is_reviewed and current_user.role in ('supervisor', 'partner', 'admin') %}<form method="post" action="{{ url_for('engagements.unreview_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small secondary" style="font-size:10.5px;">&times;</button></form>{% endif %}
+              <br>
+              {% if d.is_partner_signed %}<span class="badge status-Completed">Partner signed</span> {{ d.partner_signed_by.name }}
+                {% if current_user.role in ('partner', 'admin') %}<form method="post" action="{{ url_for('engagements.partner_unsign_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small secondary" style="font-size:10.5px;">&times;</button></form>{% endif %}
+              {% elif current_user.role in ('partner', 'admin') and d.uploaded_by_id != current_user.id %}<form method="post" action="{{ url_for('engagements.partner_sign_generated_document', doc_id=d.id) }}" class="inline"><button type="submit" class="btn small gold" style="font-size:10.5px;">Partner sign-off</button></form>
+              {% else %}<span class="muted">Not partner signed</span>{% endif %}
+            </div>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No working papers yet - generate one from a template above, or upload a file.</div>
+    {% endif %}
+  </div>
+
+  {{ qmacros.render_queries(engagement, 'documents', queries_by_section.get('documents', [])) }}
+
+{% endif %}
+

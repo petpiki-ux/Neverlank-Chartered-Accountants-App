@@ -1,0 +1,18 @@
+{# Engagement page, tab "vat". Included by templates/engagements/detail.html, which supplies every variable and macro used here. #}
+{% if not engagement.shows_vat_tab %}
+  <div class="card"><div class="empty-state">The VAT tab is shown when a Tax service is on and the client has a VAT number. Add the client's VAT number on the client page, then come back.</div></div>
+{% elif not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off first.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">VAT</h3>
+    <p class="muted" style="font-size:12.5px;margin:0;">
+      Client VAT number: <strong>{{ engagement.client.vat_number }}</strong>.
+      Capture or import the client's output and input VAT documents, work month by month, and see the output tax, input tax and net position.
+      The Acts, section by section: <a href="{{ url_for('tax.act_contents', code='vat') }}">VAT Act</a> (<a href="{{ url_for('tax.vat_act_check') }}">beside the app's VAT material</a>).
+    </p>
+  </div>
+  {{ vat_register_section() }}
+{% endif %}
+
+

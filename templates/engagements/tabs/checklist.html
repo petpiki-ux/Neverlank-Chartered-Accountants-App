@@ -1,0 +1,69 @@
+{# Engagement page, tab "checklist". Included by templates/engagements/detail.html, which supplies every variable and macro used here. #}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+  <div class="card">
+    <h3 class="mt-0">Add checklist item</h3>
+    <form method="post" action="{{ url_for('engagements.add_checklist_item', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div><label for="section">Section</label><input type="text" id="section" name="section" placeholder="e.g. Cash & Bank"></div>
+      <div style="grid-column: span 2;"><label for="item_text">Procedure *</label><input type="text" id="item_text" name="item_text" required></div>
+      <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Add item</button></div>
+    </form>
+    <form method="post" action="{{ url_for('engagements.generate_engagement_checklist_docx', engagement_id=engagement.id) }}" class="inline"><button type="submit" class="btn small secondary">Generate &amp; file checklist (Word, Ref. F-1)</button></form>
+    {{ filed_workpapers('engagement_checklist') }}
+  </div>
+
+  <div class="card">
+    {% if engagement.checklist_items %}
+      {% set ns = namespace(section='') %}
+      {% for item in engagement.checklist_items %}
+        {% if item.section and item.section != ns.section %}
+          <div class="section-title">{{ item.section }}</div>
+          {% set ns.section = item.section %}
+        {% endif %}
+        <form method="post" action="{{ url_for('engagements.update_checklist_item', item_id=item.id) }}" class="checklist-row">
+          <span class="item-text">{{ item.item_text }}
+            {% if item.completed_by %}<div class="muted" style="font-size:11px;">Prepared by {{ item.completed_by.name }} on {{ (item.completed_at|cat).strftime('%d %b %Y') }}</div>{% endif %}
+            {% if item.is_reviewed %}<div class="muted" style="font-size:11px;">Reviewed by {{ item.reviewed_by.name }} on {{ (item.reviewed_at|cat).strftime('%d %b %Y') }} <span class="badge status-Completed">Reviewed</span></div>{% endif %}
+            {% if item.is_partner_signed %}<div class="muted" style="font-size:11px;">Partner sign-off by {{ item.partner_signed_by.name }} on {{ (item.partner_signed_at|cat).strftime('%d %b %Y') }} <span class="badge status-Completed">Partner signed</span></div>{% endif %}
+          </span>
+          <input type="text" name="notes" value="{{ item.notes or '' }}" placeholder="Notes" style="width:180px;margin-bottom:0;">
+          <select name="status" onchange="this.form.submit()">
+            {% for s in checklist_statuses %}<option value="{{ s }}" {% if item.status==s %}selected{% endif %}>{{ s }}</option>{% endfor %}
+          </select>
+          <button type="submit" class="btn small secondary">Save</button>
+          <button type="submit" formaction="{{ url_for('engagements.delete_checklist_item', item_id=item.id) }}" class="btn small danger" onclick="return confirm('Delete this item?')">Delete</button>
+        </form>
+        {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+        <form method="post" action="{{ item.is_reviewed and url_for('engagements.unreview_checklist_item', item_id=item.id) or url_for('engagements.review_checklist_item', item_id=item.id) }}" class="inline" style="margin: -6px 0 8px 0;">
+          {% if item.is_reviewed %}
+          <button type="submit" class="btn small secondary">Remove review sign-off</button>
+          {% elif item.status in ('Done', 'N/A') and item.completed_by_id != current_user.id %}
+          <button type="submit" class="btn small gold">Mark as reviewed</button>
+          {% elif item.status in ('Done', 'N/A') and effectively_reviewed(item) %}
+          <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+          {% elif item.status in ('Done', 'N/A') %}
+          <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+          {% endif %}
+        </form>
+        {% endif %}
+        {% if current_user.role in ('partner', 'admin') %}
+        <form method="post" action="{{ item.is_partner_signed and url_for('engagements.partner_unsign_checklist_item', item_id=item.id) or url_for('engagements.partner_sign_checklist_item', item_id=item.id) }}" class="inline" style="margin: -6px 0 8px 0;">
+          {% if item.is_partner_signed %}
+          <button type="submit" class="btn small secondary">Remove partner sign-off</button>
+          {% elif item.status in ('Done', 'N/A') and item.completed_by_id != current_user.id %}
+          <button type="submit" class="btn small gold">Partner sign-off</button>
+          {% endif %}
+        </form>
+        {% endif %}
+        {{ rmacros.render_reviews('checklist_item', item) }}
+      {% endfor %}
+    {% else %}
+      <div class="empty-state">No checklist items yet. Add one above, or start the engagement from a template next time.</div>
+    {% endif %}
+  </div>
+
+  {{ qmacros.render_queries(engagement, 'checklist', queries_by_section.get('checklist', [])) }}
+
+{% endif %}
+

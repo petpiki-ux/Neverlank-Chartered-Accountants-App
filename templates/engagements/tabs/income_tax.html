@@ -1,0 +1,163 @@
+{# Engagement page, tab "income_tax". Included by templates/engagements/detail.html, which supplies every variable and macro used here. #}
+{% if not acceptance_cleared and current_user.role != 'admin' %}
+  <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
+{% else %}
+{% if profit_before_tax is none and engagement.is_tax_advisory_type %}
+  <div class="card">
+    <h3 class="mt-0">Income Tax Computation</h3>
+    <p class="muted" style="font-size:12.5px;">Import the client's trial balance on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab, or capture the ledger on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='accounting') }}">Accounting</a> tab and roll it up, and the profit before tax comes from that. If you only have the finished accounts, enter the <strong>profit before tax</strong> per those accounts to start the computation; the rate, AIDS levy, add-backs, capital allowances and any assessed loss follow below.</p>
+    <form method="post" action="{{ url_for('engagements.save_income_tax_computation', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        <div><label for="it_pbt_start">Profit before tax per the client's accounts</label><input type="number" step="0.01" id="it_pbt_start" name="profit_before_tax_manual" required></div>
+      </div>
+      <button type="submit" class="btn gold">Start the computation</button>
+    </form>
+  </div>
+{% elif profit_before_tax is none %}
+  <div class="card"><div class="empty-state">Profit before tax isn't available yet - complete the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab first, then come back here.</div></div>
+{% else %}
+  {% include "tax/_act_links.html" %}
+  <div class="card">
+    <h3 class="mt-0">Income Tax Computation</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Reconciles accounting profit before tax (taken live from the Statement of Profit or Loss below - never re-entered here) to taxable income and the resulting current tax charge. The tax rate and AIDS levy rate are left for you to enter - Zimbabwean statutory rates change with each year's Finance Act and published sources have disagreed even on the headline corporate rate, so nothing here is pre-filled or assumed on your behalf. Add every allowable deduction, capital allowance and disallowable add-back as its own line below.
+    </p>
+    <div class="stat-grid">
+      <div class="stat-card"><div class="num">{{ '%.2f'|format(profit_before_tax) }}</div><div class="label">Profit before tax (current year){% if profit_before_tax_is_manual %} - entered below{% endif %}</div></div>
+    </div>
+    <form method="post" action="{{ url_for('engagements.save_income_tax_computation', engagement_id=engagement.id) }}">
+      <div class="form-row">
+        {% if engagement.is_tax_advisory_type and not statements %}
+        <div><label for="it_pbt_manual">Profit before tax per the client's accounts</label><input type="number" step="0.01" id="it_pbt_manual" name="profit_before_tax_manual" value="{{ income_tax_computation.profit_before_tax_manual if income_tax_computation and income_tax_computation.profit_before_tax_manual is not none else '' }}"></div>
+        {% endif %}
+        <div><label for="it_tax_rate_percent">Corporate tax rate (%)</label><input type="number" step="0.01" id="it_tax_rate_percent" name="tax_rate_percent" value="{{ income_tax_computation.tax_rate_percent if income_tax_computation and income_tax_computation.tax_rate_percent is not none else '' }}" placeholder="e.g. the current ZIMRA rate"></div>
+        <div><label for="it_aids_levy_percent">AIDS levy (% of base tax)</label><input type="number" step="0.01" id="it_aids_levy_percent" name="aids_levy_percent" value="{{ income_tax_computation.aids_levy_percent if income_tax_computation and income_tax_computation.aids_levy_percent is not none else '' }}" placeholder="e.g. 3"></div>
+        <div><label for="it_tax_loss_brought_forward">Assessed tax loss brought forward</label><input type="number" step="0.01" id="it_tax_loss_brought_forward" name="tax_loss_brought_forward" value="{{ income_tax_computation.tax_loss_brought_forward if income_tax_computation else 0.0 }}"></div>
+      </div>
+      <label for="it_notes">Notes</label>
+      <textarea id="it_notes" name="notes">{{ income_tax_computation.notes if income_tax_computation else '' }}</textarea>
+      <button type="submit" class="btn gold">Save</button>
+    </form>
+  </div>
+
+  {% if engagement.has_tax_module %}
+  <div class="card" style="border-left:4px solid #b8923a;">
+    <h3 class="mt-0" style="font-size:14px;">Capital allowances</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Work the allowances asset by asset, with the firm's own capital allowance engine, and post them here (with the depreciation add-back and any recoupment or scrapping allowance). Lines posted that way are marked below and replaced if you post again.</p>
+    <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='capital_allowances') }}" class="btn gold small">Open the Capital Allowances schedule</a>
+  </div>
+  {% endif %}
+  <div class="card" style="border-left:4px solid #b8923a;">
+    <h3 class="mt-0" style="font-size:14px;">Section 16(1) prohibited deductions ({{ act_ref('16', text='read section 16') }})</h3>
+    <p class="muted" style="font-size:12.5px;margin-top:0;">Test this client's expenses against section 16(1), see the add-backs by clause with voucher references, and post them here as add-back lines. Lines posted that way are marked below and are replaced if you post again.</p>
+    <a href="{{ url_for('prohibited.page', engagement_id=engagement.id) }}" class="btn gold small">Open the prohibited deductions schedule</a>
+  </div>
+  <div class="card">
+    <h3 class="mt-0">Add-backs, deductions &amp; capital allowances</h3>
+    {% if income_tax_computation and income_tax_computation.items %}
+    <table>
+      <thead><tr><th>Type</th><th>Description</th><th class="text-right">Amount</th><th></th></tr></thead>
+      <tbody>
+      {% for line in income_tax_computation.items %}
+        <form method="post" action="{{ url_for('engagements.update_income_tax_line', line_id=line.id) }}" class="inline">
+        <tr>
+          <td>
+            <select name="item_type">
+              {% for t in income_tax_item_types %}<option value="{{ t }}" {% if line.item_type==t %}selected{% endif %}>{{ income_tax_item_type_labels[t] }}</option>{% endfor %}
+            </select>
+          </td>
+          <td><input type="text" name="description" value="{{ line.description }}" style="width:100%;margin-bottom:0;">{% if line.source == 'cap_allow_engine' %}<div class="muted" style="font-size:11px;">Posted from the Capital Allowances schedule - posting again replaces it.</div>{% elif line.source == 's16_engine' %}<div class="muted" style="font-size:11px;">Posted from the section 16(1) schedule - posting again replaces it</div>{% endif %}</td>
+          <td><input type="number" step="0.01" name="amount" value="{{ line.amount }}" style="width:120px;margin-bottom:0;" class="text-right"></td>
+          <td>
+            <button type="submit" class="btn small secondary">Save</button>
+            <button type="submit" formaction="{{ url_for('engagements.delete_income_tax_line', line_id=line.id) }}" class="btn small danger" onclick="return confirm('Delete this line?')">Delete</button>
+          </td>
+        </tr>
+        </form>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">No lines added yet - add the entity's add-backs, allowable deductions and capital allowances below.</div>
+    {% endif %}
+    <form method="post" action="{{ url_for('engagements.add_income_tax_line', engagement_id=engagement.id) }}" class="form-row" style="align-items:flex-end;">
+      <div>
+        <label for="it_new_item_type">Type</label>
+        <select id="it_new_item_type" name="item_type">
+          {% for t in income_tax_item_types %}<option value="{{ t }}">{{ income_tax_item_type_labels[t] }}</option>{% endfor %}
+        </select>
+      </div>
+      <div style="flex:2;"><label for="it_new_description">Description</label><input type="text" id="it_new_description" name="description" placeholder="e.g. Depreciation" required></div>
+      <div><label for="it_new_amount">Amount</label><input type="number" step="0.01" id="it_new_amount" name="amount" value="0"></div>
+      <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Add line</button></div>
+    </form>
+  </div>
+
+  {% if income_tax_result %}
+  <div class="card">
+    <h3 class="mt-0">Computation</h3>
+    <table>
+      <tbody>
+        <tr><td>Profit before tax</td><td class="text-right">{{ '%.2f'|format(income_tax_result.profit_before_tax) }}</td></tr>
+        <tr><td>Add: disallowable add-backs</td><td class="text-right">{{ '%.2f'|format(income_tax_result.total_addbacks) }}</td></tr>
+        <tr><td>Less: allowable deductions &amp; capital allowances</td><td class="text-right">({{ '%.2f'|format(income_tax_result.total_deductions) }})</td></tr>
+        <tr><td><strong>Taxable income before assessed losses</strong></td><td class="text-right"><strong>{{ '%.2f'|format(income_tax_result.taxable_income_before_losses) }}</strong></td></tr>
+        <tr><td>Less: assessed tax loss utilised (brought forward: {{ '%.2f'|format(income_tax_result.tax_loss_brought_forward) }})</td><td class="text-right">({{ '%.2f'|format(income_tax_result.loss_utilised) }})</td></tr>
+        <tr><td><strong>Taxable income</strong></td><td class="text-right"><strong>{{ '%.2f'|format(income_tax_result.taxable_income) }}</strong></td></tr>
+        <tr><td>Tax loss carried forward to next year</td><td class="text-right">{{ '%.2f'|format(income_tax_result.tax_loss_carried_forward) }}</td></tr>
+        <tr><td>Tax charge at {{ income_tax_result.tax_rate_percent if income_tax_result.tax_rate_percent is not none else '—' }}%</td><td class="text-right">{{ '%.2f'|format(income_tax_result.base_tax) }}</td></tr>
+        <tr><td>AIDS levy at {{ income_tax_result.aids_levy_percent if income_tax_result.aids_levy_percent is not none else '—' }}% of base tax</td><td class="text-right">{{ '%.2f'|format(income_tax_result.aids_levy_amount) }}</td></tr>
+        <tr><td><strong>Total current tax charge</strong></td><td class="text-right"><strong>{{ '%.2f'|format(income_tax_result.total_tax_charge) }}</strong></td></tr>
+        <tr><td>Effective tax rate</td><td class="text-right">{{ '%.2f'|format(income_tax_result.effective_rate_percent) if income_tax_result.effective_rate_percent is not none else '—' }}%</td></tr>
+      </tbody>
+    </table>
+    {% if not income_tax_computation or income_tax_computation.tax_rate_percent is none %}
+    <p class="flash danger" style="margin-top:10px;">No corporate tax rate has been entered above yet - the tax charge shown is nil until one is supplied.</p>
+    {% endif %}
+
+    {% if income_tax_reconciliation %}
+    <p class="muted" style="font-size:12.5px;margin-top:10px;">
+      <strong>Trial balance reconciliation:</strong> the trial balance's Income Tax Expense is {{ '%.2f'|format(income_tax_reconciliation.tb_current) }} against a computed charge of {{ '%.2f'|format(income_tax_reconciliation.computed) }}.
+      {% if income_tax_reconciliation.ties_out %}Ties out to the trial balance.{% else %}Difference of {{ '%.2f'|format(income_tax_reconciliation.diff) }} - basis for a proposed adjustment to either the trial balance or this computation.{% endif %}
+    </p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {% if income_tax_computation %}
+  <div class="card">
+    <h3 class="mt-0">Sign-off</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Prepared by {{ income_tax_computation.completed_by.name if income_tax_computation.completed_by else '—' }} on {{ (income_tax_computation.completed_at|cat).strftime('%d %b %Y') if income_tax_computation.completed_at else '—' }}.
+      {% if income_tax_computation.is_reviewed %}Reviewed by {{ income_tax_computation.reviewed_by.name }} on {{ (income_tax_computation.reviewed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+      {% if income_tax_computation.is_partner_signed %}Partner sign-off by {{ income_tax_computation.partner_signed_by.name }} on {{ (income_tax_computation.partner_signed_at|cat).strftime('%d %b %Y') }}.{% endif %}
+    </p>
+    {% if current_user.role in ('supervisor', 'partner', 'admin') %}
+      {% if income_tax_computation.is_reviewed %}
+      <form method="post" action="{{ url_for('engagements.unreview_income_tax_computation', computation_id=income_tax_computation.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove review sign-off</button></form>
+      {% elif income_tax_computation.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.review_income_tax_computation', computation_id=income_tax_computation.id) }}" class="inline"><button type="submit" class="btn small gold">Mark as reviewed</button></form>
+      {% elif effectively_reviewed(income_tax_computation) %}
+      <span class="muted" style="font-size:11px;">Prepared by a Partner/Admin - no separate reviewer required <span class="badge status-Completed">Effectively reviewed</span></span>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Awaiting review by someone other than the preparer</span>
+      {% endif %}
+    {% endif %}
+    {% if current_user.role in ('partner', 'admin') %}
+      {% if income_tax_computation.is_partner_signed %}
+      <form method="post" action="{{ url_for('engagements.partner_unsign_income_tax_computation', computation_id=income_tax_computation.id) }}" class="inline"><button type="submit" class="btn small secondary">Remove partner sign-off</button></form>
+      {% elif income_tax_computation.completed_by_id != current_user.id %}
+      <form method="post" action="{{ url_for('engagements.partner_sign_income_tax_computation', computation_id=income_tax_computation.id) }}" class="inline"><button type="submit" class="btn small gold">Partner sign-off</button></form>
+      {% else %}
+      <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% endif %}
+{% endif %}
+
+  {{ qmacros.render_queries(engagement, 'income_tax', queries_by_section.get('income_tax', [])) }}
+
+{% endif %}
+
+
