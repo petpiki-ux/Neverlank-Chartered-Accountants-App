@@ -873,6 +873,7 @@ def create_app():
     from scan_views import scan_bp
     from tax import tax_bp
     from accounting import accounting_bp
+    from monthly_tb import monthly_tb_bp
     from qpd import qpd_bp, qpd_dashboard_bp
     from standard_coa import standard_coa_bp
     from tb_setup import tb_setup_bp
@@ -931,6 +932,7 @@ def create_app():
     app.register_blueprint(scan_bp)
     app.register_blueprint(tax_bp)
     app.register_blueprint(accounting_bp)
+    app.register_blueprint(monthly_tb_bp)
     app.register_blueprint(qpd_bp)
     app.register_blueprint(qpd_dashboard_bp)
     app.register_blueprint(standard_coa_bp)

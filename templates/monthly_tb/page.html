@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Monthly trial balances - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Monthly trial balances</h1>
+    <div class="subtitle">
+      <a href="{{ url_for('clients.view_client', client_id=engagement.client.id) }}">{{ engagement.client.name }}</a>
+      &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='accounting') }}">{{ engagement.title }}</a>
+      &middot; <span class="badge type-{{ engagement.type|replace(' ', '') }}">{{ engagement.type }}</span>
+    </div>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap;">
+    <a class="btn secondary" href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='accounting') }}">Back to Accounting</a>
+    {% if cons.months %}<a class="btn secondary" href="{{ url_for('monthly_tb.download', engagement_id=engagement.id, month=sel) }}">Download Excel</a>{% endif %}
+  </div>
+</div>
+
+{% for w in cons.warnings %}<div class="cf-banner" style="border-left:4px solid #b8860b;">{{ w }}</div>{% endfor %}
+
+<div class="card">
+  <h3 class="mt-0">Upload a trial balance</h3>
+  <p class="muted" style="font-size:12.5px;">Excel or CSV with an account name column and Debit and Credit columns (or one Balance column, debit positive). Choose what the file holds:
+    <strong>the month's movements</strong> are added to the running total; <strong>closing balances</strong> replace the running total (the month's movement is the difference); <strong>opening balances</strong> start the year (balance sheet accounts brought forward, income and expenses nil). Uploading the same month and basis again replaces the earlier file.</p>
+  <form method="post" action="{{ url_for('monthly_tb.upload', engagement_id=engagement.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
+    <div><label for="mtb_month">Month</label>
+      <select id="mtb_month" name="month" required>
+        {% for p in fy %}<option value="{{ p }}" {% if p == default_month %}selected{% endif %}>{{ month_label(p) }}</option>{% endfor %}
+        {% if not fy %}<option value="">Set the period end on the engagement first</option>{% endif %}
+      </select></div>
+    <div><label for="mtb_basis">The file holds</label>
+      <select id="mtb_basis" name="basis" required>{% for k, lab in bases %}<option value="{{ k }}" {% if k == 'movement' %}selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+    <div><label for="mtb_file">File</label><input type="file" id="mtb_file" name="file" accept=".xlsx,.xlsm,.csv" required></div>
+    <div><label for="mtb_note">Note (optional)</label><input type="text" id="mtb_note" name="note" maxlength="300"></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;" {% if not fy %}disabled{% endif %}>Upload</button></div>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Uploads</h3>
+  {% if uploads %}
+  <div class="tbl-scroll"><table>
+    <thead><tr><th>Month</th><th>Basis</th><th>File</th><th class="text-right">Accounts</th><th class="text-right">Debits less credits</th><th>Uploaded</th><th></th></tr></thead>
+    <tbody>
+    {% for u in uploads %}
+      {% set tot = u.rows|sum(attribute='net_dr') %}
+      <tr>
+        <td>{{ month_label(u.period) }}</td><td>{{ basis_label[u.basis] }}</td><td>{{ u.filename or '' }}{% if u.note %} <span class="muted">- {{ u.note }}</span>{% endif %}</td>
+        <td class="text-right">{{ u.rows|length }}</td>
+        <td class="text-right">{% if tot > 0.5 or tot < -0.5 %}<span class="cf-bad">{{ '{:,.2f}'.format(tot) }}</span>{% else %}{{ '{:,.2f}'.format(tot) }}{% endif %}</td>
+        <td>{{ u.created_at.strftime('%d %b %Y') if u.created_at else '' }}{% if u.created_by %} <span class="muted">{{ u.created_by }}</span>{% endif %}</td>
+        <td class="text-right"><form method="post" action="{{ url_for('monthly_tb.delete', engagement_id=engagement.id, tb_id=u.id) }}" class="inline" onsubmit="return confirm('Remove this upload?');"><button class="btn small danger">Remove</button></form></td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}<div class="empty-state">Nothing uploaded yet. Start with the opening balances, then add each month.</div>{% endif %}
+</div>
+
+{% if cons.months %}
+<div class="card">
+  <h3 class="mt-0">Cumulative trial balance</h3>
+  <p class="muted" style="font-size:12px;">Debit positive, credit negative. Each column is the position at the end of that month after consolidating every upload up to it.</p>
+  <div class="tbl-scroll"><table style="font-size:12px;">
+    <thead><tr><th>Code</th><th>Account</th>{% for m in cons.months %}<th class="text-right">{{ m.label }}</th>{% endfor %}</tr></thead>
+    <tbody>
+    {% for k in cons.order %}{% set a = cons.accounts[k] %}
+      <tr><td>{{ a.code }}</td><td>{{ a.name }}</td>{% for m in cons.months %}{% set v = m.cum.get(k) %}<td class="text-right">{{ '{:,.2f}'.format(v) if v else '-' }}</td>{% endfor %}</tr>
+    {% endfor %}
+    </tbody>
+    <tfoot><tr><th></th><th>Total (should be nil)</th>{% for m in cons.months %}<th class="text-right">{{ '{:,.2f}'.format(m.cum_sum) }}</th>{% endfor %}</tr>
+      <tr><td></td><td>Uploaded as</td>{% for m in cons.months %}<td class="text-right muted">{{ m.basis|replace('+', ' + ') }}</td>{% endfor %}</tr></tfoot>
+  </table></div>
+</div>
+
+<div class="card" id="reconcile">
+  <h3 class="mt-0">Year-end reconciliation</h3>
+  {% if not has_yearend %}
+    <div class="empty-state">There is no year-end Trial Balance on this engagement yet. Import it on the <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Trial Balance</a> tab, or roll up the General Ledger, and the reconciliation appears here.</div>
+  {% else %}
+  <form method="get" class="form-row" style="align-items:flex-end;">
+    <div><label for="rec_month">Reconcile the cumulative trial balance at</label>
+      <select id="rec_month" name="month" onchange="this.form.submit()">{% for m in cons.months %}<option value="{{ m.period }}" {% if m.period == sel %}selected{% endif %}>{{ m.label }}</option>{% endfor %}</select></div>
+  </form>
+  {% if not covers_year %}<p class="muted" style="font-size:12px;">The year-end ({{ month_label(last_fy) if last_fy else '' }}) has not been uploaded yet, so differences are expected until it is.</p>{% endif %}
+  {% if rec %}
+    {% if rec.reconciled %}
+      <div class="cf-banner" style="border-left:4px solid #2e7d32;"><strong>Reconciled.</strong> The cumulative monthly trial balance at {{ month_label(sel) }} agrees to the engagement's Trial Balance, account by account.</div>
+    {% else %}
+      <div class="cf-banner" style="border-left:4px solid #b71c1c;"><strong>Not reconciled.</strong> {{ rec.off|length }} account(s) differ; the gross difference is {{ '{:,.2f}'.format(rec.totals.abs_diff) }}.
+        {% if rec.monthly_only %}{{ rec.monthly_only|length }} account(s) appear only in the monthly uploads. {% endif %}{% if rec.yearend_only %}{{ rec.yearend_only|length }} account(s) appear only in the year-end Trial Balance.{% endif %}</div>
+    {% endif %}
+    <div class="tbl-scroll"><table style="font-size:12px;">
+      <thead><tr><th>Code</th><th>Account</th><th class="text-right">Cumulative monthly TB</th><th class="text-right">Year-end TB</th><th class="text-right">Difference</th><th>Found in</th></tr></thead>
+      <tbody>
+      {% for x in rec.lines %}{% set bad = x.diff > 0.5 or x.diff < -0.5 %}
+        <tr{% if bad %} style="background:#fff4f4;"{% endif %}><td>{{ x.code }}</td><td>{{ x.name }}</td>
+          <td class="text-right">{{ '{:,.2f}'.format(x.cum) if x.cum is not none else '-' }}</td><td class="text-right">{{ '{:,.2f}'.format(x.yearend) if x.yearend is not none else '-' }}</td>
+          <td class="text-right">{% if bad %}<strong class="cf-bad">{{ '{:,.2f}'.format(x.diff) }}</strong>{% else %}-{% endif %}</td><td>{{ x.where }}</td></tr>
+      {% endfor %}
+      </tbody>
+      <tfoot><tr><th></th><th>Total</th><th class="text-right">{{ '{:,.2f}'.format(rec.totals.cum) }}</th><th class="text-right">{{ '{:,.2f}'.format(rec.totals.yearend) }}</th><th class="text-right">{{ '{:,.2f}'.format(rec.totals.diff) }}</th><th></th></tr></tfoot>
+    </table></div>
+  {% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Management accounts</h3>
+  <p class="muted" style="font-size:12.5px;">Management accounts packs for this engagement take their monthly actuals from the cumulative trial balance above. Open a pack, go to its <strong>Actuals</strong> tab and choose <strong>Load from the monthly trial balances</strong>.</p>
+  {% if packs %}
+    <ul>{% for p in packs %}<li><a href="{{ url_for('corpfin.pack_tab', pack_id=p.id, tab='actuals') }}">{{ p.pack_number }} - {{ p.name }}</a> <span class="badge status-{{ p.status }}">{{ p.status }}</span></li>{% endfor %}</ul>
+  {% endif %}
+  <a class="btn gold" href="{{ url_for('corpfin.new_pack', client_id=engagement.client_id, engagement_id=engagement.id) }}">New management accounts</a>
+  <a class="btn secondary" href="{{ url_for('corpfin.engagement_packs', engagement_id=engagement.id) }}">All packs</a>
+</div>
+{% endif %}
+{% endblock %}

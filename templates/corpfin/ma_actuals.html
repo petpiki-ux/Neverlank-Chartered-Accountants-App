@@ -36,6 +36,17 @@
 </div>
 
 {% if not pack.is_final %}
+  {% if pack.engagement and pack.engagement.has_accounting_module %}
+  <div class="card">
+    <h3 style="margin-top:0;">Load from the monthly trial balances</h3>
+    <p class="cf-sub">This pack belongs to an Accounting &amp; Bookkeeping engagement, so its actuals can come straight from the cumulative trial balance built from the monthly uploads ({{ pack.engagement.monthly_tbs|length }} upload{{ '' if pack.engagement.monthly_tbs|length == 1 else 's' }} so far). Manage them on the <a href="{{ url_for('monthly_tb.page', engagement_id=pack.engagement.id) }}">Monthly Trial Balances</a> page.</p>
+    <form method="post" action="{{ url_for('corpfin.pack_tb_from_monthly', pack_id=pack.id) }}" class="form-row" style="align-items:flex-end;">
+      <div><label>Month</label><select name="month">{% for s in status %}<option value="{{ s.month }}" {% if s.month == report_month %}selected{% endif %}>{{ s.label }}</option>{% endfor %}</select></div>
+      <div><button class="btn gold" type="submit" style="margin-bottom:14px;">Load this month (review mapping)</button></div>
+    </form>
+    <form method="post" action="{{ url_for('corpfin.pack_tb_from_monthly_all', pack_id=pack.id) }}" class="inline"><button class="btn secondary" type="submit">Load every uploaded month</button></form>
+  </div>
+  {% endif %}
 <div class="viz-grid" style="grid-template-columns:repeat(auto-fit,minmax(340px,1fr));">
   <form method="post" action="{{ url_for('corpfin.pack_tb_upload', pack_id=pack.id) }}" enctype="multipart/form-data" class="card">
     <h3 style="margin-top:0;">Upload a trial balance</h3>

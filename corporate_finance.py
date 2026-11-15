@@ -282,6 +282,19 @@ def _advisory_engagement_or_404(engagement_id):
     return eng
 
 
+def _ma_engagement_or_404(engagement_id):
+    """Like _advisory_engagement_or_404, but also lets Accounting & Bookkeeping engagements (anything with the Accounting module) in:
+    they prepare Management Accounts packs from their monthly trial balances."""
+    eng = Engagement.query.get_or_404(engagement_id)
+    if not (eng.is_corporate_finance or eng.has_accounting_module):
+        abort(404)
+    if not user_can_access_client(current_user, eng.client_id):
+        abort(403, description="You are not working on this client, so you cannot open this.")
+    if not user_can_access_engagement(current_user, eng):
+        abort(403, description="You are not on this engagement's team, so you cannot open anything inside it.")
+    return eng
+
+
 def _acceptance_open(eng):
     return current_user.role == "admin" or engagement_acceptance_cleared(eng)
 

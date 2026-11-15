@@ -4,6 +4,7 @@
 {% block content %}
 {{ svc.service_header(engagement) }}
 {{ svc.service_tabs(engagement, 'packs') }}
+{% if not engagement.is_corporate_finance %}<p><a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='accounting') }}">&larr; Back to the Accounting tab</a> &middot; <a href="{{ url_for('monthly_tb.page', engagement_id=engagement.id) }}">Monthly trial balances</a></p>{% endif %}
 
 {% if not unlocked %}
 <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before preparing management accounts here.</div></div>

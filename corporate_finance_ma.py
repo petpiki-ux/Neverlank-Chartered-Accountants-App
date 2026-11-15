@@ -40,7 +40,7 @@ from invoicing import FIRM_LETTERHEAD, next_sequence_number
 from models import (Client, Engagement, CFModel, CFScenario, CFMgmtPack, COAMapping, Document, user_can_access_client,
                     user_can_access_engagement, visible_clients)
 from corporate_finance import (corpfin_bp, _guard, _can_see, _is_signoff_role, _engagement_choices, _valid_engagement,
-                               _commit_with_number, _touch, _advisory_engagement_or_404, _acceptance_open, _run, _next_model_number, _base_scenario,
+                               _commit_with_number, _touch, _advisory_engagement_or_404, _ma_engagement_or_404, _acceptance_open, _run, _next_model_number, _base_scenario,
                                _pick_scenario, _safe_name, CURRENCIES, XLSX_MIME)
 
 PACK_TABS = [
@@ -150,7 +150,7 @@ def _chart_payload(d):
 
 @corpfin_bp.route("/engagements/<int:engagement_id>/management-accounts")
 def engagement_packs(engagement_id):
-    eng = _advisory_engagement_or_404(engagement_id)
+    eng = _ma_engagement_or_404(engagement_id)
     packs = [p for p in eng.cf_packs if _can_see(p)]
     return render_template("corpfin/engagement_packs.html", engagement=eng, packs=packs, unlocked=_acceptance_open(eng))
 
@@ -708,6 +708,95 @@ def pack_tb_upload(pack_id):
         if t:
             chosen[str(i)], hows[str(i)] = t, how
     return _mapping_page(pack, d, rows, chosen, hows, target, month, f.filename, label=(request.form.get("prior_label") or "").strip())
+
+
+def _monthly_rows(pack, d, month):
+    """(rows, error) for `month`: the cumulative monthly trial balance of the pack's engagement at that month's end."""
+    import monthly_tb as MT
+    eng = pack.engagement
+    if eng is None or not eng.has_accounting_module:
+        return None, "Monthly trial balances belong to Accounting & Bookkeeping engagements. Link this pack to one first."
+    if month not in M.fy_months(d):
+        return None, "Choose the month to load."
+    cons = MT.consolidated_for(eng)
+    if month not in [m["period"] for m in cons["months"]]:
+        return None, f"No monthly trial balance has been uploaded for {M.month_label(month, False)}. Upload it on the engagement's Monthly Trial Balances page."
+    return MT.rows_for_month(cons, month), None
+
+
+def _auto_map(pack, d, rows):
+    cmap = _client_map(pack.client_id)
+    chosen, hows = {}, {}
+    for i, r in enumerate(rows):
+        t, how = M.suggest_target(r["name"], d["structure"], d["mapping"], cmap, suggest_fs_category)
+        if t:
+            chosen[str(i)], hows[str(i)] = t, how
+    return chosen, hows
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/tb/from-monthly", methods=["POST"])
+def pack_tb_from_monthly(pack_id):
+    """Load one month of actuals from the engagement's cumulative monthly trial balance (month-by-month review of the account mapping)."""
+    pack = _pack_or_404(pack_id)
+    back = _back(pack, "actuals")
+    if _plocked(pack):
+        return back
+    d = _data(pack)
+    month = request.form.get("month")
+    rows, err = _monthly_rows(pack, d, month)
+    if err or not rows:
+        flash(err or "That month's cumulative trial balance is empty.", "danger")
+        return back
+    chosen, hows = _auto_map(pack, d, rows)
+    return _mapping_page(pack, d, rows, chosen, hows, "actual", month, f"Monthly trial balances to {M.month_label(month, False)}")
+
+
+@corpfin_bp.route("/management-accounts/<int:pack_id>/tb/from-monthly-all", methods=["POST"])
+def pack_tb_from_monthly_all(pack_id):
+    """Load every uploaded month. Months whose accounts all map (from the saved mapping) and balance are saved straight away;
+    the first month that needs a decision opens the mapping page, and the rest can be loaded again after it."""
+    import monthly_tb as MT
+    pack = _pack_or_404(pack_id)
+    back = _back(pack, "actuals")
+    if _plocked(pack):
+        return back
+    eng = pack.engagement
+    if eng is None or not eng.has_accounting_module:
+        flash("Monthly trial balances belong to Accounting & Bookkeeping engagements. Link this pack to one first.", "danger")
+        return back
+    d = _data(pack)
+    cons = MT.consolidated_for(eng)
+    fy = M.fy_months(d)
+    todo = [m["period"] for m in cons["months"] if m["period"] in fy]
+    if not todo:
+        flash("No monthly trial balance has been uploaded for this pack's financial year.", "danger")
+        return back
+    loaded = []
+    for month in todo:
+        rows = MT.rows_for_month(cons, month)
+        if not rows:
+            continue
+        chosen, _hows = _auto_map(pack, d, rows)
+        if len(chosen) < len(rows):
+            if loaded:
+                _save(pack, d)
+                flash("Loaded " + ", ".join(loaded) + ".", "success")
+            flash(f"{M.month_label(month, False)} has accounts that still need a line. Check the mapping and save it, then load the remaining months again.", "warning")
+            return _mapping_page(pack, d, rows, chosen, {}, "actual", month, f"Monthly trial balances to {M.month_label(month, False)}")
+        entry, stats = M.entry_from_tb(rows, chosen, d["structure"])
+        if abs(stats["tb_out_by"]) > 0.5 or abs(stats["bs_check"]) > 0.5:
+            if loaded:
+                _save(pack, d)
+                flash("Loaded " + ", ".join(loaded) + ".", "success")
+            flash(f"{M.month_label(month, False)} does not balance (trial balance out by {stats['tb_out_by']:,.2f}, balance sheet out by {stats['bs_check']:,.2f}). Review it below.", "warning")
+            return _mapping_page(pack, d, rows, chosen, {}, "actual", month, f"Monthly trial balances to {M.month_label(month, False)}")
+        entry["note"] = f"Monthly trial balances to {M.month_label(month, False)}"
+        entry["saved"] = _stamp()
+        d["entries"][month] = entry
+        loaded.append(M.month_label(month, False))
+    _save(pack, d)
+    flash("Loaded " + ", ".join(loaded) + " from the monthly trial balances.", "success")
+    return back
 
 
 @corpfin_bp.route("/management-accounts/<int:pack_id>/tb/confirm", methods=["POST"])
@@ -1609,7 +1698,7 @@ def pack_download_all(pack_id):
 @corpfin_bp.route("/engagements/<int:engagement_id>/management-accounts/download-all")
 def engagement_packs_download_all(engagement_id):
     from corporate_finance import _zip_response
-    eng = _advisory_engagement_or_404(engagement_id)
+    eng = _ma_engagement_or_404(engagement_id)
     if not _acceptance_open(eng):
         abort(403, description="This engagement is pending Client Acceptance sign-off.")
     files = []

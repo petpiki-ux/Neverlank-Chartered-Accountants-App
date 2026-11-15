@@ -17,6 +17,21 @@
     </p>
   </div>
 
+  <!-- ---------- Monthly trial balances & Management Accounts ---------- -->
+  <div class="card">
+    <h3 class="mt-0">Monthly Trial Balances &amp; Management Accounts</h3>
+    <p class="muted" style="font-size:12.5px;">
+      Upload each month's trial balance (the month's movements or the closing balances), consolidate them cumulatively through the year and reconcile the result to the year-end Trial Balance. The cumulative trial balance for any month then feeds the Management Accounts pack.
+    </p>
+    {% set mtb_n = engagement.monthly_tbs|length %}
+    <p style="font-size:13px;">Monthly uploads: <strong>{{ mtb_n }}</strong> &middot; Management accounts packs: <strong>{{ engagement.cf_packs|length }}</strong></p>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;">
+      <a class="btn gold" href="{{ url_for('monthly_tb.page', engagement_id=engagement.id) }}">Monthly trial balances &amp; reconciliation</a>
+      <a class="btn secondary" href="{{ url_for('corpfin.engagement_packs', engagement_id=engagement.id) }}">Management accounts packs</a>
+      <a class="btn secondary" href="{{ url_for('corpfin.new_pack', client_id=engagement.client_id, engagement_id=engagement.id) }}">New management accounts</a>
+    </div>
+  </div>
+
   <!-- ---------- Chart of Accounts ---------- -->
   <div class="card">
     <h3 class="mt-0">Chart of Accounts</h3>
