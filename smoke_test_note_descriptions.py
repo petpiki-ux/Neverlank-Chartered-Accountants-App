@@ -53,11 +53,17 @@ with app.app_context():
     check(notes["Property, plant and equipment"]["accounts"][0]["description"] == LAND, "the Right-of-Use Assets note row carries its description")
     check(notes["Share capital"]["accounts"][0]["description"] == "", "an account without one has none")
     d = DocxDocument(wp.build_financial_statements_docx(Engagement.query.get(eid), st, None))
-    cells = [cell.text for t in d.tables for row in t.rows for cell in row.cells[:1]]
-    check(any(MINING in t and "Mining Rights" in t for t in cells), "the Word note prints the description under Mining Rights")
-    check(any(LAND in t and "Use Assets" in t for t in cells), "the Word note prints the description under Right-of-Use Assets")
+    paras = [p.text for p in d.paragraphs]
+    cells = [cell.text for t in d.tables for row in t.rows for cell in row.cells]
+    check(any(t.startswith("Mining Rights: ") and MINING in t for t in paras), "the Word note prints the description as body text, with the account name, under Mining Rights")
+    check(any(t.startswith("Right") and "Use Assets: " in t and LAND in t for t in paras), "the Word note prints the description as body text under Right-of-Use Assets")
+    check(not any(MINING in t or LAND in t for t in cells), "the descriptions are not inside the table of numbers")
+    nm = [n for n in st["notes"] if n["title"] == "Intangible assets"][0]
+    check(nm["descriptions"] == [{"name": "Mining Rights", "text": MINING}], "the note carries its descriptions as a list")
 page = c.get(f"/engagements/{eid}?tab=finalisation").get_data(as_text=True)
 check(MINING in page and LAND in page, "the on-screen notes show both descriptions")
+import re as _re
+check(_re.search(r"</table>\s*(?:<[^>]+>\s*)*<p[^>]*><strong>Mining Rights:</strong>", page) is not None, "on screen the description follows the note's table")
 # the same account split across two lines keeps its description
 with app.app_context():
     from types import SimpleNamespace as NS

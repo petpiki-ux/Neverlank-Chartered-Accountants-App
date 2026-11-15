@@ -419,6 +419,7 @@ def _add_missing_columns():
         ],
         "audit_opinion": [("statutory_paragraph", "TEXT")],
         "financial_statements": list(partner_signoff_cols) + [
+            ("ppe_model", "VARCHAR(20)"), ("intangible_model", "VARCHAR(20)"),
             ("notes_to_financial_statements", "TEXT"),
             ("related_party_note", "TEXT"), ("commitments_note", "TEXT"), ("subsequent_events_note", "TEXT"),
         ],

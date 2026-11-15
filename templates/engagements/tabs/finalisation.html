@@ -704,6 +704,12 @@
     {% endif %}
     {% endfor %}
     {% endif %}
+    {% if statements.extra_policies %}
+    {% if not policy_notes %}<h4>3. Significant accounting policies</h4>{% endif %}
+    {% for ep in statements.extra_policies %}
+    <p><strong>({{ policy_notes|length + loop.index }}) {{ ep.title }}.</strong> {{ ep.text }}</p>
+    {% endfor %}
+    {% endif %}
 
 {% set yl = statements.year_labels or ['Current year', 'Prior year'] %}
     {% macro fmtv(v) %}{% if v is none or v|abs < 0.5 %}-{% elif v < 0 %}({{ '{:,.0f}'.format(-v) }}){% else %}{{ '{:,.0f}'.format(v) }}{% endif %}{% endmacro %}
@@ -796,7 +802,7 @@
       <thead><tr><th style="width:56%;">Account</th><th class="text-right" style="white-space:pre-line;width:22%;">{{ yl[0].replace(' ', '\n', 1) }}</th><th class="text-right" style="white-space:pre-line;width:22%;">{{ yl[1].replace(' ', '\n', 1) }}</th></tr></thead>
       <tbody>
         {% for a in note.accounts %}
-        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}{% if a.description %}<div class="muted" style="font-size:12px;font-style:italic;white-space:pre-line;">{{ a.description }}</div>{% endif %}{% if a.adj %} <span class="muted" style="font-size:11px;" title="This line includes audit adjustments (see the Adjustments section above)">&mdash; {% if a.from_tb is defined and not a.from_tb %}not in the trial balance; {% endif %}journal {% for j in a.adj %}{{ j.ref }} ({{ 'prior' if j.period == 'prior' else 'current' }} {{ '%.0f'|format(j.amount) }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if a.adj %}</span>{% endif %}</td><td class="text-right">{{ '%.0f'|format(a.current) }}</td><td class="text-right">{{ '%.0f'|format(a.prior) }}</td></tr>
+        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}{% if a.adj %} <span class="muted" style="font-size:11px;" title="This line includes audit adjustments (see the Adjustments section above)">&mdash; {% if a.from_tb is defined and not a.from_tb %}not in the trial balance; {% endif %}journal {% for j in a.adj %}{{ j.ref }} ({{ 'prior' if j.period == 'prior' else 'current' }} {{ '%.0f'|format(j.amount) }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if a.adj %}</span>{% endif %}</td><td class="text-right">{{ '%.0f'|format(a.current) }}</td><td class="text-right">{{ '%.0f'|format(a.prior) }}</td></tr>
         {% endfor %}
         <tr><td><strong>Total</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.prior) }}</strong></td></tr>
       </tbody>
@@ -816,6 +822,9 @@
         <tr>{% for v in r %}<td{% if loop.index > 1 %} class="text-right"{% endif %}>{% if is_b %}<strong>{% endif %}{{ v if v is string else '%.0f'|format(v) }}{% if is_b %}</strong>{% endif %}</td>{% endfor %}{% if xt.headers|length == 2 %}<td></td>{% endif %}</tr>{% endfor %}
       </tbody>
     </table>
+    {% endfor %}
+    {% for d in note.descriptions or [] %}
+    <p style="margin:8px 0 0;white-space:pre-line;"><strong>{{ d.name }}:</strong> {{ d.text }}</p>
     {% endfor %}
     {% endfor %}
 
@@ -910,6 +919,13 @@
       </select>
       <p class="muted" style="font-size:11.5px;margin-top:-2px;">Either method reconciles to the same net cash from operating activities (IAS 7.18) - only the operating activities section's presentation changes.</p>
 
+      <div class="form-row" style="margin-top:10px;">
+        <div><label for="ppe_model">Property, plant and equipment measured under</label>
+          <select id="ppe_model" name="ppe_model">{% for v, l in asset_model_choices %}<option value="{{ v }}" {% if (financial_statements.ppe_model if financial_statements else '') == v %}selected{% endif %}>{{ l }}{% if not v and statements and statements.asset_models %} (now: {{ statements.asset_models.ppe }}){% endif %}</option>{% endfor %}</select></div>
+        <div><label for="intangible_model">Intangible assets measured under</label>
+          <select id="intangible_model" name="intangible_model">{% for v, l in asset_model_choices %}<option value="{{ v }}" {% if (financial_statements.intangible_model if financial_statements else '') == v %}selected{% endif %}>{{ l }}{% if not v and statements and statements.asset_models %} (now: {{ statements.asset_models.intangible_assets }}){% endif %}</option>{% endfor %}</select></div>
+      </div>
+      <p class="muted" style="font-size:12px;margin-top:0;">The revaluation model changes the accounting policy wording for that asset line and the "historical cost basis" sentence of the basis of preparation (while that sentence is not typed over below). The valuation itself is a journal (Dr asset, Cr revaluation surplus).</p>
       <label for="basis_of_preparation" style="margin-top:10px;">Basis of preparation{% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %} (Note 2 above){% endif %}</label>
       <textarea id="basis_of_preparation" name="basis_of_preparation" rows="3">{{ financial_statements.basis_of_preparation if financial_statements else '' }}</textarea>
       {% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %}

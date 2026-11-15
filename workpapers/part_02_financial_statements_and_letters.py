@@ -45,11 +45,6 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         for r in rows:
             row = table.add_row().cells
             row[0].text = r["label"]
-            if r.get("desc"):                          # a line of description under the account's name (italic, smaller)
-                dp = row[0].add_paragraph()
-                dr = dp.add_run(r["desc"])
-                dr.italic = True
-                dr.font.size = Pt(9)
             row[1].text = _fmt_whole(r["current"])
             row[2].text = _fmt_whole(r.get("prior", 0))
             if r.get("bold"):
@@ -283,13 +278,13 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         doc.add_paragraph(fin.general_information_note(engagement.client, engagement))
 
         _add_heading(doc, "2. Basis of preparation", level=2)
-        basis_text = (financial_statements.basis_of_preparation if financial_statements else "") or (
-            fin.REPORTING_FRAMEWORK_COMPLIANCE_TEXT.get(engagement.reporting_framework, "") + fin.DEFAULT_BASIS_OF_PREPARATION_TAIL
-        )
+        basis_text = (financial_statements.basis_of_preparation if financial_statements else "") or fin.default_basis_of_preparation(
+            engagement.reporting_framework, statements.get("asset_models"))
         doc.add_paragraph(basis_text)
 
         policy_notes = [n for n in statements["notes"] if n.get("policy")]
-        if policy_notes:
+        extra_policies = statements.get("extra_policies") or []
+        if policy_notes or extra_policies:
             _add_heading(doc, "3. Significant accounting policies", level=2)
             for i, note in enumerate(policy_notes, start=1):
                 parts = note.get("policy_parts")
@@ -320,6 +315,10 @@ def build_financial_statements_docx(engagement, statements, financial_statements
                 run = p.add_run(f"({i}) {note['title']}. ")
                 run.bold = True
                 p.add_run(note["policy"])
+            for k, ep in enumerate(extra_policies, start=len(policy_notes) + 1):
+                p = doc.add_paragraph()
+                p.add_run(f"({k}) {ep['title']}. ").bold = True
+                p.add_run(ep["text"])
 
         import client_notes
         client_notes.attach_client_notes(statements, engagement)
@@ -338,7 +337,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
                 continue
             account_rows = [
                 {"label": (f"{a['account_code']} - " if a.get("account_code") else "") + a["account_name"],
-                 "current": a["current"], "prior": a["prior"], "desc": a.get("description") or ""}
+                 "current": a["current"], "prior": a["prior"]}
                 for a in note["accounts"]
             ] + [{"label": "Total", "current": note["total"]["current"], "prior": note["total"]["prior"], "bold": True}]
             two_col_table(f"{note['number']}. {note['title']}", account_rows, level=2)

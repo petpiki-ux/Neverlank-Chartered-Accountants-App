@@ -665,3 +665,15 @@ def _extra_note_tables(doc, note):
         _col_widths(doc, table, [0.56, 0.22, 0.22] if len(headers) == 3 else [0.34, 0.22, 0.22, 0.22])
         _right_align(table, first_col=1)
         doc.add_paragraph()
+    _note_descriptions(doc, note)
+
+
+def _note_descriptions(doc, note):
+    """What the preparer wrote about the note's accounts (Finalisation tab, "Describe accounts in the notes"): body text of the note, one
+    paragraph each, below the numbers - the account's name in bold, then its description."""
+    for d in note.get("descriptions") or []:
+        p = doc.add_paragraph()
+        p.paragraph_format.space_before = Pt(6)
+        p.add_run(f"{d['name']}: ").bold = True
+        p.add_run(d["text"])
+

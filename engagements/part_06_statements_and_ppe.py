@@ -26,6 +26,14 @@ def _ppe_movement_and_policy(class_dicts, asset_dicts, period_end):
     return ppe_movement, ppe_policy_text
 
 
+def _asset_model_overrides(engagement_id):
+    """The preparer's choice of measurement model for PPE and intangible assets (Finalisation tab, Basis of preparation): {} until chosen."""
+    fs = FinancialStatements.query.filter_by(engagement_id=engagement_id).first()
+    if not fs:
+        return {}
+    return {"ppe": fs.ppe_model or "", "intangible_assets": fs.intangible_model or ""}
+
+
 # ---------- Directors' Statement (Finalisation tab) ----------
 
 def _get_or_create_directors_statement(engagement):
@@ -1077,6 +1085,7 @@ def generate_financial_statements_docx(engagement_id):
         trial_balance.lines, trial_balance.adjustments,
         reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,
         ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text, whole_numbers=True,
+        asset_models=_asset_model_overrides(engagement_id),
     )
     import client_notes, cf_prior
     client_notes.attach_client_notes(statements, engagement)

@@ -174,6 +174,7 @@ def view_engagement(engagement_id):
             trial_balance.lines, trial_balance.adjustments,
             reporting_framework=engagement.reporting_framework, cash_flow_method=engagement.cash_flow_method,
             ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text, whole_numbers=True,
+            asset_models=_asset_model_overrides(engagement_id),
         )
         if trial_balance and trial_balance.lines else None
     )
@@ -623,7 +624,8 @@ def view_engagement(engagement_id):
         reporting_frameworks=REPORTING_FRAMEWORKS,
         reporting_framework_labels=REPORTING_FRAMEWORK_LABELS,
         general_information_note=fin.general_information_note(engagement.client, engagement),
-        default_basis_of_preparation=fin.REPORTING_FRAMEWORK_COMPLIANCE_TEXT.get(engagement.reporting_framework, "") + fin.DEFAULT_BASIS_OF_PREPARATION_TAIL,
+        default_basis_of_preparation=fin.default_basis_of_preparation(engagement.reporting_framework, (statements or {}).get("asset_models")),
+        asset_model_choices=(("", "Work it out from the journals"), ("cost", "Cost model"), ("revaluation", "Revaluation model")),
         default_closing_notes=fin.DEFAULT_CLOSING_NOTE_TEXT,
         cash_flow_methods=CASH_FLOW_METHODS,
         cash_flow_method_labels=CASH_FLOW_METHOD_LABELS,

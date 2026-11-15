@@ -182,6 +182,110 @@ def add_revaluation_policy(text, extra_paragraphs):
     return flat
 
 
+_PPE_COST_SENTENCE = ("Property, plant and equipment are stated at cost less accumulated depreciation and any "
+                      "accumulated impairment losses.")
+_REVALUATION_RECOGNITION = (
+    "Revaluations are made with sufficient regularity that the carrying amount does not differ materially from fair value at the end of the "
+    "reporting period. A revaluation increase is recognised in other comprehensive income and accumulated in equity as a revaluation surplus, "
+    "except to the extent that it reverses a revaluation decrease of the same asset previously recognised in profit or loss; a decrease is "
+    "recognised in profit or loss except to the extent it offsets an existing surplus on that asset.")
+REVALUATION_MODEL_POLICY = {
+    "ppe": ("Property, plant and equipment are measured at revalued amounts, being fair value at the date of revaluation less any subsequent "
+            "accumulated depreciation and accumulated impairment losses. " + _REVALUATION_RECOGNITION),
+    "intangible_assets": ("Intangible assets are measured at revalued amounts, being fair value at the date of revaluation less any subsequent "
+                          "accumulated amortisation and accumulated impairment losses. " + _REVALUATION_RECOGNITION
+                          + " Intangible assets with finite useful lives are amortised on a straight-line basis over their useful economic lives."),
+}
+ASSET_MODEL_NAMES = {"ppe": "property, plant and equipment", "intangible_assets": "intangible assets"}
+
+
+def asset_measurement_models(adjustments=None, overrides=None, ppe_movement=None, ppe_policy_text=None):
+    """How property, plant and equipment and intangible assets are measured after recognition: {"ppe": "cost"|"revaluation",
+    "intangible_assets": "cost"|"revaluation"}. `overrides` is the preparer's own choice ({"ppe": "revaluation", ...}; blank or missing means
+    work it out). Worked out: the revaluation model once a valuation journal moved that asset line against the revaluation surplus / profit or
+    loss (see revaluation_noncash), or, for PPE, an applied revaluation of the Asset Register."""
+    overrides = overrides or {}
+    seen = (revaluation_noncash(adjustments) or {}).get("assets") or {}
+    auto = {"ppe": "cost", "intangible_assets": "cost"}
+    for code in auto:
+        if abs(float(seen.get(code) or 0.0)) >= 0.5:
+            auto[code] = "revaluation"
+    if (ppe_movement and ppe_movement.get("revaluation_note")) or "revalu" in str(ppe_policy_text or "").casefold():
+        auto["ppe"] = "revaluation"
+    return {code: (overrides.get(code) if overrides.get(code) in ("cost", "revaluation") else auto[code]) for code in auto}
+
+
+def _revalued_policy(code, policy, parts):
+    """The policy wording of a note once the asset line is on the revaluation model: (flat text, parts). PPE keeps the depreciation bases
+    that follow its first paragraph; a policy that already speaks of a revaluation (the Asset Register's own) is left as it is."""
+    if "revalu" in (policy or "").casefold():
+        return policy, parts
+    new = REVALUATION_MODEL_POLICY[code]
+    if parts:
+        parts = dict(parts)
+        paras = list(parts.get("paragraphs") or [])
+        parts["paragraphs"] = ([new] + paras[1:]) if paras else [new]
+    if code == "ppe" and policy and policy.startswith(_PPE_COST_SENTENCE):
+        return new + policy[len(_PPE_COST_SENTENCE):], parts       # the depreciation bases that followed the cost sentence stay
+    return new, parts
+
+
+def _is_right_of_use_name(name):
+    n = "".join(" " if ch in "-\u2010\u2011\u2012\u2013\u2014\u2212_" else ch for ch in (name or "")).casefold()
+    n = " ".join(n.split())
+    return "right of use" in n or n.startswith("rou ") or " rou " in n or n.endswith(" rou")
+
+
+RIGHT_OF_USE_POLICY = (
+    "The entity assesses at inception of a contract whether it is, or contains, a lease. At the commencement date of a lease (the date the "
+    "underlying asset is available for use) the entity recognises a right-of-use asset and a lease liability. The right-of-use asset is "
+    "measured initially at cost, being the initial amount of the lease liability, plus lease payments made at or before the commencement "
+    "date (less any lease incentives received), plus initial direct costs and the estimated costs of restoring the underlying asset. "
+    "Subsequently, right-of-use assets are measured at cost less accumulated depreciation and accumulated impairment losses, adjusted for any "
+    "remeasurement of the lease liability. Right-of-use assets are depreciated on a straight-line basis over the shorter of the lease term and "
+    "the useful life of the underlying asset, or over the useful life where the lease transfers ownership of the underlying asset or the cost "
+    "reflects the exercise of a purchase option. The lease liability is measured at the present value of the lease payments not yet paid, "
+    "discounted at the interest rate implicit in the lease or, where that cannot be readily determined, at the entity's incremental borrowing "
+    "rate. Payments on short-term leases (twelve months or less) and leases of low-value assets are recognised as an expense on a "
+    "straight-line basis over the lease term.")
+RIGHT_OF_USE_REVALUED = (
+    " Where the entity applies the revaluation model to the class of property, plant and equipment to which the right-of-use assets relate, "
+    "those right-of-use assets are measured at revalued amounts, being fair value at the date of revaluation less any subsequent accumulated "
+    "depreciation and accumulated impairment losses, on the same basis as the other assets of that class.")
+
+
+def extra_accounting_policies(lines, adjustments=None, models=None):
+    """Significant accounting policies that belong to a particular account rather than to a category of the statements. Right-of-use assets
+    (IFRS 16) are a policy of their own once the trial balance, or a journal, holds a right-of-use account:
+    [{"title", "text"}]. Empty otherwise."""
+    found = False
+    for l in lines or []:
+        vals = [getattr(l, k, None) or 0.0 for k in ("current_debit", "current_credit", "prior_debit", "prior_credit")]
+        if _is_right_of_use_name(getattr(l, "account_name", "")) and any(abs(v) >= 0.005 for v in vals):
+            found = True
+            break
+    if not found:
+        for adj in adjustments or []:
+            if any(_is_right_of_use_name(getattr(al, "account_name", "")) for al in getattr(adj, "lines", [])):
+                found = True
+                break
+    if not found:
+        return []
+    text = RIGHT_OF_USE_POLICY + (RIGHT_OF_USE_REVALUED if (models or {}).get("ppe") == "revaluation" else "")
+    return [{"title": "Right-of-use assets and leases", "text": text}]
+
+
+def default_basis_of_preparation(reporting_framework, models=None):
+    """The default Note 2 text: the framework's compliance sentence and the standard tail, with the historical cost sentence saying which
+    assets are measured at revalued amounts instead (`models` from asset_measurement_models())."""
+    text = REPORTING_FRAMEWORK_COMPLIANCE_TEXT.get(reporting_framework, "") + DEFAULT_BASIS_OF_PREPARATION_TAIL
+    revalued = [ASSET_MODEL_NAMES[c] for c in ("ppe", "intangible_assets") if (models or {}).get(c) == "revaluation"]
+    if revalued:
+        text = text.replace("on the historical cost basis, except where stated otherwise,",
+                            "on the historical cost basis, except for " + " and ".join(revalued) + ", which are measured at revalued amounts, and except where stated otherwise,")
+    return text
+
+
 # Checked in the order line items appear on the face of the primary
 # statements (Statement of Financial Position: non-current assets, current
 # assets, equity, non-current liabilities, current liabilities; then the
@@ -375,7 +479,7 @@ def _join_year_halves(rows):
     return out
 
 
-def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_totals=None, ppe_movement_raw=None, adjustments=None):
+def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_totals=None, ppe_movement_raw=None, adjustments=None, asset_models=None):
     """Builds the numbered Notes to the Financial Statements: one breakdown
     note per IAS 1 category (or small group of categories - see
     NOTE_DEFINITIONS) with a non-nil current or prior balance, each listing
@@ -473,6 +577,8 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
         note = {
             "number": number, "title": title, "policy": policy,
             "accounts": account_rows, "total": {"current": cur, "prior": pri},
+            # What the preparer wrote about an account ("Describe accounts in the notes"): printed as body text of the note, below the numbers.
+            "descriptions": [{"name": r["account_name"], "text": r["description"]} for r in account_rows if (r.get("description") or "").strip()],
         }
 
         if has_register:
@@ -516,6 +622,10 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
                     "register_current": reg_total["closing_nbv"], "register_prior": reg_total["opening_nbv"],
                 }
 
+        for mcode in codes:
+            if mcode in REVALUATION_MODEL_POLICY and (asset_models or {}).get(mcode) == "revaluation" and note.get("policy"):
+                note["policy"], note["policy_parts"] = _revalued_policy(mcode, note["policy"], note.get("policy_parts"))
+                note["measurement_model"] = "revaluation"
         note["extra_tables"] = _movement_tables(codes, title, account_rows, cur, pri, adjustments)
         notes.append(note)
 
@@ -619,8 +729,9 @@ def _route_owner_loan_journals(lines, adjustments):
 
 
 def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs", cash_flow_method="indirect",
-                          ppe_movement=None, ppe_policy_text=None, whole_numbers=False):
-    """`adjustments`, when given (a TrialBalance's .adjustments), are applied
+                          ppe_movement=None, ppe_policy_text=None, whole_numbers=False, asset_models=None):
+    """`asset_models`: the preparer's choice of measurement model per asset line ({"ppe": "cost"|"revaluation"|"", "intangible_assets": ...}); blank
+    means it is worked out from the journals (asset_measurement_models). `adjustments`, when given (a TrialBalance's .adjustments), are applied
     on top of the preliminary trial balance's totals before the statements
     are built - see apply_adjustments() above. Leave it out (the default)
     to build statements straight from the preliminary trial balance, e.g.
@@ -658,16 +769,17 @@ def build_all_statements(lines, adjustments=None, reporting_framework="full_ifrs
     equity = build_equity_statement(totals, pl)
     sfp = build_financial_position(totals, equity)
     cf = build_cash_flow(totals, pl, method=cash_flow_method, noncash=revaluation_noncash(adjustments))
+    models = asset_measurement_models(adjustments, asset_models, ppe_movement, ppe_policy_text)
     if reporting_framework in ("full_ifrs", "ifrs_for_smes"):
         notes, note_number_by_category = build_notes(
             lines, totals, ppe_movement=ppe_movement, ppe_policy_text=ppe_policy_text,
             raw_totals=raw_totals if whole_numbers else None, ppe_movement_raw=ppe_movement_raw if whole_numbers else None,
-            adjustments=adjustments)
+            adjustments=adjustments, asset_models=models)
         _attach_note_numbers(pl, sfp, cf, note_number_by_category)
     else:
         notes = []
     return {"totals": totals, "pl": pl, "equity": equity, "sfp": sfp, "cf": cf, "notes": notes,
-            "whole_numbers": bool(whole_numbers), "rounding": rounding, "prior_restated": prior_year_adjustments(adjustments)}
+            "asset_models": models, "extra_policies": extra_accounting_policies(lines, adjustments, models) if reporting_framework in ("full_ifrs", "ifrs_for_smes") else [], "whole_numbers": bool(whole_numbers), "rounding": rounding, "prior_restated": prior_year_adjustments(adjustments)}
 
 
 def parse_tb_rows(rows):

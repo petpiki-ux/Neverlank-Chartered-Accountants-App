@@ -10,6 +10,10 @@ class FinancialStatements(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False, unique=True)
     basis_of_preparation = db.Column(db.Text)
+    # How property, plant and equipment / intangible assets are measured after recognition: "" = work it out (a valuation journal or an applied
+    # revaluation means the revaluation model), "cost" or "revaluation" = as the preparer says. Drives the accounting policies and the basis of preparation.
+    ppe_model = db.Column(db.String(20))
+    intangible_model = db.Column(db.String(20))
     # Notes to the Financial Statements - free text, editable in-app (unlike
     # the figures throughout the statements themselves, which are always
     # computed live from the adjusted TrialBalance via financials.py and are

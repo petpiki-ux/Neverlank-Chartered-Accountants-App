@@ -701,6 +701,8 @@ def save_financial_statements_notes(engagement_id):
     engagement.sme_gross_assets = _blank_tolerant_number("sme_gross_assets", float)
     engagement.sme_staff_headcount = _blank_tolerant_number("sme_staff_headcount", int)
     fs.basis_of_preparation = request.form.get("basis_of_preparation", "").strip()
+    fs.ppe_model = request.form.get("ppe_model") if request.form.get("ppe_model") in ("cost", "revaluation") else None
+    fs.intangible_model = request.form.get("intangible_model") if request.form.get("intangible_model") in ("cost", "revaluation") else None
     # Notes to the Financial Statements are free text and editable here, same
     # as the basis of preparation - but note that the FIGURES throughout the
     # statements themselves are never set from this form: they always come
