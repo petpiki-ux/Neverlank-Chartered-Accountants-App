@@ -19,4 +19,8 @@ NeverlankApp.exe
 # not needed for cloud hosting (Render installs from PyPI directly), and
 # keeping it out of git keeps the repo small and pushes fast.
 wheelhouse/
-Claude outputs/d56_payroll_to_firm_financials.zip
+# Old drafts, zips and numbered copies (app-1.py, detail-6.html ...) are kept for reference only - never part of the app
+Claude outputs/
+*-[0-9].py
+*-[0-9].html
+*.zip

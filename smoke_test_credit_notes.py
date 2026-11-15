@@ -1,5 +1,6 @@
 import os, sys, tempfile, re
 os.environ["DATA_DIR"] = tempfile.mkdtemp(prefix="nl_")
+CNT = tempfile.mkdtemp(prefix="cnt_")      # where the test leaves the pages it printed, for looking at
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from datetime import date, timedelta
 import flask
@@ -82,7 +83,7 @@ with app.app_context():
     cn_id = cn.id
 r = c.get(f"/credit-notes/{cn_id}")
 check(r.status_code == 200 and b"Credit note" in r.data and b"Fee discount agreed" in r.data and b"230.00" in r.data, "print page renders")
-open("/tmp/cnt/cn_print.html", "wb").write(r.data)
+open(os.path.join(CNT, "cn_print.html"), "wb").write(r.data)
 r = c.get("/credit-notes/")
 check(r.status_code == 200 and b"CN-" in r.data, "list renders")
 r = c.get(f"/invoices/{inv_id}")
@@ -90,7 +91,7 @@ check(b"CN-" in r.data and b"Part-credited" in r.data, "invoice page lists credi
 r = c.get(f"/invoices/{inv_id}/print")
 check(b"Less credit note" in r.data, "invoice print shows credit")
 check(b"data:image/png;base64," not in r.data, "invoice print is unsigned until the Managing Partner signs")
-open("/tmp/cnt/inv_print.html", "wb").write(r.data)
+open(os.path.join(CNT, "inv_print.html"), "wb").write(r.data)
 
 # lock
 r = c.post(f"/invoices/{inv_id}/lines/add", data={"description": "x", "quantity": 1, "unit_price": 5}, follow_redirects=True)
@@ -116,7 +117,7 @@ with app.app_context():
 r = c.get(f"/credit-notes/{cn2}"); check(b"Refund due" in r.data, "refund shown on credit note")
 r = c.get(f"/statements/client/{cl_id}")
 check(r.status_code == 200 and b"Credit note" in r.data, "statement shows credit note rows")
-open("/tmp/cnt/stmt.html","wb").write(r.data)
+open(os.path.join(CNT, "stmt.html"),"wb").write(r.data)
 with app.app_context():
     from statements import build_statement, client_invoices
     inv = Invoice.query.get(inv_id)
@@ -157,7 +158,7 @@ with app.app_context():
     from invoice_pdf import build_invoice_pdf
     from invoicing import FIRM_LETTERHEAD
     inv = Invoice.query.get(inv_id)
-    pdf = build_invoice_pdf(inv, FIRM_LETTERHEAD); open("/tmp/cnt/inv.pdf","wb").write(pdf)
+    pdf = build_invoice_pdf(inv, FIRM_LETTERHEAD); open(os.path.join(CNT, "inv.pdf"),"wb").write(pdf)
     check(pdf[:4] == b"%PDF", "invoice pdf builds with credits")
     from analytics import build_report
     rep = build_report("USD", "12m")
@@ -168,7 +169,7 @@ for url in ["/analytics/", "/invoices/", "/invoices/reminders", "/receipts/", "/
 
 r = login(partner_id).get(f"/credit-notes/{cn_id}/pdf")
 check(r.status_code == 200 and r.data[:4] == b"%PDF", "credit note pdf")
-open("/tmp/cnt/cn.pdf","wb").write(r.data)
+open(os.path.join(CNT, "cn.pdf"),"wb").write(r.data)
 import emailer
 sent = {}
 emailer.is_configured = lambda: True

@@ -44,7 +44,6 @@ with app.app_context():
         d = DocxDocument(io.BytesIO(buf.getvalue()))
         txt = "\n".join(p.text for p in d.paragraphs) + "\n".join(c.text for t in d.tables for r in t.rows for c in r.cells)
         check("Cost of production" in txt and "(140,163)" in txt and "1,899,356" in txt, "Word pack shows the note with (140,163) and 1,899,356")
-        open("/tmp/claude-0/cop_test.docx", "wb").write(buf.getvalue())
     # a trader with no stock accounts keeps the plain list
     st2 = fin.build_all_statements([TL("Cost of sales", "cost_of_sales", 500, 0, 400, 0), TL("Sales", "revenue", 0, 900, 0, 800), TL("Cash", "cash", 400, 0, 400, 0), TL("Share capital", "share_capital", 0, 100, 0, 100), TL("Retained earnings", "retained_earnings", 0, 300, 0, 300)],
                                    [], reporting_framework="ifrs_for_smes", whole_numbers=True)

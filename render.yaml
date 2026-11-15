@@ -1,9 +1,17 @@
+# Reference copy of how the live service is set up (checked against Render on 15 Nov 2026).
+# The live service was created by hand, so its real settings are in the Render dashboard, not here. If you ever use this file as a Blueprint,
+# compare it with the dashboard first: a different service name would create a second service.
 services:
   - type: web
-    name: neverlank-audit-app
+    name: Neverlank-Chartered Accountants-Firm-app
     runtime: python
-    plan: starter
+    plan: standard                       # 1 CPU, 2 GB (the dashboard calls it 1c-2g)
+    region: oregon
+    branch: main
+    autoDeploy: true
     buildCommand: pip install -r requirements.txt
+    # One worker on purpose: the sign-in lockout and the call signalling live in memory. 120 s is the longest any page may take
+    # (the AI features are given less than that, see legislation_search.py).
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT --worker-class gthread --workers 1 --threads 8 --timeout 120
     healthCheckPath: /auth/login
     envVars:
@@ -13,9 +21,13 @@ services:
         value: /var/data
       - key: PYTHON_VERSION
         value: 3.11.9
-      # Sending invoices and reminders by email (see emailer.py). Create a free
-      # Resend (or Brevo) account, verify neverlank.co.zw there, then enter these
-      # three values in Render > Environment.
+      - key: DATABASE_URL                # PostgreSQL (the SQLite file is no longer used)
+        fromDatabase:
+          name: neverlank-db
+          property: connectionString
+      - key: ANTHROPIC_API_KEY           # AI features: library questions and advice, valuation writer, ZIMRA letters
+        sync: false
+      # Sending invoices and reminders by email (see emailer.py).
       - key: EMAIL_PROVIDER
         value: resend
       - key: EMAIL_API_KEY
@@ -24,10 +36,19 @@ services:
         sync: false
       - key: EMAIL_REPLY_TO
         sync: false
-      # The address clients use; used for the invoice links sent on WhatsApp.
+      # The address clients use; used for the invoice links sent on WhatsApp, and it marks cookies "Secure".
       - key: PUBLIC_BASE_URL
         value: https://neverlank-audit-app.onrender.com
+      # Optional hardening (see docs/LAUNCH_CHECKLIST.md): make two-factor compulsory for the senior roles.
+      # - key: NL_REQUIRE_2FA_ROLES
+      #   value: admin,partner,manager
     disk:
       name: neverlank-data
       mountPath: /var/data
-      sizeGB: 1
+      sizeGB: 4
+
+databases:
+  - name: neverlank-db
+    plan: basic-1gb
+    postgresMajorVersion: "16"
+    ipAllowList: []                      # nothing outside Render can connect
