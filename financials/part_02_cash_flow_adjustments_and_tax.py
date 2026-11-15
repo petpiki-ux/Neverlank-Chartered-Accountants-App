@@ -452,6 +452,21 @@ def default_directors_statement_text(engagement):
 # paragraph returned is a starting draft, same as every other boilerplate
 # paragraph in this app - the preparer edits it to the real, engagement-
 # specific position before the report is issued.
+def default_statutory_report_text(period_end):
+    """The Section 193 (Companies and Other Business Entities Act [Chapter 24:31]) statement at the end of an audit report. A line that is
+    only "Section 193(...)" is printed as a heading. The year is the year of the period end."""
+    year = str(period_end.year) if period_end else "[year]"
+    return (
+        "In fulfilment of the requirements of Section 193 of the Companies and Other Business Entities Act (Chapter 24:31) (\u201cthe Act\u201d), "
+        "we report to the shareholders as follows:\n"
+        "Section 193(1)(a)\n"
+        f"In our opinion, the {year} financial statements of the Company are properly drawn up in accordance with the Act so as to give a true "
+        "and fair view of the state of the Company\u2019s affairs as at the date of its financial statements for its financial year ended on that date.\n"
+        "Section 193(2)\n"
+        "We have no matters to report in respect of the Section 193(2) requirements of the Act."
+    )
+
+
 def default_audit_opinion_paragraphs(report_basis, modification, client_name, period_end, framework_label):
     period_str = period_end.strftime("%d %B %Y") if period_end else "[period end]"
     framework_label = framework_label or "[the applicable financial reporting framework]"
@@ -557,6 +572,7 @@ def default_audit_opinion_paragraphs(report_basis, modification, client_name, pe
         "basis_paragraph": basis,
         "management_responsibility_paragraph": management,
         "auditor_responsibility_paragraph": responsibility,
+        "statutory_paragraph": default_statutory_report_text(period_end) if is_audit else "",
     }
 
 

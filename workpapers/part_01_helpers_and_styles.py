@@ -506,6 +506,24 @@ def _opinion_signoff(doc, report_date):
         p.paragraph_format.keep_with_next = i < len(lines) - 1
 
 
+def _statutory_report_section(doc, audit_opinion, engagement=None):
+    """The Section 193 statement at the end of the audit report, above the signature. Standard wording when none was saved; nothing when it
+    was cleared on purpose. A line that is only "Section 193(...)" is a bold heading; every other line is a paragraph."""
+    import re as _re
+    text = getattr(audit_opinion, "statutory_paragraph", None)
+    if text is None:
+        text = fin.default_statutory_report_text(engagement.period_end if engagement is not None else None)
+    for line in [l.strip() for l in (text or "").splitlines() if l.strip()]:
+        if _re.fullmatch(r"Section\s+\d+(\([^)]*\))*", line):
+            p = doc.add_paragraph()
+            p.add_run(line).bold = True
+            p.paragraph_format.space_before = Pt(6)
+            p.paragraph_format.space_after = Pt(2)
+            p.paragraph_format.keep_with_next = True
+        else:
+            doc.add_paragraph(line)
+
+
 def _audit_opinion_section(doc, audit_opinion, engagement=None):
     is_audit = (audit_opinion.report_basis if audit_opinion else "audit") != "review"
     # The auditor's / reviewer's report is the firm's own: it starts under the Neverlank letterhead. The financial statements that follow are the client's and are not.
@@ -529,6 +547,8 @@ def _audit_opinion_section(doc, audit_opinion, engagement=None):
     doc.add_paragraph(audit_opinion.management_responsibility_paragraph or "")
     _add_heading(doc, "Auditor's Responsibility" if is_audit else "Reviewer's Responsibility", level=2)
     doc.add_paragraph(audit_opinion.auditor_responsibility_paragraph or "")
+    if is_audit:
+        _statutory_report_section(doc, audit_opinion, engagement)
     _opinion_signoff(doc, audit_opinion.report_date)
     doc.add_page_break()
 

@@ -417,6 +417,7 @@ def _add_missing_columns():
             ("not_applicable", "BOOLEAN DEFAULT 0"), ("not_applicable_reason", "TEXT"),
             ("marked_na_by_id", "INTEGER"), ("marked_na_at", "DATETIME"),
         ],
+        "audit_opinion": [("statutory_paragraph", "TEXT")],
         "financial_statements": list(partner_signoff_cols) + [
             ("notes_to_financial_statements", "TEXT"),
             ("related_party_note", "TEXT"), ("commitments_note", "TEXT"), ("subsequent_events_note", "TEXT"),

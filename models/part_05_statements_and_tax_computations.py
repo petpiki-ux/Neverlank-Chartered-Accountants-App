@@ -121,6 +121,8 @@ class AuditOpinion(db.Model):
     basis_paragraph = db.Column(db.Text)
     management_responsibility_paragraph = db.Column(db.Text)
     auditor_responsibility_paragraph = db.Column(db.Text)
+    # Section 193 COBE statement printed at the end of an AUDIT report (NULL = not yet saved: the standard wording is used; '' = left out on purpose)
+    statutory_paragraph = db.Column(db.Text)
     report_date = db.Column(db.Date)
 
     completed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))

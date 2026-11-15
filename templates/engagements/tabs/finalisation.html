@@ -166,6 +166,11 @@
       <textarea id="ao_management_responsibility_paragraph" name="management_responsibility_paragraph" rows="4">{{ audit_opinion.management_responsibility_paragraph if audit_opinion else default_opinion_paragraphs.management_responsibility_paragraph }}</textarea>
       <label for="ao_auditor_responsibility_paragraph">Auditor's / Reviewer's Responsibility paragraph</label>
       <textarea id="ao_auditor_responsibility_paragraph" name="auditor_responsibility_paragraph" rows="4">{{ audit_opinion.auditor_responsibility_paragraph if audit_opinion else default_opinion_paragraphs.auditor_responsibility_paragraph }}</textarea>
+      {% if (audit_opinion.report_basis if audit_opinion else ('audit' if engagement.type == 'Audit' else 'review')) != 'review' %}
+      <label for="ao_statutory_paragraph">Section 193 statement (printed at the end of the audit report, above the signature)</label>
+      <textarea id="ao_statutory_paragraph" name="statutory_paragraph" rows="9">{{ audit_opinion.statutory_paragraph if audit_opinion and audit_opinion.statutory_paragraph is not none else default_opinion_paragraphs.statutory_paragraph }}</textarea>
+      <p class="muted" style="font-size:12px;margin:2px 0 8px;">A line that reads only "Section 193(...)" prints as a heading. Change the Section 193(2) line if there is a matter to report. Clear the box to leave the statement out.</p>
+      {% endif %}
       <button type="submit" class="btn gold">Save</button>
     </form>
     <form method="post" action="{{ url_for('engagements.regenerate_audit_opinion_wording', engagement_id=engagement.id) }}" class="inline" style="margin-top:6px;">

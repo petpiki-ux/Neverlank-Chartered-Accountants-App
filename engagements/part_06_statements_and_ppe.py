@@ -114,6 +114,8 @@ def save_audit_opinion(engagement_id):
     record.basis_paragraph = request.form.get("basis_paragraph", "").strip()
     record.management_responsibility_paragraph = request.form.get("management_responsibility_paragraph", "").strip()
     record.auditor_responsibility_paragraph = request.form.get("auditor_responsibility_paragraph", "").strip()
+    if "statutory_paragraph" in request.form:
+        record.statutory_paragraph = request.form.get("statutory_paragraph", "").strip()
     record.report_date = _parse_date(request.form.get("report_date")) or engagement.period_end
     record.completed_by_id = current_user.id
     record.completed_at = datetime.utcnow()
