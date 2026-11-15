@@ -33,7 +33,8 @@ def build_credit_note_pdf(note, firm):
     # ---- letterhead band
     contact = [firm.get("address"), "  ·  ".join(x for x in (firm.get("web"), firm.get("email"), firm.get("phone")) if x)]
     ids = "  ·  ".join(x for x in (f"VAT No: {firm['vat_number']}" if firm.get("vat_number") else "",
-                                   f"TIN: {firm['tin']}" if firm.get("tin") else "") if x)
+                                   f"TIN: {firm['tin']}" if firm.get("tin") else "",
+                                   f"PAAB Firm No. {firm['paab_no']}" if firm.get("paab_no") else "") if x)
     if ids:
         contact.append(ids)
     white = ParagraphStyle("w", parent=_base, textColor=colors.white)

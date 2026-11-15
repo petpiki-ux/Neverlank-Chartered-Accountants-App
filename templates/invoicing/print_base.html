@@ -124,7 +124,8 @@
         <div class="contact">
           {% if firm.address %}{{ firm.address }}<br>{% endif %}
           {{ [firm.web, firm.email, firm.phone]|select|join('  &middot;  ')|safe }}
-          {% if firm.vat_number or firm.tin %}<br>{% if firm.vat_number %}VAT No: {{ firm.vat_number }}{% endif %}{% if firm.vat_number and firm.tin %}  &middot;  {% endif %}{% if firm.tin %}TIN: {{ firm.tin }}{% endif %}{% endif %}
+          {% set ids = [('VAT No: ' ~ firm.vat_number) if firm.vat_number, ('TIN: ' ~ firm.tin) if firm.tin, ('PAAB Firm No. ' ~ firm.paab_no) if firm.paab_no]|select|list %}
+          {% if ids %}<br>{{ ids|join('  &middot;  ')|safe }}{% endif %}
         </div>
       </div>
       <div class="doc">

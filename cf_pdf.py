@@ -34,6 +34,11 @@ def _p(text, style=_base):
 def _band(firm, title, number, sub):
     white = ParagraphStyle("w", parent=_base, textColor=colors.white)
     contact = [firm.get("address"), "  ·  ".join(x for x in (firm.get("web"), firm.get("email"), firm.get("phone")) if x)]
+    ids = "  ·  ".join(x for x in (f"VAT No: {firm['vat_number']}" if firm.get("vat_number") else "",
+                                   f"TIN: {firm['tin']}" if firm.get("tin") else "",
+                                   f"PAAB Firm No. {firm['paab_no']}" if firm.get("paab_no") else "") if x)
+    if ids:
+        contact.append(ids)
     firm_cell = [
         Paragraph(f"<font name='Helvetica-Bold' size='15'>{escape(firm.get('name', ''))}</font>", ParagraphStyle("fn", parent=white, leading=19)),
         Paragraph(f"<font color='#d4af6a' size='7.5'>{escape((firm.get('strapline') or firm.get('tagline') or '').upper())}</font>", ParagraphStyle("st", parent=white, leading=11)),

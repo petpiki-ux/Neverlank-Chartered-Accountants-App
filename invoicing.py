@@ -97,6 +97,7 @@ FIRM_LETTERHEAD = {
     "phone": "",
     "vat_number": "",
     "tin": "",
+    "paab_no": "Z10110",   # the firm's PAAB registration number, printed in every letterhead (brand_docs.FIRM_PAAB_NO)
     "bank_details": "",
 }
 

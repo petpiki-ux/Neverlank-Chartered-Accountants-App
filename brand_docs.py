@@ -522,7 +522,8 @@ def letterhead_band(doc, title, sub=None, number=None, firm=None):
     for text in (firm.get("address"),
                  "  ·  ".join(x for x in (firm.get("web"), firm.get("email"), firm.get("phone")) if x),
                  "  ·  ".join(x for x in (f"VAT No: {firm['vat_number']}" if firm.get("vat_number") else "",
-                                           f"TIN: {firm['tin']}" if firm.get("tin") else "") if x)):
+                                           f"TIN: {firm['tin']}" if firm.get("tin") else "",
+                                   f"PAAB Firm No. {firm['paab_no']}" if firm.get("paab_no") else "") if x)):
         if text:
             p = firm_cell.add_paragraph()
             _tight(p, before=1)
@@ -741,7 +742,8 @@ def pdf_letterhead(width, title, number=None, sub=None, firm=None):
     right = ParagraphStyle("lhr", parent=base, alignment=TA_RIGHT)
     contact = [firm.get("address"), "  ·  ".join(x for x in (firm.get("web"), firm.get("email"), firm.get("phone")) if x)]
     ids = "  ·  ".join(x for x in (f"VAT No: {firm['vat_number']}" if firm.get("vat_number") else "",
-                                   f"TIN: {firm['tin']}" if firm.get("tin") else "") if x)
+                                   f"TIN: {firm['tin']}" if firm.get("tin") else "",
+                                   f"PAAB Firm No. {firm['paab_no']}" if firm.get("paab_no") else "") if x)
     if ids:
         contact.append(ids)
     firm_cell = [
