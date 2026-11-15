@@ -345,7 +345,10 @@ def general_information_note(client, engagement):
     incorporation is left as a bracketed placeholder for the preparer to
     fill in, since the app doesn't currently record one."""
     sentences = [f"{client.name} (\"the entity\") is a company incorporated in [jurisdiction of incorporation]."]
-    if client.industry:
+    activities = principal_activities_text(client)
+    if activities:
+        sentences.append(f"Nature of business and principal activities: {activities}.")
+    elif client.industry:
         sentences.append(f"The entity's principal activity is {client.industry.lower()}.")
     bankers = bankers_list(client)
     if bankers:
@@ -354,6 +357,13 @@ def general_information_note(client, engagement):
     if engagement.period_end:
         sentences.append(f"These financial statements are for the year ended {engagement.period_end.strftime('%d %B %Y')}.")
     return " ".join(sentences)
+
+
+def principal_activities_text(client):
+    """The client's "Nature of business and principal activities" as one line for a sentence: lines joined with "; ", no final full stop."""
+    raw = getattr(client, "principal_activities", None) or ""
+    parts = [p.strip().rstrip(".;") for p in raw.splitlines() if p.strip()]
+    return "; ".join(p for p in parts if p)
 
 
 def bankers_list(client):

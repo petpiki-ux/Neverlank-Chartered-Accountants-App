@@ -750,6 +750,8 @@ class Client(db.Model):
     share_par_value = db.Column(db.Float)
     shareholder_loan_terms = db.Column(db.Text)
     industry = db.Column(db.String(120))
+    # Free-text "Nature of business and principal activities": printed in Note 1 (General information) of the financial statements.
+    principal_activities = db.Column(db.Text)
     # Company registration number (e.g. a companies-office registration
     # number). Optional - not every client is a registered company - but
     # when it IS given, clients.py checks it against every other client's
@@ -899,6 +901,10 @@ class Engagement(db.Model):
     # Defaults to "indirect" for every engagement (existing ones included),
     # matching how the Cash Flow Statement has always been presented here.
     cash_flow_method = db.Column(db.String(10), default="indirect", nullable=False)
+
+    # True when the PRIOR year was the entity's first year of business (no opening balances): the comparative Statement of Cash Flows is then
+    # worked out from the trial balance (cf_prior.first_year_lines) instead of being typed in. False (the default): typed or imported by hand.
+    prior_year_first_year = db.Column(db.Boolean, default=False)
 
     # Public Interest Entity checklist - see PIE_CRITERIA above. Any one of
     # these true makes the entity a Public Interest Entity for the purposes

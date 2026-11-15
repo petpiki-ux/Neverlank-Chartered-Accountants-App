@@ -287,7 +287,7 @@ def _add_missing_columns():
             ("reviewed_by_id", "INTEGER"), ("reviewed_at", "DATETIME"),
         ] + partner_signoff_cols,
         "regulatory_notice": [("text_source", "VARCHAR(20)")],
-        "client": [("bankers", "TEXT"), ("reporting_currency", "VARCHAR(8)"), ("share_class", "VARCHAR(60)"), ("authorised_shares", "INTEGER"), ("issued_shares", "INTEGER"), ("share_par_value", "FLOAT"), ("shareholder_loan_terms", "TEXT"), ("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("cover_primary", "VARCHAR(6)"), ("cover_accent", "VARCHAR(6)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER"),
+        "client": [("bankers", "TEXT"), ("principal_activities", "TEXT"), ("reporting_currency", "VARCHAR(8)"), ("share_class", "VARCHAR(60)"), ("authorised_shares", "INTEGER"), ("issued_shares", "INTEGER"), ("share_par_value", "FLOAT"), ("shareholder_loan_terms", "TEXT"), ("company_number", "VARCHAR(80)"), ("logo_filename", "VARCHAR(255)"), ("cover_primary", "VARCHAR(6)"), ("cover_accent", "VARCHAR(6)"), ("tin_number", "VARCHAR(40)"), ("vat_number", "VARCHAR(40)"), ("created_by_id", "INTEGER"),
                    # d63: the decision to accept the client lives on the client (NULL = not yet carried over; see _migrate_client_acceptance_decisions)
                    ("acceptance_decision", "VARCHAR(30)"), ("acceptance_decision_notes", "TEXT"), ("acceptance_decided_by_id", "INTEGER"), ("acceptance_decided_at", "DATETIME")],
         # last_seen_at - see models.User.is_online and this file's
@@ -305,7 +305,7 @@ def _add_missing_columns():
         "engagement": [
             ("subdivision", "VARCHAR(50)"), ("acceptance_required", "BOOLEAN DEFAULT 0"),
             ("reporting_framework", "VARCHAR(20) DEFAULT 'full_ifrs'"),
-            ("cash_flow_method", "VARCHAR(10) DEFAULT 'indirect'"),
+            ("cash_flow_method", "VARCHAR(10) DEFAULT 'indirect'"), ("prior_year_first_year", "BOOLEAN DEFAULT 0"),
             ("pie_listed", "BOOLEAN DEFAULT 0"), ("pie_financial_institution", "BOOLEAN DEFAULT 0"),
             ("pie_insurer", "BOOLEAN DEFAULT 0"), ("pie_asset_manager", "BOOLEAN DEFAULT 0"),
             ("pie_pension_fund", "BOOLEAN DEFAULT 0"), ("pie_medical_aid", "BOOLEAN DEFAULT 0"),

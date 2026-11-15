@@ -173,6 +173,30 @@ def _rank_fn(std_sec):
     return rank
 
 
+def first_year_lines(statements, engagement):
+    """The prior year's cash flow worked out from the trial balance when the prior year was the entity's FIRST year of business: there were
+    no opening balances, so every prior-year closing balance is the year's movement, and the cash at the beginning of that year is nil.
+    The same build as this year's statement is run on the prior column with an all-nil year before it. Returns unsaved lines
+    (section, label, amount) in the form the comparative is placed from; nil lines and Profit before tax (linked to the income statement) are left out."""
+    from types import SimpleNamespace
+    totals = (statements or {}).get("totals")
+    if not totals:
+        return []
+    py = {code: {"current": v.get("prior", 0.0) or 0.0, "prior": 0.0} for code, v in totals.items()}
+    cf = fin.build_cash_flow(py, fin.build_income_statement(py), engagement.cash_flow_method or "indirect")
+    out = []
+    for sec, key in (("operating", "operating_rows"), ("investing", "investing_rows"), ("financing", "financing_rows")):
+        for r in cf[key]:
+            if r.get("bold") or _key(r["label"]) == _key(PBT_LABEL):
+                continue
+            amount = r["current"]
+            if r.get("memo"):
+                continue        # depreciation is only a memo line: the statement shows property, plant and equipment net, so it is not added back
+            if abs(amount) >= 0.5:
+                out.append(SimpleNamespace(section=sec, label=r["label"], amount=amount))
+    return out
+
+
 def is_nil(r):
     """A statement line with nothing in either year (shown as a dash): left out of the statement. Subtotals and the linked Profit before tax stay."""
     return not r.get("bold") and not r.get("linked") and abs(r.get("current") or 0.0) < 0.5 and abs(r.get("prior") or 0.0) < 0.5
@@ -189,6 +213,10 @@ def attach_prior_cash_flow(statements, engagement, editable=False):
     if not cf or "prior" in cf:
         return statements
     lines = (CashFlowPriorLine.query.filter_by(engagement_id=engagement.id).order_by(CashFlowPriorLine.sort_order, CashFlowPriorLine.id).all())
+    auto = False
+    if not lines and getattr(engagement, "prior_year_first_year", False):
+        lines = first_year_lines(statements, engagement)         # the prior year was the first year of business: worked out, not typed
+        auto = bool(lines)
     if not lines and not editable:
         cf["prior"] = None
         return statements
@@ -301,7 +329,7 @@ def attach_prior_cash_flow(statements, engagement, editable=False):
     close = cash_open + net
     cf["prior"] = {"net_operating": totals["operating"], "net_investing": totals["investing"], "net_financing": totals["financing"],
                    "net_movement": net, "cash_open": cash_open, "cash_close_computed": close,
-                   "cash_close_actual": cf["cash_open"], "variance": (close - cf["cash_open"]) if lines else 0.0, "empty": not lines,
+                   "cash_close_actual": cf["cash_open"], "variance": (close - cf["cash_open"]) if lines else 0.0, "empty": not lines, "auto": auto,
                    "pbt": {"amount": pbt_prior, "typed": typed_pbt if abs(typed_pbt) >= 0.5 else None}}
     return statements
 
@@ -339,6 +367,37 @@ def seed(engagement_id):
     db.session.commit()
     flash(f"{added} line(s) added under this year's headings. Type last year's amounts and press Save.", "success")
     return _back(engagement_id)
+
+
+@cfprior_bp.route("/<int:engagement_id>/cash-flow-prior/first-year", methods=["POST"])
+@login_required
+def set_first_year(engagement_id):
+    """Tick / untick "the prior year was the entity's first year of business". Ticked: the comparative cash flow is worked out from the
+    trial balance whenever nothing has been typed or imported. Unticked: typed / imported by hand, as before. Saved figures are never overwritten."""
+    engagement = _engagement(engagement_id)
+    engagement.prior_year_first_year = request.form.get("prior_year_first_year") == "on"
+    db.session.commit()
+    if engagement.prior_year_first_year:
+        saved = CashFlowPriorLine.query.filter_by(engagement_id=engagement_id).count()
+        flash("The comparative cash flow is worked out from the trial balance (prior year = first year of business)."
+              + (" Figures already typed or imported are kept; use 'Discard typed figures' to switch to the automatic ones." if saved else ""), "success")
+    else:
+        flash("The comparative cash flow is entered by hand.", "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation") + "#cf-statement")
+
+
+@cfprior_bp.route("/<int:engagement_id>/cash-flow-prior/use-automatic", methods=["POST"])
+@login_required
+def use_automatic(engagement_id):
+    """Throw away the typed / imported comparative so the automatic first-year one shows again (only when the first-year box is ticked)."""
+    engagement = _engagement(engagement_id)
+    if not engagement.prior_year_first_year:
+        flash("Tick 'the prior year was the first year of business' first.", "info")
+    else:
+        n = CashFlowPriorLine.query.filter_by(engagement_id=engagement_id).delete()
+        db.session.commit()
+        flash(f"Typed figures discarded ({n} line(s)); the comparative is worked out from the trial balance again.", "success")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation") + "#cf-statement")
 
 
 @cfprior_bp.route("/<int:engagement_id>/cash-flow-prior/save", methods=["POST"])

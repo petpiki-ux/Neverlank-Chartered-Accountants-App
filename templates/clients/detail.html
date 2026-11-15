@@ -23,6 +23,9 @@
     <div><strong>Main bankers:</strong> {{ (client.bankers.splitlines()|select|join('; ')) if client.bankers else '—' }}</div>
   </div>
   <div class="form-row">
+    <div style="white-space:pre-line;"><strong>Nature of business and principal activities:</strong> {{ client.principal_activities or '—' }}</div>
+  </div>
+  <div class="form-row">
     <div><strong>TIN:</strong> {{ client.tin_number or '—' }}</div>
     <div><strong>VAT number:</strong> {{ client.vat_number or 'Not VAT registered / not recorded' }}</div>
   </div>

@@ -6,7 +6,7 @@
   <div class="card" style="padding:10px 16px;">
     <a href="#cf-statement"><strong>Prior-year cash flow (comparative)</strong></a>
     <span class="muted" style="font-size:12.5px;"> - type last year's figures straight into the prior-year column of the Statement of Cash Flows
-      ({% if cf_prior_lines %}{{ cf_prior_lines|length }} line(s) saved{% else %}not entered yet{% endif %}).</span>
+      ({% if cf_prior_lines %}{{ cf_prior_lines|length }} line(s) saved{% elif engagement.prior_year_first_year %}worked out from the trial balance: prior year was the first year of business{% else %}not entered yet{% endif %}).</span>
   </div>
   {% endif %}
   {% macro finalisation_checklist_row(item, responses) %}
@@ -565,6 +565,17 @@
     {% set cfy = statements.year_labels or ['Current year', 'Prior year'] %}
     <h3 class="mt-0">Statement of Cash Flows ({{ cash_flow_method_labels.get(statements.cf.method, 'Indirect method') }})</h3>
     <p class="muted" style="font-size:12px;">Type last year's figures straight into the <strong>{{ cfy[1].replace(' ', ' ', 1) }}</strong> column, from last year's signed financial statements (outflows with a minus sign, e.g. -1,200), then press <em>Save prior-year figures</em>. Profit before tax is taken from the prior-year income statement. Subtotals, the closing cash and the check against the prior-year cash in the trial balance are worked out when you save. Use the same headings as this year; a line this year does not have can be added below the statement. Investing activities this year are the net movement in each non-current asset's carrying value, so depreciation is not added back in this year's operating activities (see the memo line); last year's depreciation charge, when it was added back, goes on its own line. Change the method in "Basis of preparation &amp; sign-off" - investing and financing activities, and every subtotal from "Cash generated from operations" onward, are identical either way (IAS 7).</p>
+    <form method="post" action="{{ url_for('cfprior.set_first_year', engagement_id=engagement.id) }}" style="margin:6px 0 10px;padding:10px 12px;border:1px solid #d7dde8;border-radius:6px;">
+      <label style="display:flex;gap:8px;align-items:flex-start;margin:0;"><input type="checkbox" name="prior_year_first_year" style="width:auto;margin-top:3px;" {% if engagement.prior_year_first_year %}checked{% endif %}>
+        <span><strong>The prior year was the entity's first year of business</strong> (no opening balances). The app then works out the comparative cash flow from the trial balance; leave this unticked when there was an earlier year and type or import last year's cash flow as usual.</span></label>
+      <button type="submit" class="btn small secondary" style="margin-top:6px;">Save</button>
+      {% if cfp and cfp.auto %}<span class="muted" style="font-size:12px;margin-left:8px;">Prepared automatically from the trial balance (cash at the beginning of the prior year is nil).</span>{% endif %}
+    </form>
+    {% if engagement.prior_year_first_year and cf_prior_lines %}
+    <form method="post" action="{{ url_for('cfprior.use_automatic', engagement_id=engagement.id) }}" style="margin:0 0 10px;" onsubmit="return confirm('Discard the typed or imported prior-year figures and use the automatic ones?');">
+      <button type="submit" class="btn small secondary">Discard typed figures and use the automatic comparative</button>
+    </form>
+    {% endif %}
     {% macro cfline(label, cur, pri, bold=False, note='', memo=False) %}
     <tr{% if memo %} class="muted"{% endif %}><td>{% if bold %}<strong>{{ label }}</strong>{% else %}{{ label }}{% endif %}</td><td>{{ note or '' }}</td>
       <td class="text-right">{% if bold %}<strong>{{ '%.0f'|format(cur) }}</strong>{% else %}{{ '%.0f'|format(cur) }}{% endif %}</td>

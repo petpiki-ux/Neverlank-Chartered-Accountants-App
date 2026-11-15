@@ -409,6 +409,7 @@ def _client_details_and_toc_page(doc, engagement, client_key_people, toc_section
     detail_row("Company registration number", client.company_number if client else None)
     detail_row("Registered address", client.address if client else None)
     detail_row("Industry", client.industry if client else None)
+    detail_row("Nature of business and principal activities", fin.principal_activities_text(client) if client else None)
     detail_row("Reporting period ended", _fmt_date(engagement.period_end))
 
     directors = [p for p in (client_key_people or []) if p.get("role") == "Director"]

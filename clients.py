@@ -181,6 +181,7 @@ def new_client():
             phone=request.form.get("phone", "").strip(),
             address=request.form.get("address", "").strip(),
             bankers=request.form.get("bankers", "").strip() or None,
+            principal_activities=request.form.get("principal_activities", "").strip() or None,
             **_share_fields(request.form),
             industry=_resolve_industry(request.form),
             company_number=company_number,
@@ -306,6 +307,7 @@ def edit_client(client_id):
         client.phone = request.form.get("phone", "").strip()
         client.address = request.form.get("address", "").strip()
         client.bankers = request.form.get("bankers", "").strip() or None
+        client.principal_activities = request.form.get("principal_activities", "").strip() or None
         for _k, _v in _share_fields(request.form).items():
             setattr(client, _k, _v)
         old_industry = client.industry
