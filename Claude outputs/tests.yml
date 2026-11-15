@@ -6,6 +6,12 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:   # also lets you press 'Run workflow' on the Actions tab
+
+# A newer push cancels the run still going for the older one on the same branch.
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   sqlite:
