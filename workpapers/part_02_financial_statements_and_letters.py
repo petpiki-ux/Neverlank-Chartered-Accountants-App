@@ -45,6 +45,11 @@ def build_financial_statements_docx(engagement, statements, financial_statements
         for r in rows:
             row = table.add_row().cells
             row[0].text = r["label"]
+            if r.get("desc"):                          # a line of description under the account's name (italic, smaller)
+                dp = row[0].add_paragraph()
+                dr = dp.add_run(r["desc"])
+                dr.italic = True
+                dr.font.size = Pt(9)
             row[1].text = _fmt_whole(r["current"])
             row[2].text = _fmt_whole(r.get("prior", 0))
             if r.get("bold"):
@@ -333,7 +338,7 @@ def build_financial_statements_docx(engagement, statements, financial_statements
                 continue
             account_rows = [
                 {"label": (f"{a['account_code']} - " if a.get("account_code") else "") + a["account_name"],
-                 "current": a["current"], "prior": a["prior"]}
+                 "current": a["current"], "prior": a["prior"], "desc": a.get("description") or ""}
                 for a in note["accounts"]
             ] + [{"label": "Total", "current": note["total"]["current"], "prior": note["total"]["prior"], "bold": True}]
             two_col_table(f"{note['number']}. {note['title']}", account_rows, level=2)

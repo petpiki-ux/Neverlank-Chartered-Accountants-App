@@ -656,7 +656,7 @@
   </div>
 
   {% if engagement.reporting_framework in ('full_ifrs', 'ifrs_for_smes') %}
-  <div class="card">
+  <div class="card" id="notes">
     <h3 class="mt-0">Notes to the Financial Statements</h3>
     <p class="muted" style="font-size:11.5px;">
       Prepared under {{ reporting_framework_labels.get(engagement.reporting_framework) }}. Note 1 and the account
@@ -664,6 +664,23 @@
       fix the account mapping rather than this text. The framework can be changed below.
     </p>
 
+    {% if trial_balance and trial_balance.lines %}
+    <details style="margin:0 0 10px;">
+      <summary style="cursor:pointer;"><strong>Describe accounts in the notes</strong> <span class="muted" style="font-size:12px;">- a line printed under the account's name in its note (e.g. the Binga coal special grant under Mining Rights)</span></summary>
+      <form method="post" action="{{ url_for('engagements.save_note_descriptions', engagement_id=engagement.id) }}" style="margin-top:8px;">
+        <table style="max-width:820px;">
+          <thead><tr><th style="width:34%;">Account</th><th>Description printed in the note</th></tr></thead>
+          <tbody>
+          {% for line in trial_balance.lines if (line.fs_category and line.fs_category != 'excluded') and ((line.current_debit or 0) or (line.current_credit or 0) or (line.prior_debit or 0) or (line.prior_credit or 0)) %}
+            <tr><td>{{ line.account_code + ' - ' if line.account_code }}{{ line.account_name }}</td>
+              <td><input type="hidden" name="line_id" value="{{ line.id }}"><input type="text" name="desc_{{ line.id }}" value="{{ line.note_description or '' }}" maxlength="500" style="margin:0;width:100%;" aria-label="Description for {{ line.account_name }}"></td></tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <button type="submit" class="btn small gold" style="margin-top:8px;">Save descriptions</button>
+      </form>
+    </details>
+    {% endif %}
     <h4>1. General information</h4>
     <p>{{ general_information_note }}</p>
 
@@ -779,7 +796,7 @@
       <thead><tr><th style="width:56%;">Account</th><th class="text-right" style="white-space:pre-line;width:22%;">{{ yl[0].replace(' ', '\n', 1) }}</th><th class="text-right" style="white-space:pre-line;width:22%;">{{ yl[1].replace(' ', '\n', 1) }}</th></tr></thead>
       <tbody>
         {% for a in note.accounts %}
-        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}{% if a.adj %} <span class="muted" style="font-size:11px;" title="This line includes audit adjustments (see the Adjustments section above)">&mdash; {% if a.from_tb is defined and not a.from_tb %}not in the trial balance; {% endif %}journal {% for j in a.adj %}{{ j.ref }} ({{ 'prior' if j.period == 'prior' else 'current' }} {{ '%.0f'|format(j.amount) }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if a.adj %}</span>{% endif %}</td><td class="text-right">{{ '%.0f'|format(a.current) }}</td><td class="text-right">{{ '%.0f'|format(a.prior) }}</td></tr>
+        <tr><td>{{ a.account_code + ' - ' if a.account_code }}{{ a.account_name }}{% if a.description %}<div class="muted" style="font-size:12px;font-style:italic;white-space:pre-line;">{{ a.description }}</div>{% endif %}{% if a.adj %} <span class="muted" style="font-size:11px;" title="This line includes audit adjustments (see the Adjustments section above)">&mdash; {% if a.from_tb is defined and not a.from_tb %}not in the trial balance; {% endif %}journal {% for j in a.adj %}{{ j.ref }} ({{ 'prior' if j.period == 'prior' else 'current' }} {{ '%.0f'|format(j.amount) }}){% if not loop.last %}, {% endif %}{% endfor %}{% endif %}{% if a.adj %}</span>{% endif %}</td><td class="text-right">{{ '%.0f'|format(a.current) }}</td><td class="text-right">{{ '%.0f'|format(a.prior) }}</td></tr>
         {% endfor %}
         <tr><td><strong>Total</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.current) }}</strong></td><td class="text-right"><strong>{{ '%.0f'|format(note.total.prior) }}</strong></td></tr>
       </tbody>

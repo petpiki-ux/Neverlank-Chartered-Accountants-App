@@ -1005,6 +1005,8 @@ class TrialBalanceLine(db.Model):
     current_credit = db.Column(db.Float, default=0.0)
     prior_debit = db.Column(db.Float, default=0.0)
     prior_credit = db.Column(db.Float, default=0.0)
+    # A line of description printed under the account's name in its note (e.g. "Coal special grant, Binga (about 9,710 ha)"); narrative only, no figures.
+    note_description = db.Column(db.Text)
 
     def __repr__(self):
         return f"<TrialBalanceLine {self.account_name}>"

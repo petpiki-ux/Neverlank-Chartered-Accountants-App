@@ -256,6 +256,29 @@ def add_trial_balance_line(engagement_id):
     return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="trial_balance"))
 
 
+@engagements_bp.route("/<int:engagement_id>/notes/descriptions", methods=["POST"])
+@login_required
+def save_note_descriptions(engagement_id):
+    """The line of description printed under an account's name in its note (TrialBalanceLine.note_description). Narrative only: it changes no
+    figure, so the trial balance's sign-offs are left alone."""
+    engagement = Engagement.query.get_or_404(engagement_id)
+    _ensure_engagement_access(engagement)
+    tb = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
+    changed = 0
+    if tb:
+        ids = set(request.form.getlist("line_id"))
+        for line in tb.lines:
+            if str(line.id) not in ids:
+                continue
+            text = " ".join((request.form.get(f"desc_{line.id}") or "").split())[:500] or None
+            if text != (line.note_description or None):
+                line.note_description = text
+                changed += 1
+        db.session.commit()
+    flash(f"Note descriptions saved ({changed} changed)." if changed else "No description was changed.", "success" if changed else "info")
+    return redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation") + "#notes")
+
+
 @engagements_bp.route("/trial-balance/lines/<int:line_id>/update", methods=["POST"])
 @login_required
 def update_trial_balance_line(line_id):

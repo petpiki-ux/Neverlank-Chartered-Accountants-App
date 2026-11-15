@@ -371,6 +371,7 @@ def _join_year_halves(rows):
         else:
             mate["current"] += r["current"]
             mate["prior"] += r["prior"]
+            mate["description"] = mate.get("description") or r.get("description") or ""
     return out
 
 
@@ -436,6 +437,7 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
                 account_rows.append({
                     "account_code": l.account_code, "account_name": l.account_name,
                     "current": current, "prior": prior, "from_tb": True,
+                    "description": (getattr(l, "note_description", None) or "").strip(),
                 })
         account_rows = _join_year_halves(account_rows)
         # Audit adjustments (including the Asset Register's PPE-REG depreciation) go onto the account line they belong to: added to the

@@ -641,7 +641,7 @@ def _add_missing_columns():
         "coa_mapping": [("coa_account_number", "VARCHAR(20)")],
         # registration_date / last_agm_date - see models.SecretarialPlan (COBE Act s165(2) and s167(2)).
         "secretarial_plan": [("registration_date", "DATE"), ("last_agm_date", "DATE")],
-        "trial_balance_line": [("coa_account_number", "VARCHAR(20)"), ("sub_category", "VARCHAR(100)")],
+        "trial_balance_line": [("coa_account_number", "VARCHAR(20)"), ("sub_category", "VARCHAR(100)"), ("note_description", "TEXT")],
         # sub_category / needs_review / added_by_id / added_from_engagement_id - see models.StandardChartOfAccounts and FSSubCategory.
         "standard_chart_of_accounts": [("sub_category", "VARCHAR(100)"), ("needs_review", "BOOLEAN DEFAULT 0"),
                                        ("added_by_id", "INTEGER"), ("added_from_engagement_id", "INTEGER")],
