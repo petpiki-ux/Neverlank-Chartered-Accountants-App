@@ -83,7 +83,7 @@ with app.app_context():
 
     # 5. Note 1 and Client Details
     note1 = fin.general_information_note(Client.query.get(cid), Engagement.query.get(eid))
-    check("Nature of business and principal activities: Holder of a coal mining claim in Binga; Owner of land in Chegutu." in note1, "Note 1 prints the client's nature of business and principal activities: %s" % note1)
+    check("Holder of a coal mining claim in Binga; Owner of land in Chegutu." in note1 and "Nature of business" not in note1, "Note 1 prints the client's activities without a label: %s" % note1)
     check("principal activity is mining" not in note1, "...instead of the industry sentence")
     cl2 = Client(name="Plain Co", created_by_id=aid, industry="Retail"); db.session.add(cl2); db.session.commit()
     n2 = fin.general_information_note(cl2, e)

@@ -347,7 +347,7 @@ def general_information_note(client, engagement):
     sentences = [f"{client.name} (\"the entity\") is a company incorporated in [jurisdiction of incorporation]."]
     activities = principal_activities_text(client)
     if activities:
-        sentences.append(f"Nature of business and principal activities: {activities}.")
+        sentences.append(f"{activities}.")
     elif client.industry:
         sentences.append(f"The entity's principal activity is {client.industry.lower()}.")
     bankers = bankers_list(client)
