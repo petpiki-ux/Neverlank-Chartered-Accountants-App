@@ -22,6 +22,8 @@ def build_cash_flow(totals, pl, method="indirect", noncash=None):
     # They are taken out of the investing movement and out of the deferred tax add-back, so closing cash still agrees to the balance sheet.
     noncash = noncash or {}
     nc_ppe, nc_dtl = float(noncash.get("ppe") or 0.0), float(noncash.get("dtl") or 0.0)
+    # Non-cash valuation movements on the OTHER non-current asset lines too (mining rights, investment property ...), by category code.
+    nc_assets = {c: float(v or 0.0) for c, v in (noncash.get("assets") or {}).items() if c != "ppe"}
     nc_pl = float(noncash.get("pl") or 0.0)        # the revaluation's gain (loss) in profit or loss: not cash, so taken back out of operating cash flow
 
     def move(code):
@@ -49,7 +51,7 @@ def build_cash_flow(totals, pl, method="indirect", noncash=None):
         _row("Movement in deferred tax", dtl_move - dta_move),
     ]
     if abs(nc_pl) >= 0.5:
-        adjustments.append(_row("Revaluation (gain)/loss on property, plant and equipment, not a cash flow", -nc_pl))
+        adjustments.append(_row("Revaluation (gain)/loss on non-current assets, not a cash flow" if nc_assets else "Revaluation (gain)/loss on property, plant and equipment, not a cash flow", -nc_pl))
     op_before_wc = pbt + finance_costs + prov_move + dtl_move - dta_move - nc_pl
 
     wc_rows = [
@@ -111,7 +113,7 @@ def build_cash_flow(totals, pl, method="indirect", noncash=None):
     net_operating = cash_from_ops + finance_costs_paid + tax_paid
 
     investing_codes = ["ppe", "intangible_assets", "investment_property", "long_term_investments", "other_noncurrent_assets"]
-    investing_rows = [_row(f"Net movement in {category_label(c).lower()}", -(move(c) - (nc_ppe if c == "ppe" else 0.0)), category=c) for c in investing_codes]
+    investing_rows = [_row(f"Net movement in {category_label(c).lower()}", -(move(c) - (nc_ppe if c == "ppe" else nc_assets.get(c, 0.0))), category=c) for c in investing_codes]
     net_investing = sum(r["current"] for r in investing_rows)
 
     shares_move = move("share_capital") + move("share_premium")
@@ -140,7 +142,9 @@ def build_cash_flow(totals, pl, method="indirect", noncash=None):
         "operating_rows": operating_rows, "net_operating": net_operating,
         "investing_rows": _filter_nil_rows(investing_rows + (
             [_row("Non-cash: revaluation of property, plant and equipment (not a cash flow; see the property, plant and equipment note)", nc_ppe, memo=True)]
-            if abs(nc_ppe) >= 0.5 else [])), "net_investing": net_investing,
+            if abs(nc_ppe) >= 0.5 else [])
+            + [_row(f"Non-cash: valuation of {category_label(c).lower()} (not a cash flow; see the notes)", v, memo=True)
+               for c, v in nc_assets.items() if abs(v) >= 0.5]), "net_investing": net_investing,
         "financing_rows": _filter_nil_rows(financing_rows), "net_financing": net_financing,
         "net_movement": net_movement,
         "cash_open": cash_open, "cash_close_computed": cash_close_computed,
@@ -154,25 +158,50 @@ def adjustment_source(adj):
     return ((getattr(adj, "source_key", None) or getattr(adj, "reference", None) or "")).strip().upper()
 
 
+NONCASH_ASSET_CODES = ("ppe", "intangible_assets", "investment_property", "long_term_investments", "other_noncurrent_assets")
+# What a valuation journal may be balanced against without any cash: the revaluation surplus (OCI / reserves), a gain or loss in profit or
+# loss, and the deferred tax on the surplus. A journal that touches anything else (cash, payables, depreciation ...) is not read as a valuation.
+_NONCASH_COUNTERPARTS = ("oci_items", "other_reserves", "other_income", "other_expenses", "deferred_tax_liability", "deferred_tax_asset")
+
+
 def revaluation_noncash(adjustments):
-    """What the revaluation journal (REVAL, ppe_revaluation.py) did to the balance sheet without any cash: {"ppe": its net effect on
-    property, plant and equipment, "dtl": the deferred tax charged to OCI on it, "pl": the gain (loss) it took to profit or loss}. The Cash Flow Statement takes both out of its investing
-    movement and its deferred tax add-back. Empty when there is no such journal."""
-    ppe = dtl = pl = 0.0
+    """What the valuation journals did to the balance sheet without any cash:
+    {"ppe": the effect on property, plant and equipment, "assets": {category code: the effect on that non-current asset line (mining rights,
+    investment property ...)}, "dtl": the deferred tax charged to OCI, "pl": the gain (loss) taken to profit or loss}.
+    Two kinds of current-year journal count: the app's own revaluation journal (REVAL, ppe_revaluation.py), and any other journal that moves a
+    non-current asset line against ONLY the revaluation surplus / OCI / a gain or loss in profit or loss / deferred tax (a valuation of mining rights
+    entered as a manual journal, say). The Cash Flow Statement takes these out of its investing movement and its deferred tax add-back, so closing
+    cash still agrees to the balance sheet. Empty when there is no such journal."""
+    assets = {}
+    dtl = pl = 0.0
     found = False
     for adj in adjustments or []:
-        if adjustment_source(adj) != "REVAL" or is_prior_adjustment(adj):
+        if is_prior_adjustment(adj):
             continue
+        lines = list(adj.lines)
+        cats = {l.fs_category for l in lines}
+        is_reval = adjustment_source(adj) == "REVAL"
+        if not is_reval:
+            if not (cats & set(NONCASH_ASSET_CODES)) or not (cats - set(NONCASH_ASSET_CODES)) or (cats - set(NONCASH_ASSET_CODES)) - set(_NONCASH_COUNTERPARTS):
+                continue
+            if not (cats & {"oci_items", "other_reserves", "other_income", "other_expenses"}):
+                continue                                    # asset against deferred tax only: not a valuation
         found = True
-        for line in adj.lines:
+        dtl_oci = dtl_liab = 0.0
+        for line in lines:
             net = (line.debit or 0.0) - (line.credit or 0.0)
-            if line.fs_category == "ppe":
-                ppe += net
+            if line.fs_category in NONCASH_ASSET_CODES:
+                assets[line.fs_category] = assets.get(line.fs_category, 0.0) + net
             elif line.fs_category == "oci_items" and "deferred" in (getattr(line, "account_name", "") or "").casefold():
-                dtl += net
+                dtl_oci += net                              # deferred tax charged to OCI
+            elif line.fs_category == "deferred_tax_liability":
+                dtl_liab -= net                             # the same tax, read from the liability line (a credit is a charge)
             elif line.fs_category in ("other_income", "other_expenses"):
                 pl -= net                                   # a credit to income, or a debit to expense, is read as a gain / loss
-    return {"ppe": ppe, "dtl": dtl, "pl": pl} if found else {}
+        dtl += dtl_oci if abs(dtl_oci) > 1e-9 else dtl_liab
+    if not found:
+        return {}
+    return {"ppe": assets.get("ppe", 0.0), "assets": assets, "dtl": dtl, "pl": pl}
 
 
 def roll_oci_into_reserves(totals):
