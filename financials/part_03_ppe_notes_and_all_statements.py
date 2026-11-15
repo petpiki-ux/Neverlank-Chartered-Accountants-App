@@ -304,8 +304,16 @@ def _round_note_rows(rows, codes, raw_totals, cur, pri):
 _NAME_NOISE = {"charge", "for", "the", "year", "per", "asset", "register", "expense", "expenses", "of", "and", "adjustment", "movement"}
 
 def _name_words(name):
+    """The significant words of an account name: lower case, brackets dropped, split on any dash (including the non-breaking hyphen that
+    Excel and PDF imports often carry: "Right\u2011of\u2011Use Assets") or other punctuation, plural "s" removed ("Assets" = "Asset")."""
     import re
-    return {w for w in re.sub(r"\([^)]*\)", " ", (name or "").casefold()).replace("-", " ").split() if w.isalpha() and w not in _NAME_NOISE}
+    text = re.sub(r"\([^)]*\)", " ", (name or "").casefold())
+    words = []
+    for w in re.findall(r"[^\W\d_]+", text):
+        if len(w) > 3 and w.endswith("s") and not w.endswith("ss"):
+            w = w[:-1]
+        words.append(w)
+    return {w for w in words if w not in _NAME_NOISE}
 
 
 def _note_row_for_adjustment(account_rows, row_code, ecode, name):
@@ -318,8 +326,19 @@ def _note_row_for_adjustment(account_rows, row_code, ecode, name):
             return r
     words = _name_words(name)
     hits = [r for r in account_rows if row_code.get(id(r)) == ecode and words & _name_words(r["account_name"])]
+    if len(hits) > 1 and "accumulated" not in words:
+        # "Right of Use Asset" is the cost line, not the "Accumulated Depreciation of Right of Use Assets" line that shares its words
+        not_accumulated = [r for r in hits if "accumulated" not in _name_words(r["account_name"])]
+        if len(not_accumulated) == 1:
+            hits = not_accumulated
     if len(hits) == 1:
         return hits[0]
+    if len(hits) > 1:
+        # several rows share a word: the one that shares clearly the most (the name is spelt a little differently) is the account
+        scored = sorted(hits, key=lambda r: -len(words & _name_words(r["account_name"])))
+        if len(words & _name_words(scored[0]["account_name"])) > len(words & _name_words(scored[1]["account_name"])) \
+                and (words & _name_words(scored[0]["account_name"])) >= words - {"accumulated"}:
+            return scored[0]
     # A shareholder / director loan journal belongs on the trial balance's shareholder loan account, even when other loan accounts (a bank
     # loan) share the word "loan": the one owner-loan row of the category, or else the owner-loan row that shares the most words with it.
     if _is_owner_loan(name):
@@ -331,6 +350,28 @@ def _note_row_for_adjustment(account_rows, row_code, ecode, name):
             if len(words & _name_words(ranked[0]["account_name"])) > len(words & _name_words(ranked[1]["account_name"])):
                 return ranked[0]
     return None
+
+
+def _join_year_halves(rows):
+    """One note line per account: when the same account name (same code) sits on two trial balance lines that hold different years (one
+    only the current year, the other only the prior year), the note shows them as one line. Lines that both hold the same year are
+    different accounts and stay apart. The trial balance itself is untouched (Align accounts merges it there)."""
+    out = []
+    for r in rows:
+        key = ((r["account_code"] or "").strip().casefold(), (r["account_name"] or "").strip().casefold())
+        mate = None
+        for o in out:
+            same = ((o["account_code"] or "").strip().casefold(), (o["account_name"] or "").strip().casefold()) == key
+            overlap = (not _is_nil(o["current"]) and not _is_nil(r["current"])) or (not _is_nil(o["prior"]) and not _is_nil(r["prior"]))
+            if same and not overlap:
+                mate = o
+                break
+        if mate is None:
+            out.append(dict(r))
+        else:
+            mate["current"] += r["current"]
+            mate["prior"] += r["prior"]
+    return out
 
 
 def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_totals=None, ppe_movement_raw=None, adjustments=None):
@@ -396,6 +437,7 @@ def build_notes(lines, totals, ppe_movement=None, ppe_policy_text=None, raw_tota
                     "account_code": l.account_code, "account_name": l.account_name,
                     "current": current, "prior": prior, "from_tb": True,
                 })
+        account_rows = _join_year_halves(account_rows)
         # Audit adjustments (including the Asset Register's PPE-REG depreciation) go onto the account line they belong to: added to the
         # trial balance line of the same name, or a line of that account's own when the trial balance has none. They are never shown as
         # a separate "adjustment" line, and the lines then add up to the note total.
