@@ -97,9 +97,10 @@ def _database_url():
 class Config:
     SECRET_KEY = os.environ.get("SECRET_KEY", "neverlank-dev-secret-change-me")
     SQLALCHEMY_DATABASE_URI = _database_url()
-    # PostgreSQL only: the app serves 8 requests at once (gunicorn --threads 8), so keep 8 connections ready; test a connection before using
-    # it (the host closes idle ones) and retire them hourly. SQLite needs none of this.
-    SQLALCHEMY_ENGINE_OPTIONS = ({"pool_size": 8, "max_overflow": 4, "pool_pre_ping": True, "pool_recycle": 3600}
+    # PostgreSQL only: the app serves 32 requests at once (gunicorn --threads 32; the open Socket.IO long-polls of every signed-in tab each hold
+    # one of them), so keep 24 connections ready plus 8 extra; test a connection before using it (the host closes idle ones) and retire
+    # them hourly. SQLite needs none of this.
+    SQLALCHEMY_ENGINE_OPTIONS = ({"pool_size": 24, "max_overflow": 8, "pool_pre_ping": True, "pool_recycle": 3600}
                                  if _database_url().startswith("postgresql") else {})
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     UPLOAD_FOLDER = UPLOAD_DIR
