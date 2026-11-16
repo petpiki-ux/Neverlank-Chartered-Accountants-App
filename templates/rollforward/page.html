@@ -1,0 +1,97 @@
+{% extends "base.html" %}
+{% block title %}Roll forward - {{ engagement.title }} - {{ firm_name }}{% endblock %}
+{% macro amt(x) %}{{ '{:,.2f}'.format(x) }}{% endmacro %}
+{% block content %}
+<div class="page-header">
+  <div>
+    <h1>Roll forward from last year's engagement</h1>
+    <div class="subtitle">
+      <a href="{{ url_for('clients.view_client', client_id=engagement.client.id) }}">{{ engagement.client.name }}</a>
+      &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">{{ engagement.title }}</a>
+      {% if engagement.period_end %}&middot; year ended {{ engagement.period_end.strftime('%d %B %Y') }}{% endif %}
+    </div>
+  </div>
+  <div><a class="btn secondary" href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='trial_balance') }}">Back to Trial Balance</a></div>
+</div>
+
+<div class="card">
+  <p class="muted" style="font-size:12.5px;margin-top:0;">Brings last year's finished figures into this year, so the comparatives, the opening position, last year's cash flow and the opening asset register do not have to be typed or imported again. Nothing is written until you tick the confirmation at the bottom. This year's own (current year) trial balance figures are never changed, and last year's engagement is not edited.</p>
+  {% if not candidates %}
+    <div class="empty-state">This client has no earlier engagement with a trial balance that ended before {{ start.strftime('%d %B %Y') if start else 'this period starts' }}. Finish last year's engagement (or upload its trial balance there) first, or import the prior-year trial balance directly on the Trial Balance tab.</div>
+  {% else %}
+  <form method="get" class="form-row" style="align-items:flex-end;">
+    <div style="grid-column: span 2;"><label for="rf_source">Last year's engagement</label>
+      <select id="rf_source" name="source" onchange="this.form.submit()">
+        {% for e, exact in candidates %}<option value="{{ e.id }}" {% if src and src.id == e.id %}selected{% endif %}>{{ e.title }} - year ended {{ e.period_end.strftime('%d %b %Y') }}{% if exact %} (the year before){% endif %}</option>{% endfor %}
+      </select></div>
+    <noscript><div><button class="btn secondary" style="margin-bottom:14px;">Show</button></div></noscript>
+  </form>
+  {% if candidates and not candidates[0][1] %}<div class="cf-banner" style="border-left:4px solid #b8860b;">None of this client's engagements ends on the day before this period starts{% if start %} ({{ (start - one_day).strftime('%d %B %Y') }}){% endif %}. Check you are rolling forward from the right year.</div>{% endif %}
+  {% endif %}
+</div>
+
+{% if plan %}
+{% for e in plan.errors %}<div class="cf-banner" style="border-left:4px solid #b8860b;">{{ e }}</div>{% endfor %}
+<form method="post" action="{{ url_for('rollfwd.apply', engagement_id=engagement.id) }}">
+  <input type="hidden" name="source" value="{{ src.id }}">
+
+  <div class="card">
+    <label style="display:flex;gap:8px;align-items:flex-start;"><input type="checkbox" name="comparatives" value="1" checked style="margin-top:4px;">
+      <span><strong>1. Comparative balances</strong> - last year's final trial balance (its figures plus its {{ plan.src_adjustments }} adjustment{{ '' if plan.src_adjustments == 1 else 's' }}) becomes this year's prior-year column.</span></label>
+    <p class="muted" style="font-size:12.5px;margin:6px 0 6px 24px;">
+      {{ plan.accounts|length }} accounts from last year: {{ plan.merge.matched }} match accounts already in this year's trial balance, {{ plan.merge.added|length }} will be added, {{ plan.merge.zeroed|length }} existing prior-year figures will be set to nil.
+      Debits {{ amt(plan.src_debit) }}, credits {{ amt(plan.src_credit) }}
+      {% if plan.src_balanced %}<span style="color:#2e7d32;">- balanced</span>{% else %}<span class="cf-bad">- does NOT balance: the comparatives will not be changed until last year is fixed</span>{% endif %}.
+    </p>
+    {% if plan.merge.added %}<p class="muted" style="font-size:12px;margin:0 0 4px 24px;">Added (not in this year's trial balance): {{ plan.merge.added[:12]|join(', ') }}{% if plan.merge.added|length > 12 %} and {{ plan.merge.added|length - 12 }} more{% endif %}.</p>{% endif %}
+    {% if plan.merge.zeroed %}<p class="muted" style="font-size:12px;margin:0 0 4px 24px;">Set to nil for last year (only in this year's file): {{ plan.merge.zeroed[:12]|join(', ') }}{% if plan.merge.zeroed|length > 12 %} and {{ plan.merge.zeroed|length - 12 }} more{% endif %}.</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <label style="display:flex;gap:8px;align-items:flex-start;"><input type="checkbox" name="opening" value="1" {% if plan.carry %}checked{% else %}disabled{% endif %} style="margin-top:4px;">
+      <span><strong>2. Opening position</strong> - last year's audit adjustments repeated in this year's opening balances (journal {{ REFERENCE }}).</span></label>
+    {% if plan.carry %}
+    <p class="muted" style="font-size:12.5px;margin:6px 0 6px 24px;">The client's own trial balance does not hold last year's audit adjustments, so without this the closing balances miss them (a deferred tax or revaluation journal, say). Balance sheet lines are repeated as they stand; last year's profit and loss effect goes to retained earnings brought forward. <strong>Untick this if the client has already booked last year's adjustments in this year's trial balance.</strong>
+      {% if plan.carry_existing %}It is already posted ({{ plan.carry_existing.reference }}); ticking refreshes it, and unticking removes it.{% endif %}</p>
+    <div class="tbl-scroll" style="margin-left:24px;"><table>
+      <thead><tr><th>Account</th><th>Category</th><th class="text-right">Debit</th><th class="text-right">Credit</th></tr></thead>
+      <tbody>{% for l in plan.carry %}<tr><td>{{ l.account_name }}</td><td>{{ label(l.fs_category) }}</td><td class="text-right">{{ amt(l.debit) if l.debit else '' }}</td><td class="text-right">{{ amt(l.credit) if l.credit else '' }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% if not plan.carry_balanced %}<p class="cf-bad" style="margin-left:24px;">These lines do not balance, so the journal will not be posted.</p>{% endif %}
+    {% else %}
+    <p class="muted" style="font-size:12.5px;margin:6px 0 0 24px;">Last year's engagement has no adjustments to carry forward.{% if plan.carry_existing %} An earlier {{ REFERENCE }} journal ({{ plan.carry_existing.reference }}) is on this year's trial balance; roll forward again to remove it.{% endif %}</p>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <label style="display:flex;gap:8px;align-items:flex-start;"><input type="checkbox" name="cashflow" value="1" {% if plan.cf_ok and plan.cf %}checked{% else %}disabled{% endif %} style="margin-top:4px;">
+      <span><strong>3. Prior-year cash flow</strong> - last year's statement of cash flows becomes this year's comparative.</span></label>
+    {% if plan.cf_ok and plan.cf %}
+    <p class="muted" style="font-size:12.5px;margin:6px 0 6px 24px;">{{ plan.cf|length }} lines, cash at the beginning of last year {{ amt(plan.cf_open) }}.{% if plan.cf_existing %} <strong>{{ plan.cf_existing }} comparative lines already saved here will be replaced.</strong>{% endif %}</p>
+    <div class="tbl-scroll" style="margin-left:24px;"><table>
+      <thead><tr><th>Section</th><th>Line</th><th class="text-right">Amount</th></tr></thead>
+      <tbody>{% for sec, lab, a in plan.cf %}<tr><td>{{ sec|capitalize }}</td><td>{{ lab }}</td><td class="text-right">{{ amt(a) }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% else %}<p class="muted" style="font-size:12.5px;margin:6px 0 0 24px;">Last year's cash flow could not be built (no movement or no trial balance), so there is nothing to bring across.</p>{% endif %}
+  </div>
+
+  <div class="card">
+    <label style="display:flex;gap:8px;align-items:flex-start;"><input type="checkbox" name="assets" value="1" {% if plan.assets %}checked{% else %}disabled{% endif %} style="margin-top:4px;">
+      <span><strong>4. Opening asset register</strong> - assets still held at last year end, with their closing cost, accumulated depreciation and tax value as this year's opening balances.</span></label>
+    <p class="muted" style="font-size:12.5px;margin:6px 0 6px 24px;">{{ plan.assets|length }} asset{{ '' if plan.assets|length == 1 else 's' }} to add; {{ plan.assets_skipped }} already in this year's register (skipped); {{ plan.assets_sold }} fully disposed of last year (not carried).{% if plan.assets_partial %} {{ plan.assets_partial }} partly sold: only the part still held is carried and its tax value is left for the Capital Allowances tab to work out.{% endif %}</p>
+    {% if plan.assets %}
+    <div class="tbl-scroll" style="margin-left:24px;"><table>
+      <thead><tr><th>Class</th><th>Asset</th><th>Acquired</th><th class="text-right">Cost</th><th class="text-right">Accum. depn</th><th class="text-right">Tax value</th></tr></thead>
+      <tbody>{% for a in plan.assets %}<tr><td>{{ a.class_name or '' }}</td><td>{{ a.asset_code or '' }} {{ a.description }}</td><td>{{ a.date_acquired.strftime('%d %b %Y') if a.date_acquired else '' }}</td><td class="text-right">{{ amt(a.cost) }}</td><td class="text-right">{{ amt(a.acc) }}</td><td class="text-right">{{ amt(a.tax_value) if a.tax_value is not none else '' }}</td></tr>{% endfor %}</tbody>
+    </table></div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <label style="display:flex;gap:8px;align-items:flex-start;"><input type="checkbox" name="confirm" value="1" style="margin-top:4px;">
+      <span>I have checked the figures above. Bring them into <strong>{{ engagement.title }}</strong>; the ticked items replace what is saved here for them.</span></label>
+    <p style="margin:10px 0 0 24px;"><button type="submit" class="btn gold">Roll forward</button></p>
+  </div>
+</form>
+{% endif %}
+{% endblock %}

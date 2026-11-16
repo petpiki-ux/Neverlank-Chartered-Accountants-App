@@ -42,6 +42,7 @@
         </form>
       </div>
     </div>
+    <div style="margin:0 0 12px;"><a href="{{ url_for('rollfwd.page', engagement_id=engagement.id) }}" class="btn gold">Roll forward from last year's engagement</a> <span class="muted" style="font-size:12px;">Brings last year's final figures across: comparative balances, the opening position, last year's cash flow and the opening asset register.</span></div>
     {% if trial_balance and trial_balance.lines %}
     <div style="margin:0 0 12px;"><a href="{{ url_for('tbalign.align_page', engagement_id=engagement.id) }}" class="btn secondary">Align accounts uploaded in different years</a> <span class="muted" style="font-size:12px;">Finds the same account spelt differently in the two years and offers to merge each pair into one line.</span></div>
     {% endif %}

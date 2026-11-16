@@ -882,6 +882,7 @@ def create_app():
     from asset_recon import assetrecon_bp
     from tb_year_import import tbyear_bp
     from tb_align import tbalign_bp
+    from roll_forward import rollfwd_bp
     from cf_prior import cfprior_bp
     from wp_editor import wpedit_bp
     from deferred_tax_adj import dtadj_bp
@@ -944,6 +945,7 @@ def create_app():
     app.register_blueprint(ppereval_bp)
     app.register_blueprint(tbyear_bp)
     app.register_blueprint(tbalign_bp)
+    app.register_blueprint(rollfwd_bp)
     app.register_blueprint(cfprior_bp)
     app.register_blueprint(wpedit_bp)
     app.register_blueprint(dtadj_bp)
