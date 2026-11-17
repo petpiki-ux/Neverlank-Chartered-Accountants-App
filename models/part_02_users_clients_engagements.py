@@ -752,6 +752,7 @@ class Client(db.Model):
     industry = db.Column(db.String(120))
     # Free-text "Nature of business and principal activities": printed in Note 1 (General information) of the financial statements.
     principal_activities = db.Column(db.Text)
+    jurisdiction = db.Column(db.String(120))   # country of incorporation, e.g. "Zimbabwe": printed in note 1 and on the Client Details page of the Financial Statements
     # Company registration number (e.g. a companies-office registration
     # number). Optional - not every client is a registered company - but
     # when it IS given, clients.py checks it against every other client's

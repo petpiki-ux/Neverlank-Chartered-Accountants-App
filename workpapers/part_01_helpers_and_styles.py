@@ -408,6 +408,7 @@ def _client_details_and_toc_page(doc, engagement, client_key_people, toc_section
 
     detail_row("Registered name", client.name if client else None)
     detail_row("Company registration number", client.company_number if client else None)
+    detail_row("Jurisdiction of incorporation", fin.jurisdiction_text(client) if client else None)
     detail_row("Registered address", client.address if client else None)
     detail_row("Industry", client.industry if client else None)
     detail_row("Nature of business and principal activities", fin.principal_activities_text(client) if client else None)

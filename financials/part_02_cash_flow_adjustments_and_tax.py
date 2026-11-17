@@ -372,8 +372,8 @@ def general_information_note(client, engagement):
     (the client's name, industry and this engagement's period end) rather
     than typed in fresh each time. The entity's jurisdiction of
     incorporation is left as a bracketed placeholder for the preparer to
-    fill in, since the app doesn't currently record one."""
-    sentences = [f"{client.name} (\"the entity\") is a company incorporated in [jurisdiction of incorporation]."]
+    fill in until it is recorded on the client page (Client > Jurisdiction of incorporation)."""
+    sentences = [f"{client.name} (\"the entity\") is a company incorporated in {jurisdiction_text(client) or '[jurisdiction of incorporation]'}."]
     activities = principal_activities_text(client)
     if activities:
         sentences.append(f"{activities}.")
@@ -386,6 +386,11 @@ def general_information_note(client, engagement):
     if engagement.period_end:
         sentences.append(f"These financial statements are for the {period_phrase(getattr(engagement, 'period_start', None), engagement.period_end)}.")
     return " ".join(sentences)
+
+
+def jurisdiction_text(client):
+    """The client's jurisdiction of incorporation as typed on the client page (one line, no final full stop), or ''."""
+    return " ".join((getattr(client, "jurisdiction", None) or "").split()).rstrip(".")
 
 
 def principal_activities_text(client):

@@ -136,6 +136,26 @@ def upload_document(client_id):
 
     db.session.commit()  # save the upload itself before attempting the AI call, so a slow/failed AI step never loses the file
 
+    # The Company Secretary typed on the upload form is recorded straight away as a confirmed key person (the preparer is vouching for it),
+    # linked to this document - whatever the document type, including the ones that are not read for people. It feeds the Client Details page
+    # of the Financial Statements. The same name already on the client's list is not added twice.
+    secretary_note = ""
+    secretary = " ".join(request.form.get("company_secretary", "").split())[:200]
+    if secretary:
+        same = [p for p in ClientKeyPerson.query.filter_by(client_id=client_id, role="Company Secretary").all()
+                if " ".join((p.full_name or "").split()).casefold() == secretary.casefold()]
+        if same:
+            secretary_note = f" {secretary} is already recorded as Company Secretary."
+            for p in same:
+                if p.status != "Confirmed":
+                    p.status, p.confirmed_by_id, p.confirmed_at = "Confirmed", current_user.id, datetime.utcnow()
+        else:
+            db.session.add(ClientKeyPerson(client_id=client_id, full_name=secretary, role="Company Secretary", status="Confirmed",
+                                           details=request.form.get("secretary_details", "").strip() or None, source_document_id=doc.id,
+                                           created_by_id=current_user.id, confirmed_by_id=current_user.id, confirmed_at=datetime.utcnow()))
+            secretary_note = f" {secretary} recorded as Company Secretary."
+        db.session.commit()
+
     # Auto-file a copy to the Permanent File for document types that belong
     # there (see models.COMPANY_DOCUMENT_TYPE_TO_FILING_CODE and this
     # module's docstring) - best-effort: a Permanent File filing hiccup
@@ -163,7 +183,7 @@ def upload_document(client_id):
         doc.ai_processed_at = datetime.utcnow()
         db.session.commit()
         why = COMPANY_DOCUMENT_NOT_READ_NOTES.get(document_type, ("", "it names people whose roles need a person's judgement"))[1]
-        flash(f"'{doc.title}' uploaded.{permanent_file_note or ''} It is not read for people, because {why}: "
+        flash(f"'{doc.title}' uploaded.{permanent_file_note or ''}{secretary_note} It is not read for people, because {why}: "
               "update the directors and shareholders below by hand if it changes who they are.", "success")
         return redirect(url_for("clients.view_client", client_id=client_id))
 
@@ -173,6 +193,8 @@ def upload_document(client_id):
     doc.ai_status = ai_status
     doc.ai_error = ai_error
     doc.ai_processed_at = datetime.utcnow()
+    typed = " ".join(secretary.split()).casefold() if secretary else ""
+    people = [p for p in people if not (typed and p["role"] == "Company Secretary" and " ".join(p["full_name"].split()).casefold() == typed)]
     for p in people:
         db.session.add(ClientKeyPerson(
             client_id=client_id,
@@ -191,13 +213,13 @@ def upload_document(client_id):
 
     if ai_status == "done":
         if people:
-            flash(f"'{doc.title}' uploaded - {len(people)} person(s) suggested below for review under Directors & Shareholders.{permanent_file_note or ''}", "success")
+            flash(f"'{doc.title}' uploaded - {len(people)} person(s) suggested below for review under Directors & Shareholders.{permanent_file_note or ''}{secretary_note}", "success")
         else:
-            flash(f"'{doc.title}' uploaded - no directors/shareholders/etc were found in it.{permanent_file_note or ''}", "info")
+            flash(f"'{doc.title}' uploaded - no directors/shareholders/etc were found in it.{permanent_file_note or ''}{secretary_note}", "info")
     elif ai_status == "not_configured":
-        flash(f"'{doc.title}' uploaded, but automatic extraction isn't set up yet ({ai_error}) - add people manually below, or reprocess this document once it's configured.{permanent_file_note or ''}", "warning")
+        flash(f"'{doc.title}' uploaded, but automatic extraction isn't set up yet ({ai_error}) - add people manually below, or reprocess this document once it's configured.{permanent_file_note or ''}{secretary_note}", "warning")
     else:
-        flash(f"'{doc.title}' uploaded, but automatic extraction failed ({ai_error}) - add people manually below, or use \"Reprocess\" to try again.{permanent_file_note or ''}", "warning")
+        flash(f"'{doc.title}' uploaded, but automatic extraction failed ({ai_error}) - add people manually below, or use \"Reprocess\" to try again.{permanent_file_note or ''}{secretary_note}", "warning")
     return redirect(url_for("clients.view_client", client_id=client_id))
 
 

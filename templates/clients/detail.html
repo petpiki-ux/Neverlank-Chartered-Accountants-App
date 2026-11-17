@@ -19,6 +19,7 @@
   </div>
   <div class="form-row">
     <div><strong>Company number:</strong> {{ client.company_number or '—' }}</div>
+    <div><strong>Jurisdiction of incorporation:</strong> {{ client.jurisdiction or '—' }}</div>
     <div><strong>Address:</strong> {{ client.address or '—' }}</div>
     <div><strong>Main bankers:</strong> {{ (client.bankers.splitlines()|select|join('; ')) if client.bankers else '—' }}</div>
   </div>
@@ -203,6 +204,11 @@
     <p id="doc_type_hint" class="muted" style="font-size:12px; display:none; margin:0 0 8px;">
       A <span id="doc_type_hint_form">CR</span> form is filed here and to the Permanent File (<span id="doc_type_hint_code">P5000</span>), but it is not read for people: <span id="doc_type_hint_why"></span>. After uploading it, update the directors and shareholders below by hand where it changes who they are.
     </p>
+    <div class="form-row">
+      <div><label for="doc_secretary">Company Secretary (optional)</label><input type="text" id="doc_secretary" name="company_secretary" maxlength="200" placeholder="Full name, as on the document - added to Directors &amp; Shareholders as Company Secretary"></div>
+      <div><label for="doc_secretary_details">Secretary details (optional)</label><input type="text" id="doc_secretary_details" name="secretary_details" placeholder="e.g. date of appointment, firm or address"></div>
+    </div>
+    <div class="muted" style="font-size:11.5px;margin:-8px 0 12px;">Works for every document type, including those not read for people. Printed on the Client Details page of the Financial Statements.</div>
     <label for="doc_notes">Notes (optional)</label>
     <textarea id="doc_notes" name="notes" rows="2"></textarea>
   </form>
