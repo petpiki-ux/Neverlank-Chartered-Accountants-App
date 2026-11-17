@@ -205,6 +205,12 @@
       <span class="muted" style="font-size:11px;">Partner sign-off: not available on your own preparation</span>
       {% endif %}
     {% endif %}
+    <div style="margin-top:10px;padding-top:8px;border-top:1px solid #eee;">
+      <strong style="font-size:12.5px;">Managing Partner's signature on the report</strong>
+      <p class="muted" style="font-size:12px;margin:2px 0 6px;">Puts the Managing Partner's e-signature on the signing line of the auditor's report in the Financial Statements (Word). It is withdrawn automatically if the report wording, the report date, the trial balance or any adjustment changes afterwards, and has to be applied again. Without it the line is left blank to sign by hand.</p>
+      {% set sign_doc = audit_opinion %}{% set sign_kind = 'audit_report' %}{% include '_mp_sign_control.html' %}
+      {% if audit_opinion.mp_signed_at and not mp_signed(audit_opinion) %}<span class="muted" style="font-size:11.5px;">The signature applied on {{ (audit_opinion.mp_signed_at|cat).strftime('%d %b %Y') }} no longer shows because the report or the accounts changed. Sign again once final.</span>{% endif %}
+    </div>
     {% endif %}
   </div>
   {% endif %}

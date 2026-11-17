@@ -103,7 +103,7 @@ OPINION_MODIFICATION_LABELS = {
 }
 
 
-class AuditOpinion(db.Model):
+class AuditOpinion(MPSignedMixin, db.Model):
     """The Independent Auditor's Report / Independent Reviewer's Report
     working paper - one per engagement, shown only for Audit and Assurance
     engagement types (see AUDIT_OPINION_BASES above), placed before the

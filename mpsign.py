@@ -11,7 +11,7 @@ from flask_login import current_user, login_required
 
 import brand_docs
 from extensions import db
-from models import CFValuationModel, ClientAdvance, CreditNote, Invoice, Quotation, Receipt, ValuationCertificate, WorkpaperNarrative, ZimraReply
+from models import AuditOpinion, CFValuationModel, ClientAdvance, CreditNote, Invoice, Quotation, Receipt, ValuationCertificate, WorkpaperNarrative, ZimraReply
 
 mpsign_bp = Blueprint("mpsign", __name__, url_prefix="/sign")
 
@@ -25,6 +25,8 @@ KINDS = {
     "zimra_reply": (ZimraReply, "letter", lambda d: url_for("zimra.view_reply", reply_id=d.id)),
     "valuation": (ValuationCertificate, "valuation certificate", lambda d: url_for("valuations.view_certificate", cert_id=d.id)),
     "valuation_model": (CFValuationModel, "valuation model report", lambda d: url_for("corpfin.vm_tab", vm_id=d.id, tab="report")),
+    "audit_report": (AuditOpinion, "auditor's report",
+                     lambda d: url_for("engagements.view_engagement", engagement_id=d.engagement_id, tab="finalisation")),
     "report_to_management": (WorkpaperNarrative, "Report to Management letter",
                              lambda d: url_for("engagements.view_engagement", engagement_id=d.engagement_id, tab="finalisation")),
 }
@@ -59,6 +61,21 @@ def can_sign(doc):
             return False, "The valuation model is incomplete (a component has no value or no exchange rate). Fix it before signing."
     if type(doc).__name__ == "WorkpaperNarrative" and doc.kind != "report_to_management":
         return False, "Only the Report to Management letter carries the signature."
+    if type(doc).__name__ == "AuditOpinion":
+        if not doc.report_date:
+            return False, "Set the report date on the auditor's report first."
+        if not (doc.opinion_paragraph or "").strip():
+            return False, "The opinion paragraph of the auditor's report is empty."
+        if not brand_docs.is_managing_partner(brand_docs.AUDITOR_SIGNOFF_NAME):
+            return False, "The report is signed by someone other than the Managing Partner (see brand_docs.AUDITOR_SIGNOFF_NAME)."
+        from models import TrialBalance
+        tb = TrialBalance.query.filter_by(engagement_id=doc.engagement_id).first()
+        if tb is None or not tb.lines:
+            return False, "There is no trial balance behind this report yet."
+        dr = sum(l.current_debit or 0.0 for l in tb.lines) + sum(l.debit or 0.0 for a in tb.adjustments if (a.applies_to or "current") == "current" for l in a.lines)
+        cr = sum(l.current_credit or 0.0 for l in tb.lines) + sum(l.credit or 0.0 for a in tb.adjustments if (a.applies_to or "current") == "current" for l in a.lines)
+        if abs(dr - cr) >= 0.5:
+            return False, f"The final trial balance does not balance (debits {dr:,.2f}, credits {cr:,.2f}). Fix the accounts before signing the report."
     if not brand_docs.signature_bytes():
         return False, "The signature image is missing from the server."
     return True, ""
@@ -89,7 +106,8 @@ def sign(kind, doc_id):
     doc.mp_signed_at = datetime.utcnow()
     doc.mp_signed_key = brand_docs.content_key(doc)
     db.session.commit()
-    flash(f"The {KINDS[kind][1]} now carries the Managing Partner's signature.", "success")
+    flash(f"The {KINDS[kind][1]} now carries the Managing Partner's signature."
+          + (" Generate the Financial Statements (Word) again to get the signed report." if kind == "audit_report" else ""), "success")
     return redirect(_back(kind, doc))
 
 

@@ -77,6 +77,23 @@ def signature_data_uri():
     return _sig_cache["uri"] if signature_bytes() else ""
 
 
+def accounts_key(engagement_id):
+    """A fingerprint of the accounts an auditor's report is signed over: every trial balance line (both years, with its IAS 1 category) and
+    every audit adjustment line. Change a figure, a category or a journal and the signature on the report stops showing."""
+    import hashlib
+    from models import TrialBalance
+    tb = TrialBalance.query.filter_by(engagement_id=engagement_id).first()
+    if tb is None:
+        return ""
+    items = [("tb", l.account_name or "", l.fs_category or "", round(l.current_debit or 0.0, 2), round(l.current_credit or 0.0, 2),
+              round(l.prior_debit or 0.0, 2), round(l.prior_credit or 0.0, 2)) for l in tb.lines]
+    for a in tb.adjustments:
+        for l in a.lines:
+            items.append(("adj", a.applies_to or "current", bool(a.carry_to_current), l.account_name or "", l.fs_category or "",
+                          round(l.debit or 0.0, 2), round(l.credit or 0.0, 2)))
+    return hashlib.sha1(repr(sorted(items, key=repr)).encode("utf-8")).hexdigest()
+
+
 def content_key(doc):
     """A short fingerprint of what the Managing Partner signs: the document number and amount (invoices, quotations, credit notes,
     receipts, advance receipts), or the subject, wording and signatory of a letter. If it changes after signing, the signature
@@ -89,6 +106,10 @@ def content_key(doc):
         parts = [doc.subject, doc.body, doc.signatory, doc.addressee, doc.letter_date]
     elif cls == "WorkpaperNarrative":
         parts = [doc.kind, doc.body]
+    elif cls == "AuditOpinion":
+        parts = [doc.report_basis, doc.modification, doc.basis_for_modification, doc.opinion_paragraph, doc.basis_paragraph,
+                 doc.management_responsibility_paragraph, doc.auditor_responsibility_paragraph, doc.statutory_paragraph, doc.report_date,
+                 accounts_key(doc.engagement_id)]
     elif cls == "ValuationCertificate":
         import valuation_docs
         parts = [doc.reference, doc.valuation_date, doc.certificate_date, doc.currency, doc.area_ha, doc.low_value, doc.adopted_value,

@@ -487,13 +487,19 @@ def _directors_statement_section(doc, directors_statement, engagement=None):
 
 
 
-def _opinion_signoff(doc, report_date):
+def _opinion_signoff(doc, report_date, signed=False):
     """The signing block under the auditor's/reviewer's report: a line to sign on, then the signing auditor, the PAAB / ICAZ numbers, the firm
     with its PAAB firm number, the place and the date of the report. Kept together on one page."""
-    for _ in range(2):                                   # room for the signature
+    if signed:                                           # the Managing Partner's e-signature (mpsign.py), sitting on the signing line
         sp = doc.add_paragraph()
         sp.paragraph_format.space_after = Pt(0)
         sp.paragraph_format.keep_with_next = True
+        brand.add_signature_picture(sp, width_in=1.45)
+    else:
+        for _ in range(2):                               # room for the signature
+            sp = doc.add_paragraph()
+            sp.paragraph_format.space_after = Pt(0)
+            sp.paragraph_format.keep_with_next = True
     lines = [
         "\u2026" * 42,
         brand.AUDITOR_SIGNOFF_NAME,
@@ -552,7 +558,7 @@ def _audit_opinion_section(doc, audit_opinion, engagement=None):
     doc.add_paragraph(audit_opinion.auditor_responsibility_paragraph or "")
     if is_audit:
         _statutory_report_section(doc, audit_opinion, engagement)
-    _opinion_signoff(doc, audit_opinion.report_date)
+    _opinion_signoff(doc, audit_opinion.report_date, signed=brand.signature_valid(audit_opinion))
     doc.add_page_break()
 
 

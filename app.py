@@ -654,7 +654,7 @@ def _add_missing_columns():
     }
     # The Managing Partner's e-signature columns (models.MPSignedMixin) - MERGED into each table's list, because some of these tables
     # (receipt, zimra_reply, invoice) already have their own entry above and a repeated key in the literal would replace it.
-    for _t in ("quotation", "invoice", "credit_note", "receipt", "client_advance", "zimra_reply", "workpaper_narrative"):
+    for _t in ("quotation", "invoice", "credit_note", "receipt", "client_advance", "zimra_reply", "workpaper_narrative", "audit_opinion"):
         additions[_t] = list(additions.get(_t, [])) + [("mp_signed_by_id", "INTEGER"), ("mp_signed_at", "DATETIME"), ("mp_signed_key", "VARCHAR(64)")]
     def _pg_type(col_type):
         # the column types above are written for SQLite; PostgreSQL spells two of them differently
