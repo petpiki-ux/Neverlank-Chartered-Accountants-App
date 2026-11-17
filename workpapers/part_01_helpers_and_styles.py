@@ -487,6 +487,44 @@ def _directors_statement_section(doc, directors_statement, engagement=None):
 
 
 
+def _directors_sign_block(doc, directors_statement, client_key_people=None):
+    """The directors' approval signatures under the Statement of Financial Position: two signing lines side by side, each with the director's
+    name and "Director" in bold, and the date of approval centred below. Names come from the Directors' Statement; where that has none, the
+    client's first two Directors on the Company Documents list; otherwise the line is left blank to write on. Kept together on one page."""
+    ds = directors_statement
+    people = [p.get("full_name") for p in (client_key_people or []) if p.get("role") == "Director" and p.get("full_name")]
+    names = [(ds.director1_name if ds else None) or (people[0] if len(people) > 0 else None),
+             (ds.director2_name if ds else None) or (people[1] if len(people) > 1 else None)]
+    titles = [(ds.director1_title if ds and ds.director1_title else None) or "Director",
+              (ds.director2_title if ds and ds.director2_title else None) or "Director"]
+    line = "_" * 26
+    doc.add_paragraph().paragraph_format.space_after = Pt(6)
+    table = doc.add_table(rows=3, cols=2)
+    table.autofit = True
+    for ci in (0, 1):
+        for ri, (text, bold) in enumerate(((line, False), (names[ci] or "", False), (titles[ci], True))):
+            cell = table.rows[ri].cells[ci]
+            p = cell.paragraphs[0]
+            run = p.add_run(text)
+            run.bold = bold
+            run.font.size = Pt(12)
+            p.paragraph_format.space_before = Pt(10 if ri == 0 else 4)
+            p.paragraph_format.space_after = Pt(0)
+            p.paragraph_format.keep_with_next = True
+            if ci == 1:
+                p.paragraph_format.left_indent = Inches(0.9)
+    for row in table.rows:                                # a row never splits across pages
+        trPr = row._tr.get_or_add_trPr()
+        trPr.append(trPr.makeelement(qn("w:cantSplit"), {}))
+    date_p = doc.add_paragraph()
+    date_p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    date_p.paragraph_format.space_before = Pt(14)
+    d = ds.statement_date if ds else None
+    r = date_p.add_run(d.strftime("%d %B %Y") if d else "_" * 20)
+    r.bold = True
+    r.font.size = Pt(12)
+
+
 def _opinion_signoff(doc, report_date, signed=False):
     """The signing block under the auditor's/reviewer's report: a line to sign on, then the signing auditor, the PAAB / ICAZ numbers, the firm
     with its PAAB firm number, the place and the date of the report. Kept together on one page."""

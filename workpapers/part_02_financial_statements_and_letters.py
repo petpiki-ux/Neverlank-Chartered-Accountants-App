@@ -201,6 +201,8 @@ def build_financial_statements_docx(engagement, statements, financial_statements
             f"adjustments {refs}" + ("; the opening balances of the current year have been restated accordingly." if carried else ".")
         ).runs[0].italic = True
 
+    _directors_sign_block(doc, directors_statement, client_key_people)
+
     pl_specs = [{"cells": _fs_row_cells(r), "bold": r.get("bold", False)} for r in statements["pl"]["rows"]]
     _statement_table(doc, "Statement of Profit or Loss and Other Comprehensive Income", ["", "Note", *_years(doc)], pl_specs)
 
