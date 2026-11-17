@@ -238,9 +238,15 @@ def view_client(client_id):
     # FILING_ARCHIVE_SECTIONS) so the template can render each of the three
     # sections as its own list without re-filtering client.
     # filing_archive_documents three times itself.
+    import filing_archive as _fa
+    filing_filter = request.args.get("fa", "all")
+    filing_filter_choices = _fa.filter_choices(list(client.filing_archive_documents))
+    if filing_filter not in {k for k, _l, _c in filing_filter_choices}:
+        filing_filter = "all"
     filing_archive_by_section = {key: [] for key, _ in FILING_ARCHIVE_SECTIONS}
     for doc in client.filing_archive_documents:
-        filing_archive_by_section.setdefault(doc.section, []).append(doc)
+        if _fa.matches_filter(doc, filing_filter):
+            filing_archive_by_section.setdefault(doc.section, []).append(doc)
     # Sanctions / AML vetting: one list per client, applying to every engagement (see ClientSanctionsScreening).
     sanctions_list_status = {
         row.source: row for row in SanctionsListStatus.query.filter(SanctionsListStatus.source.in_(SANCTIONS_AUTO_SOURCES)).all()
@@ -278,6 +284,8 @@ def view_client(client_id):
         filing_archive_by_section=filing_archive_by_section,
         tax_heads=TAX_HEADS,
         can_delete_filing_archive=user_has_permission(current_user, "delete_documents"),
+        filing_can_delete=lambda d: _fa.can_delete(current_user, d),
+        filing_filter=filing_filter, filing_filter_choices=filing_filter_choices,
         legislative_updates_for_tagging=LegislativeUpdate.query.order_by(LegislativeUpdate.created_at.desc()).all(),
         zimra_cases=_visible_zimra_cases(client.zimra_cases),
         visible_invoices=[i for i in client.invoices if _invoice_visible(i)],

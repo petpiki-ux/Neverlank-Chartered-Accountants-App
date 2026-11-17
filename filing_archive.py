@@ -28,6 +28,43 @@ def _allowed_file(filename):
     return ext in current_app.config["ALLOWED_EXTENSIONS"]
 
 
+# The quick views over the whole archive: show only the files of one tax: (key, label, matcher). ITF = the income tax return forms (ITF12B etc.),
+# kept under Corporate Income Tax, or any file with "ITF" in its title, reference or period; Other = every head not listed.
+FILING_FILTERS = [
+    ("paye", "PAYE", lambda d: (d.tax_head or "") == "PAYE"),
+    ("vat", "VAT", lambda d: (d.tax_head or "") == "Value Added Tax (VAT)"),
+    ("qpd", "QPDs", lambda d: (d.tax_head or "") == "Provisional Tax (QPDs)"),
+    ("itf", "ITF (income tax)", lambda d: (d.tax_head or "") == "Corporate Income Tax (CIT)"
+     or "itf" in " ".join(str(x or "") for x in (d.title, d.reference, d.period_label, d.original_filename)).lower()),
+]
+
+
+def matches_filter(doc, key):
+    """True when this filed document belongs in the chosen quick view ('' or 'all' = every file)."""
+    if not key or key == "all":
+        return True
+    for k, _label, fn in FILING_FILTERS:
+        if k == key:
+            return bool(fn(doc))
+    if key == "other":
+        return not any(fn(doc) for _k, _l, fn in FILING_FILTERS)
+    return True
+
+
+def filter_choices(docs):
+    """[(key, label, count)] for the chips above the archive: All, PAYE, VAT, QPDs, ITF, Other."""
+    out = [("all", "All files", len(docs))]
+    for k, label, _fn in FILING_FILTERS:
+        out.append((k, label, sum(1 for d in docs if matches_filter(d, k))))
+    out.append(("other", "Other taxes and untagged", sum(1 for d in docs if matches_filter(d, "other"))))
+    return out
+
+
+def can_delete(user, doc):
+    """Anyone with the Delete Documents permission may delete a filing; so may the person who filed it (to correct their own mistake)."""
+    return bool(user_has_permission(user, "delete_documents") or (doc.uploaded_by_id and doc.uploaded_by_id == getattr(user, "id", None)))
+
+
 @filing_archive_bp.route("/<int:client_id>/filing-archive/upload", methods=["POST"])
 @login_required
 def upload_filing_archive_document(client_id):
@@ -69,7 +106,7 @@ def upload_filing_archive_document(client_id):
     except Exception:
         pass
     flash(f"Filed '{original_name}' to {FILING_ARCHIVE_SECTION_LABELS[section]}.", "success")
-    return redirect(url_for("clients.view_client", client_id=client_id))
+    return redirect(url_for("clients.view_client", client_id=client_id) + "#filing-archive")
 
 
 @filing_archive_bp.route("/filing-archive/<int:doc_id>/download")
@@ -85,14 +122,21 @@ def download_filing_archive_document(doc_id):
 @filing_archive_bp.route("/filing-archive/<int:doc_id>/delete", methods=["POST"])
 @login_required
 def delete_filing_archive_document(doc_id):
-    if not user_has_permission(current_user, "delete_documents"):
-        abort(403)
     doc = TaxAccountingFilingDocument.query.get_or_404(doc_id)
+    if not can_delete(current_user, doc):
+        abort(403)
     client_id = doc.client_id
+    label = f"{doc.section_label}: {doc.title or doc.original_filename}"
     try:
         os.remove(os.path.join(current_app.config["UPLOAD_FOLDER"], doc.stored_filename))
     except OSError:
         pass
+    try:
+        import scan_text
+        scan_text.forget("filing_archive", doc.id)
+    except Exception:
+        pass
     db.session.delete(doc)
     db.session.commit()
-    return redirect(url_for("clients.view_client", client_id=client_id))
+    flash(f"Deleted - {label}.", "success")
+    return redirect(url_for("clients.view_client", client_id=client_id, fa=request.form.get("fa") or None) + "#filing-archive")

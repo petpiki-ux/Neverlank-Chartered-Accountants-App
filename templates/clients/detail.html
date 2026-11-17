@@ -294,13 +294,21 @@
 </div>
 
 {% if client.has_tax_or_accounting_engagement %}
-<div class="card">
+<div class="card" id="filing-archive">
   <h3 class="mt-0">Tax &amp; Accounting Filing Archive</h3>
   <p class="muted" style="font-size:12px;">
     Filed once per client, across tax years and engagements, rather than tied to whichever Tax Advisory or
     Accounting &amp; Bookkeeping engagement happened to be open at the time - three sections: Tax Clearances,
     Returns, and Schedules.
   </p>
+
+  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 6px;">
+    <span class="muted" style="font-size:12px;">Show only:</span>
+    {% for k, lab, n in filing_filter_choices %}
+    <a href="{{ url_for('clients.view_client', client_id=client.id, fa=(k if k != 'all' else None)) }}#filing-archive" class="btn small {{ 'gold' if filing_filter == k else 'secondary' }}">{{ lab }} ({{ n }})</a>
+    {% endfor %}
+  </div>
+  {% if filing_filter != 'all' %}<p class="muted" style="font-size:12px;margin:0 0 4px;">Showing only the {{ (filing_filter_choices|selectattr(0, 'equalto', filing_filter)|first)[1] }} files in each section. <a href="{{ url_for('clients.view_client', client_id=client.id) }}#filing-archive">Show all</a></p>{% endif %}
 
   {% for section_key, section_label in filing_archive_sections %}
   <h4 style="margin-bottom:4px;{% if not loop.first %}margin-top:20px;{% endif %}">{{ loop.index }}. {{ section_label }}</h4>
@@ -321,8 +329,8 @@
         <td class="muted">{{ (doc.uploaded_at|cat).strftime('%d %b %Y') if doc.uploaded_at else '—' }}{% if doc.uploaded_by %} by {{ doc.uploaded_by.name }}{% endif %}</td>
         <td class="text-right">
           <a href="{{ url_for('filing_archive.download_filing_archive_document', doc_id=doc.id) }}" class="btn small secondary">Download</a>
-          {% if can_delete_filing_archive %}
-          <form method="post" action="{{ url_for('filing_archive.delete_filing_archive_document', doc_id=doc.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
+          {% if filing_can_delete(doc) %}
+          <form method="post" action="{{ url_for('filing_archive.delete_filing_archive_document', doc_id=doc.id) }}" class="inline" onsubmit="return confirm('Delete {{ (doc.title or doc.original_filename)|e|replace("'", "") }} ({{ section_label|e }}{% if doc.period_label %}, {{ doc.period_label|e }}{% endif %})? The file is removed and this cannot be undone. Use this to remove a wrong filing, then file the correct one.')"><input type="hidden" name="fa" value="{{ filing_filter if filing_filter != 'all' else '' }}"><button type="submit" class="btn small danger">Delete</button></form>
           {% endif %}
         </td>
       </tr>
@@ -330,7 +338,7 @@
     </tbody>
   </table>
   {% else %}
-  <div class="empty-state">No {{ section_label|lower }} filed yet.</div>
+  <div class="empty-state">{% if filing_filter != 'all' %}No {{ section_label|lower }} for this tax.{% else %}No {{ section_label|lower }} filed yet.{% endif %}</div>
   {% endif %}
   <form method="post" action="{{ url_for('filing_archive.upload_filing_archive_document', client_id=client.id) }}" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;margin-top:6px;">
     <input type="hidden" name="section" value="{{ section_key }}">
