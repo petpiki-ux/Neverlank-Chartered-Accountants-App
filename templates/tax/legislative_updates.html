@@ -182,33 +182,6 @@
 {% if fold %}</div></details>{% else %}</div>{% endif %}
 {% endmacro %}
 
-<div class="card">
-  {% if updates %}
-  {% set case_list = updates|selectattr('instrument_type', 'equalto', 'Case')|list %}
-  {% for u in updates %}{% if u.instrument_type != 'Case' %}{{ lu_entry(u) }}{% endif %}{% endfor %}
-  {% if case_list %}
-  <details id="lu-cases" style="margin-top:12px;">
-    <summary style="cursor:pointer;font-size:15px;font-weight:bold;padding:8px 0;">Court cases ({{ case_list|length }}) <span class="muted" style="font-weight:normal;font-size:12.5px;">- click to open; each case opens on its own</span></summary>
-    <div style="margin:4px 0 8px;"><button type="button" class="btn small secondary" onclick="luFold(true)">Open all cases</button> <button type="button" class="btn small secondary" onclick="luFold(false)">Close all cases</button></div>
-    {% for u in case_list %}{{ lu_entry(u, True) }}{% endfor %}
-  </details>
-  {% endif %}
-  <script>
-  function luFold(open) { document.querySelectorAll('details.lu-fold').forEach(function (d) { d.open = open; }); }
-  function luReveal() {
-    var id = (location.hash || '').slice(1); if (!id) return;
-    var el = document.getElementById(id); if (!el) return;
-    for (var p = el; p; p = p.parentElement) { if (p.tagName === 'DETAILS') p.open = true; }
-    el.scrollIntoView();
-  }
-  window.addEventListener('hashchange', luReveal); document.addEventListener('DOMContentLoaded', luReveal);
-  document.addEventListener('click', function (e) { var a = e.target.closest && e.target.closest('a[href^="#legislative-update-"]'); if (a) setTimeout(luReveal, 0); });
-  </script>
-  {% else %}
-  <div class="empty-state">No legislative updates logged yet.</div>
-  {% endif %}
-</div>
-
 {% if can_edit %}
 <div class="card">
   <h3 class="mt-0">File an instrument, or log an update</h3>
@@ -259,4 +232,47 @@
   </form>
 </div>
 {% endif %}
+
+<div class="card">
+  {% if updates %}
+  {% set groups = [] %}
+  {% for t in instrument_types %}{% set _ = groups.append((t, type_labels.get(t, t), updates|selectattr('instrument_type', 'equalto', t)|list)) %}{% endfor %}
+  {% set typed = instrument_types|list %}
+  {% set untyped = updates|rejectattr('instrument_type', 'in', typed)|list %}
+  {% if untyped %}{% set _ = groups.append(('', 'Text log entries (no instrument type)', untyped)) %}{% endif %}
+  <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:6px;margin-bottom:4px;">
+    <h3 class="mt-0" style="margin:0;">Filed library</h3>
+    <span class="muted" style="font-size:12.5px;">Each class is closed to keep this page short - click a class to open it.
+      <button type="button" class="btn small secondary" onclick="luGroups(true)">Open all</button>
+      <button type="button" class="btn small secondary" onclick="luGroups(false)">Close all</button></span>
+  </div>
+  {% for t, label, items in groups %}
+  <details class="lu-group" id="{{ 'lu-cases' if t == 'Case' else 'lu-group-' ~ loop.index }}" style="border-top:1px solid var(--border);margin-top:6px;">
+    <summary style="cursor:pointer;font-size:15px;font-weight:bold;padding:8px 0;">{{ label }} ({{ items|length }})
+      {% if not items %}<span class="muted" style="font-weight:normal;font-size:12.5px;">- none filed yet</span>{% elif t == 'Case' %}<span class="muted" style="font-weight:normal;font-size:12.5px;">- each case opens on its own</span>{% endif %}</summary>
+    {% if t == 'Case' and items %}
+    <div style="margin:4px 0 8px;"><button type="button" class="btn small secondary" onclick="luFold(true)">Open all cases</button> <button type="button" class="btn small secondary" onclick="luFold(false)">Close all cases</button></div>
+    {% for u in items %}{{ lu_entry(u, True) }}{% endfor %}
+    {% else %}
+    {% for u in items %}{{ lu_entry(u) }}{% endfor %}
+    {% endif %}
+  </details>
+  {% endfor %}
+  <script>
+  function luGroups(open) { document.querySelectorAll('details.lu-group').forEach(function (d) { d.open = open; }); }
+  function luFold(open) { document.querySelectorAll('details.lu-fold').forEach(function (d) { d.open = open; }); }
+  function luReveal() {
+    var id = (location.hash || '').slice(1); if (!id) return;
+    var el = document.getElementById(id); if (!el) return;
+    for (var p = el; p; p = p.parentElement) { if (p.tagName === 'DETAILS') p.open = true; }
+    el.scrollIntoView();
+  }
+  window.addEventListener('hashchange', luReveal); document.addEventListener('DOMContentLoaded', luReveal);
+  document.addEventListener('click', function (e) { var a = e.target.closest && e.target.closest('a[href^="#legislative-update-"]'); if (a) setTimeout(luReveal, 0); });
+  </script>
+  {% else %}
+  <div class="empty-state">No legislative updates logged yet.</div>
+  {% endif %}
+</div>
+
 {% endblock %}
