@@ -302,12 +302,15 @@
     Returns, and Schedules.
   </p>
 
-  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 6px;">
-    <span class="muted" style="font-size:12px;">Show only:</span>
-    {% for k, lab, n in filing_filter_choices %}
-    <a href="{{ url_for('clients.view_client', client_id=client.id, fa=(k if k != 'all' else None)) }}#filing-archive" class="btn small {{ 'gold' if filing_filter == k else 'secondary' }}">{{ lab }} ({{ n }})</a>
-    {% endfor %}
-  </div>
+  {% set fa_current = (filing_filter_choices|selectattr(0, 'equalto', filing_filter)|first) %}
+  <details class="fa-filter" style="margin:4px 0 6px;"{% if filing_filter != 'all' %} open{% endif %}>
+    <summary style="cursor:pointer;font-size:12px;"><span class="muted">Show only:</span> <strong>{{ fa_current[1] }} ({{ fa_current[2] }})</strong> <span class="muted">&middot; click to change</span></summary>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0 0;">
+      {% for k, lab, n in filing_filter_choices %}
+      <a href="{{ url_for('clients.view_client', client_id=client.id, fa=(k if k != 'all' else None)) }}#filing-archive" class="btn small {{ 'gold' if filing_filter == k else 'secondary' }}">{{ lab }} ({{ n }})</a>
+      {% endfor %}
+    </div>
+  </details>
   {% if filing_filter != 'all' %}<p class="muted" style="font-size:12px;margin:0 0 4px;">Showing only the {{ (filing_filter_choices|selectattr(0, 'equalto', filing_filter)|first)[1] }} files in each section. <a href="{{ url_for('clients.view_client', client_id=client.id) }}#filing-archive">Show all</a></p>{% endif %}
 
   {% for section_key, section_label in filing_archive_sections %}

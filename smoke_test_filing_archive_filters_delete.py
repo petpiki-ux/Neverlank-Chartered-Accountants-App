@@ -63,6 +63,10 @@ check(titles(admin.get(f"/clients/{cid}?fa=qpd").get_data(as_text=True)) == ["QP
 check(sorted(titles(admin.get(f"/clients/{cid}?fa=itf").get_data(as_text=True))) == ["Annual return", "ITF12B working schedule"], "ITF view: the income tax return and the file marked ITF")
 check(sorted(titles(admin.get(f"/clients/{cid}?fa=other").get_data(as_text=True))) == ["TCC 2026", "WHT return"], "Other view: the rest")
 check(len(titles(admin.get(f"/clients/{cid}?fa=bogus").get_data(as_text=True))) == 7, "unknown view falls back to all")
+_pg_all = admin.get(f"/clients/{cid}").get_data(as_text=True)
+_pg_vat = admin.get(f"/clients/{cid}?fa=vat").get_data(as_text=True)
+check('<details class="fa-filter"' in _pg_all and 'fa-filter" style="margin:4px 0 6px;">' in _pg_all, "filter row is collapsed by default and shows the current choice")
+check('<details class="fa-filter" style="margin:4px 0 6px;" open>' in _pg_vat, "filter row stays open while a filter is applied")
 # deleting: staff without the permission can delete only their own filing
 st = login(sid); ot = login(oid)
 pg = st.get(f"/clients/{cid}").get_data(as_text=True)
