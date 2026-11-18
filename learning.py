@@ -250,7 +250,7 @@ def _call_extract(system, user_message):
     import zimra_ai
     try:
         response = zimra_ai._client().messages.create(
-            model=zimra_ai.DEFAULT_MODEL, max_tokens=1500, temperature=0.2, system=system, tools=[EXTRACT_TOOL],
+            model=zimra_ai.DEFAULT_MODEL, max_tokens=1500, system=system, tools=[EXTRACT_TOOL],
             tool_choice={"type": "tool", "name": EXTRACT_TOOL["name"]}, messages=[{"role": "user", "content": user_message}])
     except Exception as exc:
         return None, str(exc)[:500]

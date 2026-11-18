@@ -347,8 +347,8 @@ def _call_model(system, user_message, tool, max_tokens=6000):
     """Returns (tool_input_dict, None) or (None, error message). The only place that talks to the API (tests replace it)."""
     try:
         response = zimra_ai._client().messages.create(
-            model=DEFAULT_MODEL, max_tokens=max_tokens, temperature=0.2, system=system, tools=[tool],
-            tool_choice={"type": "tool", "name": tool["name"]}, messages=[{"role": "user", "content": user_message}], timeout=REQUEST_TIMEOUT)
+            model=DEFAULT_MODEL, max_tokens=max_tokens, system=system, tools=[tool],
+            tool_choice={"type": "tool", "name": tool["name"]}, messages=[{"role": "user", "content": user_message}])
     except Exception as exc:
         try:
             import legislation_search

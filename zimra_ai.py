@@ -122,7 +122,7 @@ def _call_model(system, user_message):
     """Returns (tool_input_dict, None) or (None, error message). The only place that talks to the API."""
     try:
         response = _client().messages.create(
-            model=DEFAULT_MODEL, max_tokens=4000, temperature=0.2, system=system, tools=[COMPOSE_TOOL],
+            model=DEFAULT_MODEL, max_tokens=4000, system=system, tools=[COMPOSE_TOOL],
             tool_choice={"type": "tool", "name": COMPOSE_TOOL["name"]},
             messages=[{"role": "user", "content": user_message}])
     except Exception as exc:  # network, quota, bad key ...
