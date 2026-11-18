@@ -65,8 +65,10 @@ check(sorted(titles(admin.get(f"/clients/{cid}?fa=other").get_data(as_text=True)
 check(len(titles(admin.get(f"/clients/{cid}?fa=bogus").get_data(as_text=True))) == 7, "unknown view falls back to all")
 _pg_all = admin.get(f"/clients/{cid}").get_data(as_text=True)
 _pg_vat = admin.get(f"/clients/{cid}?fa=vat").get_data(as_text=True)
-check('<details class="fa-filter"' in _pg_all and 'fa-filter" style="margin:4px 0 6px;">' in _pg_all, "filter row is collapsed by default and shows the current choice")
-check('<details class="fa-filter" style="margin:4px 0 6px;" open>' in _pg_vat, "filter row stays open while a filter is applied")
+check(_pg_all.count('<details class="fa-section"') == 3, "each of the three sections is collapsible")
+check(_pg_all.count('class="fa-section"') == 3 and ' open>' not in _pg_all.split('id="filing-archive"')[1].split("Relevant Legislative")[0].replace('<details class="fa-filter"', ''), "sections are collapsed by default")
+import re as _re
+check(len(_re.findall(r'<details class="fa-section"[^>]*\sopen>', _pg_vat)) == 3 and len(_re.findall(r'<details class="fa-section"[^>]*\sopen>', _pg_all)) == 0, "sections open while a filter is applied, closed otherwise")
 # deleting: staff without the permission can delete only their own filing
 st = login(sid); ot = login(oid)
 pg = st.get(f"/clients/{cid}").get_data(as_text=True)

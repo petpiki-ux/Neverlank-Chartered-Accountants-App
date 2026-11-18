@@ -302,20 +302,18 @@
     Returns, and Schedules.
   </p>
 
-  {% set fa_current = (filing_filter_choices|selectattr(0, 'equalto', filing_filter)|first) %}
-  <details class="fa-filter" style="margin:4px 0 6px;"{% if filing_filter != 'all' %} open{% endif %}>
-    <summary style="cursor:pointer;font-size:12px;"><span class="muted">Show only:</span> <strong>{{ fa_current[1] }} ({{ fa_current[2] }})</strong> <span class="muted">&middot; click to change</span></summary>
-    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:6px 0 0;">
-      {% for k, lab, n in filing_filter_choices %}
-      <a href="{{ url_for('clients.view_client', client_id=client.id, fa=(k if k != 'all' else None)) }}#filing-archive" class="btn small {{ 'gold' if filing_filter == k else 'secondary' }}">{{ lab }} ({{ n }})</a>
-      {% endfor %}
-    </div>
-  </details>
+  <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin:4px 0 6px;">
+    <span class="muted" style="font-size:12px;">Show only:</span>
+    {% for k, lab, n in filing_filter_choices %}
+    <a href="{{ url_for('clients.view_client', client_id=client.id, fa=(k if k != 'all' else None)) }}#filing-archive" class="btn small {{ 'gold' if filing_filter == k else 'secondary' }}">{{ lab }} ({{ n }})</a>
+    {% endfor %}
+  </div>
   {% if filing_filter != 'all' %}<p class="muted" style="font-size:12px;margin:0 0 4px;">Showing only the {{ (filing_filter_choices|selectattr(0, 'equalto', filing_filter)|first)[1] }} files in each section. <a href="{{ url_for('clients.view_client', client_id=client.id) }}#filing-archive">Show all</a></p>{% endif %}
 
   {% for section_key, section_label in filing_archive_sections %}
-  <h4 style="margin-bottom:4px;{% if not loop.first %}margin-top:20px;{% endif %}">{{ loop.index }}. {{ section_label }}</h4>
   {% set docs = filing_archive_by_section.get(section_key, []) %}
+  <details class="fa-section" data-fa-key="{{ section_key }}" style="{% if not loop.first %}margin-top:14px;{% endif %}border-top:1px solid var(--border, #e3e3e3);padding-top:8px;"{% if filing_filter != 'all' %} open{% endif %}>
+  <summary style="cursor:pointer;list-style:revert;"><h4 style="display:inline;margin:0;">{{ loop.index }}. {{ section_label }}</h4> <span class="muted" style="font-size:12px;">({{ docs|length }} file{{ '' if docs|length == 1 else 's' }}) &middot; click to {{ 'hide' if filing_filter != 'all' else 'show or hide' }}</span></summary>
   {% if docs %}
   <table>
     <thead><tr><th>File</th><th>Tax head</th><th>Period</th><th>Reference</th><th>Uploaded</th><th></th></tr></thead>
@@ -358,7 +356,19 @@
     <div><label for="fa_reference_{{ section_key }}">Reference</label><input type="text" id="fa_reference_{{ section_key }}" name="reference" placeholder="Certificate / ack. no."></div>
     <div><button type="submit" class="btn gold" style="margin-bottom:14px;">File it</button></div>
   </form>
+  </details>
   {% endfor %}
+  <script>
+  (function () {
+    var key = function (d) { return "fa_open_" + d.getAttribute("data-fa-key"); };
+    document.querySelectorAll("#filing-archive details.fa-section").forEach(function (d) {
+      try { if (localStorage.getItem(key(d)) === "1") d.open = true; } catch (e) {}
+      d.addEventListener("toggle", function () {
+        try { localStorage.setItem(key(d), d.open ? "1" : "0"); } catch (e) {}
+      });
+    });
+  })();
+  </script>
 </div>
 {% endif %}
 
