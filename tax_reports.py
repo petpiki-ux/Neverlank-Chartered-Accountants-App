@@ -39,13 +39,17 @@ from models import (Document, Engagement, IncomeTaxComputation, PenaltyInterestC
 taxreports_bp = Blueprint("taxreports", __name__, url_prefix="/tax-reports")
 
 DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
-LONG_TIMEOUT = 290            # seconds the AI may take over one report
+REPORT_MODEL = os.environ.get("TAX_REPORT_MODEL") or DEFAULT_MODEL     # set TAX_REPORT_MODEL on Render to use a stronger model for reports only
+LONG_TIMEOUT = 290            # seconds the AI may take over each of the two steps (analysis, then writing)
+THINKING_BUDGET = 8000        # tokens the AI may spend reasoning before the analysis (used only if this SDK/model supports it)
+ANALYSIS_TOKENS = 14000
+WRITE_TOKENS = 16000
 BACKGROUND = True             # draft in a background thread (tests switch this off to run inline)
-STALE_AFTER = 900             # seconds after which a draft still 'Writing' is treated as lost (the server restarted)
-MAX_PAIRS = 14
-MAX_DOC_CHARS = 9000          # per uploaded document
-MAX_DOCS_CHARS = 26000        # all uploaded documents together
-MAX_SECTIONS = 14
+STALE_AFTER = 1500            # seconds after which a draft still 'Writing' is treated as lost (the server restarted)
+MAX_PAIRS = 22
+MAX_DOC_CHARS = 16000         # per uploaded document
+MAX_DOCS_CHARS = 48000       # all uploaded documents together
+MAX_SECTIONS = 18
 
 # ------------------------------------------------------------------ the four kinds
 
@@ -314,30 +318,56 @@ REWRITE_TOOL = {
 }
 
 RULES = (
-    "You are drafting a written report for a Partner at Neverlank Chartered Accountants, a Zimbabwean firm of chartered accountants and tax "
-    "practitioners. A Partner will review, edit and sign it, so your job is a careful, accurate, well-argued first draft.\n\n"
-    "STRICT RULES\n"
+    "You are a senior tax partner at Neverlank Chartered Accountants, a Zimbabwean firm of chartered accountants and tax practitioners, "
+    "writing a report that a fellow Partner will review, edit and sign. Write the way an experienced, well-read practitioner would: "
+    "reason from the facts to a conclusion, weigh both sides, and say what you think and why. A thin, generic or list-like report is a failure; "
+    "a thorough, well-argued one is the aim.\n\n"
+    "RULES\n"
     "1. FACTS: use only the facts in ENGAGEMENT RECORD, UPLOADED DOCUMENTS, ZIMRA MATTER and PARTNER'S INSTRUCTIONS. Never invent or estimate an "
     "amount, date, reference, name, document or event. Where the report needs something you were not given, write [CONFIRM: what is needed] and "
     "list it under missing_information.\n"
-    "2. LAW: state law only from the LIBRARY EXCERPTS (the firm's own filed material). Name an Act, section, statutory instrument or case only "
-    "if it appears in an excerpt, and give a section number only if the excerpt shows it; otherwise write [CONFIRM: legal basis - what is "
-    "needed]. Acts, Notices and SIs are primary law; a Zimbabwean court case is binding authority, a foreign case persuasive only; a "
-    "Publication is commentary and a News Article an unconfirmed report - never present those two as law. Where excerpts disagree or carry a "
-    "'Check:' line (a later instrument, a date not reached), say which you relied on and why. Cite every legal statement inline as [#id] with the "
-    "excerpt's Update id, and list each excerpt relied on under citations. If no excerpts are supplied, state no law at all.\n"
-    "3. POSITION: if the PARTNER'S INSTRUCTIONS state the position to take, state it faithfully and no more strongly than instructed. If they do "
-    "not, do NOT choose one: put [CONFIRM: the position on ...] and set the realistic options out in reviewer_notes. Make no admission of "
-    "liability, no promise to pay and no commitment to a date unless the instructions or facts give it.\n"
+    "2. LAW: build the argument on the LIBRARY EXCERPTS (the firm's own filed material) and cite each legal statement inline as [#id] with the "
+    "excerpt's Update id; list each excerpt relied on under citations. You may also use your general knowledge of Zimbabwean tax law and of tax "
+    "principles to reason and to say where the law probably lies, but name an Act, section, statutory instrument or case that is NOT in an excerpt "
+    "only where it really matters, and mark it '(not in the Firm Library - to be verified)'; never give a section number you are not sure of - "
+    "write [CONFIRM: legal basis - what is needed] instead. Acts, Notices and SIs are primary law; a Zimbabwean court case is binding authority, "
+    "a foreign case persuasive only; a Publication is commentary and a News Article an unconfirmed report - never present those two as law. "
+    "Where excerpts disagree or carry a 'Check:' line (a later instrument, a date not reached), say which you relied on and why.\n"
+    "3. POSITION: if the PARTNER'S INSTRUCTIONS state the position to take, advance it faithfully and as persuasively as the law honestly allows, "
+    "and say plainly where it is weak. If they do not state one, reach your own reasoned recommendation and begin it with 'Recommended position "
+    "(for the Partner to confirm):', then set the realistic alternatives out in reviewer_notes. Make no admission of liability, no promise to pay "
+    "and no commitment to a date unless the instructions or facts give it.\n"
     "4. IDENTITY: the client's name, TIN and VAT number are replaced by the tokens {client_name}, {client_tin} and {client_vat}. Use those tokens "
     "(or 'the client'); never guess a name or number.\n"
     "5. FIGURES: use a figure only if it is in the material, exactly as given. Never calculate tax, penalties or interest yourself; quote the "
     "firm's penalty runs and the accounts' figures as they are.\n"
-    "6. STYLE: formal, plain English, concise, no repetition between sections, no markdown symbols (no #, *, or bullet characters; use plain "
-    "paragraphs or numbered points typed as '1.', '2.'). Follow the section plan, changing a heading only to make it more specific.\n"
-    "7. LENGTH: keep it tight. Each section at most about 250 words and the whole report under about 1,800 words; the risk table at most 10 rows. "
-    "Say less, but say it precisely; put detail in the sections that need it.\n"
-    "8. Return everything through the tool, with the report's sections in the 'sections' array."
+    "6. DEPTH: for every issue, state the rule, apply it to this client's actual facts, give the strongest counter-argument (and what ZIMRA would "
+    "say), and conclude. Use the PRIOR ANALYSIS you are given: carry its reasoning, its weighing of the arguments and its risks into the "
+    "wording; do not drop it for a shorter summary. Be specific to this client, never generic. Put the answer first, then the reasoning.\n"
+    "7. STYLE: formal, plain English, well organised, no padding and no repetition between sections. No markdown symbols (no #, *, or bullet "
+    "characters; use plain paragraphs or numbered points typed as '1.', '2.'). Follow the section plan, changing a heading only to make it more "
+    "specific, and add a section where the matter needs one.\n"
+    "8. LENGTH: as long as the matter needs and no longer: a substantial section is several paragraphs, not a few lines. An opinion or risk review "
+    "on a real matter is typically 2,500 to 5,000 words; a client letter-report 1,500 to 3,000. The risk table may have up to 20 rows.\n"
+    "9. Return everything through the tool, with the report's sections in the 'sections' array."
+)
+
+ANALYSIS_RULES = (
+    "You are a senior tax partner at Neverlank Chartered Accountants (Zimbabwe), working out your thinking BEFORE a report is written. "
+    "Do not write the report. Write your working analysis in plain text, as a thorough briefing to yourself, using only the facts in the "
+    "material supplied (never invent a fact, figure, date or name; list what is missing). Cover, in this order:\n"
+    "A. THE QUESTION: what exactly has to be decided or advised, and why it matters to this client.\n"
+    "B. THE FACTS: the facts that matter, the facts that are unclear or missing, and the assumptions you would have to make.\n"
+    "C. THE LAW: each rule that bears on it, with the Update id of the Firm Library excerpt where it appears; what each instrument is worth "
+    "(Act or SI, court case, commentary); conflicts or later changes the excerpts reveal. Add what you know of the law beyond the excerpts, "
+    "clearly marked as not in the Firm Library.\n"
+    "D. APPLICATION: take each issue in turn, apply the law to these facts, and reach a view. Test the opposite view as hard as you can.\n"
+    "E. ZIMRA'S LIKELY RESPONSE: what ZIMRA would argue, how strong that is, and how the client would answer.\n"
+    "F. CONCLUSION AND CONFIDENCE: your recommended position (or the options, if the instructions leave it open), how confident you are, "
+    "and what would change your mind.\n"
+    "G. RISKS AND ACTIONS: the exposure (only figures that are in the material), what the client should do, in priority order.\n"
+    "Be specific and rigorous. Use the Partner's instructions as the brief. Use the plain tokens {client_name}, {client_tin}, {client_vat} "
+    "where the material uses them. Aim for 1,500 to 3,000 words of dense reasoning."
 )
 
 
@@ -353,12 +383,66 @@ def _long_client():
     return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=LONG_TIMEOUT)
 
 
-def _call_model(system, user_message, tool, max_tokens=8000):
-    """Returns (tool_input_dict, None) or (None, error message). The only place that talks to the API (tests replace it)."""
+def _is_model_missing(exc):
+    t = str(exc).lower()
+    return "model" in t and ("not_found" in t or "not found" in t or "invalid" in t or "does not exist" in t)
+
+
+def _call_text(system, user_message, max_tokens=ANALYSIS_TOKENS):
+    """Step 1: the AI's reasoning as plain text (it may think first when the SDK/model allows). Returns (text, None) or (None, error). Tests replace it."""
+    def go(model, thinking):
+        kw = dict(model=model, max_tokens=max_tokens, system=system, messages=[{"role": "user", "content": user_message}])
+        if thinking:
+            kw["thinking"] = {"type": "enabled", "budget_tokens": THINKING_BUDGET}
+        return _long_client().messages.create(**kw)
+    response = None
+    last = None
+    for model in dict.fromkeys([REPORT_MODEL, DEFAULT_MODEL]):
+        for thinking in (True, False):
+            try:
+                response = go(model, thinking)
+                break
+            except TypeError as exc:                      # this SDK does not know 'thinking'
+                last = exc
+                continue
+            except Exception as exc:
+                last = exc
+                if thinking and not _is_model_missing(exc):
+                    continue                              # this model may not allow thinking: try again without it
+                break
+        if response is not None or not (last is not None and _is_model_missing(last)):
+            break
+    if response is None:
+        try:
+            import legislation_search
+            return None, legislation_search.friendly_error(last)
+        except Exception:
+            return None, str(last)[:400]
+    text = "".join(getattr(b, "text", "") or "" for b in response.content if getattr(b, "type", None) == "text").strip()
     try:
-        response = _long_client().messages.create(
-            model=DEFAULT_MODEL, max_tokens=max_tokens, system=system, tools=[tool],
-            tool_choice={"type": "tool", "name": tool["name"]}, messages=[{"role": "user", "content": user_message}])
+        current_app.logger.info("tax_reports: analysis stop_reason=%s chars=%s", getattr(response, "stop_reason", None), len(text))
+    except Exception:
+        pass
+    return (text, None) if text else (None, "The AI sent no analysis.")
+
+
+def _call_model(system, user_message, tool, max_tokens=WRITE_TOKENS):
+    """Step 2: returns (tool_input_dict, None) or (None, error message). The only place that writes the report (tests replace it)."""
+    response = None
+    last = None
+    try:
+        for model in dict.fromkeys([REPORT_MODEL, DEFAULT_MODEL]):
+            try:
+                response = _long_client().messages.create(
+                    model=model, max_tokens=max_tokens, system=system, tools=[tool],
+                    tool_choice={"type": "tool", "name": tool["name"]}, messages=[{"role": "user", "content": user_message}])
+                break
+            except Exception as exc:
+                last = exc
+                if not _is_model_missing(exc):
+                    raise
+        if response is None:
+            raise last
     except Exception as exc:
         try:
             import legislation_search
@@ -385,7 +469,7 @@ def _call_model(system, user_message, tool, max_tokens=8000):
     return None, "The AI did not return a structured draft - try again."
 
 
-def build_user_message(report, extra, pairs, docs, case_text):
+def build_user_message(report, extra, pairs, docs, case_text, analysis=""):
     client = report.engagement.client
     red = lambda t: zimra_ai.redact(t, client)
     parts = ["ENGAGEMENT RECORD\n" + red(engagement_facts(report.engagement))]
@@ -404,6 +488,8 @@ def build_user_message(report, extra, pairs, docs, case_text):
         parts.append("LIBRARY EXCERPTS (the firm's filed legislation and material - the only source of law you may use)\n\n" + excerpt_block(pairs))
     else:
         parts.append("LIBRARY EXCERPTS\n(No filed material matched this matter. State no law; use [CONFIRM: legal basis ...] where law is needed.)")
+    if analysis:
+        parts.append("PRIOR ANALYSIS (your own working analysis of this matter, written first; the report must carry its reasoning)\n" + analysis)
     parts.append(f"Today's date: {_d(date.today())}. Write the report now.")
     return "\n\n=====\n\n".join(parts)
 
@@ -539,7 +625,10 @@ def generate(report, extra=""):
         report.ai_used = False
         report.ai_note = "AI is not switched on (no ANTHROPIC_API_KEY on the server), so this is the structure with placeholders to fill in."
         return False, report.ai_note
-    data, err = _call_model(system_prompt(report.kind), build_user_message(report, extra, pairs, docs, case_text), COMPOSE_TOOL)
+    # step 1: think the matter through in plain text; step 2: write the report from that analysis. A failed step 1 is not fatal.
+    analysis, a_err = _call_text(ANALYSIS_RULES + f"\n\nTHE REPORT TO BE WRITTEN AFTERWARDS: {KINDS[report.kind]['label']}. {KINDS[report.kind]['guide']}",
+                                 build_user_message(report, extra, pairs, docs, case_text) .replace("Write the report now.", "Write your analysis now."))
+    data, err = _call_model(system_prompt(report.kind), build_user_message(report, extra, pairs, docs, case_text, analysis or ""), COMPOSE_TOOL)
     if err:
         if not old["sections"]:
             d = skeleton(report)
@@ -580,7 +669,10 @@ def generate(report, extra=""):
         flags.append("Legal references not found in the Firm Library (each marked in the text): " + ", ".join(dict.fromkeys(refs)))
     if dropped:
         flags.append(f"{len(dropped)} citation(s) pointed at material that was not supplied and were removed.")
-    d = {"sections": sections, "risk_rows": rows, "sources": sources, "considered": considered,
+    shown_analysis = zimra_ai.restore_tokens(analysis, client) if analysis else ""
+    if a_err and not analysis:
+        flags.append("The AI's reasoning step did not complete (" + str(a_err)[:160] + "), so this draft was written without it and may be less thorough. Try again.")
+    d = {"sections": sections, "risk_rows": rows, "sources": sources, "considered": considered, "analysis": shown_analysis,
          "missing": zimra_ai.clean_list(data.get("missing_information")), "notes": zimra_ai.clean_list(data.get("reviewer_notes")), "flags": flags}
     if report_prev:
         d["previous"] = report_prev

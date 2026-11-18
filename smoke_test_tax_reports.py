@@ -225,6 +225,29 @@ with app.app_context():
     admin.post(f"/tax-reports/{pid}/regenerate", data={})
     miss = TaxAdvisoryReport.query.get(pid).data["missing"]
     check(sum(1 for m in miss if m.startswith("The AI")) <= 2 and not any("took too long" in m for m in miss), "a stale 'AI could not be reached' line is replaced by the latest reason")
+    # two-step drafting: the analysis is written first and handed to the report writer
+    seen = {}
+    def fake_text(system, user_message, max_tokens=14000):
+        seen["analysis_system"] = system
+        return "A. THE QUESTION: whether the loss may be carried forward.\nF. CONCLUSION: yes, with caveats.", None
+    def fake_write(system, user_message, tool, max_tokens=16000):
+        seen["write_msg"] = user_message
+        seen["write_system"] = system
+        return ({"sections": [{"heading": "Issue", "text": "A long, reasoned issue."}, {"heading": "Analysis", "text": "Reasoned analysis."}],
+                 "citations": [], "missing_information": [], "reviewer_notes": []}, None)
+    TR._call_text, TR._call_model = fake_text, fake_write
+    TR.is_configured = lambda: True
+    admin.post(f"/tax-reports/{rid}/regenerate", data={})
+    rr = TaxAdvisoryReport.query.get(rid)
+    check("PRIOR ANALYSIS" in seen.get("write_msg", "") and "whether the loss may be carried forward" in seen["write_msg"], "the analysis is passed to the report writer")
+    check("whether the loss may be carried forward" in (rr.data.get("analysis") or ""), "the analysis is kept for the Partner to read")
+    check("250 words" not in seen["write_system"] and "2,500 to 5,000 words" in seen["write_system"], "the old short-length cap is gone")
+    check("How the AI reasoned" in admin.get(f"/tax-reports/{rid}").get_data(as_text=True), "the editor shows how the AI reasoned")
+    # a failed analysis step does not stop the report, but says so
+    TR._call_text = lambda *a, **k: (None, "The AI took too long to reply.")
+    admin.post(f"/tax-reports/{rid}/regenerate", data={})
+    rr = TaxAdvisoryReport.query.get(rid)
+    check(rr.ai_used and any("reasoning step did not complete" in f for f in rr.data["flags"]), "a failed analysis step still gives a draft and warns about it")
     # delete
     check(staff_c.post(f"/tax-reports/{rid}/delete").status_code == 403, "staff who did not create it cannot delete")
     admin.post(f"/tax-reports/{rid}/delete")

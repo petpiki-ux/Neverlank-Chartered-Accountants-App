@@ -53,6 +53,13 @@
 </div>
 {% endif %}
 
+{% if d.analysis %}
+<details class="card" style="margin-bottom:14px;">
+  <summary style="cursor:pointer;font-weight:600;">How the AI reasoned (its working analysis, for the Partner - not part of the report)</summary>
+  <div style="white-space:pre-wrap;font-size:13px;margin-top:10px;">{{ d.analysis }}</div>
+</details>
+{% endif %}
+
 <form method="post" action="{{ url_for('taxreports.save', report_id=report.id) }}" id="sections">
   <div class="card">
     <h3 class="mt-0">Report details</h3>
