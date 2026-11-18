@@ -206,6 +206,25 @@ with app.app_context():
     bg.updated_at = dtm.datetime.utcnow() - dtm.timedelta(hours=1); db.session.commit()
     check("draft was interrupted" in admin.get(f"/tax-reports/{bid}").get_data(as_text=True), "a draft stuck on Writing (server restarted) is shown as interrupted")
     TR.BACKGROUND = False
+    # odd replies from the AI: sections sent as a JSON string, then nothing usable
+    import json as _json
+    TR.BACKGROUND = False
+    secs = [{"heading": "Issue", "text": "A short issue."}, {"heading": "Conclusion", "text": "A short conclusion."}]
+    TR._call_model = lambda *a, **k: ({"sections": _json.dumps(secs), "citations": [], "missing_information": [], "reviewer_notes": []}, None)
+    admin.post(f"/tax-reports/{rid}/regenerate", data={})
+    check([s["heading"] for s in TaxAdvisoryReport.query.get(rid).data["sections"]] == ["Issue", "Conclusion"], "sections sent as a JSON string are still read")
+    placeholder = admin.post(f"/tax-reports/engagement/{eid}/new", data={"kind": "opinion"})
+    TR.is_configured = lambda: False
+    pid = TaxAdvisoryReport.query.order_by(TaxAdvisoryReport.id.desc()).first().id
+    TR.is_configured = lambda: True
+    TR._call_model = lambda *a, **k: ({"citations": []}, None)
+    admin.post(f"/tax-reports/{pid}/regenerate", data={})
+    pr = TaxAdvisoryReport.query.get(pid)
+    check("sent no report sections" in (pr.ai_note or "") and "it sent: citations" in pr.ai_note, "an empty reply says what the AI actually sent")
+    TR._call_model = lambda *a, **k: (None, "The report was longer than the AI could write in one go.")
+    admin.post(f"/tax-reports/{pid}/regenerate", data={})
+    miss = TaxAdvisoryReport.query.get(pid).data["missing"]
+    check(sum(1 for m in miss if m.startswith("The AI")) <= 2 and not any("took too long" in m for m in miss), "a stale 'AI could not be reached' line is replaced by the latest reason")
     # delete
     check(staff_c.post(f"/tax-reports/{rid}/delete").status_code == 403, "staff who did not create it cannot delete")
     admin.post(f"/tax-reports/{rid}/delete")

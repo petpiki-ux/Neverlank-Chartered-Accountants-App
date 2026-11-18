@@ -335,7 +335,9 @@ RULES = (
     "firm's penalty runs and the accounts' figures as they are.\n"
     "6. STYLE: formal, plain English, concise, no repetition between sections, no markdown symbols (no #, *, or bullet characters; use plain "
     "paragraphs or numbered points typed as '1.', '2.'). Follow the section plan, changing a heading only to make it more specific.\n"
-    "7. Return everything through the tool."
+    "7. LENGTH: keep it tight. Each section at most about 250 words and the whole report under about 1,800 words; the risk table at most 10 rows. "
+    "Say less, but say it precisely; put detail in the sections that need it.\n"
+    "8. Return everything through the tool, with the report's sections in the 'sections' array."
 )
 
 
@@ -351,7 +353,7 @@ def _long_client():
     return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=LONG_TIMEOUT)
 
 
-def _call_model(system, user_message, tool, max_tokens=6000):
+def _call_model(system, user_message, tool, max_tokens=8000):
     """Returns (tool_input_dict, None) or (None, error message). The only place that talks to the API (tests replace it)."""
     try:
         response = _long_client().messages.create(
@@ -363,9 +365,23 @@ def _call_model(system, user_message, tool, max_tokens=6000):
             return None, legislation_search.friendly_error(exc)
         except Exception:
             return None, str(exc)[:400]
+    stop = getattr(response, "stop_reason", None)
     for block in response.content:
         if getattr(block, "type", None) == "tool_use" and getattr(block, "name", None) == tool["name"]:
-            return (block.input or {}), None
+            data = block.input
+            if isinstance(data, str):
+                try:
+                    data = json.loads(data)
+                except ValueError:
+                    data = {}
+            data = data if isinstance(data, dict) else {}
+            try:
+                current_app.logger.info("tax_reports: AI replied stop_reason=%s keys=%s", stop, sorted(data.keys()))
+            except Exception:
+                pass
+            if stop == "max_tokens" and not (data.get("sections") or data.get("text")):
+                return None, "The report was longer than the AI could write in one go, so it was cut off. Shorten your instructions or tick fewer documents, then try again."
+            return data, None
     return None, "The AI did not return a structured draft - try again."
 
 
@@ -471,6 +487,35 @@ def skeleton(report):
             "notes": [], "flags": []}
 
 
+def _note_failure(report, text):
+    """Replace any earlier 'AI could not ...' line in a placeholder draft with the latest reason, so the page never shows a stale one."""
+    d = report.data
+    if report.ai_used or not d["sections"]:
+        return
+    d["missing"] = [m for m in d["missing"] if not m.startswith(("The AI could not", "The AI draft was not made", "The AI returned"))]
+    d["missing"].insert(0, text)
+    report.set_data(d)
+
+
+def _sections_from(data):
+    """The sections list from the model's reply, tolerating a JSON string or a dict keyed by heading."""
+    secs = data.get("sections")
+    if isinstance(secs, str):
+        try:
+            secs = json.loads(secs)
+        except ValueError:
+            secs = None
+    if isinstance(secs, dict):
+        secs = [{"heading": k, "text": v} for k, v in secs.items()]
+    out = []
+    for x in secs or []:
+        if isinstance(x, dict):
+            out.append(x)
+        elif isinstance(x, str) and x.strip():
+            out.append({"heading": "", "text": x})
+    return out
+
+
 def generate(report, extra=""):
     """(ok, message). Writes a fresh draft into `report` (keeping the previous wording so it can be restored)."""
     old = report.data
@@ -500,21 +545,24 @@ def generate(report, extra=""):
             d = skeleton(report)
             d["missing"].insert(0, "The AI could not be reached: " + err)
             report.set_data(d)
-        report.ai_used = False
+        else:
+            _note_failure(report, "The AI could not write the draft: " + err)
         report.ai_note = ("The AI draft failed: " + err)[:390]
         return False, report.ai_note
     corpus = source_corpus(report, extra, pairs, docs, case_text)
     shown = {u.id for u, _c in pairs}
     figs, refs = [], []
     sections = []
-    for s in (data.get("sections") or [])[:MAX_SECTIONS]:
+    for s in _sections_from(data)[:MAX_SECTIONS]:
         head = zimra_ai.restore_tokens(re.sub(r"\s+", " ", str(s.get("heading") or "")).strip()[:160], client)
         txt = guard_text(str(s.get("text") or ""), corpus, client, shown, figs, refs)
         txt = zimra_ai.strip_framing(txt)
         if head or txt:
             sections.append({"heading": head or "Section", "text": txt})
     if not sections:
-        report.ai_note = "The AI returned no wording - try again."
+        keys = ", ".join(sorted(map(str, data.keys()))) or "nothing"
+        report.ai_note = f"The AI replied but sent no report sections (it sent: {keys}). Try again; if it keeps happening, shorten your instructions."
+        _note_failure(report, "The AI returned no wording on the last try.")
         return False, report.ai_note
     rows = []
     if report.kind == "risk_review":
