@@ -74,6 +74,7 @@ def fake_model(system, message, tool, max_tokens=6000):
         "missing_information": ["Date the loan was drawn down"], "reviewer_notes": ["The lender is a related party."]}, None
 TR._call_model = fake_model
 TR.is_configured = lambda: True
+TR.BACKGROUND = False
 TR.library_pairs = lambda q, limit=14: [(LegislativeUpdate.query.get(uid_), None)] if q else []
 
 with app.app_context():
@@ -183,6 +184,28 @@ with app.app_context():
     admin.post(f"/tax-reports/{rid}/regenerate", data={})
     check(TaxAdvisoryReport.query.get(rid).data_json == before and "busy" in TaxAdvisoryReport.query.get(rid).ai_note, "an AI failure leaves the existing draft untouched")
 
+    # background drafting: returns at once, shows a waiting page, finishes by itself
+    import time
+    TR.BACKGROUND = True
+    TR._call_model = fake_model
+    r = admin.post(f"/tax-reports/engagement/{eid}/new", data={"kind": "opinion", "instructions": "background run"})
+    bid = int(r.headers["Location"].rstrip("/").split("/")[-1])
+    for _ in range(80):
+        db.session.expire_all()
+        if TaxAdvisoryReport.query.get(bid).status != "Writing": break
+        time.sleep(0.1)
+    db.session.expire_all()
+    bg = TaxAdvisoryReport.query.get(bid)
+    check(bg.status == "Draft" and bg.ai_used and len(bg.data["sections"]) == 3, "a background draft finishes by itself and lands as a Draft")
+    bg.status = "Writing"; bg.updated_at = dtm.datetime.utcnow(); db.session.commit()
+    pg = admin.get(f"/tax-reports/{bid}").get_data(as_text=True)
+    check("The AI is writing your" in pg and "location.reload" in pg, "while writing, the page shows a waiting message that refreshes itself")
+    check("AI writing..." in admin.get(f"/engagements/{eid}?tab=finalisation").get_data(as_text=True), "the Finalisation list shows the report as being written")
+    admin.post(f"/tax-reports/{bid}/save", data={"title": "x", "n_sections": "0"})
+    check(TaxAdvisoryReport.query.get(bid).title != "x", "cannot be edited while the AI is writing it")
+    bg.updated_at = dtm.datetime.utcnow() - dtm.timedelta(hours=1); db.session.commit()
+    check("draft was interrupted" in admin.get(f"/tax-reports/{bid}").get_data(as_text=True), "a draft stuck on Writing (server restarted) is shown as interrupted")
+    TR.BACKGROUND = False
     # delete
     check(staff_c.post(f"/tax-reports/{rid}/delete").status_code == 403, "staff who did not create it cannot delete")
     admin.post(f"/tax-reports/{rid}/delete")

@@ -7,6 +7,17 @@
   <p class="muted" style="margin:0;">{{ kind.label }} &middot; {{ engagement.client.name }} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}">back to the Finalisation tab</a></p>
 </div>
 
+{% if writing %}
+<div class="card" style="text-align:center;padding:26px;">
+  <h3 class="mt-0">The AI is writing your {{ kind.label|lower }}</h3>
+  <p class="muted" style="margin:0 0 6px;">It is reading the engagement record, your documents and the Firm Library. This usually takes one to three minutes. This page refreshes by itself; you can also leave and come back to the Finalisation tab.</p>
+  <p class="muted" style="font-size:12px;margin:0;">Started {{ (report.updated_at|cat).strftime('%H:%M:%S') if report.updated_at else '' }}</p>
+</div>
+<script>setTimeout(function () { location.reload(); }, 6000);</script>
+{% else %}
+{% if lost %}
+<div class="card" style="background:#fbf1ee;"><strong>This draft was interrupted</strong> (the server restarted while it was being written). Use "Write a new draft" below to start it again.</div>
+{% endif %}
 <div class="card" style="padding:10px 16px;">
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
     {% if signed %}<span class="badge status-Completed">Signed by the Managing Partner {{ (report.mp_signed_at|cat).strftime('%d %b %Y') }}</span>
@@ -158,6 +169,7 @@
   {% endif %}
 </div>
 
+{% endif %}
 <div class="card">
   <form method="post" action="{{ url_for('taxreports.delete', report_id=report.id) }}" class="inline" onsubmit="return confirm('Delete this report? This cannot be undone.');"><button type="submit" class="btn small danger">Delete this report</button></form>
 </div>

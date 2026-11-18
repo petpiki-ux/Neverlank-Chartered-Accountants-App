@@ -39,7 +39,9 @@ from models import (Document, Engagement, IncomeTaxComputation, PenaltyInterestC
 taxreports_bp = Blueprint("taxreports", __name__, url_prefix="/tax-reports")
 
 DEFAULT_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
-REQUEST_TIMEOUT = 150
+LONG_TIMEOUT = 290            # seconds the AI may take over one report
+BACKGROUND = True             # draft in a background thread (tests switch this off to run inline)
+STALE_AFTER = 900             # seconds after which a draft still 'Writing' is treated as lost (the server restarted)
 MAX_PAIRS = 14
 MAX_DOC_CHARS = 9000          # per uploaded document
 MAX_DOCS_CHARS = 26000        # all uploaded documents together
@@ -343,10 +345,16 @@ def system_prompt(kind):
     return f"{RULES}\n\nTHIS REPORT: {k['label']}.\n{k['guide']}\n\nSECTION PLAN\n{plan}"
 
 
+def _long_client():
+    """A whole report takes the AI longer than a letter body, so this client waits up to LONG_TIMEOUT seconds (the draft runs in the background)."""
+    import anthropic
+    return anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"], timeout=LONG_TIMEOUT)
+
+
 def _call_model(system, user_message, tool, max_tokens=6000):
     """Returns (tool_input_dict, None) or (None, error message). The only place that talks to the API (tests replace it)."""
     try:
-        response = zimra_ai._client().messages.create(
+        response = _long_client().messages.create(
             model=DEFAULT_MODEL, max_tokens=max_tokens, system=system, tools=[tool],
             tool_choice={"type": "tool", "name": tool["name"]}, messages=[{"role": "user", "content": user_message}])
     except Exception as exc:
@@ -674,6 +682,61 @@ def build_docx(report):
     return buf
 
 
+# ------------------------------------------------------------------ running a draft in the background
+
+def _finish(report, ok, msg):
+    report.status = "Draft"
+    report.updated_at = datetime.utcnow()
+    if not ok and not report.ai_note:
+        report.ai_note = msg
+
+
+def _run_job(app, report_id, extra):
+    with app.app_context():
+        try:
+            report = TaxAdvisoryReport.query.get(report_id)
+            if report is None:
+                return
+            ok, msg = generate(report, extra)
+            _finish(report, ok, msg)
+            db.session.commit()
+        except Exception as exc:                       # never leave a report stuck on 'Writing'
+            db.session.rollback()
+            report = TaxAdvisoryReport.query.get(report_id)
+            if report is not None:
+                report.status = "Draft"
+                report.ai_note = ("The AI draft failed: " + str(exc))[:390]
+                if not report.data["sections"]:
+                    report.set_data(skeleton(report))
+                db.session.commit()
+        finally:
+            db.session.remove()
+
+
+def start_draft(report, extra=""):
+    """Write the draft now (tests, or no AI switched on) or hand it to a background thread and return at once. Returns (done_now, message)."""
+    if not BACKGROUND or not is_configured():
+        ok, msg = generate(report, extra)
+        _finish(report, ok, msg)
+        db.session.commit()
+        return True, msg
+    import threading
+    report.status = "Writing"
+    report.updated_at = datetime.utcnow()
+    db.session.commit()
+    t = threading.Thread(target=_run_job, args=(current_app._get_current_object(), report.id, extra), daemon=True)
+    t.start()
+    return False, "The AI is writing the draft."
+
+
+def is_writing(report):
+    """True while a background draft is running; a draft left 'Writing' for too long (the server restarted) counts as lost."""
+    if report.status != "Writing":
+        return False
+    age = (datetime.utcnow() - (report.updated_at or datetime.utcnow())).total_seconds()
+    return age < STALE_AFTER
+
+
 # ------------------------------------------------------------------ the pages
 
 def _report_or_404(report_id):
@@ -717,11 +780,12 @@ def create(engagement_id):
                                instructions=(request.form.get("instructions") or "").strip() or None,
                                doc_ids_json=json.dumps(doc_ids), zimra_case_id=case_id if (case_id and kind == "zimra_submission") else None)
     db.session.add(report)
-    db.session.flush()
-    ok, msg = generate(report)
-    report.updated_at = datetime.utcnow()
     db.session.commit()
-    flash(("The first draft is ready to edit. " if ok else "") + msg + " Nothing is final until a Partner marks it reviewed.", "success" if ok else "warning")
+    done, msg = start_draft(report)
+    if done:
+        flash(msg + " Nothing is final until a Partner marks it reviewed.", "success" if report.ai_used else "warning")
+    else:
+        flash("The AI is writing the first draft. This page refreshes by itself when it is ready (usually one to three minutes).", "info")
     return redirect(url_for("taxreports.editor", report_id=report.id))
 
 
@@ -741,9 +805,17 @@ def editor(report_id):
         from models import LegislativeUpdate
         u = LegislativeUpdate.query.get(s["id"])
         weights[s["id"]] = legislation_understand.weight_label(u) if u is not None else ""
-    return render_template("taxreports/editor.html", report=report, d=report.data, kind=KINDS[report.kind], q=q, results=results,
+    return render_template("taxreports/editor.html", report=report, d=report.data, writing=is_writing(report), lost=(report.status == "Writing" and not is_writing(report)), kind=KINDS[report.kind], q=q, results=results,
                            weights=weights, configured=is_configured(), can_review=_can_review(current_user), engagement=report.engagement,
                            cited_order=_cites_order(report.data["sections"]))
+
+
+def _busy(report):
+    """True (after telling the person) while the AI is still writing this report, so nothing is edited under it."""
+    if is_writing(report):
+        flash("The AI is still writing this report. Wait for it to finish (this page refreshes by itself).", "info")
+        return True
+    return False
 
 
 def _touch(report):
@@ -757,6 +829,8 @@ def _touch(report):
 @login_required
 def save(report_id):
     report = _report_or_404(report_id)
+    if _busy(report):
+        return redirect(url_for("taxreports.editor", report_id=report.id))
     d = report.data
     report.title = (request.form.get("title") or "").strip()[:200] or report.title
     report.addressee = (request.form.get("addressee") or "").strip()[:300] or None
@@ -797,10 +871,16 @@ def save(report_id):
 @login_required
 def regenerate(report_id):
     report = _report_or_404(report_id)
-    ok, msg = generate(report, (request.form.get("extra") or "").strip())
+    if is_writing(report):
+        flash("The AI is already writing this report.", "info")
+        return redirect(url_for("taxreports.editor", report_id=report.id))
     _touch(report)
-    db.session.commit()
-    flash(msg + (" The earlier wording is kept: use 'Restore the previous draft' if you prefer it." if ok and report.data.get("previous") else ""), "success" if ok else "warning")
+    done, msg = start_draft(report, (request.form.get("extra") or "").strip())
+    if done:
+        flash(msg + (" The earlier wording is kept: use 'Restore the previous draft' if you prefer it." if report.ai_used and report.data.get("previous") else ""),
+              "success" if report.ai_used else "warning")
+    else:
+        flash("The AI is writing a new draft. Your current wording is kept and can be restored afterwards. This page refreshes when it is ready.", "info")
     return redirect(url_for("taxreports.editor", report_id=report.id))
 
 
@@ -808,6 +888,8 @@ def regenerate(report_id):
 @login_required
 def restore(report_id):
     report = _report_or_404(report_id)
+    if _busy(report):
+        return redirect(url_for("taxreports.editor", report_id=report.id))
     d = report.data
     prev = d.pop("previous", None)
     if prev:
@@ -823,6 +905,8 @@ def restore(report_id):
 @login_required
 def rewrite(report_id, idx):
     report = _report_or_404(report_id)
+    if _busy(report):
+        return redirect(url_for("taxreports.editor", report_id=report.id))
     ok, msg = rewrite_section(report, idx, (request.form.get("instruction") or "").strip())
     if ok:
         _touch(report)
@@ -835,6 +919,8 @@ def rewrite(report_id, idx):
 @login_required
 def review(report_id):
     report = _report_or_404(report_id)
+    if _busy(report):
+        return redirect(url_for("taxreports.editor", report_id=report.id))
     if not _can_review(current_user):
         abort(403)
     if request.form.get("undo"):

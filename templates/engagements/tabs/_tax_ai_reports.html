@@ -19,7 +19,7 @@
     <tr>
       <td><a href="{{ url_for('taxreports.editor', report_id=r.id) }}">{{ r.title or tax_report_kinds[r.kind].title }}</a></td>
       <td class="muted">{{ tax_report_kinds[r.kind].short }}</td>
-      <td>{% if mp_signed(r) %}<span class="badge status-Completed">Signed</span>{% elif r.status == 'Reviewed' %}<span class="badge status-Completed">Reviewed</span>{% else %}<span class="badge">Draft</span>{% endif %}{% if r.open_placeholders %} <span class="muted" style="font-size:11.5px;">{{ r.open_placeholders }} to confirm</span>{% endif %}</td>
+      <td>{% if r.status == 'Writing' %}<span class="badge">AI writing...</span>{% elif mp_signed(r) %}<span class="badge status-Completed">Signed</span>{% elif r.status == 'Reviewed' %}<span class="badge status-Completed">Reviewed</span>{% else %}<span class="badge">Draft</span>{% endif %}{% if r.open_placeholders %} <span class="muted" style="font-size:11.5px;">{{ r.open_placeholders }} to confirm</span>{% endif %}</td>
       <td class="muted">{{ (r.updated_at|cat).strftime('%d %b %Y %H:%M') if r.updated_at else '-' }}</td>
       <td class="text-right"><a href="{{ url_for('taxreports.editor', report_id=r.id) }}" class="btn small secondary">Open</a>
         <a href="{{ url_for('taxreports.download', report_id=r.id) }}" class="btn small secondary">Word</a></td>
