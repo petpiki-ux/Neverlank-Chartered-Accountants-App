@@ -11,7 +11,7 @@ from flask_login import current_user, login_required
 
 import brand_docs
 from extensions import db
-from models import AuditOpinion, CFValuationModel, ClientAdvance, CreditNote, Invoice, Quotation, Receipt, ValuationCertificate, WorkpaperNarrative, ZimraReply
+from models import AuditOpinion, CFValuationModel, ClientAdvance, CreditNote, Invoice, Quotation, Receipt, TaxAdvisoryReport, ValuationCertificate, WorkpaperNarrative, ZimraReply
 
 mpsign_bp = Blueprint("mpsign", __name__, url_prefix="/sign")
 
@@ -27,6 +27,8 @@ KINDS = {
     "valuation_model": (CFValuationModel, "valuation model report", lambda d: url_for("corpfin.vm_tab", vm_id=d.id, tab="report")),
     "audit_report": (AuditOpinion, "auditor's report",
                      lambda d: url_for("engagements.view_engagement", engagement_id=d.engagement_id, tab="finalisation")),
+    "tax_report": (TaxAdvisoryReport, "tax advisory report",
+                   lambda d: url_for("taxreports.editor", report_id=d.id)),
     "report_to_management": (WorkpaperNarrative, "Report to Management letter",
                              lambda d: url_for("engagements.view_engagement", engagement_id=d.engagement_id, tab="finalisation")),
 }
@@ -59,6 +61,13 @@ def can_sign(doc):
             return False, "The valuation model has no component with a value yet."
         if not res["complete"]:
             return False, "The valuation model is incomplete (a component has no value or no exchange rate). Fix it before signing."
+    if type(doc).__name__ == "TaxAdvisoryReport":
+        if not doc.data["sections"] or not any((x.get("text") or "").strip() for x in doc.data["sections"]):
+            return False, "The report has no wording yet."
+        if doc.open_placeholders:
+            return False, f"{doc.open_placeholders} [CONFIRM: ...] placeholder(s) are still in the report. Complete or remove them first."
+        if doc.status != "Reviewed":
+            return False, "Mark the report as reviewed before it is signed."
     if type(doc).__name__ == "WorkpaperNarrative" and doc.kind != "report_to_management":
         return False, "Only the Report to Management letter carries the signature."
     if type(doc).__name__ == "AuditOpinion":

@@ -1,0 +1,164 @@
+{% extends "base.html" %}
+{% block title %}{{ report.title or kind.title }} - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set signed = mp_signed(report) %}
+<div class="page-header">
+  <h1>{{ report.title or kind.title }}</h1>
+  <p class="muted" style="margin:0;">{{ kind.label }} &middot; {{ engagement.client.name }} &middot; <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='finalisation') }}">back to the Finalisation tab</a></p>
+</div>
+
+<div class="card" style="padding:10px 16px;">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+    {% if signed %}<span class="badge status-Completed">Signed by the Managing Partner {{ (report.mp_signed_at|cat).strftime('%d %b %Y') }}</span>
+    {% elif report.status == 'Reviewed' %}<span class="badge status-Completed">Reviewed</span>
+    {% else %}<span class="badge">Draft</span>{% endif %}
+    {% if report.ai_note %}<span class="muted" style="font-size:12.5px;">{{ report.ai_note }}</span>{% endif %}
+    <span style="flex:1"></span>
+    <a href="{{ url_for('taxreports.download', report_id=report.id) }}" class="btn small gold">Download Word</a>
+    {% if can_review %}
+      {% if report.status == 'Reviewed' %}
+      <form method="post" action="{{ url_for('taxreports.review', report_id=report.id) }}" class="inline"><input type="hidden" name="undo" value="1"><button type="submit" class="btn small secondary">Back to draft</button></form>
+      {% else %}
+      <form method="post" action="{{ url_for('taxreports.review', report_id=report.id) }}" class="inline" onsubmit="return confirm('Confirm you have checked the facts, figures and every source cited, and that the report is ready to sign.');"><button type="submit" class="btn small">Mark as reviewed</button></form>
+      {% endif %}
+    {% endif %}
+    {% if mp_is_signer(current_user) %}
+      {% if signed %}
+      <form method="post" action="{{ url_for('mpsign.unsign', kind='tax_report', doc_id=report.id) }}" class="inline" onsubmit="return confirm('Remove your signature from this report?');"><button type="submit" class="btn small secondary">Remove signature</button></form>
+      {% else %}
+      <form method="post" action="{{ url_for('mpsign.sign', kind='tax_report', doc_id=report.id) }}" class="inline"><button type="submit" class="btn small gold">Sign as Managing Partner</button></form>
+      {% endif %}
+    {% endif %}
+  </div>
+  {% if report.open_placeholders %}<p class="muted" style="font-size:12.5px;margin:8px 0 0;"><strong>{{ report.open_placeholders }}</strong> <code>[CONFIRM: ...]</code> placeholder(s) still to complete before the report can be reviewed and signed.</p>{% endif %}
+</div>
+
+{% if d.flags or d.missing or d.notes %}
+<div class="card" style="background:#fbf7ec;">
+  <h3 class="mt-0">Check before you rely on this draft</h3>
+  {% if d.flags %}<p style="font-size:13px;margin:0 0 6px;"><strong>Flagged by the app</strong></p><ul style="margin-top:0;">{% for f in d.flags %}<li style="font-size:13px;">{{ f }}</li>{% endfor %}</ul>{% endif %}
+  {% if d.missing %}<p style="font-size:13px;margin:0 0 6px;"><strong>Information still needed</strong></p><ul style="margin-top:0;">{% for f in d.missing %}<li style="font-size:13px;">{{ f }}</li>{% endfor %}</ul>{% endif %}
+  {% if d.notes %}<p style="font-size:13px;margin:0 0 6px;"><strong>For the reviewing Partner</strong></p><ul style="margin-top:0;">{% for f in d.notes %}<li style="font-size:13px;">{{ f }}</li>{% endfor %}</ul>{% endif %}
+</div>
+{% endif %}
+
+<form method="post" action="{{ url_for('taxreports.save', report_id=report.id) }}" id="sections">
+  <div class="card">
+    <h3 class="mt-0">Report details</h3>
+    <div class="form-row">
+      <div><label for="title">Title</label><input type="text" id="title" name="title" value="{{ report.title or '' }}"></div>
+      <div><label for="reference">Reference</label><input type="text" id="reference" name="reference" value="{{ report.reference or '' }}" placeholder="{{ 'ZIMRA reference' if report.kind == 'zimra_submission' else 'Optional' }}"></div>
+    </div>
+    {% if kind.letter %}
+    <label for="addressee">Addressee (name, then address lines)</label>
+    <textarea id="addressee" name="addressee" rows="3" placeholder="{{ 'The Commissioner General, Zimbabwe Revenue Authority, ...' if report.kind == 'zimra_submission' else 'The Directors, ...' }}">{{ report.addressee or '' }}</textarea>
+    {% else %}<input type="hidden" name="addressee" value="{{ report.addressee or '' }}">{% endif %}
+    <label for="instructions">Your instructions to the AI (the facts, the question, the position to take)</label>
+    <textarea id="instructions" name="instructions" rows="4">{{ report.instructions or '' }}</textarea>
+  </div>
+
+  <input type="hidden" name="n_sections" value="{{ d.sections|length }}">
+  {% for s in d.sections %}
+  <div class="card" id="sec{{ loop.index0 }}">
+    <div style="display:flex;gap:8px;align-items:center;">
+      <input type="text" name="heading_{{ loop.index0 }}" value="{{ s.heading }}" style="font-weight:600;margin-bottom:0;flex:1;">
+      <button type="submit" name="action" value="delete_{{ loop.index0 }}" class="btn small danger" onclick="return confirm('Delete this section?')">Delete</button>
+    </div>
+    <textarea name="text_{{ loop.index0 }}" rows="{{ [6, ((s.text|length) // 95) + 3]|max if s.text else 6 }}" style="margin-top:8px;width:100%;">{{ s.text }}</textarea>
+  </div>
+  {% endfor %}
+
+  {% if report.kind == 'risk_review' %}
+  <div class="card" id="risk">
+    <h3 class="mt-0">Risk register</h3>
+    <input type="hidden" name="n_rows" value="{{ d.risk_rows|length }}">
+    <table>
+      <thead><tr><th>Tax head</th><th>Issue</th><th>Exposure</th><th>Likelihood</th><th>Mitigation</th><th></th></tr></thead>
+      <tbody>
+      {% for r in d.risk_rows %}
+      <tr>
+        <td><input type="text" name="r{{ loop.index0 }}_tax_head" value="{{ r.tax_head }}" style="width:110px;"></td>
+        <td><textarea name="r{{ loop.index0 }}_issue" rows="3">{{ r.issue }}</textarea></td>
+        <td><input type="text" name="r{{ loop.index0 }}_exposure" value="{{ r.exposure }}" style="width:110px;"></td>
+        <td><select name="r{{ loop.index0 }}_likelihood">{% for l in ['Low','Medium','High'] %}<option{% if r.likelihood == l %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></td>
+        <td><textarea name="r{{ loop.index0 }}_mitigation" rows="3">{{ r.mitigation }}</textarea></td>
+        <td><button type="submit" name="action" value="delrow_{{ loop.index0 }}" class="btn small danger">x</button></td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <button type="submit" name="action" value="add_row" class="btn small secondary">Add a row</button>
+  </div>
+  {% endif %}
+
+  <div class="card" style="position:sticky;bottom:0;z-index:5;padding:10px 16px;">
+    <button type="submit" name="action" value="save" class="btn gold">Save changes</button>
+    <button type="submit" name="action" value="add_section" class="btn secondary">Add a section</button>
+    <span class="muted" style="font-size:12px;">Saving a changed report puts it back to Draft, and removes the signature until it is reviewed and signed again.</span>
+  </div>
+</form>
+
+<div class="card">
+  <h3 class="mt-0">Rewrite one section with AI</h3>
+  {% if not configured %}<p class="muted" style="font-size:13px;">The AI is not switched on on this server (no API key), so sections have to be written by hand.</p>{% else %}
+  <p class="muted" style="font-size:12.5px;margin-top:0;">Tell the AI what to change in a section (for example "make this firmer", "add the VAT angle", "shorter"). It uses the Firm Library for that section. Save your own edits first.</p>
+  {% for s in d.sections %}
+  <form method="post" action="{{ url_for('taxreports.rewrite', report_id=report.id, idx=loop.index0) }}" class="form-row" style="align-items:flex-end;">
+    <div style="flex:0 0 220px;"><strong style="font-size:13px;">{{ s.heading }}</strong></div>
+    <div style="flex:1;"><input type="text" name="instruction" placeholder="What should change?" style="margin-bottom:0;"></div>
+    <div><button type="submit" class="btn small secondary" style="margin-bottom:0;">Rewrite</button></div>
+  </form>
+  {% endfor %}
+  <hr>
+  <form method="post" action="{{ url_for('taxreports.regenerate', report_id=report.id) }}" onsubmit="return confirm('Write a completely new draft? Your current wording is kept, and you can restore it afterwards.');">
+    <label for="extra">Write the whole report again, with this further instruction (optional)</label>
+    <input type="text" id="extra" name="extra" placeholder="e.g. take the position that the supply is zero-rated">
+    <button type="submit" class="btn small secondary">Write a new draft</button>
+  </form>
+  {% if d.previous %}
+  <form method="post" action="{{ url_for('taxreports.restore', report_id=report.id) }}" class="inline" style="margin-top:6px;"><button type="submit" class="btn small secondary">Restore the previous draft</button></form>
+  {% endif %}
+  {% endif %}
+</div>
+
+<div class="card" id="library">
+  <h3 class="mt-0">Firm Library</h3>
+  {% if d.sources %}
+  <p style="font-size:13px;margin:0 0 6px;"><strong>Sources this report relies on</strong> (cited as [#id] in the wording; numbered [1], [2] ... in the Word file)</p>
+  <table>
+    <thead><tr><th>#id</th><th>Instrument</th><th>Type / weight</th><th>Used for</th><th></th></tr></thead>
+    <tbody>
+    {% for s in d.sources %}
+    <tr>
+      <td>{{ s.id }}</td>
+      <td>{{ s.title }}{% if s.ref %}<div class="muted" style="font-size:11.5px;">{{ s.ref }}</div>{% endif %}</td>
+      <td class="muted">{{ s.type }}{% if weights.get(s.id) %} &middot; {{ weights.get(s.id) }}{% endif %}</td>
+      <td style="font-size:12.5px;">{{ s.used_for }}</td>
+      <td><a href="{{ url_for('tax.read_legislative_update', update_id=s.id) }}" target="_blank" class="btn small secondary">Open</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="font-size:13px;">No Library source is cited yet. Search the Library below and cite what you rely on by typing its [#id] after the sentence.</p>{% endif %}
+  {% if d.considered %}<p class="muted" style="font-size:12px;">The AI was shown {{ d.considered|length }} Library item(s): {% for c in d.considered %}#{{ c.id }} {{ c.title|truncate(48) }}{% if not loop.last %}; {% endif %}{% endfor %}.</p>{% endif %}
+  <form method="get" action="{{ url_for('taxreports.editor', report_id=report.id) }}#library" class="form-row" style="align-items:flex-end;margin-top:10px;">
+    <div style="flex:1;"><label for="q">Search the Firm Library</label><input type="text" id="q" name="q" value="{{ q }}" placeholder="e.g. input tax on motor vehicles, section 15 deduction"></div>
+    <div><button type="submit" class="btn small secondary" style="margin-bottom:14px;">Search</button></div>
+  </form>
+  {% if q %}
+    {% if results %}
+    {% for r in results %}
+    <div style="border-top:1px solid #e6e6e6;padding:8px 0;">
+      <strong style="font-size:13px;">[#{{ r.id }}] {{ r.title }}</strong> <span class="muted" style="font-size:12px;">{{ r.type }}{% if r.ref %} &middot; {{ r.ref }}{% endif %}{% if r.heading %} &middot; {{ r.heading }}{% endif %}</span>
+      <div style="font-size:12.5px;margin-top:2px;">{{ r.text }}...</div>
+      <a href="{{ url_for('tax.read_legislative_update', update_id=r.id) }}" target="_blank" style="font-size:12px;">Open the full instrument</a>
+    </div>
+    {% endfor %}
+    {% else %}<p class="muted" style="font-size:13px;">Nothing in the Firm Library matches that.</p>{% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <form method="post" action="{{ url_for('taxreports.delete', report_id=report.id) }}" class="inline" onsubmit="return confirm('Delete this report? This cannot be undone.');"><button type="submit" class="btn small danger">Delete this report</button></form>
+</div>
+{% endblock %}

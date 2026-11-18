@@ -1039,3 +1039,73 @@ ZIMRA_DIRECTIONS = ["Incoming from ZIMRA", "Outgoing to ZIMRA", "Internal note"]
 ZIMRA_PLAN_STATUSES = ["Proposed", "Agreed", "In default", "Completed"]
 ZIMRA_TCC_STATUSES = ["Not applied", "Applied", "Issued", "Declined", "Expired"]
 ZIMRA_CURRENCIES = ["USD", "ZWG"]
+
+
+TAX_REPORT_STATUSES = ["Draft", "Reviewed"]
+
+
+class TaxAdvisoryReport(MPSignedMixin, db.Model):
+    """An AI-assisted written report on a Tax Advisory engagement's Finalisation tab (see tax_reports.py): a tax advisory opinion / memo,
+    an advisory report to the client, a tax position and risk review, or a submission to ZIMRA. The AI writes a first draft from the
+    engagement's own record and the Firm Library; a person edits it section by section, a Partner marks it reviewed, and the Managing
+    Partner can sign it. `data_json` holds the sections, the risk rows, the library sources used and the points the AI flagged."""
+    id = db.Column(db.Integer, primary_key=True)
+    engagement_id = db.Column(db.Integer, db.ForeignKey("engagement.id"), nullable=False)
+    kind = db.Column(db.String(30), nullable=False)
+    title = db.Column(db.String(200))
+    addressee = db.Column(db.String(300))
+    reference = db.Column(db.String(100))
+    instructions = db.Column(db.Text)            # the partner's own facts, question and the position to take
+    doc_ids_json = db.Column(db.Text)            # uploaded engagement documents the AI was asked to read
+    zimra_case_id = db.Column(db.Integer)        # optional ZIMRA matter the submission answers (no foreign key on purpose)
+    status = db.Column(db.String(20), default="Draft")
+    data_json = db.Column(db.Text)
+    ai_used = db.Column(db.Boolean, default=False)
+    ai_note = db.Column(db.String(400))
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    reviewed_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    reviewed_at = db.Column(db.DateTime)
+
+    engagement = db.relationship("Engagement", backref=db.backref("tax_advisory_reports", lazy=True, cascade="all, delete-orphan"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+    reviewed_by = db.relationship("User", foreign_keys=[reviewed_by_id])
+
+    @property
+    def data(self):
+        import json
+        try:
+            d = json.loads(self.data_json or "{}")
+        except ValueError:
+            d = {}
+        d.setdefault("sections", [])
+        d.setdefault("risk_rows", [])
+        d.setdefault("sources", [])
+        d.setdefault("missing", [])
+        d.setdefault("notes", [])
+        d.setdefault("flags", [])
+        return d
+
+    def set_data(self, d):
+        import json
+        self.data_json = json.dumps(d)
+
+    @property
+    def doc_ids(self):
+        import json
+        try:
+            return [int(x) for x in json.loads(self.doc_ids_json or "[]")]
+        except (ValueError, TypeError):
+            return []
+
+    @property
+    def open_placeholders(self):
+        """How many [CONFIRM: ...] placeholders are still in the wording."""
+        import re
+        d = self.data
+        text = " ".join(s.get("text", "") for s in d["sections"]) + " " + " ".join(" ".join(map(str, r.values())) for r in d["risk_rows"])
+        return len(re.findall(r"\[CONFIRM:", text))
+
+    def __repr__(self):
+        return f"<TaxAdvisoryReport {self.kind} engagement={self.engagement_id}>"

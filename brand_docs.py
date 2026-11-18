@@ -106,6 +106,11 @@ def content_key(doc):
         parts = [doc.subject, doc.body, doc.signatory, doc.addressee, doc.letter_date]
     elif cls == "WorkpaperNarrative":
         parts = [doc.kind, doc.body]
+    elif cls == "TaxAdvisoryReport":
+        import json
+        d = doc.data
+        parts = [doc.kind, doc.title, doc.addressee, doc.reference,
+                 json.dumps([(x.get("heading"), x.get("text")) for x in d["sections"]]), json.dumps(d["risk_rows"], sort_keys=True)]
     elif cls == "AuditOpinion":
         parts = [doc.report_basis, doc.modification, doc.basis_for_modification, doc.opinion_paragraph, doc.basis_paragraph,
                  doc.management_responsibility_paragraph, doc.auditor_responsibility_paragraph, doc.statutory_paragraph, doc.report_date,

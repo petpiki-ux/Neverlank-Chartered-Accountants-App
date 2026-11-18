@@ -2,6 +2,7 @@
 {% if not acceptance_cleared and current_user.role != 'admin' %}
   <div class="card"><div class="empty-state">&#128274; This engagement is pending <strong>Client Acceptance &amp; Continuance</strong> sign-off. <a href="{{ url_for('engagements.view_engagement', engagement_id=engagement.id, tab='acceptance') }}">Go to the Client Acceptance tab</a> and get Partner sign-off on an Accepted decision before working here.</div></div>
 {% else %}
+  {% if engagement.has_tax_advisory %}{% include "engagements/tabs/_tax_ai_reports.html" %}{% endif %}
   {% if statements %}
   <div class="card" style="padding:10px 16px;">
     <a href="#cf-statement"><strong>Prior-year cash flow (comparative)</strong></a>

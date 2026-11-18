@@ -948,6 +948,8 @@ def create_app():
     app.register_blueprint(rollfwd_bp)
     app.register_blueprint(cfprior_bp)
     app.register_blueprint(wpedit_bp)
+    from tax_reports import taxreports_bp
+    app.register_blueprint(taxreports_bp)
     app.register_blueprint(dtadj_bp)
     from cover_pages import covers_bp
     app.register_blueprint(covers_bp)
@@ -1095,6 +1097,11 @@ def create_app():
     app.jinja_env.globals["mp_can_sign"] = _mpsign.can_sign
     app.jinja_env.globals["mp_is_signer"] = _mpsign.is_signer
     app.jinja_env.globals["mp_full_name"] = _brand.mp_full_name
+    import tax_reports as _taxr
+    app.jinja_env.globals["tax_reports_for"] = _taxr.reports_for
+    app.jinja_env.globals["tax_report_kinds"] = _taxr.KINDS
+    app.jinja_env.globals["tax_report_options"] = _taxr.new_report_options
+    app.jinja_env.globals["tax_reports_configured"] = _taxr.is_configured
     app.jinja_env.globals["mp_title"] = _brand.MP_TITLE
 
     @app.context_processor

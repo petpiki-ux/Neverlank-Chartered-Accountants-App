@@ -1,0 +1,62 @@
+{# AI Report Writer card, Tax Advisory Finalisation tab. Included by finalisation.html when engagement.has_tax_advisory. #}
+{% set tar_list = tax_reports_for(engagement) %}
+{% set tar_opts = tax_report_options(engagement) %}
+<div class="card" id="ai-reports">
+  <h3 class="mt-0">AI Report Writer</h3>
+  <p class="muted" style="font-size:12.5px;">
+    The AI writes a first draft from this engagement's Research Log, positions, structuring options, disputes, returns, penalty runs, income tax
+    computation and accounts, the documents you tick, and the Firm Library (your filed Acts, SIs, cases and articles), citing the law it relies on. You edit it
+    section by section, a Partner marks it reviewed, and the Managing Partner can sign it. Anything the AI cannot support from that material is left as a
+    <code>[CONFIRM: ...]</code> for you.
+    {% if not tax_reports_configured() %}<strong>The AI is not switched on on this server, so a new report starts as a structure with placeholders.</strong>{% endif %}
+  </p>
+
+  {% if tar_list %}
+  <table>
+    <thead><tr><th>Report</th><th>Kind</th><th>Status</th><th>Updated</th><th></th></tr></thead>
+    <tbody>
+    {% for r in tar_list %}
+    <tr>
+      <td><a href="{{ url_for('taxreports.editor', report_id=r.id) }}">{{ r.title or tax_report_kinds[r.kind].title }}</a></td>
+      <td class="muted">{{ tax_report_kinds[r.kind].short }}</td>
+      <td>{% if mp_signed(r) %}<span class="badge status-Completed">Signed</span>{% elif r.status == 'Reviewed' %}<span class="badge status-Completed">Reviewed</span>{% else %}<span class="badge">Draft</span>{% endif %}{% if r.open_placeholders %} <span class="muted" style="font-size:11.5px;">{{ r.open_placeholders }} to confirm</span>{% endif %}</td>
+      <td class="muted">{{ (r.updated_at|cat).strftime('%d %b %Y %H:%M') if r.updated_at else '-' }}</td>
+      <td class="text-right"><a href="{{ url_for('taxreports.editor', report_id=r.id) }}" class="btn small secondary">Open</a>
+        <a href="{{ url_for('taxreports.download', report_id=r.id) }}" class="btn small secondary">Word</a></td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  <details style="margin-top:10px;"{% if not tar_list %} open{% endif %}>
+    <summary style="cursor:pointer;"><strong>Write a new report</strong></summary>
+    <form method="post" action="{{ url_for('taxreports.create', engagement_id=engagement.id) }}" style="margin-top:8px;" onsubmit="this.querySelector('button[type=submit]').disabled = true; this.querySelector('button[type=submit]').textContent = 'Writing - this takes up to a minute...';">
+      <div class="form-row">
+        <div>
+          <label for="tar_kind">What to write *</label>
+          <select id="tar_kind" name="kind" required>
+            {% for k, v in tax_report_kinds.items() %}<option value="{{ k }}">{{ v.label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><label for="tar_title">Title (optional)</label><input type="text" id="tar_title" name="title" placeholder="e.g. Opinion on the VAT treatment of the loan"></div>
+        <div><label for="tar_ref">Reference (optional)</label><input type="text" id="tar_ref" name="reference" placeholder="ZIMRA or file reference"></div>
+      </div>
+      <label for="tar_addr">Addressee (for a letter or ZIMRA submission: name, then address lines)</label>
+      <textarea id="tar_addr" name="addressee" rows="2" placeholder="The Directors, {{ engagement.client.name }}"></textarea>
+      <label for="tar_ins">Your instructions: the facts, the question, and the position to take</label>
+      <textarea id="tar_ins" name="instructions" rows="4" placeholder="e.g. The client lent USD 150,000 to its sister company in 2024 and ZIMRA has disallowed the interest. We want to argue it was incurred in the production of income. Take a firm but courteous line."></textarea>
+      {% if tar_opts.cases %}
+      <label for="tar_case">ZIMRA matter this answers (for a ZIMRA submission)</label>
+      <select id="tar_case" name="zimra_case_id"><option value="">None</option>{% for c in tar_opts.cases %}<option value="{{ c.id }}">{{ c.case_number }} - {{ c.title }}</option>{% endfor %}</select>
+      {% endif %}
+      {% if tar_opts.docs %}
+      <p style="margin:8px 0 2px;font-size:13px;"><strong>Documents for the AI to read</strong> <span class="muted">(PDF, Word, Excel, PowerPoint filed on this engagement)</span></p>
+      <div style="max-height:150px;overflow:auto;border:1px solid #e3e3e3;padding:6px 10px;">
+        {% for dd in tar_opts.docs %}<label style="display:block;font-weight:normal;font-size:12.5px;"><input type="checkbox" name="doc_ids" value="{{ dd.id }}" style="width:auto;"> {{ dd.original_filename }} <span class="muted">({{ dd.category }})</span></label>{% endfor %}
+      </div>
+      {% endif %}
+      <p style="margin-top:10px;"><button type="submit" class="btn gold">Write the first draft</button></p>
+    </form>
+  </details>
+</div>
