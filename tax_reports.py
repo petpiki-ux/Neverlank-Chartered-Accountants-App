@@ -603,8 +603,10 @@ def _sections_from(data):
 
 
 def generate(report, extra=""):
-    """(ok, message). Writes a fresh draft into `report` (keeping the previous wording so it can be restored)."""
+    """(ok, message). Writes a fresh draft into `report` (keeping the previous wording so it can be restored). A report imported from outside is reviewed instead."""
     old = report.data
+    if old.get("origin") == "imported":
+        return review_draft(report, extra)
     if old["sections"]:
         report_prev = {"sections": old["sections"], "risk_rows": old["risk_rows"]}
     else:
@@ -725,6 +727,325 @@ def rewrite_section(report, idx, instruction):
     report.set_data(d)
     report.status = "Draft"
     return True, f"Section '{sec['heading']}' rewritten."
+
+
+
+# ------------------------------------------------------------------ reviewing a draft written outside the app
+
+MAX_IMPORT_CHARS = 80000
+SEVERITIES = ("High", "Medium", "Low")
+COMMENT_TYPES = {"law": "Law", "fact": "Facts", "figure": "Figure", "reasoning": "Reasoning", "missing": "Missing", "style": "Style"}
+
+REVIEW_TOOL = {
+    "name": "review_outside_draft",
+    "description": "Return the review of the outside draft: a verdict, section-by-section comments, and the points a Partner must decide.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["Ready with minor edits", "Needs substantial work", "Not safe to rely on as it stands"]},
+            "summary": {"type": "string", "description": "Three to six sentences: is the conclusion right, how well is it supported, and what matters most to fix."},
+            "strengths": {"type": "array", "items": {"type": "string"}, "description": "What is sound and should be kept."},
+            "weaknesses": {"type": "array", "items": {"type": "string"}, "description": "The main weaknesses, most serious first."},
+            "missing_issues": {"type": "array", "items": {"type": "string"}, "description": "Issues the draft should deal with and does not."},
+            "counter_arguments": {"type": "array", "items": {"type": "string"}, "description": "ZIMRA's (or the other side's) strongest points that the draft does not answer."},
+            "sections": {
+                "type": "array", "description": "One entry per section of the draft that has anything to say about it; `index` is the section's number as given (starting at 0).",
+                "items": {"type": "object", "properties": {
+                    "index": {"type": "integer"},
+                    "verdict": {"type": "string", "enum": ["Sound", "Needs attention", "Unsupported"]},
+                    "comments": {"type": "array", "items": {"type": "object", "properties": {
+                        "type": {"type": "string", "enum": list(COMMENT_TYPES)},
+                        "severity": {"type": "string", "enum": list(SEVERITIES)},
+                        "quote": {"type": "string", "description": "The few words of the draft this comment is about (at most 15 words, copied exactly), or empty."},
+                        "text": {"type": "string", "description": "What is wrong or missing, and why."},
+                        "suggested_fix": {"type": "string", "description": "How to put it right, in a sentence or two. Empty if none."},
+                        "library_id": {"type": "integer", "description": "Update id of the Firm Library excerpt that supports or contradicts this point, if any."},
+                    }, "required": ["type", "severity", "text"]}},
+                }, "required": ["index", "verdict", "comments"]},
+            },
+            "citations": {"type": "array", "items": {"type": "object", "properties": {"update_id": {"type": "integer"}, "used_for": {"type": "string"}}, "required": ["update_id", "used_for"]}},
+            "missing_information": {"type": "array", "items": {"type": "string"}, "description": "Facts or documents needed to settle the open points."},
+            "reviewer_notes": {"type": "array", "items": {"type": "string"}, "description": "Decisions the Partner has to take."},
+        },
+        "required": ["verdict", "summary", "sections", "citations", "missing_information", "reviewer_notes"],
+    },
+}
+
+REVIEW_RULES = (
+    "You are a senior tax partner at Neverlank Chartered Accountants (Zimbabwe) reviewing a draft report that was written OUTSIDE this app "
+    "(for example researched with an AI assistant). The Partner will decide what goes to the client or to ZIMRA, so your job is a rigorous, fair, "
+    "specific review: say what is sound, and find what is wrong, unsupported, missing or risky. Do not rewrite the draft.\n\n"
+    "HOW TO REVIEW\n"
+    "1. LAW: take each statement of law in turn and test it against the LIBRARY EXCERPTS. Say whether it is supported by an excerpt (give its Update "
+    "id), unsupported by anything supplied, contradicted by an excerpt, or overtaken by a later instrument (look at each excerpt's 'Check:' line). "
+    "A section number, SI or case in the draft that no excerpt contains is NOT confirmed: say so. You may use your own knowledge of Zimbabwean tax law "
+    "to say where the law probably lies, but mark it 'not in the Firm Library - verify' and never present it as confirmed. Outside AI assistants often "
+    "invent or misnumber sections and cite repealed or foreign law: look for that.\n"
+    "2. FACTS AND FIGURES: test every fact, date and amount against ENGAGEMENT RECORD, UPLOADED DOCUMENTS, ZIMRA MATTER and PARTNER'S INSTRUCTIONS. "
+    "Flag anything that is not there, that differs, or that has been assumed. Do not accept a figure just because it is stated confidently.\n"
+    "3. REASONING: check the logic from facts to conclusion. Look for leaps, circular reasoning, one-sided argument, an authority stretched beyond what "
+    "it says, missing counter-arguments (what ZIMRA would say), missing issues (other tax heads, time limits, penalties, procedure), and a conclusion "
+    "stronger than the analysis supports. If the PARTNER'S INSTRUCTIONS state a position, check the draft takes it and say whether it is sustainable.\n"
+    "4. CALIBRATE: High = would mislead the client or ZIMRA, rests on wrong or unconfirmed law or a wrong fact, or reverses the answer. Medium = a gap "
+    "or weakness that should be fixed before signing. Low = polish. Do not pad: a few precise comments beat many vague ones, but do not miss a High. "
+    "Praise what is genuinely sound (strengths) so it is kept.\n"
+    "5. Every comment names the exact words it concerns in `quote` (copied exactly, at most 15 words) and says what to do in `suggested_fix`.\n"
+    "6. IDENTITY: the client's name, TIN and VAT number appear as tokens {client_name}, {client_tin}, {client_vat}; use the tokens or 'the client'.\n"
+    "7. Return everything through the tool. Sections are numbered from 0 as in the draft."
+)
+
+REVIEW_ANALYSIS_RULES = (
+    "You are a senior tax partner at Neverlank Chartered Accountants (Zimbabwe) preparing to review a draft written outside the app. "
+    "Do not write the review yet. Write your working analysis in plain text, using only the facts in the material supplied (never invent a fact, "
+    "figure, date or name; list what is missing). First reach your OWN view of the matter from the facts and the Library excerpts, without deferring "
+    "to the draft: the question, the facts, the law (with the Update id of each excerpt), the application, ZIMRA's likely response, your conclusion and "
+    "confidence. Then test the draft against it, section by section: where its law is unsupported, contradicted or outdated; where its facts or figures "
+    "are not in the record; where its reasoning leaps or ignores the counter-argument; what it leaves out; and where it is right. "
+    "Aim for 1,500 to 3,000 words of dense, specific reasoning."
+)
+
+_HEAD_NUM = re.compile(r"^(?:\d{1,2}(?:\.\d{1,2}){0,3}[.)]?|[A-Z][.)]|[IVX]{1,5}[.)]|(?:part|section|annexure|appendix)\s+[A-Z0-9]+[.:]?)\s+\S", re.I)
+
+
+def _clean_import(text):
+    text = (text or "").replace("\r\n", "\n").replace("\r", "\n").replace(" ", " ")
+    text = re.sub(r"[ \t]*\*\*|__|^#{1,6}\s*", "", text, flags=re.M)
+    text = re.sub(r"^[ \t]*[•●▪‣]\s*", "- ", text, flags=re.M)
+    text = re.sub(r"[ \t]+\n", "\n", text)
+    return re.sub(r"\n{3,}", "\n\n", text).strip()
+
+
+def _reflow(text):
+    """Join hard-wrapped lines of a PDF extract, then make every remaining line its own paragraph."""
+    out = []
+    for line in [l.strip() for l in text.split("\n") if l.strip()]:
+        if out and len(out[-1]) >= 60 and not out[-1].endswith((".", ":", ";", "?", "!")) and line[:1].islower():
+            out[-1] += " " + line
+        else:
+            out.append(line)
+    return "\n\n".join(out)
+
+
+def _sentence_pieces(para, size=3000):
+    """A very long paragraph cut at sentence ends into pieces of about `size` characters."""
+    if len(para) <= size * 1.3:
+        return [para]
+    pieces, cur = [], ""
+    for sent in re.split(r"(?<=[.!?])\s+", para):
+        if cur and len(cur) + len(sent) > size:
+            pieces.append(cur.strip())
+            cur = ""
+        cur += sent + " "
+    if cur.strip():
+        pieces.append(cur.strip())
+    return pieces
+
+
+def split_draft(text):
+    """[{heading, text}] from an outside draft. A short line standing alone (numbered, ALL CAPS or Title-like, no full stop) starts a section;
+    with no headings the text is cut into parts at paragraph breaks. The wording itself is never changed."""
+    text = _clean_import(text)
+    if not text:
+        return []
+    if text.count("\n\n") < max(2, text.count("\n") // 6):      # a Word or PDF extract (or a paste) with one line per paragraph or hard-wrapped lines
+        text = _reflow(text)
+    paras = [p.strip() for p in re.split(r"\n\s*\n", text) if p.strip()]
+
+    def heading_of(block):
+        lines = block.split("\n")
+        first = lines[0].strip()
+        if len(lines) > 1 and not (len(first) <= 90 and not first.endswith((".", ",", ";", ":"))):
+            return None, block
+        if len(first) > 100 or len(first.split()) > 14 or first.endswith((".", ",", ";", "?")):
+            return None, block
+        letters = [c for c in first if c.isalpha()]
+        is_caps = len(letters) >= 4 and first.upper() == first
+        numbered = bool(_HEAD_NUM.match(first))
+        titleish = len(first.split()) <= 9 and first[:1].isupper() and sum(w[:1].isupper() for w in first.split() if len(w) > 3) >= max(1, len([w for w in first.split() if len(w) > 3]) // 2)
+        if len(lines) == 1:
+            if is_caps or numbered or (titleish and len(first.split()) <= 8):
+                return first.rstrip(":").strip(), ""
+            return None, block
+        if is_caps or numbered or first.endswith(":") is False and titleish and len(first.split()) <= 8:
+            return first.rstrip(":").strip(), "\n".join(lines[1:]).strip()
+        return None, block
+
+    sections, cur = [], None
+    for para in paras:
+        head, rest = heading_of(para)
+        if head is not None:
+            cur = {"heading": re.sub(r"^\d{1,2}(?:\.\d{1,2}){0,3}[.)]?\s+", "", head)[:160] or head[:160], "text": rest}
+            sections.append(cur)
+        elif cur is None:
+            cur = {"heading": "Opening", "text": para}
+            sections.append(cur)
+        else:
+            cur["text"] = (cur["text"] + "\n\n" + para).strip()
+    sections = [x for x in sections if x["heading"] or x["text"]]
+    if len(sections) > 2 and not sections[0]["text"]:     # a bare title line at the top is not a section
+        sections = sections[1:]
+    # a lone title line followed by nothing but a heading-looking one is not worth a section of its own
+    if len(sections) == 1 or sum(1 for x in sections if x["text"]) < 2:
+        sections, chunk, size = [], [], 0
+        for para in [x for p0 in paras for x in _sentence_pieces(p0)]:
+            chunk.append(para)
+            size += len(para)
+            if size >= 3000:
+                sections.append({"heading": f"Part {len(sections) + 1}", "text": "\n\n".join(chunk)})
+                chunk, size = [], 0
+        if chunk:
+            sections.append({"heading": f"Part {len(sections) + 1}" if sections else "Imported draft", "text": "\n\n".join(chunk)})
+    return sections[:MAX_SECTIONS]
+
+
+def _empty_comment(kind, severity, text, fix="", quote="", library_id=None, source="app"):
+    return {"type": kind if kind in COMMENT_TYPES else "reasoning", "severity": severity if severity in SEVERITIES else "Medium", "quote": quote[:200],
+            "text": text[:900], "fix": fix[:600], "library_id": library_id, "source": source, "resolved": False}
+
+
+def auto_checks(sections, corpus):
+    """{section index: [comments]} from the app's own checks, no AI: figures and legal references the file and Library never mention."""
+    out = {}
+    for i, sec in enumerate(sections):
+        text = _unprotect(_protect(sec.get("text") or ""))
+        _t, figs = zimra_ai.flag_figures(text, corpus)
+        _t, refs = zimra_ai.flag_legal_refs(text, corpus)
+        found = []
+        if figs:
+            found.append(_empty_comment("figure", "Medium", "Figure(s) not found in the engagement file, the documents you ticked or your instructions: " +
+                                        ", ".join(dict.fromkeys(figs)) + ". Confirm where each comes from.", "Trace each figure to the accounts, a document or the client; remove it if it cannot be sourced."))
+        if refs:
+            found.append(_empty_comment("law", "High", "Legal reference(s) not found in the Firm Library or the file: " + ", ".join(dict.fromkeys(refs)) +
+                                        ". Outside drafts often misnumber or invent provisions, so this is unconfirmed.",
+                                        "Check each against the instrument itself (file it in the Firm Library if it is genuine) or remove it."))
+        if found:
+            out[i] = found
+    return out
+
+
+def _numbered_draft(sections, client):
+    return "\n\n".join(f"### SECTION {i}: {zimra_ai.redact(s['heading'], client)}\n{zimra_ai.redact(s['text'], client)}" for i, s in enumerate(sections))
+
+
+def _draft_pairs(report, extra, sections):
+    """Firm Library passages for the whole matter plus the best few for each section of the draft, without repeats."""
+    pairs = list(library_pairs(library_query(report, extra + " " + " ".join(s["heading"] for s in sections))))
+    seen = {(u.id, getattr(c, "id", None)) for u, c in pairs}
+    for sec in sections[:MAX_SECTIONS]:
+        for u, c in library_pairs((sec["heading"] + " " + sec["text"])[:900], limit=4):
+            key = (u.id, getattr(c, "id", None))
+            if key not in seen and len(pairs) < 34:
+                seen.add(key)
+                pairs.append((u, c))
+    return pairs
+
+
+def open_high_comments(report):
+    """Unresolved High-severity review comments still on the report."""
+    d = report.data
+    return sum(1 for lst in (d.get("comments") or {}).values() for c in lst if c.get("severity") == "High" and not c.get("resolved"))
+
+
+def review_draft(report, extra=""):
+    """(ok, message): check an outside draft against the Firm Library and the engagement record and attach comments to its sections.
+    The partner's wording is never changed."""
+    d = report.data
+    sections = d["sections"]
+    if not d.get("original"):
+        d["original"] = [dict(x) for x in sections]
+    client = report.engagement.client
+    pairs = _draft_pairs(report, extra, sections)
+    docs = document_texts(report)
+    case_text = zimra_matter_facts(report)
+    corpus = source_corpus(report, extra, pairs, docs, case_text)
+    comments = {str(i): v for i, v in auto_checks(sections, corpus).items()}
+    d["considered"] = [{"id": u.id, "title": u.title, "type": u.type_label} for u in {u.id: u for u, _c in pairs}.values()]
+
+    def save_checks_only(note):
+        d["comments"] = comments
+        d.pop("overall", None)
+        report.set_data(d)
+        report.ai_used = False
+        report.ai_note = note
+        report.status = "Draft"
+        return False, note
+
+    if not is_configured():
+        return save_checks_only("AI is not switched on (no ANTHROPIC_API_KEY), so only the automatic checks ran: figures and legal references the file and Library never mention.")
+    base = ["ENGAGEMENT RECORD\n" + zimra_ai.redact(engagement_facts(report.engagement), client)]
+    if docs:
+        base.append("UPLOADED DOCUMENTS\n" + "\n\n".join(zimra_ai.redact(f"--- {n} ---\n{t}", client) for n, t in docs))
+    if case_text:
+        base.append("ZIMRA MATTER\n" + zimra_ai.redact(case_text, client))
+    ins = ((report.instructions or "") + (("\n\nFURTHER INSTRUCTION FOR THIS REVIEW: " + extra) if extra else "")).strip()
+    base.append("PARTNER'S INSTRUCTIONS (the facts, the question and the position wanted)\n" + (zimra_ai.redact(ins, client) if ins else "(none given)"))
+    base.append(("LIBRARY EXCERPTS (the firm's filed legislation and material - the only law you can confirm)\n\n" + excerpt_block(pairs)) if pairs
+                else "LIBRARY EXCERPTS\n(No filed material matched. No legal statement in the draft can be confirmed from the Library.)")
+    base.append(f"THE OUTSIDE DRAFT TO REVIEW ({KINDS[report.kind]['label']}), sections numbered from 0\n\n" + _numbered_draft(sections, client))
+    material = "\n\n=====\n\n".join(base)
+    analysis, a_err = _call_text(REVIEW_ANALYSIS_RULES, material + f"\n\n=====\n\nToday's date: {_d(date.today())}. Write your analysis now.")
+    msg = material + (("\n\n=====\n\nYOUR PRIOR ANALYSIS (carry its findings into the review)\n" + analysis) if analysis else "") + \
+        f"\n\n=====\n\nToday's date: {_d(date.today())}. Review the draft now."
+    data, err = _call_model(REVIEW_RULES, msg, REVIEW_TOOL)
+    if err:
+        return save_checks_only("The AI review failed (" + err[:200] + "), so only the automatic checks ran. Try again.")
+    shown = {u.id for u, _c in pairs}
+    cited_extra = []
+    dropped = 0
+    for entry in data.get("sections") or []:
+        if not isinstance(entry, dict):
+            continue
+        try:
+            idx = int(entry.get("index"))
+        except (TypeError, ValueError):
+            continue
+        if not (0 <= idx < len(sections)):
+            continue
+        bucket = comments.setdefault(str(idx), [])
+        for c in (entry.get("comments") or [])[:8]:
+            if not isinstance(c, dict) or not str(c.get("text") or "").strip():
+                continue
+            lid = c.get("library_id")
+            try:
+                lid = int(lid) if lid not in (None, "", 0) else None
+            except (TypeError, ValueError):
+                lid = None
+            if lid is not None and lid not in shown:
+                lid, dropped = None, dropped + 1
+            if lid is not None:
+                cited_extra.append({"update_id": lid, "used_for": "Checked against this passage in the review"})
+            bucket.append(_empty_comment(
+                str(c.get("type") or "reasoning"), str(c.get("severity") or "Medium"),
+                zimra_ai.restore_tokens(str(c.get("text")).strip(), client), zimra_ai.restore_tokens(str(c.get("suggested_fix") or "").strip(), client),
+                str(c.get("quote") or "").strip(), lid, "AI"))
+        verdicts = d.setdefault("verdicts", {})
+        verdicts[str(idx)] = entry.get("verdict") if entry.get("verdict") in ("Sound", "Needs attention", "Unsupported") else "Needs attention"
+    for k in list(comments):
+        if not comments[k]:
+            comments.pop(k)
+    d["comments"] = comments
+    rest = lambda key, n=12: [zimra_ai.restore_tokens(x, client) for x in zimra_ai.clean_list(data.get(key), limit=n, width=600)]
+    d["overall"] = {"verdict": data.get("verdict") if data.get("verdict") in ("Ready with minor edits", "Needs substantial work", "Not safe to rely on as it stands") else "Needs substantial work",
+                    "summary": zimra_ai.restore_tokens(str(data.get("summary") or "").strip()[:1500], client),
+                    "strengths": rest("strengths"), "weaknesses": rest("weaknesses"), "missing_issues": rest("missing_issues"), "counter_arguments": rest("counter_arguments")}
+    sources, _considered, dropped_cites = zimra_ai.build_sources(list(data.get("citations") or []) + cited_extra, pairs)
+    d["sources"] = sources
+    d["missing"] = zimra_ai.clean_list(data.get("missing_information"))
+    d["notes"] = zimra_ai.clean_list(data.get("reviewer_notes"))
+    d["analysis"] = zimra_ai.restore_tokens(analysis, client) if analysis else ""
+    flags = []
+    if a_err and not analysis:
+        flags.append("The AI's reasoning step did not complete (" + str(a_err)[:160] + "), so this review may be less thorough. Check it again.")
+    if dropped or dropped_cites:
+        flags.append(f"{dropped + len(dropped_cites)} pointer(s) to Library material that was not supplied were removed.")
+    d["flags"] = flags
+    report.set_data(d)
+    total = sum(len(v) for v in comments.values())
+    high = sum(1 for v in comments.values() for c in v if c["severity"] == "High")
+    report.ai_used = True
+    report.ai_note = f"Draft reviewed against the engagement record and {len(pairs)} Firm Library passage(s): {total} comment(s), {high} high-priority."
+    report.status = "Draft"
+    return True, report.ai_note
 
 
 # ------------------------------------------------------------------ the Word document
@@ -929,6 +1250,135 @@ def create(engagement_id):
     return redirect(url_for("taxreports.editor", report_id=report.id))
 
 
+@taxreports_bp.route("/engagement/<int:engagement_id>/import", methods=["POST"])
+@login_required
+def import_draft(engagement_id):
+    engagement = Engagement.query.get_or_404(engagement_id)
+    import engagements as eng
+    eng._ensure_engagement_access(engagement)
+    back = redirect(url_for("engagements.view_engagement", engagement_id=engagement_id, tab="finalisation"))
+    kind = request.form.get("kind", "")
+    if kind not in KINDS:
+        flash("Choose the kind of report this draft is.", "danger")
+        return back
+    text = (request.form.get("draft_text") or "").strip()
+    upload = request.files.get("draft_file")
+    if not text and upload is not None and upload.filename:
+        ext = upload.filename.rsplit(".", 1)[-1].lower() if "." in upload.filename else ""
+        if ext in ("txt", "md"):
+            text = upload.read().decode("utf-8", errors="ignore")
+        elif ext in ("docx", "pdf"):
+            import tempfile
+            import file_text_extraction
+            with tempfile.NamedTemporaryFile(suffix="." + ext, delete=False) as tmp:
+                upload.save(tmp.name)
+            try:
+                text, status, _pages = file_text_extraction.extract_text_for_file(tmp.name, ext)
+            finally:
+                try:
+                    os.unlink(tmp.name)
+                except OSError:
+                    pass
+            if not (text or "").strip():
+                flash("No text could be read from that file (a scanned PDF has none). Paste the text instead.", "danger")
+                return back
+        else:
+            flash("Upload a Word (.docx), PDF or text file, or paste the draft in the box.", "danger")
+            return back
+    text = _clean_import(text)
+    if len(text) < 200:
+        flash("Paste or upload the draft report to review (it looks empty or too short).", "danger")
+        return back
+    cut = len(text) > MAX_IMPORT_CHARS
+    sections = split_draft(text[:MAX_IMPORT_CHARS])
+    doc_ids = [int(x) for x in request.form.getlist("doc_ids") if x.isdigit()]
+    case_id = request.form.get("zimra_case_id", type=int)
+    report = TaxAdvisoryReport(engagement_id=engagement_id, kind=kind, created_by_id=current_user.id,
+                               title=(request.form.get("title") or "").strip()[:200] or KINDS[kind]["title"],
+                               addressee=(request.form.get("addressee") or "").strip()[:300] or None,
+                               reference=(request.form.get("reference") or "").strip()[:100] or None,
+                               instructions=(request.form.get("instructions") or "").strip() or None,
+                               doc_ids_json=json.dumps(doc_ids), zimra_case_id=case_id if (case_id and kind == "zimra_submission") else None)
+    report.set_data({"origin": "imported", "sections": sections, "original": [dict(x) for x in sections], "risk_rows": [], "sources": [], "missing": [], "notes": [], "flags":
+                     (["The draft was longer than " + f"{MAX_IMPORT_CHARS:,}" + " characters, so the end was left out of the review."] if cut else [])})
+    db.session.add(report)
+    db.session.commit()
+    done, msg = start_draft(report)
+    if done:
+        flash(msg, "success" if report.ai_used else "warning")
+    else:
+        flash("The AI is reviewing the draft against the Firm Library and the engagement record. This page refreshes by itself (usually two to five minutes).", "info")
+    return redirect(url_for("taxreports.editor", report_id=report.id))
+
+
+@taxreports_bp.route("/<int:report_id>/apply/<int:idx>", methods=["POST"])
+@login_required
+def apply_comments(report_id, idx):
+    report = _report_or_404(report_id)
+    if _busy(report):
+        return redirect(url_for("taxreports.editor", report_id=report.id))
+    d = report.data
+    open_c = [c for c in (d.get("comments") or {}).get(str(idx), []) if not c.get("resolved")]
+    if not open_c:
+        flash("There are no open comments on that section.", "info")
+        return redirect(url_for("taxreports.editor", report_id=report.id) + f"#sec{idx}")
+    instruction = ("Revise this section so that it deals with each of these review comments, keeping everything that is sound and the author's own wording where it is "
+                   "right:\n" + "\n".join(f"- ({COMMENT_TYPES.get(c['type'], c['type'])}, {c['severity']}) {c['text']}" + (f" Fix: {c['fix']}" if c.get("fix") else "") for c in open_c))
+    ok, msg = rewrite_section(report, idx, instruction)
+    if ok:
+        d = report.data
+        for c in d.get("comments", {}).get(str(idx), []):
+            if not c.get("resolved"):
+                c["resolved"] = True
+                c["note"] = "Applied by AI rewrite"
+        if str(idx) in d.get("verdicts", {}):
+            d["verdicts"][str(idx)] = "Needs attention" if d["verdicts"][str(idx)] == "Unsupported" else d["verdicts"][str(idx)]
+        report.set_data(d)
+        _touch(report)
+        db.session.commit()
+        flash(msg + " Read it: the comments on this section are marked dealt with.", "success")
+    else:
+        flash(msg, "warning")
+    return redirect(url_for("taxreports.editor", report_id=report.id) + f"#sec{idx}")
+
+
+@taxreports_bp.route("/<int:report_id>/restore-original", methods=["POST"])
+@login_required
+def restore_original(report_id):
+    report = _report_or_404(report_id)
+    if _busy(report):
+        return redirect(url_for("taxreports.editor", report_id=report.id))
+    d = report.data
+    if not d.get("original"):
+        abort(404)
+    d["sections"] = [dict(x) for x in d["original"]]
+    d["comments"], d["verdicts"] = {}, {}
+    d["flags"] = ["The draft was put back as it was brought in; run 'Check it again' to get fresh comments."]
+    report.set_data(d)
+    _touch(report)
+    db.session.commit()
+    flash("The draft is back exactly as you brought it in. Use 'Check it again' for fresh comments.", "success")
+    return redirect(url_for("taxreports.editor", report_id=report.id))
+
+
+@taxreports_bp.route("/<int:report_id>/comment/<int:idx>/<int:cidx>", methods=["POST"])
+@login_required
+def comment_toggle(report_id, idx, cidx):
+    report = _report_or_404(report_id)
+    if _busy(report):
+        return redirect(url_for("taxreports.editor", report_id=report.id))
+    d = report.data
+    try:
+        c = d["comments"][str(idx)][cidx]
+    except (KeyError, IndexError, TypeError):
+        abort(404)
+    c["resolved"] = not c.get("resolved")
+    c["note"] = ("Dealt with by " + (current_user.name or "a user")) if c["resolved"] else ""
+    report.set_data(d)
+    db.session.commit()
+    return redirect(url_for("taxreports.editor", report_id=report.id) + f"#sec{idx}")
+
+
 @taxreports_bp.route("/<int:report_id>")
 @login_required
 def editor(report_id):
@@ -976,7 +1426,7 @@ def save(report_id):
     report.addressee = (request.form.get("addressee") or "").strip()[:300] or None
     report.reference = (request.form.get("reference") or "").strip()[:100] or None
     report.instructions = (request.form.get("instructions") or "").strip() or None
-    secs = []
+    secs, keep_map = [], {}
     n = request.form.get("n_sections", type=int) or len(d["sections"])
     delete = request.form.get("action", "")
     for i in range(n):
@@ -986,6 +1436,10 @@ def save(report_id):
         text = (request.form.get(f"text_{i}") or "").replace("\r\n", "\n").strip()
         if heading or text:
             secs.append({"heading": heading, "text": text})
+            keep_map[i] = len(secs) - 1
+    if d.get("comments") or d.get("verdicts"):
+        d["comments"] = {str(keep_map[int(k)]): v for k, v in (d.get("comments") or {}).items() if k.isdigit() and int(k) in keep_map}
+        d["verdicts"] = {str(keep_map[int(k)]): v for k, v in (d.get("verdicts") or {}).items() if k.isdigit() and int(k) in keep_map}
     if delete == "add_section":
         secs.append({"heading": "New section", "text": ""})
     d["sections"] = secs
@@ -1069,6 +1523,9 @@ def review(report_id):
     else:
         if report.open_placeholders:
             flash(f"{report.open_placeholders} [CONFIRM: ...] placeholder(s) are still in the report. Complete or remove them before marking it reviewed.", "danger")
+            return redirect(url_for("taxreports.editor", report_id=report.id))
+        if open_high_comments(report):
+            flash(f"{open_high_comments(report)} high-priority review comment(s) are still open. Deal with each (apply it, fix the wording, or mark it dealt with) before marking the report reviewed.", "danger")
             return redirect(url_for("taxreports.editor", report_id=report.id))
         report.status, report.reviewed_by_id, report.reviewed_at = "Reviewed", current_user.id, datetime.utcnow()
         flash("Marked as reviewed. The Managing Partner can now sign it.", "success")

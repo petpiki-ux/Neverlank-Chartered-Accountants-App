@@ -9,14 +9,14 @@
 
 {% if writing %}
 <div class="card" style="text-align:center;padding:26px;">
-  <h3 class="mt-0">The AI is writing your {{ kind.label|lower }}</h3>
-  <p class="muted" style="margin:0 0 6px;">It is reading the engagement record, your documents and the Firm Library. This usually takes one to three minutes. This page refreshes by itself; you can also leave and come back to the Finalisation tab.</p>
+  <h3 class="mt-0">{% if d.origin == 'imported' %}The AI is reviewing your draft{% else %}The AI is writing your {{ kind.label|lower }}{% endif %}</h3>
+  <p class="muted" style="margin:0 0 6px;">{% if d.origin == 'imported' %}It is checking each statement of law against the Firm Library, and each fact and figure against the engagement record, then challenging the reasoning. This usually takes two to five minutes.{% else %}It is reading the engagement record, your documents and the Firm Library. This usually takes two to five minutes.{% endif %} This page refreshes by itself; you can also leave and come back to the Finalisation tab.</p>
   <p class="muted" style="font-size:12px;margin:0;">Started {{ (report.updated_at|cat).strftime('%H:%M:%S') if report.updated_at else '' }}</p>
 </div>
 <script>setTimeout(function () { location.reload(); }, 6000);</script>
 {% else %}
 {% if lost %}
-<div class="card" style="background:#fbf1ee;"><strong>This draft was interrupted</strong> (the server restarted while it was being written). Use "Write a new draft" below to start it again.</div>
+<div class="card" style="background:#fbf1ee;"><strong>This draft was interrupted</strong> (the server restarted while it was being written). Use the button near the bottom of the page to start it again.</div>
 {% endif %}
 <div class="card" style="padding:10px 16px;">
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
@@ -44,6 +44,29 @@
   {% if report.open_placeholders %}<p class="muted" style="font-size:12.5px;margin:8px 0 0;"><strong>{{ report.open_placeholders }}</strong> <code>[CONFIRM: ...]</code> placeholder(s) still to complete before the report can be reviewed and signed.</p>{% endif %}
 </div>
 
+{% if d.origin == 'imported' %}
+{% set ov = d.overall %}
+{% set n_open = namespace(high=0, all=0) %}
+{% for k, lst in (d.comments or {}).items() %}{% for c in lst %}{% if not c.resolved %}{% set n_open.all = n_open.all + 1 %}{% if c.severity == 'High' %}{% set n_open.high = n_open.high + 1 %}{% endif %}{% endif %}{% endfor %}{% endfor %}
+<div class="card" id="review-summary" style="border-left:4px solid {% if ov and ov.verdict == 'Ready with minor edits' %}#2e7d32{% elif ov and ov.verdict == 'Not safe to rely on as it stands' %}#b3261e{% else %}#c9a227{% endif %};">
+  <h3 class="mt-0">Review of the outside draft{% if ov %}: {{ ov.verdict }}{% endif %}</h3>
+  <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Your wording below is exactly as you brought it in. The comments are the app's and the AI's challenge to it; nothing has been changed.
+    <strong>{{ n_open.all }}</strong> open comment(s), <strong>{{ n_open.high }}</strong> high-priority (those must be dealt with before the report can be marked reviewed).</p>
+  {% if ov %}
+  {% if ov.summary %}<p style="font-size:13.5px;">{{ ov.summary }}</p>{% endif %}
+  <div class="form-row" style="align-items:flex-start;">
+    {% if ov.strengths %}<div><p style="font-size:13px;margin:0 0 4px;"><strong>Sound - keep</strong></p><ul style="margin-top:0;">{% for x in ov.strengths %}<li style="font-size:12.5px;">{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+    {% if ov.weaknesses %}<div><p style="font-size:13px;margin:0 0 4px;"><strong>Main weaknesses</strong></p><ul style="margin-top:0;">{% for x in ov.weaknesses %}<li style="font-size:12.5px;">{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+  </div>
+  <div class="form-row" style="align-items:flex-start;">
+    {% if ov.missing_issues %}<div><p style="font-size:13px;margin:0 0 4px;"><strong>Not dealt with in the draft</strong></p><ul style="margin-top:0;">{% for x in ov.missing_issues %}<li style="font-size:12.5px;">{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+    {% if ov.counter_arguments %}<div><p style="font-size:13px;margin:0 0 4px;"><strong>What ZIMRA could say that the draft does not answer</strong></p><ul style="margin-top:0;">{% for x in ov.counter_arguments %}<li style="font-size:12.5px;">{{ x }}</li>{% endfor %}</ul></div>{% endif %}
+  </div>
+  {% else %}<p style="font-size:13px;">Only the app's automatic checks ran (figures and legal references the file and Library never mention).</p>{% endif %}
+  {% if d.original %}<form method="post" action="{{ url_for('taxreports.restore_original', report_id=report.id) }}" class="inline" onsubmit="return confirm('Put the draft back exactly as it was brought in? Your edits to the wording will be lost.');"><button type="submit" class="btn small secondary">Restore the draft as I brought it in</button></form>{% endif %}
+</div>
+{% endif %}
+
 {% if d.flags or d.missing or d.notes %}
 <div class="card" style="background:#fbf7ec;">
   <h3 class="mt-0">Check before you rely on this draft</h3>
@@ -55,7 +78,7 @@
 
 {% if d.analysis %}
 <details class="card" style="margin-bottom:14px;">
-  <summary style="cursor:pointer;font-weight:600;">How the AI reasoned (its working analysis, for the Partner - not part of the report)</summary>
+  <summary style="cursor:pointer;font-weight:600;">How the AI reasoned (its working analysis for the Partner, not part of the report)</summary>
   <div style="white-space:pre-wrap;font-size:13px;margin-top:10px;">{{ d.analysis }}</div>
 </details>
 {% endif %}
@@ -83,6 +106,29 @@
       <button type="submit" name="action" value="delete_{{ loop.index0 }}" class="btn small danger" onclick="return confirm('Delete this section?')">Delete</button>
     </div>
     <textarea name="text_{{ loop.index0 }}" rows="{{ [6, ((s.text|length) // 95) + 3]|max if s.text else 6 }}" style="margin-top:8px;width:100%;">{{ s.text }}</textarea>
+    {% set si = loop.index0 %}
+    {% set cl = (d.comments or {}).get(si|string, []) %}
+    {% if d.origin == 'imported' and (cl or (d.verdicts or {}).get(si|string)) %}
+    <div style="margin-top:8px;border-top:1px dashed #d9d9d9;padding-top:8px;">
+      {% set v = (d.verdicts or {}).get(si|string) %}
+      <p style="margin:0 0 6px;font-size:13px;"><strong>Review of this section</strong>
+        {% if v %}<span class="badge" style="{% if v == 'Sound' %}background:#e3f1e4;color:#1b5e20;{% elif v == 'Unsupported' %}background:#fbe3e0;color:#8c1d18;{% else %}background:#fdf1d3;color:#7a5b00;{% endif %}">{{ v }}</span>{% endif %}</p>
+      {% for c in cl %}
+      <div style="margin:0 0 8px;padding:8px 10px;border-radius:4px;background:{% if c.resolved %}#f3f3f3{% elif c.severity == 'High' %}#fbeeec{% elif c.severity == 'Medium' %}#fdf6e3{% else %}#f4f7fa{% endif %};{% if c.resolved %}opacity:.7;{% endif %}">
+        <div style="font-size:12px;"><strong>{{ c.severity }}</strong> &middot; {{ {'law':'Law','fact':'Facts','figure':'Figure','reasoning':'Reasoning','missing':'Missing','style':'Style'}.get(c.type, c.type) }}{% if c.source == 'app' %} &middot; automatic check{% endif %}{% if c.resolved %} &middot; <em>dealt with{% if c.note %} ({{ c.note }}){% endif %}</em>{% endif %}</div>
+        {% if c.quote %}<div style="font-size:12.5px;font-style:italic;margin-top:2px;">"{{ c.quote }}"</div>{% endif %}
+        <div style="font-size:13px;margin-top:2px;">{{ c.text }}</div>
+        {% if c.fix %}<div style="font-size:12.5px;margin-top:2px;"><strong>Suggested fix:</strong> {{ c.fix }}</div>{% endif %}
+        {% if c.library_id %}<div style="font-size:12px;margin-top:2px;"><a href="{{ url_for('tax.read_legislative_update', update_id=c.library_id) }}" target="_blank">Firm Library #{{ c.library_id }}</a></div>{% endif %}
+        <div style="margin-top:4px;"><button type="submit" form="cm_{{ si }}_{{ loop.index0 }}" class="btn small secondary">{% if c.resolved %}Re-open{% else %}Mark as dealt with{% endif %}</button></div>
+      </div>
+      {% endfor %}
+      {% if cl|selectattr('resolved', 'equalto', false)|list %}
+      <button type="submit" form="ap_{{ si }}" class="btn small secondary" {% if not configured %}disabled{% endif %}>Apply the open comments with AI</button>
+      <span class="muted" style="font-size:12px;">Save your own edits to this section first; the AI rewrites it from the comments and the Firm Library.</span>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
   {% endfor %}
 
@@ -128,16 +174,23 @@
   </form>
   {% endfor %}
   <hr>
-  <form method="post" action="{{ url_for('taxreports.regenerate', report_id=report.id) }}" onsubmit="return confirm('Write a completely new draft? Your current wording is kept, and you can restore it afterwards.');">
-    <label for="extra">Write the whole report again, with this further instruction (optional)</label>
+  <form method="post" action="{{ url_for('taxreports.regenerate', report_id=report.id) }}" onsubmit="return confirm('{% if d.origin == 'imported' %}Run the review again? Your wording is not changed, but the earlier comments are replaced.{% else %}Write a completely new draft? Your current wording is kept, and you can restore it afterwards.{% endif %}');">
+    <label for="extra">{% if d.origin == 'imported' %}Check the draft again against the Library, with this further instruction (optional){% else %}Write the whole report again, with this further instruction (optional){% endif %}</label>
     <input type="text" id="extra" name="extra" placeholder="e.g. take the position that the supply is zero-rated">
-    <button type="submit" class="btn small secondary">Write a new draft</button>
+    <button type="submit" class="btn small secondary">{% if d.origin == 'imported' %}Check it again{% else %}Write a new draft{% endif %}</button>
   </form>
   {% if d.previous %}
   <form method="post" action="{{ url_for('taxreports.restore', report_id=report.id) }}" class="inline" style="margin-top:6px;"><button type="submit" class="btn small secondary">Restore the previous draft</button></form>
   {% endif %}
   {% endif %}
 </div>
+
+{% if d.origin == 'imported' %}
+{% for k, lst in (d.comments or {}).items() %}
+<form id="ap_{{ k }}" method="post" action="{{ url_for('taxreports.apply_comments', report_id=report.id, idx=k|int) }}" onsubmit="return confirm('Rewrite this section to deal with its open comments? Your current wording for this section will be replaced.');"></form>
+{% for c in lst %}<form id="cm_{{ k }}_{{ loop.index0 }}" method="post" action="{{ url_for('taxreports.comment_toggle', report_id=report.id, idx=k|int, cidx=loop.index0) }}"></form>{% endfor %}
+{% endfor %}
+{% endif %}
 
 <div class="card" id="library">
   <h3 class="mt-0">Firm Library</h3>

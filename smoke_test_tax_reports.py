@@ -200,7 +200,7 @@ with app.app_context():
     bg.status = "Writing"; bg.updated_at = dtm.datetime.utcnow(); db.session.commit()
     pg = admin.get(f"/tax-reports/{bid}").get_data(as_text=True)
     check("The AI is writing your" in pg and "location.reload" in pg, "while writing, the page shows a waiting message that refreshes itself")
-    check("AI writing..." in admin.get(f"/engagements/{eid}?tab=finalisation").get_data(as_text=True), "the Finalisation list shows the report as being written")
+    check("AI working..." in admin.get(f"/engagements/{eid}?tab=finalisation").get_data(as_text=True), "the Finalisation list shows the report as being written")
     admin.post(f"/tax-reports/{bid}/save", data={"title": "x", "n_sections": "0"})
     check(TaxAdvisoryReport.query.get(bid).title != "x", "cannot be edited while the AI is writing it")
     bg.updated_at = dtm.datetime.utcnow() - dtm.timedelta(hours=1); db.session.commit()

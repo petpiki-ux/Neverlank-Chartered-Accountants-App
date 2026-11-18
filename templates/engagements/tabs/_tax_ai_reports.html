@@ -18,8 +18,8 @@
     {% for r in tar_list %}
     <tr>
       <td><a href="{{ url_for('taxreports.editor', report_id=r.id) }}">{{ r.title or tax_report_kinds[r.kind].title }}</a></td>
-      <td class="muted">{{ tax_report_kinds[r.kind].short }}</td>
-      <td>{% if r.status == 'Writing' %}<span class="badge">AI writing...</span>{% elif mp_signed(r) %}<span class="badge status-Completed">Signed</span>{% elif r.status == 'Reviewed' %}<span class="badge status-Completed">Reviewed</span>{% else %}<span class="badge">Draft</span>{% endif %}{% if r.open_placeholders %} <span class="muted" style="font-size:11.5px;">{{ r.open_placeholders }} to confirm</span>{% endif %}</td>
+      <td class="muted">{{ tax_report_kinds[r.kind].short }}{% if r.data.get('origin') == 'imported' %} <span class="badge">Outside draft reviewed</span>{% endif %}</td>
+      <td>{% if r.status == 'Writing' %}<span class="badge">AI working...</span>{% elif mp_signed(r) %}<span class="badge status-Completed">Signed</span>{% elif r.status == 'Reviewed' %}<span class="badge status-Completed">Reviewed</span>{% else %}<span class="badge">Draft</span>{% endif %}{% if r.open_placeholders %} <span class="muted" style="font-size:11.5px;">{{ r.open_placeholders }} to confirm</span>{% endif %}</td>
       <td class="muted">{{ (r.updated_at|cat).strftime('%d %b %Y %H:%M') if r.updated_at else '-' }}</td>
       <td class="text-right"><a href="{{ url_for('taxreports.editor', report_id=r.id) }}" class="btn small secondary">Open</a>
         <a href="{{ url_for('taxreports.download', report_id=r.id) }}" class="btn small secondary">Word</a></td>
@@ -57,6 +57,47 @@
       </div>
       {% endif %}
       <p style="margin-top:10px;"><button type="submit" class="btn gold">Write the first draft</button></p>
+    </form>
+  </details>
+
+  <details style="margin-top:10px;">
+    <summary style="cursor:pointer;"><strong>Review a draft written outside the app</strong> <span class="muted" style="font-size:12.5px;">(for example research done in Claude)</span></summary>
+    <p class="muted" style="font-size:12.5px;margin:8px 0 6px;">
+      Bring in a draft report and the app checks it against the Firm Library and this engagement's record: each statement of law is tested against your filed
+      instruments, each fact and figure against the file, and the reasoning is challenged (what ZIMRA would say, what is missing). You get comments beside each
+      section, and your wording is left exactly as it is; apply a comment, edit it yourself, or mark it dealt with. Remove the client's name and details from
+      anything you research in an outside chat.
+    </p>
+    <form method="post" action="{{ url_for('taxreports.import_draft', engagement_id=engagement.id) }}" enctype="multipart/form-data" onsubmit="this.querySelector('button[type=submit]').disabled = true; this.querySelector('button[type=submit]').textContent = 'Reviewing - this takes a few minutes...';">
+      <div class="form-row">
+        <div>
+          <label for="imp_kind">What kind of report is it? *</label>
+          <select id="imp_kind" name="kind" required>
+            {% for k, v in tax_report_kinds.items() %}<option value="{{ k }}">{{ v.label }}</option>{% endfor %}
+          </select>
+        </div>
+        <div><label for="imp_title">Title (optional)</label><input type="text" id="imp_title" name="title" placeholder="e.g. Opinion on interest deductibility"></div>
+        <div><label for="imp_ref">Reference (optional)</label><input type="text" id="imp_ref" name="reference"></div>
+      </div>
+      <label for="imp_text">Paste the draft here</label>
+      <textarea id="imp_text" name="draft_text" rows="8" placeholder="Paste the whole draft report. Headings on their own line (for example 1. Issue, Analysis, Conclusion) become the sections."></textarea>
+      <label for="imp_file">...or upload it (Word, PDF or text file)</label>
+      <input type="file" id="imp_file" name="draft_file" accept=".docx,.pdf,.txt,.md">
+      <label for="imp_addr">Addressee (for a letter or ZIMRA submission)</label>
+      <textarea id="imp_addr" name="addressee" rows="2" placeholder="The Directors, {{ engagement.client.name }}"></textarea>
+      <label for="imp_ins">What the report must achieve: the question and the position you want (optional but it sharpens the review)</label>
+      <textarea id="imp_ins" name="instructions" rows="3" placeholder="e.g. Our position is that the interest is deductible under the production-of-income test. Check whether the draft proves that."></textarea>
+      {% if tar_opts.cases %}
+      <label for="imp_case">ZIMRA matter this answers (for a ZIMRA submission)</label>
+      <select id="imp_case" name="zimra_case_id"><option value="">None</option>{% for c in tar_opts.cases %}<option value="{{ c.id }}">{{ c.case_number }} - {{ c.title }}</option>{% endfor %}</select>
+      {% endif %}
+      {% if tar_opts.docs %}
+      <p style="margin:8px 0 2px;font-size:13px;"><strong>Documents to check the draft against</strong> <span class="muted">(filed on this engagement)</span></p>
+      <div style="max-height:130px;overflow:auto;border:1px solid #e3e3e3;padding:6px 10px;">
+        {% for dd in tar_opts.docs %}<label style="display:block;font-weight:normal;font-size:12.5px;"><input type="checkbox" name="doc_ids" value="{{ dd.id }}" style="width:auto;"> {{ dd.original_filename }} <span class="muted">({{ dd.category }})</span></label>{% endfor %}
+      </div>
+      {% endif %}
+      <p style="margin-top:10px;"><button type="submit" class="btn gold">Review this draft</button></p>
     </form>
   </details>
 </div>
