@@ -78,6 +78,7 @@
           <a href="{{ url_for('tax.legislative_updates_calendar') }}"{% if ep == 'tax.legislative_updates_calendar' %} class="active"{% endif %}>Legislative Update Calendar</a>
         </div>
       </div>
+      <a href="{{ url_for('news.index') }}"{% if bp == 'news' %} class="active"{% endif %}>News Watch{% if news_unread_count %} <span class="badge" style="background:#b8923a;color:#fff;" title="New urgent or important stories since you last looked">{{ news_unread_count }}</span>{% endif %}</a>
       <a href="{{ url_for('hr.project_board') }}"{% if ep == 'hr.project_board' %} class="active"{% endif %}>Tasks{% if my_open_task_count %} <span class="badge overdue">{{ my_open_task_count }}</span>{% endif %}</a>
       <a href="{{ url_for('daily_updates.my_update') }}"{% if bp == 'daily_updates' %} class="active"{% endif %}>Daily Update{% if daily_fire_count %} <span class="badge overdue" title="Urgent fires reported today">{{ daily_fire_count }}</span>{% endif %}</a>
       <a href="{{ url_for('engagements.queries_board') }}"{% if ep == 'engagements.queries_board' %} class="active"{% endif %}>Queries</a>

@@ -218,3 +218,78 @@ class PPERevaluationLine(db.Model):
     order = db.Column(db.Integer, default=0)
 
     asset = db.relationship("PPEAsset", foreign_keys=[asset_id])
+
+
+# ---------- News Watch (news_watch.py): tax and business news for the team ----------
+
+class NewsSource(db.Model):
+    """Somewhere News Watch looks for news: a Google News search (`target` holds the search words), a website's own RSS/Atom feed or a Google Alerts
+    feed (`target` holds the web address). Managed by Partners and Admin on the News Watch sources page."""
+    __tablename__ = "news_source"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False)
+    kind = db.Column(db.String(20), nullable=False)          # google_news / feed / google_alert
+    target = db.Column(db.String(500), nullable=False)
+    active = db.Column(db.Boolean, default=True)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_fetched_at = db.Column(db.DateTime)                  # last attempt, successful or not
+    last_status = db.Column(db.String(300))
+    last_new_count = db.Column(db.Integer, default=0)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+
+class NewsItem(db.Model):
+    """One news story found by News Watch (or added by a team member from a link). `status`: new (waiting to be read by the AI), relevant, irrelevant
+    (not about tax or business that matters to the firm, or marked so by a person) or skipped (failed the keyword filter, never sent to the AI).
+    Only a headline, a short snippet and the AI's own short summary are kept, never the article. News is an unconfirmed signal, never law."""
+    __tablename__ = "news_item"
+    id = db.Column(db.Integer, primary_key=True)
+    source_id = db.Column(db.Integer, db.ForeignKey("news_source.id"))
+    title = db.Column(db.String(400), nullable=False)
+    url = db.Column(db.String(1000), nullable=False)
+    publisher = db.Column(db.String(200))
+    published_at = db.Column(db.DateTime)
+    snippet = db.Column(db.Text)
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow)
+    fingerprint = db.Column(db.String(40), index=True)
+    status = db.Column(db.String(12), default="new")
+    urgency = db.Column(db.String(12))                       # Urgent / Important / FYI
+    topics_json = db.Column(db.Text)
+    summary = db.Column(db.Text)
+    why = db.Column(db.Text)
+    sectors_json = db.Column(db.Text)
+    confidence = db.Column(db.String(10))                     # how well the headline and snippet support the summary
+    ai_used = db.Column(db.Boolean, default=False)
+    ai_tries = db.Column(db.Integer, default=0)
+    ai_error = db.Column(db.String(300))
+    unconfirmed = db.Column(db.Boolean, default=False)       # social media or a link a person added: not checked by anyone
+    shared_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    pinned = db.Column(db.Boolean, default=False)
+    filed_update_id = db.Column(db.Integer)                  # the Legislative Update Control News entry made from this story (no foreign key on purpose)
+
+    source = db.relationship("NewsSource", foreign_keys=[source_id])
+    shared_by = db.relationship("User", foreign_keys=[shared_by_id])
+    __table_args__ = (db.Index("ix_news_item_status_fetched", "status", "fetched_at"),)
+
+    @property
+    def topics(self):
+        try:
+            return list(json.loads(self.topics_json or "[]"))
+        except ValueError:
+            return []
+
+    @property
+    def sectors(self):
+        try:
+            return list(json.loads(self.sectors_json or "[]"))
+        except ValueError:
+            return []
+
+
+class NewsSeen(db.Model):
+    """When each person last opened News Watch, so the menu badge counts only what is new to them."""
+    __tablename__ = "news_seen"
+    user_id = db.Column(db.Integer, db.ForeignKey("user.id"), primary_key=True)
+    seen_at = db.Column(db.DateTime, default=datetime.utcnow)

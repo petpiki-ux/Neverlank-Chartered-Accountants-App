@@ -950,6 +950,8 @@ def create_app():
     app.register_blueprint(wpedit_bp)
     from tax_reports import taxreports_bp
     app.register_blueprint(taxreports_bp)
+    from news_watch import news_bp
+    app.register_blueprint(news_bp)
     app.register_blueprint(dtadj_bp)
     from cover_pages import covers_bp
     app.register_blueprint(covers_bp)
@@ -1120,8 +1122,11 @@ def create_app():
         learning_pending_count = 0
         invoice_reminder_count = 0
         daily_fire_count = 0
+        news_unread_count = 0
         if current_user.is_authenticated:
             from models import Invoice
+            import news_watch as _nw
+            news_unread_count = _nw.unread_count(current_user)
             from invoice_send import due_reminder_count
             invoice_reminder_count = due_reminder_count()
             if current_user.role in ("admin", "partner"):
@@ -1152,6 +1157,7 @@ def create_app():
             "open_check_in": open_check_in,
             "recurring_review_count": recurring_review_count,
             "daily_fire_count": daily_fire_count,
+            "news_unread_count": news_unread_count,
             "zimra_overdue_count": zimra_overdue_count,
             "zimra_approval_count": zimra_approval_count,
             "learning_pending_count": learning_pending_count,

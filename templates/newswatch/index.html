@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}News Watch - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set hidden_view = args.get('show') == 'hidden' %}
+<div class="page-header">
+  <h1>News Watch</h1>
+  <p class="muted" style="margin:0;">Tax and business news the team should know about, found and summarised by the AI from the sources the firm chose.
+    News is an unconfirmed signal, never law: check the instrument itself before relying on a story.</p>
+</div>
+
+<div class="card" style="padding:12px 16px;">
+  <div style="display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+    <span><span class="badge overdue">{{ today['Urgent'] }}</span> Urgent</span>
+    <span><span class="badge" style="background:#b8923a;color:#fff;">{{ today['Important'] }}</span> Important</span>
+    <span><span class="badge">{{ today['FYI'] }}</span> FYI</span>
+    <span class="muted" style="font-size:12px;">found in the last 3 days</span>
+    <span style="flex:1"></span>
+    <span class="muted" style="font-size:12px;">
+      {% if refreshing %}Looking for news now... reload in a minute.{% elif last %}Last checked {{ (last|cat).strftime('%d %b %H:%M') }}{% elif n_sources %}Not checked yet{% endif %}
+      {% if state.message and not refreshing %} &middot; {{ state.message }}{% endif %}
+    </span>
+    <form method="post" action="{{ url_for('news.refresh') }}" class="inline"><button type="submit" class="btn small secondary" {% if not n_sources %}disabled{% endif %}>Look for news now</button></form>
+    {% if can_manage %}<a href="{{ url_for('news.sources') }}" class="btn small secondary">Sources</a>{% endif %}
+  </div>
+  {% if not n_sources %}
+  <p style="margin:10px 0 0;font-size:13px;"><strong>No news sources are set up yet.</strong>
+    {% if can_manage %}Open <a href="{{ url_for('news.sources') }}">Sources</a> and add the starter set, then press "Look for news now".{% else %}A Partner or Admin sets them up under Sources.{% endif %}</p>
+  {% elif not configured %}
+  <p class="muted" style="margin:10px 0 0;font-size:12.5px;">The AI is not switched on on this server (no API key), so stories are listed from a keyword filter without summaries.</p>
+  {% endif %}
+</div>
+
+<div class="card" style="padding:10px 16px;">
+  <form method="get" action="{{ url_for('news.index') }}" class="form-row" style="align-items:flex-end;">
+    <div style="flex:2;"><label for="q">Search</label><input type="text" id="q" name="q" value="{{ args.get('q','') }}" placeholder="e.g. VAT, ZiG, Finance Act"></div>
+    <div><label for="urgency">Urgency</label><select id="urgency" name="urgency"><option value="">All</option>{% for u in urgencies %}<option{% if args.get('urgency') == u %} selected{% endif %}>{{ u }}</option>{% endfor %}</select></div>
+    <div><label for="topic">Topic</label><select id="topic" name="topic"><option value="">All</option>{% for t in topics %}<option{% if args.get('topic') == t %} selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
+    <div><label for="days">From</label><select id="days" name="days">{% for d, lab in [(2,'Last 2 days'),(7,'Last week'),(14,'Last 2 weeks'),(30,'Last month'),(90,'Last 3 months')] %}<option value="{{ d }}"{% if (args.get('days', type=int) or 14) == d %} selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
+    <div><label for="show">Show</label><select id="show" name="show"><option value="relevant">News that matters</option><option value="hidden"{% if hidden_view %} selected{% endif %}>Hidden (not relevant)</option></select></div>
+    <div><label style="font-weight:normal;font-size:12.5px;"><input type="checkbox" name="pinned" value="1" style="width:auto;"{% if args.get('pinned') %} checked{% endif %}> Pinned only</label>
+         <label style="font-weight:normal;font-size:12.5px;"><input type="checkbox" name="unconfirmed" value="1" style="width:auto;"{% if args.get('unconfirmed') %} checked{% endif %}> Added by the team</label></div>
+    <div><button type="submit" class="btn small" style="margin-bottom:14px;">Filter</button></div>
+  </form>
+</div>
+
+<details class="card" style="padding:10px 16px;">
+  <summary style="cursor:pointer;"><strong>Add a story or a social media post</strong> <span class="muted" style="font-size:12.5px;">(a link someone spotted)</span></summary>
+  <form method="post" action="{{ url_for('news.add_link') }}" style="margin-top:8px;">
+    <label for="al_url">Link *</label>
+    <input type="text" id="al_url" name="url" placeholder="https://..." required>
+    <label for="al_text">Paste the text of the story or post {% if True %}<span class="muted" style="font-weight:normal;">(needed for social media such as X, Facebook, LinkedIn and WhatsApp, which the app cannot read itself; optional for a news page)</span>{% endif %}</label>
+    <textarea id="al_text" name="text" rows="4"></textarea>
+    <p class="muted" style="font-size:12px;margin:4px 0 8px;">Anything added this way, and anything from social media, is marked unconfirmed until a person checks it against the real source.</p>
+    <button type="submit" class="btn small gold">Add to News Watch</button>
+  </form>
+</details>
+
+{% if not items %}
+<div class="card"><p class="muted" style="margin:0;">{% if hidden_view %}Nothing hidden in this period.{% else %}No stories match. {% if n_sources %}Try a longer period, or press "Look for news now".{% endif %}{% endif %}</p></div>
+{% endif %}
+
+{% for it in items %}
+<div class="card" id="n{{ it.id }}" style="padding:12px 16px;border-left:4px solid {% if it.urgency == 'Urgent' %}#b3261e{% elif it.urgency == 'Important' %}#b8923a{% else %}#d5d9de{% endif %};">
+  <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;">
+    {% if it.urgency == 'Urgent' %}<span class="badge overdue">Urgent</span>{% elif it.urgency == 'Important' %}<span class="badge" style="background:#b8923a;color:#fff;">Important</span>{% elif it.urgency %}<span class="badge">FYI</span>{% endif %}
+    {% if it.pinned %}<span class="badge status-Completed">Pinned</span>{% endif %}
+    {% if it.unconfirmed %}<span class="badge" style="background:#fdf1d3;color:#7a5b00;">Unconfirmed{% if it.shared_by %}: added by {{ it.shared_by.name }}{% endif %}</span>{% endif %}
+    {% for t in it.topics %}<span class="muted">{{ t }}</span>{% if not loop.last %} &middot; {% endif %}{% endfor %}
+    <span style="flex:1"></span>
+    <span class="muted">{{ it.publisher or '' }}{% if it.published_at %} &middot; {{ it.published_at.strftime('%d %b %Y') }}{% endif %}</span>
+  </div>
+  <h3 style="margin:6px 0 4px;font-size:15.5px;"><a href="{{ it.url }}" target="_blank" rel="noopener noreferrer">{{ it.title }}</a></h3>
+  {% if it.summary %}<p style="margin:0 0 4px;font-size:13.5px;">{{ it.summary }}{% if it.confidence == 'Low' %} <span class="muted" style="font-size:12px;">(from the headline or a short snippet only)</span>{% endif %}</p>{% endif %}
+  {% if it.why %}<p style="margin:0 0 4px;font-size:13px;"><strong>Why it matters:</strong> {{ it.why }}</p>{% endif %}
+  {% if related.get(it.id) %}<p style="margin:0 0 4px;font-size:12.5px;"><strong>Clients:</strong>
+    {% for c, why in related[it.id] %}<a href="{{ url_for('clients.view_client', client_id=c.id) }}">{{ c.name }}</a> <span class="muted">({{ why }})</span>{% if not loop.last %}, {% endif %}{% endfor %}</p>{% endif %}
+  {% if it.sectors %}<p class="muted" style="margin:0 0 4px;font-size:12px;">Sectors: {{ it.sectors|join(', ') }}</p>{% endif %}
+  <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:6px;">
+    <a href="{{ it.url }}" target="_blank" rel="noopener noreferrer" class="btn small secondary">Read it</a>
+    <form method="post" action="{{ url_for('news.pin', item_id=it.id) }}" class="inline"><button type="submit" class="btn small secondary">{{ 'Unpin' if it.pinned else 'Pin' }}</button></form>
+    {% if can_file and not it.filed_update_id %}<form method="post" action="{{ url_for('news.file_to_library', item_id=it.id) }}" class="inline"><button type="submit" class="btn small secondary">File in the Firm Library</button></form>
+    {% elif it.filed_update_id %}<a href="{{ url_for('tax.read_legislative_update', update_id=it.filed_update_id) }}" class="btn small secondary">In the Firm Library</a>{% endif %}
+    <form method="post" action="{{ url_for('news.hide', item_id=it.id) }}" class="inline"><button type="submit" class="btn small secondary">{{ 'Bring back' if hidden_view else 'Not relevant' }}</button></form>
+  </div>
+</div>
+{% endfor %}
+{% endblock %}

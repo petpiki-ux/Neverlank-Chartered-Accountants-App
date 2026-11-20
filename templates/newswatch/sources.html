@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}News Watch sources - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>News Watch sources</h1>
+  <p class="muted" style="margin:0;"><a href="{{ url_for('news.index') }}">back to News Watch</a> &middot; Partners and Admin choose where the app looks.</p>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Where the app looks</h3>
+  {% if sources %}
+  <table>
+    <thead><tr><th>Source</th><th>Kind</th><th>Search words / address</th><th>Last check</th><th>Stories</th><th></th></tr></thead>
+    <tbody>
+    {% for s in sources %}
+    <tr{% if not s.active %} style="opacity:.55;"{% endif %}>
+      <td>{{ s.name }}</td>
+      <td class="muted">{{ kinds[s.kind] }}</td>
+      <td style="font-size:12px;max-width:340px;word-break:break-word;">{{ s.target }}</td>
+      <td style="font-size:12px;">{% if s.last_fetched_at %}{{ (s.last_fetched_at|cat).strftime('%d %b %H:%M') }}<div class="{{ 'muted' if (s.last_status or '').startswith('OK') else '' }}" style="{{ '' if (s.last_status or '').startswith('OK') else 'color:#b3261e;' }}">{{ s.last_status }}</div>{% else %}<span class="muted">not yet</span>{% endif %}</td>
+      <td>{{ counts.get(s.id, 0) }}</td>
+      <td class="text-right">
+        <form method="post" action="{{ url_for('news.toggle_source', source_id=s.id) }}" class="inline"><button type="submit" class="btn small secondary">{{ 'Pause' if s.active else 'Resume' }}</button></form>
+        <form method="post" action="{{ url_for('news.delete_source', source_id=s.id) }}" class="inline" onsubmit="return confirm('Remove this source? The stories it found are kept.');"><button type="submit" class="btn small danger">Remove</button></form>
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted">No sources yet.</p>{% endif %}
+  <form method="post" action="{{ url_for('news.add_starter') }}" style="margin-top:10px;" class="inline"><button type="submit" class="btn small gold">Add the starter set</button>
+    <span class="muted" style="font-size:12px;">ZIMRA and tax, budget, RBZ and currency, companies and registry, audit and profession, and the ZIMRA and RBZ websites. Already-added ones are not repeated.</span></form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Add a source</h3>
+  <form method="post" action="{{ url_for('news.add_source') }}">
+    <div class="form-row">
+      <div><label for="kind">Kind *</label><select id="kind" name="kind">{% for k, v in kinds.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+      <div><label for="name">Name</label><input type="text" id="name" name="name" placeholder="e.g. Mining tax news"></div>
+    </div>
+    <label for="query">Search words (Google News) or the feed address *</label>
+    <input type="text" id="query" name="query" placeholder='e.g. ("withholding tax" OR "capital gains") Zimbabwe     or     https://example.com/feed'>
+    <p class="muted" style="font-size:12px;margin:2px 0 8px;">
+      <strong>Google News search:</strong> type the words as you would in Google News. Use OR between alternatives, quotes for exact phrases, and <code>site:zimra.co.zw</code> to watch one website that has no feed of its own.
+      <strong>Website feed:</strong> the address of the site's RSS or Atom feed (often ending /feed or /rss).
+      <strong>Google Alerts:</strong> create an alert at google.com/alerts, choose "Deliver to: RSS feed", and paste the feed address.
+    </p>
+    <button type="submit" class="btn gold">Add the source</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">How and when it runs</h3>
+  <ul style="font-size:13px;">
+    <li>Opening News Watch checks the sources in the background if the last check is more than a few hours old. "Look for news now" checks on demand.</li>
+    <li>For a regular check without anyone opening the page, add a Render Cron Job (or any timer) that calls <code>/news-watch/cron?token=...</code> on this site. {% if token_set %}<strong>The token is set on this server.</strong>{% else %}It needs an environment variable called <code>NEWS_WATCH_TOKEN</code> set on Render to a long secret of your choosing; until then that address does not respond.{% endif %}</li>
+    <li>{% if configured %}The AI is switched on: each new story is read, rated and summarised from its headline and snippet.{% else %}The AI is not switched on (no ANTHROPIC_API_KEY), so stories are listed by keyword without summaries.{% endif %} Set <code>NEWS_WATCH_MODEL</code> on Render to use a smaller, cheaper model for this job if you want to keep costs down.</li>
+    <li>Google's news search feed is unofficial and may change or limit heavy use; a source that fails shows its error above and the others carry on.</li>
+    <li>Only the headline, a short snippet and the AI's summary are kept, never the article itself. Everything links to the publisher.</li>
+  </ul>
+</div>
+{% endblock %}
