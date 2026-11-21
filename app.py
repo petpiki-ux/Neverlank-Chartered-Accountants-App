@@ -651,6 +651,9 @@ def _add_missing_columns():
         # set on invoices raised by a recurring schedule.
         "invoice": [("recurring_invoice_id", "INTEGER"), ("recurrence_index", "INTEGER"), ("share_token", "VARCHAR(64)"),
                     ("reminders_paused", "BOOLEAN DEFAULT 0")],
+        # News Watch: where a source / story comes from (Zimbabwe, South Africa, International) - see news_watch.py
+        "news_source": [("region", "VARCHAR(20) DEFAULT 'Zimbabwe'")],
+        "news_item": [("region", "VARCHAR(20) DEFAULT 'Zimbabwe'")],
     }
     # The Managing Partner's e-signature columns (models.MPSignedMixin) - MERGED into each table's list, because some of these tables
     # (receipt, zimra_reply, invoice) already have their own entry above and a repeated key in the literal would replace it.

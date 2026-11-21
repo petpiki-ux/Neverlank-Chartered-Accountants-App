@@ -3,7 +3,10 @@
 Sources (Partners and Admin manage them on the sources page):
   - a Google News search (Google publishes an RSS feed for any search; it is unofficial, so it may change),
   - a website's own RSS or Atom feed,
-  - a Google Alerts feed.
+  - a Google Alerts feed,
+  - an X (Twitter) account or search, through the paid X API (needs the X_BEARER_TOKEN setting; every post counts as unconfirmed).
+Each source belongs to a region (Zimbabwe, South Africa or International); the AI judges International and South African stories by what they mean for a
+Zimbabwean practice and its clients, and leaves out market chatter (share-price moves, stock picks, crypto speculation).
 Anything else (social media posts, a story somebody spotted) is added by a team member pasting a link and, for social media, the text.
 
 Each refresh: fetch the feeds (safely: public web addresses only, size and time limits), drop duplicates, send what passes a keyword filter to the AI
@@ -36,9 +39,15 @@ from models import Client, LegislativeUpdate, NewsItem, NewsSeen, NewsSource, cl
 news_bp = Blueprint("news", __name__, url_prefix="/news-watch")
 
 USER_AGENT = "NeverlankNewsWatch/1.0 (+https://app.neverlank.co.zw; practice news monitor)"
-KINDS = {"google_news": "Google News search", "feed": "Website feed (RSS / Atom)", "google_alert": "Google Alerts feed"}
+KINDS = {"google_news": "Google News search", "feed": "Website feed (RSS / Atom)", "google_alert": "Google Alerts feed",
+         "x_account": "X (Twitter) account", "x_search": "X (Twitter) search"}
+X_KINDS = ("x_account", "x_search")
+REGIONS = ("Zimbabwe", "South Africa", "International")
+# The Google News edition used for a region's searches (language, country, edition)
+EDITIONS = {"Zimbabwe": ("en-ZW", "ZW", "ZW:en"), "South Africa": ("en-ZA", "ZA", "ZA:en"), "International": ("en-US", "US", "US:en")}
 URGENCIES = ("Urgent", "Important", "FYI")
-TOPICS = ["Tax: ZIMRA and administration", "Tax: policy and Finance Act", "RBZ, currency and exchange control", "Companies and registry",
+TOPICS = ["International standards (IFRS, ISA, ethics)", "International tax and transfer pricing", "Africa and regional economy", "Global markets and business",
+          "Tax: ZIMRA and administration", "Tax: policy and Finance Act", "RBZ, currency and exchange control", "Companies and registry",
           "Audit and accounting standards", "Banking and finance", "Labour and payroll", "Mining", "Agriculture", "Property and construction",
           "Regulation and compliance", "Economy and markets", "Courts and cases", "Other"]
 SOCIAL_HOSTS = ("x.com", "twitter.com", "facebook.com", "fb.com", "fb.watch", "linkedin.com", "instagram.com", "t.me", "telegram.me", "tiktok.com",
@@ -55,6 +64,11 @@ MIN_GAP_MINUTES = 30           # a source is not fetched again sooner than this 
 AI_BATCH = 15
 AI_PER_RUN = 60                # most stories sent to the AI in one refresh; the rest wait for the next
 MAX_AI_TRIES = 3
+X_MIN_GAP_HOURS = 3            # an X source is never fetched more often than this, even on demand: the X API is paid per post read
+X_POSTS_PER_FETCH = 10
+X_TIMEOUT = 20
+X_API = "https://api.x.com/2"
+MIN_SCORE = {"Zimbabwe": 1, "South Africa": 1, "International": 2}   # keyword hits a general feed story needs before the AI reads it
 KEEP_DAYS = 120                # stories older than this go (unless pinned or filed)
 RECENT_DAYS = 14               # the page shows stories from this many days unless a longer range is chosen
 
@@ -69,6 +83,34 @@ STARTER_SOURCES = [
     ("RBZ website", "google_news", "site:rbz.co.zw"),
 ]
 
+STARTER_SOUTH_AFRICA = [
+    ("SARS and tax in South Africa", "google_news", '("South African Revenue Service" OR SARS OR "Tax Administration Act" OR "Income Tax Act" OR "tax tribunal" OR VAT) "South Africa"'),
+    ("IRBA and auditors in South Africa", "google_news", '(IRBA OR "Independent Regulatory Board for Auditors" OR "audit regulator" OR auditor OR "audit firm") "South Africa"'),
+    ("SAICA and accounting in South Africa", "google_news", '(SAICA OR "chartered accountants" OR IFRS OR "financial reporting") "South Africa"'),
+    ("Reserve Bank, rand and JSE", "google_news", '("South African Reserve Bank" OR SARB OR rand OR "exchange control" OR JSE) "South Africa"'),
+    ("Companies Act and CIPC", "google_news", '(CIPC OR "Companies Act" OR "beneficial ownership" OR "Companies Tribunal") "South Africa"'),
+    ("South Africa and Zimbabwe trade", "google_news", '("South Africa" AND Zimbabwe) (trade OR border OR tax OR SADC OR migration OR "customs")'),
+    ("SARS website", "google_news", "site:sars.gov.za"),
+    ("IRBA website", "google_news", "site:irba.co.za"),
+    ("SAICA website", "google_news", "site:saica.org.za"),
+]
+
+STARTER_INTERNATIONAL = [
+    ("Global accounting and audit standards", "google_news", '(IFRS OR IASB OR ISSB OR IAASB OR IESBA OR IFAC OR "auditing standard" OR "accounting standard")'),
+    ("Audit regulators and audit quality", "google_news", '(PCAOB OR "Financial Reporting Council" OR "audit quality" OR "audit reform" OR "audit firm fined")'),
+    ("Big Four news", "google_news", '(Deloitte OR PwC OR KPMG OR "Ernst & Young") (audit OR tax OR regulator OR fine OR standards)'),
+    ("Global tax developments", "google_news", '(OECD OR "Pillar Two" OR BEPS OR "transfer pricing" OR "global minimum tax" OR "digital services tax" OR "tax treaty")'),
+    ("Financial crime and sanctions", "google_news", '(FATF OR "grey list" OR "anti-money laundering" OR sanctions) (compliance OR rules OR guidance)'),
+    ("Africa business and economy", "google_news", '(Africa OR SADC OR AfCFTA) (economy OR tax OR investment OR "central bank" OR "debt restructuring")'),
+    ("Yahoo Finance: audit, accounting and tax", "google_news", 'site:finance.yahoo.com (audit OR accounting OR "tax rules" OR IFRS OR "financial reporting")'),
+    ("CFA Institute", "google_news", "site:cfainstitute.org OR site:blogs.cfainstitute.org"),
+    ("Accountancy press", "google_news", "site:accountancyage.com OR site:ifac.org OR site:ifrs.org OR site:icaew.com OR site:accountingtoday.com OR site:cfo.com"),
+    ("CFA Institute (publications feed)", "feed", "https://rpc.cfainstitute.org/RPC-Publications-Feed"),
+    ("Yahoo Finance headlines (feed)", "feed", "https://finance.yahoo.com/news/rssindex"),
+]
+
+STARTER_SETS = {"Zimbabwe": STARTER_SOURCES, "South Africa": STARTER_SOUTH_AFRICA, "International": STARTER_INTERNATIONAL}
+
 # Words that make a story worth the AI's time when it comes from a general feed (a targeted Google search skips this filter).
 _RELEVANT_TERMS = [
     "zimra", "revenue authority", "tax", "vat", "paye", "imtt", "withholding", "customs", "duty", "duties", "finance act", "income tax", "capital gains",
@@ -79,6 +121,11 @@ _RELEVANT_TERMS = [
     "merger", "acquisition", "takeover", "delist", "liquidation", "insolvency", "judicial management", "sanction", "money laundering", "aml", "fiu",
     "mining", "royalt", "lithium", "gold", "agricultur", "land tenure", "property", "stand", "investment", "zida", "special economic zone", "sez",
     "levy", "licen", "regulation", "compliance", "penalty", "deadline", "amnesty", "voluntary disclosure",
+    # South Africa and international
+    "sars", "south african revenue", "irba", "saica", "cipc", "sarb", "jse", "iasb", "issb", "ifac", "iesba", "pcaob", "financial reporting council", "frc ",
+    "audit quality", "going concern", "big four", "deloitte", "pwc", "kpmg", "ernst & young", "oecd", "pillar two", "beps", "transfer pricing", "minimum tax",
+    "tax treaty", "double taxation", "digital services tax", "fatf", "grey list", "anti-money", "cfa institute", "sustainability reporting", "sustainability disclosure",
+    "accounting", "financial statements", "tax rules", "tax law", "tax reform", "central bank", "imf", "world bank", "afcfta", "sadc", "debt restructuring",
 ]
 
 
@@ -140,16 +187,111 @@ def fetch_bytes(url, timeout=FETCH_TIMEOUT, max_bytes=MAX_BYTES):
     return None, current, "Too many redirects."
 
 
-def google_news_url(query):
-    """The Google News RSS search for `query` on the Zimbabwe edition, newest first, last few days only."""
+def google_news_url(query, region="Zimbabwe"):
+    """The Google News RSS search for `query` on the edition that goes with the region, newest first, last few days only."""
     q = (query or "").strip()
     if "when:" not in q:
         q += " when:3d"
-    return "https://news.google.com/rss/search?q=" + quote(q) + "&hl=en-ZW&gl=ZW&ceid=ZW:en"
+    hl, gl, ceid = EDITIONS.get(region) or EDITIONS["Zimbabwe"]
+    return f"https://news.google.com/rss/search?q={quote(q)}&hl={hl}&gl={gl}&ceid={ceid}"
 
 
 def source_url(source):
-    return google_news_url(source.target) if source.kind == "google_news" else source.target
+    return google_news_url(source.target, getattr(source, "region", None) or "Zimbabwe") if source.kind == "google_news" else source.target
+
+
+def region_of(source_or_item):
+    r = getattr(source_or_item, "region", None)
+    return r if r in REGIONS else "Zimbabwe"
+
+
+# ------------------------------------------------------------------ X (Twitter), through the paid X API
+
+_x_ids = {}                    # handle -> user id, remembered while the server runs (saves a paid lookup each time)
+
+
+def x_configured():
+    return bool(os.environ.get("X_BEARER_TOKEN"))
+
+
+def clean_handle(value):
+    """The bare X username from '@name', 'name' or an x.com / twitter.com address, or '' if it is not one."""
+    v = (value or "").strip()
+    m = re.match(r"^(?:https?://)?(?:www\.|mobile\.)?(?:x|twitter)\.com/(@?[A-Za-z0-9_]{1,15})(?:[/?#].*)?$", v, re.I)
+    if m:
+        v = m.group(1)
+    v = v.lstrip("@")
+    return v if re.fullmatch(r"[A-Za-z0-9_]{1,15}", v) else ""
+
+
+def x_get(path, params):
+    """(json dict, None) or (None, error message). The only place that talks to the X API (tests replace it)."""
+    token = os.environ.get("X_BEARER_TOKEN")
+    if not token:
+        return None, "No X API key is set on the server (X_BEARER_TOKEN), so X sources are not read."
+    import requests
+    try:
+        r = requests.get(X_API + path, params=params, headers={"Authorization": "Bearer " + token, "User-Agent": USER_AGENT}, timeout=X_TIMEOUT)
+    except Exception as exc:
+        return None, ("Could not reach X: " + str(exc))[:200]
+    if r.status_code in (401, 403):
+        return None, f"X refused the key ({r.status_code}). Check X_BEARER_TOKEN and that the X developer account has API access."
+    if r.status_code in (402, 429):
+        return None, f"X says the account is out of credits or over its limit ({r.status_code}). Top up the X developer account or wait."
+    if r.status_code >= 400:
+        return None, f"X answered {r.status_code}."
+    try:
+        return r.json(), None
+    except ValueError:
+        return None, "X returned something that could not be read."
+
+
+def _x_title(text):
+    t = re.sub(r"https?://\S+", "", text or "")
+    t = re.sub(r"\s+", " ", t).strip()
+    return (t[:137].rstrip() + "...") if len(t) > 140 else (t or "Post on X")
+
+
+def fetch_x(source):
+    """(entries, None) or (None, error): recent posts from an X account or search, in the same shape as parse_feed. Original posts only (no retweets or replies)."""
+    start = (datetime.utcnow() - timedelta(days=MAX_AGE_DAYS) + timedelta(hours=2)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    fields = {"tweet.fields": "created_at,author_id,lang", "max_results": X_POSTS_PER_FETCH, "start_time": start}
+    if source.kind == "x_account":
+        handle = clean_handle(source.target)
+        if not handle:
+            return None, "That is not a valid X username."
+        uid = _x_ids.get(handle.lower())
+        if not uid:
+            data, err = x_get("/users/by/username/" + handle, {})
+            if err:
+                return None, err
+            uid = ((data or {}).get("data") or {}).get("id")
+            if not uid:
+                return None, f"X has no account called @{handle}."
+            _x_ids[handle.lower()] = uid
+        data, err = x_get(f"/users/{uid}/tweets", dict(fields, exclude="retweets,replies"))
+        names = {uid: handle}
+    else:
+        q = (source.target or "").strip()
+        if not q:
+            return None, "The search is empty."
+        if "is:retweet" not in q:
+            q += " -is:retweet"
+        if "lang:" not in q:
+            q += " lang:en"
+        data, err = x_get("/tweets/search/recent", dict(fields, query=q[:500], expansions="author_id", **{"user.fields": "username,name"}))
+        names = {u.get("id"): u.get("username") for u in ((data or {}).get("includes") or {}).get("users") or []}
+    if err:
+        return None, err
+    entries = []
+    for t in (data or {}).get("data") or []:
+        tid, text = t.get("id"), t.get("text") or ""
+        who = names.get(t.get("author_id")) or (clean_handle(source.target) if source.kind == "x_account" else "")
+        if not tid or not who:
+            continue
+        entries.append({"title": _x_title(text), "url": f"https://x.com/{who}/status/{tid}", "publisher": f"@{who} (X)", "published": _when(t.get("created_at")),
+                        "snippet": re.sub(r"\s+", " ", text).strip()[:1200]})
+    return entries, None
 
 
 # ------------------------------------------------------------------ reading a feed
@@ -274,6 +416,14 @@ TRIAGE_SYSTEM = (
     "You are the news analyst for Neverlank Chartered Accountants, a Zimbabwean firm of chartered accountants, auditors and tax practitioners. "
     "You are given a numbered list of news items (headline, publisher, date and sometimes a short snippet). For each, decide whether the team should "
     "know about it, and summarise it for them.\n\n"
+    "Each item carries a REGION: Zimbabwe, South Africa or International. Zimbabwean items are judged as below. South African and international items are "
+    "relevant only if they could change what a Zimbabwean firm of chartered accountants, auditors and tax practitioners does or advises: a new or amended "
+    "accounting, auditing, ethics or sustainability standard (IFRS, ISA, IESBA, ISSB); an audit regulator's action or an audit-quality finding; a tax, transfer "
+    "pricing or anti-money-laundering rule that Zimbabwe may follow or that touches cross-border clients; South African rules (SARS, IRBA, SAICA, CIPC, Reserve "
+    "Bank) that affect clients trading with or owning businesses in South Africa; or a regional or global economic event that moves Zimbabwean business (currency, "
+    "commodity, trade, sanctions, debt). NOT relevant from abroad: share-price moves, stock tips, individual company earnings, crypto speculation, personal "
+    "finance advice, market commentary, celebrity or political stories, and press-release marketing. International items are rarely Urgent: use Urgent only when "
+    "something takes effect now and clients must act. In why_it_matters say what it means for Zimbabwe or the firm's clients.\n\n"
     "RELEVANT means it bears on: tax (ZIMRA, the Finance Act, VAT, PAYE, IMTT, withholding tax, capital gains, customs); the Reserve Bank, currency and "
     "exchange control; companies law and the Registrar; audit, accounting and reporting standards and the profession (ICAZ, PAAB, IFRS); banking, "
     "insurance and capital markets; labour, payroll and pension rules; sector rules for mining, agriculture, property and other client sectors; "
@@ -283,7 +433,7 @@ TRIAGE_SYSTEM = (
     "Important = a significant development the team should know this week. FYI = background.\n\n"
     "RULES: use ONLY the headline and snippet given. Never add a fact, figure, date, section or name that is not in them. If you were given only a headline, "
     "say so in the summary ('Headline only: ...') and set confidence Low. Never present news as law or as confirmed: say 'reported' where it is a report. "
-    "If an item says it was shared from social media or by a person, treat it as unconfirmed. Keep the summary to one to three plain sentences. "
+    "If an item says it was shared from social media or by a person, or is a post on X, treat it as unconfirmed and say 'posted on X' or 'reported'. Keep the summary to one to three plain sentences. "
     "Return one entry for every id you were given."
 )
 
@@ -331,8 +481,8 @@ def _call_triage(system, user_message, tool=TRIAGE_TOOL, max_tokens=6000):
 
 def _item_block(item):
     when = item.published_at.strftime("%d %b %Y") if item.published_at else "date unknown"
-    extra = " [SHARED BY A TEAM MEMBER / SOCIAL MEDIA - UNCONFIRMED]" if item.unconfirmed else ""
-    return f"[{item.id}]{extra} {item.title}\nPublisher: {item.publisher or 'unknown'} | {when}\nSnippet: {item.snippet or '(none - headline only)'}"
+    extra = " [SHARED BY A TEAM MEMBER / SOCIAL MEDIA / X POST - UNCONFIRMED]" if item.unconfirmed else ""
+    return f"[{item.id}]{extra} {item.title}\nRegion: {region_of(item)} | Publisher: {item.publisher or 'unknown'} | {when}\nSnippet: {item.snippet or '(none - headline only)'}"
 
 
 def _apply_ai(item, entry):
@@ -353,7 +503,8 @@ def _apply_ai(item, entry):
 def triage_pending(limit=AI_PER_RUN):
     """Ask the AI about stories still waiting (newest first), in small batches. Returns (done, failed). Without an AI key, stories that passed the keyword
     filter are shown as FYI with no summary. Never raises."""
-    pending = NewsItem.query.filter(NewsItem.status == "new", NewsItem.ai_tries < MAX_AI_TRIES).order_by(NewsItem.published_at.desc().nullslast(), NewsItem.id.desc()).limit(limit).all()
+    region_rank = db.case((NewsItem.region == "International", 2), (NewsItem.region == "South Africa", 1), else_=0)         # Zimbabwean stories are read first
+    pending = NewsItem.query.filter(NewsItem.status == "new", NewsItem.ai_tries < MAX_AI_TRIES).order_by(region_rank, NewsItem.published_at.desc().nullslast(), NewsItem.id.desc()).limit(limit).all()
     if not pending:
         return 0, 0
     if not is_configured():
@@ -404,23 +555,38 @@ def refresh_state():
 
 
 def _fresh_enough(source, force):
-    return (not force) and source.last_fetched_at is not None and (datetime.utcnow() - source.last_fetched_at) < timedelta(minutes=MIN_GAP_MINUTES)
+    if source.last_fetched_at is None:
+        return False
+    age = datetime.utcnow() - source.last_fetched_at
+    if source.kind in X_KINDS:                          # paid per post: never more often than the gap, forced or not
+        return age < timedelta(hours=X_MIN_GAP_HOURS)
+    return (not force) and age < timedelta(minutes=MIN_GAP_MINUTES)
 
 
 def fetch_source(source):
     """Fetch one source and store its new stories. Returns (new_count, error or None). Never raises."""
     source.last_fetched_at = datetime.utcnow()
-    content, _final, err = fetch_bytes(source_url(source))
-    if err:
-        source.last_status = ("Failed: " + err)[:300]
-        source.last_new_count = 0
-        return 0, err
-    try:
-        entries = parse_feed(content, default_publisher=source.name if source.kind != "google_news" else "", google=(source.kind == "google_news"))
-    except ValueError as exc:
-        source.last_status = ("Failed: " + str(exc))[:300]
-        source.last_new_count = 0
-        return 0, str(exc)
+    is_x = source.kind in X_KINDS
+    if is_x:
+        entries, err = fetch_x(source)
+        if err:
+            source.last_status = ("Failed: " + err)[:300]
+            source.last_new_count = 0
+            return 0, err
+    else:
+        content, _final, err = fetch_bytes(source_url(source))
+        if err:
+            source.last_status = ("Failed: " + err)[:300]
+            source.last_new_count = 0
+            return 0, err
+        try:
+            entries = parse_feed(content, default_publisher=source.name if source.kind != "google_news" else "", google=(source.kind == "google_news"))
+        except ValueError as exc:
+            source.last_status = ("Failed: " + str(exc))[:300]
+            source.last_new_count = 0
+            return 0, str(exc)
+    region = region_of(source)
+    threshold = MIN_SCORE.get(region, 1) if source.kind in ("feed", "x_search") else 1
     cutoff = datetime.utcnow() - timedelta(days=MAX_AGE_DAYS)
     entries.sort(key=lambda e: e["published"] or datetime.utcnow(), reverse=True)
     new = 0
@@ -430,9 +596,10 @@ def fetch_source(source):
         fp = fingerprint(e["title"])
         if NewsItem.query.filter(db.or_(NewsItem.fingerprint == fp, NewsItem.url == e["url"])).first() is not None:
             continue
-        skip = source.kind == "feed" and prefilter_score(e["title"], e["snippet"]) == 0           # a targeted search needs no keyword filter; a general feed does
+        # a targeted Google search needs no keyword filter; a general feed or an X search does (International needs more hits); a chosen X account needs one
+        skip = (source.kind in ("feed", "x_search", "x_account")) and prefilter_score(e["title"], e["snippet"]) < threshold
         db.session.add(NewsItem(source_id=source.id, title=e["title"], url=e["url"], publisher=e["publisher"], published_at=e["published"], snippet=e["snippet"],
-                                fingerprint=fp, status="skipped" if skip else "new", fetched_at=datetime.utcnow()))
+                                region=region, unconfirmed=is_x, fingerprint=fp, status="skipped" if skip else "new", fetched_at=datetime.utcnow()))
         new += 1
     source.last_new_count = new
     source.last_status = f"OK: {len(entries)} found, {new} new"
@@ -575,6 +742,8 @@ def _query_items(args):
         q = q.filter(NewsItem.urgency == args["urgency"])
     if args.get("topic") in TOPICS:
         q = q.filter(NewsItem.topics_json.like('%"' + args["topic"].replace('"', "") + '"%'))
+    if args.get("region") in REGIONS:
+        q = q.filter(db.func.coalesce(NewsItem.region, "Zimbabwe") == args["region"])
     if args.get("pinned"):
         q = q.filter(NewsItem.pinned.is_(True))
     if args.get("unconfirmed"):
@@ -605,7 +774,7 @@ def index():
     if seen is not None:
         new_since = seen.seen_at
     related = related_clients(items[:150], current_user) if request.args.get("show", "relevant") != "hidden" else {}
-    page = render_template("newswatch/index.html", items=items, related=related, today=today, topics=TOPICS, urgencies=URGENCIES, args=request.args,
+    page = render_template("newswatch/index.html", items=items, related=related, today=today, topics=TOPICS, urgencies=URGENCIES, regions=REGIONS, args=request.args,
                            state=refresh_state(), configured=is_configured(), can_manage=can_manage(current_user), new_since=new_since,
                            n_sources=NewsSource.query.filter_by(active=True).count(), last=last_refresh_at(), refreshing=_state["running"] or started,
                            can_file=user_has_permission(current_user, "manage_legislative_updates"), social_hosts=SOCIAL_HOSTS)
@@ -690,7 +859,8 @@ def add_link():
     if NewsItem.query.filter(NewsItem.url == url[:1000]).first() is not None:
         flash("That link is already in News Watch.", "info")
         return redirect(url_for("news.index"))
-    item = NewsItem(title=title[:400], url=url[:1000], publisher=publisher[:200], published_at=datetime.utcnow(), snippet=snippet[:1200], fingerprint=fingerprint(title),
+    region = request.form.get("region") if request.form.get("region") in REGIONS else "Zimbabwe"
+    item = NewsItem(title=title[:400], url=url[:1000], publisher=publisher[:200], published_at=datetime.utcnow(), snippet=snippet[:1200], fingerprint=fingerprint(title), region=region,
                     status="new", unconfirmed=bool(social or pasted), shared_by_id=current_user.id, fetched_at=datetime.utcnow())
     db.session.add(item)
     db.session.commit()
@@ -783,8 +953,8 @@ def _manager_only():
 @login_required
 def sources():
     _manager_only()
-    return render_template("newswatch/sources.html", sources=NewsSource.query.order_by(NewsSource.id).all(), kinds=KINDS, starter=STARTER_SOURCES,
-                           configured=is_configured(), token_set=bool(os.environ.get("NEWS_WATCH_TOKEN")), state=refresh_state(),
+    return render_template("newswatch/sources.html", sources=NewsSource.query.order_by(NewsSource.id).all(), kinds=KINDS, starter_sets=STARTER_SETS, regions=REGIONS,
+                           configured=is_configured(), x_set=x_configured(), x_gap=X_MIN_GAP_HOURS, x_posts=X_POSTS_PER_FETCH, token_set=bool(os.environ.get("NEWS_WATCH_TOKEN")), state=refresh_state(),
                            counts={s.id: NewsItem.query.filter_by(source_id=s.id).count() for s in NewsSource.query.all()})
 
 
@@ -795,15 +965,25 @@ def add_source():
     kind = request.form.get("kind", "")
     query = (request.form.get("query") or "").strip()
     name = (request.form.get("name") or "").strip()[:120] or query[:60]
+    region = request.form.get("region") if request.form.get("region") in REGIONS else "Zimbabwe"
     if kind not in KINDS or not query:
-        flash("Choose a kind and enter the search words or address.", "danger")
+        flash("Choose a kind and enter the search words, the X username or the address.", "danger")
         return redirect(url_for("news.sources"))
-    if kind != "google_news":
+    if kind == "x_account":
+        handle = clean_handle(query)
+        if not handle:
+            flash("That is not an X username. Type it as @name or paste the account's x.com address.", "danger")
+            return redirect(url_for("news.sources"))
+        query = "@" + handle
+        name = (request.form.get("name") or "").strip()[:120] or "X: " + query
+    elif kind == "x_search":
+        name = (request.form.get("name") or "").strip()[:120] or "X search: " + query[:50]
+    elif kind != "google_news":
         ok, why = safe_url(query)
         if not ok:
             flash(why, "danger")
             return redirect(url_for("news.sources"))
-    db.session.add(NewsSource(name=name, kind=kind, target=query[:500], created_by_id=current_user.id))
+    db.session.add(NewsSource(name=name, kind=kind, target=query[:500], region=region, created_by_id=current_user.id))
     db.session.commit()
     flash("Source added. Use 'Look for news now' to try it.", "success")
     return redirect(url_for("news.sources"))
@@ -813,14 +993,15 @@ def add_source():
 @login_required
 def add_starter():
     _manager_only()
+    region = request.form.get("region") if request.form.get("region") in STARTER_SETS else "Zimbabwe"
     have = {(s.kind, s.target) for s in NewsSource.query.all()}
     added = 0
-    for name, kind, query in STARTER_SOURCES:
+    for name, kind, query in STARTER_SETS[region]:
         if (kind, query) not in have:
-            db.session.add(NewsSource(name=name, kind=kind, target=query, created_by_id=current_user.id))
+            db.session.add(NewsSource(name=name, kind=kind, target=query, region=region, created_by_id=current_user.id))
             added += 1
     db.session.commit()
-    flash(f"{added} starter source(s) added." if added else "The starter sources are already there.", "success")
+    flash(f"{added} {region} starter source(s) added." if added else f"The {region} starter sources are already there.", "success")
     return redirect(url_for("news.sources"))
 
 

@@ -228,8 +228,9 @@ class NewsSource(db.Model):
     __tablename__ = "news_source"
     id = db.Column(db.Integer, primary_key=True)
     name = db.Column(db.String(120), nullable=False)
-    kind = db.Column(db.String(20), nullable=False)          # google_news / feed / google_alert
+    kind = db.Column(db.String(20), nullable=False)          # google_news / feed / google_alert / x_account / x_search
     target = db.Column(db.String(500), nullable=False)
+    region = db.Column(db.String(20), default="Zimbabwe")     # Zimbabwe / South Africa / International
     active = db.Column(db.Boolean, default=True)
     created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
@@ -249,6 +250,7 @@ class NewsItem(db.Model):
     source_id = db.Column(db.Integer, db.ForeignKey("news_source.id"))
     title = db.Column(db.String(400), nullable=False)
     url = db.Column(db.String(1000), nullable=False)
+    region = db.Column(db.String(20), default="Zimbabwe")
     publisher = db.Column(db.String(200))
     published_at = db.Column(db.DateTime)
     snippet = db.Column(db.Text)

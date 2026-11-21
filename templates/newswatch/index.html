@@ -4,7 +4,7 @@
 {% set hidden_view = args.get('show') == 'hidden' %}
 <div class="page-header">
   <h1>News Watch</h1>
-  <p class="muted" style="margin:0;">Tax and business news the team should know about, found and summarised by the AI from the sources the firm chose.
+  <p class="muted" style="margin:0;">Tax, audit, accounting and business news (Zimbabwe, South Africa and international) the team should know about, found and summarised by the AI from the sources the firm chose.
     News is an unconfirmed signal, never law: check the instrument itself before relying on a story.</p>
 </div>
 
@@ -34,6 +34,7 @@
   <form method="get" action="{{ url_for('news.index') }}" class="form-row" style="align-items:flex-end;">
     <div style="flex:2;"><label for="q">Search</label><input type="text" id="q" name="q" value="{{ args.get('q','') }}" placeholder="e.g. VAT, ZiG, Finance Act"></div>
     <div><label for="urgency">Urgency</label><select id="urgency" name="urgency"><option value="">All</option>{% for u in urgencies %}<option{% if args.get('urgency') == u %} selected{% endif %}>{{ u }}</option>{% endfor %}</select></div>
+    <div><label for="region">Region</label><select id="region" name="region"><option value="">All</option>{% for r in regions %}<option{% if args.get('region') == r %} selected{% endif %}>{{ r }}</option>{% endfor %}</select></div>
     <div><label for="topic">Topic</label><select id="topic" name="topic"><option value="">All</option>{% for t in topics %}<option{% if args.get('topic') == t %} selected{% endif %}>{{ t }}</option>{% endfor %}</select></div>
     <div><label for="days">From</label><select id="days" name="days">{% for d, lab in [(2,'Last 2 days'),(7,'Last week'),(14,'Last 2 weeks'),(30,'Last month'),(90,'Last 3 months')] %}<option value="{{ d }}"{% if (args.get('days', type=int) or 14) == d %} selected{% endif %}>{{ lab }}</option>{% endfor %}</select></div>
     <div><label for="show">Show</label><select id="show" name="show"><option value="relevant">News that matters</option><option value="hidden"{% if hidden_view %} selected{% endif %}>Hidden (not relevant)</option></select></div>
@@ -50,6 +51,8 @@
     <input type="text" id="al_url" name="url" placeholder="https://..." required>
     <label for="al_text">Paste the text of the story or post {% if True %}<span class="muted" style="font-weight:normal;">(needed for social media such as X, Facebook, LinkedIn and WhatsApp, which the app cannot read itself; optional for a news page)</span>{% endif %}</label>
     <textarea id="al_text" name="text" rows="4"></textarea>
+    <label for="al_region">Region</label>
+    <select id="al_region" name="region" style="max-width:220px;">{% for r in regions %}<option>{{ r }}</option>{% endfor %}</select>
     <p class="muted" style="font-size:12px;margin:4px 0 8px;">Anything added this way, and anything from social media, is marked unconfirmed until a person checks it against the real source.</p>
     <button type="submit" class="btn small gold">Add to News Watch</button>
   </form>
@@ -63,6 +66,7 @@
 <div class="card" id="n{{ it.id }}" style="padding:12px 16px;border-left:4px solid {% if it.urgency == 'Urgent' %}#b3261e{% elif it.urgency == 'Important' %}#b8923a{% else %}#d5d9de{% endif %};">
   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;font-size:12px;">
     {% if it.urgency == 'Urgent' %}<span class="badge overdue">Urgent</span>{% elif it.urgency == 'Important' %}<span class="badge" style="background:#b8923a;color:#fff;">Important</span>{% elif it.urgency %}<span class="badge">FYI</span>{% endif %}
+    {% if it.region and it.region != 'Zimbabwe' %}<span class="badge" style="background:#e3ecf7;color:#1f4e79;">{{ it.region }}</span>{% endif %}
     {% if it.pinned %}<span class="badge status-Completed">Pinned</span>{% endif %}
     {% if it.unconfirmed %}<span class="badge" style="background:#fdf1d3;color:#7a5b00;">Unconfirmed{% if it.shared_by %}: added by {{ it.shared_by.name }}{% endif %}</span>{% endif %}
     {% for t in it.topics %}<span class="muted">{{ t }}</span>{% if not loop.last %} &middot; {% endif %}{% endfor %}

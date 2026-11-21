@@ -36,6 +36,15 @@ ATOM = f"""<?xml version="1.0" encoding="utf-8"?><feed xmlns="http://www.w3.org/
 <entry><title>Celebrity wedding photos released</title><link href="https://example.org/wedding"/><updated>{(NOW - dtm.timedelta(hours=2)).strftime('%Y-%m-%dT%H:%M:%SZ')}</updated><summary>Photos from the big day.</summary></entry>
 <entry><title>RBZ tightens exchange control rules on offshore payments</title><link href="https://example.org/rbz-dupe"/><updated>{(NOW - dtm.timedelta(hours=1)).strftime('%Y-%m-%dT%H:%M:%SZ')}</updated><summary>Same story from another site.</summary></entry>
 </feed>""".encode()
+SA_GOOGLE = f"""<?xml version="1.0"?><rss version="2.0"><channel><item><title>SARS announces VAT audit drive for importers - Daily Maverick</title><link>https://news.google.com/rss/articles/ZA1</link>
+<pubDate>{rfc(NOW - dtm.timedelta(hours=4))}</pubDate><source url="https://dailymaverick.co.za">Daily Maverick</source></item></channel></rss>""".encode()
+INTL_GOOGLE = f"""<?xml version="1.0"?><rss version="2.0"><channel><item><title>PCAOB fines audit firm over quality control failures - Reuters</title><link>https://news.google.com/rss/articles/US1</link>
+<pubDate>{rfc(NOW - dtm.timedelta(hours=4))}</pubDate><source url="https://reuters.com">Reuters</source></item></channel></rss>""".encode()
+INTL_FEED = f"""<?xml version="1.0"?><rss version="2.0"><channel><title>Markets</title>
+<item><title>IASB issues amendments to IFRS 18 presentation requirements</title><link>https://intl.example.org/iasb</link><pubDate>{rfc(NOW - dtm.timedelta(hours=2))}</pubDate><description>The accounting standard setter published amendments.</description></item>
+<item><title>Tech stock jumps 5% after earnings beat</title><link>https://intl.example.org/stock</link><pubDate>{rfc(NOW - dtm.timedelta(hours=2))}</pubDate><description>Shares rallied.</description></item>
+<item><title>Dow rises as bank earnings arrive</title><link>https://intl.example.org/dow</link><pubDate>{rfc(NOW - dtm.timedelta(hours=2))}</pubDate><description>Markets closed higher.</description></item>
+</channel></rss>""".encode()
 EVIL = b'<?xml version="1.0"?><!DOCTYPE lolz [<!ENTITY lol "lol"><!ENTITY lol2 "&lol;&lol;">]><rss version="2.0"><channel><item><title>&lol2;</title><link>https://x.org/a</link></item></channel></rss>'
 
 # ---- address safety (names are given a public address, as the real internet would; the test machine has no DNS)
@@ -88,6 +97,9 @@ admin, partner, staff = login(aid), login(pid), login(sid)
 calls = {"fetch": [], "ai": []}
 def fake_fetch(url, timeout=15, max_bytes=2_000_000):
     calls["fetch"].append(url)
+    if "ceid=ZA:en" in url: return SA_GOOGLE, url, None
+    if "news.google.com/rss/search" in url and "ceid=US:en" in url: return INTL_GOOGLE, url, None
+    if url == "https://intl.example.org/feed": return INTL_FEED, url, None
     if "news.google.com/rss/search" in url: return GOOGLE, url, None
     if url == "https://example.org/feed": return ATOM, url, None
     if url == "https://broken.example.org/feed": return None, url, "The site answered 500."
@@ -301,6 +313,146 @@ with app.app_context():
 admin.post(f"/news-watch/sources/{sid_src}/delete")
 with app.app_context():
     check(NewsSource.query.get(sid_src) is None and NewsItem.query.filter(NewsItem.title.like("Budget 2027%")).first() is not None, "a removed source keeps its stories")
+
+
+# ---- international, South Africa and X (Twitter)
+NW._call_triage = fake_ai
+check(NW.google_news_url("SARS", "South Africa").endswith("&hl=en-ZA&gl=ZA&ceid=ZA:en") and NW.google_news_url("IFRS", "International").endswith("&hl=en-US&gl=US&ceid=US:en"), "each region searches its own Google News edition")
+check(NW.clean_handle("@IFRSFoundation") == "IFRSFoundation" and NW.clean_handle("https://x.com/CFAInstitute/status/1") == "CFAInstitute" and NW.clean_handle("twitter.com/saica_news") == "saica_news"
+      and NW.clean_handle("not a handle!!") == "" and NW.clean_handle("averyveryverylongusername") == "", "X usernames are read from @name or an address; nonsense is refused")
+check(NW.prefilter_score("Dow rises as bank earnings arrive", "Markets closed higher.") < NW.MIN_SCORE["International"] and NW.prefilter_score("IASB issues amendments to IFRS 18", "accounting standard") >= 2, "market chatter does not pass the stricter International filter")
+
+with app.app_context():
+    for s_ in NewsSource.query.all(): s_.active = False
+    db.session.commit()
+admin.post("/news-watch/sources/starter", data={"region": "South Africa"})
+admin.post("/news-watch/sources/starter", data={"region": "International"})
+admin.post("/news-watch/sources/starter", data={"region": "International"})
+with app.app_context():
+    sa_n = NewsSource.query.filter_by(region="South Africa").count(); in_n = NewsSource.query.filter_by(region="International").count()
+    check(sa_n == len(NW.STARTER_SOUTH_AFRICA) and in_n == len(NW.STARTER_INTERNATIONAL), "the South Africa and International starter sets are added once each: %d / %d" % (sa_n, in_n))
+    check(all(NewsSource.query.filter_by(name=n).first().region == "Zimbabwe" for n in ("Mining tax",)), "existing sources stay Zimbabwean")
+    names = {x.name for x in NewsSource.query.all()}
+    check({"IRBA website", "SAICA website", "CFA Institute", "Yahoo Finance: audit, accounting and tax", "CFA Institute (publications feed)", "Big Four news"} <= names, "the sets name SARS, IRBA, SAICA, CFA, Yahoo Finance and the Big Four")
+    for s_ in NewsSource.query.all(): s_.active = False
+    db.session.commit()
+partner.post("/news-watch/sources/add", data={"kind": "google_news", "name": "SA test", "query": "SARS VAT", "region": "South Africa"})
+partner.post("/news-watch/sources/add", data={"kind": "google_news", "name": "Intl test", "query": "PCAOB", "region": "International"})
+partner.post("/news-watch/sources/add", data={"kind": "feed", "name": "Markets feed", "query": "https://intl.example.org/feed", "region": "International"})
+r = partner.post("/news-watch/sources/add", data={"kind": "x_account", "name": "", "query": "https://x.com/IFRS", "region": "International"})
+partner.post("/news-watch/sources/add", data={"kind": "x_account", "query": "not a handle!!", "region": "International"})
+partner.post("/news-watch/sources/add", data={"kind": "x_search", "name": "Standards chatter", "query": "(IFRS OR IAASB) (standard OR exposure)", "region": "International"})
+with app.app_context():
+    xa = NewsSource.query.filter_by(kind="x_account").all()
+    check(len(xa) == 1 and xa[0].target == "@IFRS" and xa[0].name == "X: @IFRS" and xa[0].region == "International", "an X account is added from its address, a bad username is refused")
+    check(NewsSource.query.filter_by(kind="x_search").count() == 1, "an X search is added")
+
+# X without a key: saved, but says so, and nothing is fetched
+os.environ.pop("X_BEARER_TOKEN", None)
+x_calls = []
+_real_x_get = NW.x_get
+with app.app_context():
+    for s_ in NewsSource.query.filter(NewsSource.kind.in_(("x_account", "x_search"))): s_.active = True
+    db.session.commit()
+    NW.refresh_all(True)
+    st_ = {x.name: x for x in NewsSource.query.all()}
+    check(st_["X: @IFRS"].last_status.startswith("Failed") and "X_BEARER_TOKEN" in st_["X: @IFRS"].last_status, "without an X key the source says so")
+    for s_ in NewsSource.query.filter(NewsSource.kind.in_(("x_account", "x_search"))): s_.last_fetched_at = None
+    db.session.commit()
+
+# X with a key (the API is simulated)
+os.environ["X_BEARER_TOKEN"] = "test-token"
+def fake_x(path, params):
+    x_calls.append((path, dict(params)))
+    if path == "/users/by/username/IFRS": return {"data": {"id": "111", "username": "IFRS"}}, None
+    if path == "/users/111/tweets":
+        return {"data": [{"id": "9001", "text": "New IASB exposure draft on IFRS 9 amendments is out for comment https://t.co/abc", "created_at": NOW.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "author_id": "111"},
+                         {"id": "9002", "text": "Happy Friday everyone!", "created_at": NOW.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "author_id": "111"}]}, None
+    if path == "/tweets/search/recent":
+        return {"data": [{"id": "9101", "text": "IAASB proposes revised ISA standard on going concern audit work", "created_at": NOW.strftime("%Y-%m-%dT%H:%M:%S.000Z"), "author_id": "222"}],
+                "includes": {"users": [{"id": "222", "username": "auditwatcher", "name": "Audit Watcher"}]}}, None
+    return None, "unexpected"
+NW.x_get = fake_x
+with app.app_context():
+    NW._x_ids.clear()
+    msg = NW.refresh_all(True)
+    it1 = NewsItem.query.filter_by(url="https://x.com/IFRS/status/9001").first()
+    it2 = NewsItem.query.filter_by(url="https://x.com/IFRS/status/9002").first()
+    it3 = NewsItem.query.filter_by(url="https://x.com/auditwatcher/status/9101").first()
+    check(it1 is not None and it1.unconfirmed and it1.publisher == "@IFRS (X)" and it1.region == "International" and it1.status == "relevant" and "https://t.co" not in it1.title, "an X post is stored as an unconfirmed International story, link removed from the title")
+    check(it2 is not None and it2.status == "skipped", "an X post with nothing relevant is skipped without the AI")
+    check(it3 is not None and it3.publisher == "@auditwatcher (X)" and it3.unconfirmed, "an X search result is credited to its author")
+    qry = [c for c in x_calls if c[0] == "/tweets/search/recent"][0][1]["query"]
+    check("-is:retweet" in qry and "lang:en" in qry, "the X search leaves out retweets and non-English posts")
+    tw = [c for c in x_calls if c[0] == "/users/111/tweets"][0][1]
+    check(tw["exclude"] == "retweets,replies" and tw["max_results"] == NW.X_POSTS_PER_FETCH, "an X account read leaves out retweets and replies and takes a handful of posts")
+    n_calls = len(x_calls)
+    NW.refresh_all(True)
+    check(len(x_calls) == n_calls, "X sources are not read again within the gap, even when forced (the API is paid)")
+    for s_ in NewsSource.query.filter(NewsSource.kind.in_(("x_account", "x_search"))): s_.last_fetched_at = dtm.datetime.utcnow() - dtm.timedelta(hours=NW.X_MIN_GAP_HOURS + 1)
+    db.session.commit()
+    n_calls = len(x_calls)
+    NW.refresh_all(False)
+    check(len(x_calls) > n_calls and not any(c[0] == "/users/by/username/IFRS" for c in x_calls[n_calls:]), "after the gap they are read again, and the account's id is remembered")
+    check(NewsItem.query.filter_by(url="https://x.com/IFRS/status/9001").count() == 1, "the same post is not stored twice")
+
+# X errors show a plain message
+def x_err(code):
+    class R:
+        status_code = code
+        def json(self): return {}
+    return R()
+import requests as _rq
+_real_get = _rq.get
+for code, word in ((401, "refused the key"), (429, "credits"), (500, "answered 500")):
+    _rq.get = lambda *a, **k: x_err(code)
+    d, e = _real_x_get("/users/by/username/x", {})
+    check(d is None and word in e, f"X error {code} is explained")
+_rq.get = _real_get
+NW.x_get = fake_x
+
+# regional feeds
+with app.app_context():
+    for s_ in NewsSource.query.all(): s_.active = False
+    for n in ("SA test", "Intl test", "Markets feed"): NewsSource.query.filter_by(name=n).first().active = True
+    db.session.commit()
+    msg = NW.refresh_all(True)
+    sa_it = NewsItem.query.filter(NewsItem.title.like("SARS announces%")).first()
+    in_it = NewsItem.query.filter(NewsItem.title.like("PCAOB fines%")).first()
+    check(sa_it is not None and sa_it.region == "South Africa" and in_it is not None and in_it.region == "International", "stories take the region of the source that found them")
+    check(any("ceid=ZA:en" in u for u in calls["fetch"]) and any("ceid=US:en" in u for u in calls["fetch"]), "the South Africa and International searches used their own Google News editions")
+    iasb = NewsItem.query.filter(NewsItem.title.like("IASB issues%")).first()
+    stock = NewsItem.query.filter(NewsItem.title.like("Tech stock%")).first(); dow = NewsItem.query.filter(NewsItem.title.like("Dow rises%")).first()
+    check(iasb is not None and iasb.status == "relevant" and iasb.region == "International", "an accounting standards story from an international feed is read")
+    check(stock.status == "skipped" and dow.status == "skipped", "share-price and market stories from an international feed are skipped before the AI")
+    check(any("Region: South Africa" in m for m in calls["ai"]) and any("Region: International" in m for m in calls["ai"]), "the AI is told each story's region")
+    check("Zimbabwe, South Africa and international" in NW.TRIAGE_SYSTEM or "Zimbabwe" in NW.TRIAGE_SYSTEM and "share-price moves" in NW.TRIAGE_SYSTEM, "the AI is told to leave out market chatter and judge by the Zimbabwean angle")
+
+# Zimbabwean stories are read before foreign ones when the AI limit bites
+with app.app_context():
+    NewsItem.query.filter(NewsItem.url.in_(("https://example.org/zz1", "https://example.org/zz2"))).delete(synchronize_session=False)
+    a = NewsItem(title="OECD tax update zz", url="https://example.org/zz1", region="International", published_at=dtm.datetime.utcnow(), fingerprint="zz1", status="new")
+    b = NewsItem(title="ZIMRA notice zz", url="https://example.org/zz2", region="Zimbabwe", published_at=dtm.datetime.utcnow() - dtm.timedelta(days=2), fingerprint="zz2", status="new")
+    db.session.add_all([a, b]); db.session.commit()
+    NW.triage_pending(limit=1)
+    check(NewsItem.query.filter_by(url="https://example.org/zz2").first().status != "new" and NewsItem.query.filter_by(url="https://example.org/zz1").first().status == "new", "Zimbabwean stories are read by the AI first")
+    NW.triage_pending()
+
+# the page
+pg = staff.get("/news-watch/?region=International").get_data(as_text=True)
+check("IASB issues amendments" in pg and "ZIMRA extends VAT" not in pg and "Region" in pg, "the page filters by region")
+check("Unconfirmed" in pg and "International" in pg, "X posts and foreign stories are labelled")
+pg = staff.get("/news-watch/?region=South+Africa").get_data(as_text=True)
+check("SARS announces VAT audit drive" in pg and "IASB issues" not in pg, "the South Africa view shows only South African stories")
+sp = partner.get("/news-watch/sources").get_data(as_text=True)
+check("Add the South Africa set" in sp and "Add the International set" in sp and "Add the Zimbabwe set" in sp and "The X key is set on this server" in sp, "the sources page offers the three sets and says the X key is set")
+os.environ.pop("X_BEARER_TOKEN", None)
+sp = partner.get("/news-watch/sources").get_data(as_text=True)
+check("X_BEARER_TOKEN" in sp and "X (Twitter) account" in sp and "X (Twitter) search" in sp and "The X key is set on this server" not in sp, "without the key the page explains how to set it, and lists the X kinds")
+r = partner.post("/news-watch/add-link", data={"url": "https://x.com/someone/status/5", "text": "Interesting transfer pricing ruling from OECD", "region": "International"}, follow_redirects=True)
+with app.app_context():
+    sh = NewsItem.query.filter_by(url="https://x.com/someone/status/5").first()
+    check(sh is not None and sh.region == "International" and sh.unconfirmed, "a link added by hand can be given a region")
 
 print(len(fails), "failure(s)")
 sys.exit(1 if fails else 0)
