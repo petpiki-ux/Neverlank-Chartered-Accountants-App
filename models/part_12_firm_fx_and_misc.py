@@ -1,4 +1,4 @@
-"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine.
+"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine, MarketingLead, LeadTouch.
 
 See __init__.py: all parts share one set of names, exactly as the single file models.py did."""
 
@@ -295,3 +295,62 @@ class NewsSeen(db.Model):
     __tablename__ = "news_seen"
     user_id = db.Column(db.Integer, db.ForeignKey("user.id"), primary_key=True)
     seen_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+
+# --------------------------------------------------------------------------- Leads (marketing sign-ups)
+
+LEAD_STATUSES = ("New", "Contacted", "Replied", "Booked", "Won", "Lost", "Unsubscribed")
+LEAD_STOP_STATUSES = ("Replied", "Booked", "Won", "Lost", "Unsubscribed")     # once a lead is in one of these, the follow-up sequence stops
+
+
+class MarketingLead(db.Model):
+    """One person who asked for a lead magnet (e.g. the Compliance Calendar) on the landing page."""
+    __tablename__ = "marketing_lead"
+    id = db.Column(db.Integer, primary_key=True)
+    first_name = db.Column(db.String(80), nullable=False)
+    last_name = db.Column(db.String(80), default="")
+    company = db.Column(db.String(160), default="")
+    job_role = db.Column(db.String(60), default="")
+    email = db.Column(db.String(200), nullable=False, index=True)
+    mobile = db.Column(db.String(40), default="")
+    headache = db.Column(db.String(80), default="")
+    source = db.Column(db.String(120), default="Magnet 1: Compliance Calendar")
+    utm_source = db.Column(db.String(80), default="")
+    utm_medium = db.Column(db.String(80), default="")
+    utm_campaign = db.Column(db.String(80), default="")
+    consent_email = db.Column(db.Boolean, default=False)
+    consent_whatsapp = db.Column(db.Boolean, default=False)
+    consent_at = db.Column(db.DateTime)
+    status = db.Column(db.String(20), default="New", index=True)
+    priority = db.Column(db.String(10), default="Normal")        # High: an owner, director or CEO, or a company that already asked about audit or tax
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    notes = db.Column(db.Text, default="")
+    unsub_token = db.Column(db.String(40), unique=True, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_touch_at = db.Column(db.DateTime)
+
+    owner = db.relationship("User", foreign_keys=[owner_id])
+    touches = db.relationship("LeadTouch", backref="lead", cascade="all, delete-orphan", order_by="LeadTouch.due_at")
+
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.last_name}".strip()
+
+
+class LeadTouch(db.Model):
+    """One planned follow-up for a lead: an automatic email, or a personal note or WhatsApp message for a person to send."""
+    __tablename__ = "lead_touch"
+    id = db.Column(db.Integer, primary_key=True)
+    lead_id = db.Column(db.Integer, db.ForeignKey("marketing_lead.id"), nullable=False, index=True)
+    step = db.Column(db.String(20), nullable=False)               # note24h, email1, email2, whatsapp5, email3, reengage
+    channel = db.Column(db.String(12), default="email")           # email / whatsapp
+    mode = db.Column(db.String(8), default="manual")              # auto: the app sends it; manual: a person sends it
+    due_at = db.Column(db.DateTime, nullable=False, index=True)
+    status = db.Column(db.String(10), default="pending", index=True)   # pending / sent / done / skipped / failed
+    tries = db.Column(db.Integer, default=0)
+    done_at = db.Column(db.DateTime)
+    done_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    error = db.Column(db.String(300))
+
+    done_by = db.relationship("User", foreign_keys=[done_by_id])

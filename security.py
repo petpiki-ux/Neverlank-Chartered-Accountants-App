@@ -54,6 +54,17 @@ def same_origin_ok(req=None):
     return True
 
 
+def lead_capture_allowed(req=None):
+    """The one public sign-up route (leads.capture) may be posted to from the other websites the firm listed in LEADS_ALLOWED_ORIGINS
+    (a landing page hosted elsewhere). Nothing else is opened up, and a site not on the list is still refused."""
+    req = req or request
+    if req.endpoint != "leads.capture":
+        return False
+    origin = (req.headers.get("Origin") or "").strip().rstrip("/").lower()
+    listed = {o.strip().rstrip("/").lower() for o in os.environ.get("LEADS_ALLOWED_ORIGINS", "").split(",") if o.strip()}
+    return bool(origin) and origin in listed
+
+
 # --------------------------------------------------------------------------- uploads
 
 # Every file type any page of the app accepts. A page may accept fewer (its own list still applies); none may accept more.
@@ -265,7 +276,7 @@ def init_security(app):
 
     @app.before_request
     def _csrf_same_origin():
-        if request.method in UNSAFE_METHODS and not same_origin_ok():
+        if request.method in UNSAFE_METHODS and not same_origin_ok() and not lead_capture_allowed():
             abort(403, description="This request did not come from this site, so it was refused (cross-site request protection). "
                                    "Go back, reload the page and try again.")
 

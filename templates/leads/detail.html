@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}{{ lead.full_name }} - Leads - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>{{ lead.full_name }}{% if lead.company %} <span class="muted" style="font-weight:normal;">&middot; {{ lead.company }}</span>{% endif %}</h1>
+  <p class="muted" style="margin:0;"><a href="{{ url_for('leads.index') }}">back to Leads</a> &middot; received {{ (lead.created_at|cat).strftime('%d %b %Y %H:%M') }} &middot; {{ lead.source }}</p>
+</div>
+
+<div class="card">
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px 24px;">
+    <div><span class="muted">Email</span><br><a href="mailto:{{ lead.email }}">{{ lead.email }}</a></div>
+    <div><span class="muted">Mobile</span><br>{% if lead.mobile %}{{ lead.mobile }}{% if wa_number %} &middot; <a href="https://wa.me/{{ wa_number }}" target="_blank" rel="noopener">WhatsApp</a>{% endif %}{% else %}-{% endif %}</div>
+    <div><span class="muted">Role</span><br>{{ lead.job_role or '-' }}</div>
+    <div><span class="muted">Biggest headache</span><br>{{ lead.headache or '-' }}</div>
+    <div><span class="muted">Agreed to emails</span><br>{{ 'Yes' if lead.consent_email else 'No' }}{% if lead.consent_at %} <span class="muted" style="font-size:12px;">({{ (lead.consent_at|cat).strftime('%d %b %Y') }})</span>{% endif %}</div>
+    <div><span class="muted">Agreed to WhatsApp</span><br>{{ 'Yes' if lead.consent_whatsapp else 'No' }}</div>
+    {% if lead.utm_source or lead.utm_medium or lead.utm_campaign %}<div><span class="muted">Came from</span><br>{{ lead.utm_source }} {{ lead.utm_medium }} {{ lead.utm_campaign }}</div>{% endif %}
+  </div>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Owner, status and notes</h3>
+  <form method="post" action="{{ url_for('leads.update', lead_id=lead.id) }}">
+    <div class="form-row">
+      <div><label for="owner_id">Owner</label><select id="owner_id" name="owner_id"><option value="">Nobody yet</option>{% for u in owners %}<option value="{{ u.id }}"{% if lead.owner_id == u.id %} selected{% endif %}>{{ u.name }}</option>{% endfor %}</select></div>
+      <div><label for="status">Status</label><select id="status" name="status">{% for s in statuses %}<option{% if lead.status == s %} selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+      <div><label for="priority">Priority</label><select id="priority" name="priority">{% for p in priorities %}<option{% if lead.priority == p %} selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+    </div>
+    <label for="notes">Notes</label>
+    <textarea id="notes" name="notes" rows="5">{{ lead.notes }}</textarea>
+    <p class="muted" style="font-size:12.5px;margin:4px 0 10px;">Replied, Booked, Won, Lost and Unsubscribed all stop the follow-up emails.</p>
+    <button type="submit" class="btn small gold">Save</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Follow-up plan</h3>
+  <table>
+    <thead><tr><th>Step</th><th>Due</th><th>How</th><th>State</th><th></th></tr></thead>
+    <tbody>
+    {% for touch, name, d in rows %}
+    <tr>
+      <td>{{ name }}<details><summary class="muted" style="cursor:pointer;font-size:12px;">wording</summary><pre style="white-space:pre-wrap;font:inherit;font-size:13px;background:#faf8f1;padding:8px;border-radius:6px;">{{ d.text }}</pre></details></td>
+      <td>{{ (touch.due_at|cat).strftime('%d %b') }}</td>
+      <td class="muted">{{ 'sent by the app' if touch.mode == 'auto' else 'by a person' }}</td>
+      <td>{{ touch.status }}{% if touch.done_at %} <span class="muted" style="font-size:12px;">{{ (touch.done_at|cat).strftime('%d %b') }}{% if touch.done_by %} by {{ touch.done_by.name }}{% endif %}</span>{% endif %}{% if touch.error %}<div style="color:#b3261e;font-size:12px;">{{ touch.error }}</div>{% endif %}</td>
+      <td class="text-right">
+        {% if touch.status in ('pending', 'failed') and lead.status not in ('Replied','Booked','Won','Lost','Unsubscribed') %}
+          {% if touch.channel == 'email' and email_ready %}<form method="post" action="{{ url_for('leads.send_touch', touch_id=touch.id) }}" class="inline"><input type="hidden" name="next" value="{{ url_for('leads.detail', lead_id=lead.id) }}"><button type="submit" class="btn small gold">Send now</button></form>{% endif %}
+          {% if touch.channel == 'whatsapp' and d.wa %}<a class="btn small gold" href="{{ d.wa }}" target="_blank" rel="noopener">Open WhatsApp</a>{% endif %}
+          <form method="post" action="{{ url_for('leads.done_touch', touch_id=touch.id) }}" class="inline"><input type="hidden" name="next" value="{{ url_for('leads.detail', lead_id=lead.id) }}"><button type="submit" class="btn small secondary">Mark done</button></form>
+          <form method="post" action="{{ url_for('leads.skip_touch', touch_id=touch.id) }}" class="inline"><input type="hidden" name="next" value="{{ url_for('leads.detail', lead_id=lead.id) }}"><button type="submit" class="btn small secondary">Skip</button></form>
+        {% endif %}
+      </td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+
+{% if can_delete %}
+<form method="post" action="{{ url_for('leads.delete', lead_id=lead.id) }}" onsubmit="return confirm('Delete this lead and its follow-up plan for good? This cannot be undone.');">
+  <button type="submit" class="btn small danger">Delete this lead</button>
+</form>
+{% endif %}
+{% endblock %}

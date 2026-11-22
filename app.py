@@ -955,6 +955,9 @@ def create_app():
     app.register_blueprint(taxreports_bp)
     from news_watch import news_bp
     app.register_blueprint(news_bp)
+    from leads import leads_bp, page_bp as leads_page_bp
+    app.register_blueprint(leads_bp)
+    app.register_blueprint(leads_page_bp)
     app.register_blueprint(dtadj_bp)
     from cover_pages import covers_bp
     app.register_blueprint(covers_bp)
@@ -1126,10 +1129,17 @@ def create_app():
         invoice_reminder_count = 0
         daily_fire_count = 0
         news_unread_count = 0
+        leads_badge = 0
         if current_user.is_authenticated:
             from models import Invoice
             import news_watch as _nw
             news_unread_count = _nw.unread_count(current_user)
+            try:
+                if user_has_permission(current_user, "manage_leads"):
+                    import leads as _leads
+                    leads_badge = _leads.due_count()
+            except Exception:
+                db.session.rollback()
             from invoice_send import due_reminder_count
             invoice_reminder_count = due_reminder_count()
             if current_user.role in ("admin", "partner"):
@@ -1161,6 +1171,7 @@ def create_app():
             "recurring_review_count": recurring_review_count,
             "daily_fire_count": daily_fire_count,
             "news_unread_count": news_unread_count,
+            "leads_badge": leads_badge,
             "zimra_overdue_count": zimra_overdue_count,
             "zimra_approval_count": zimra_approval_count,
             "learning_pending_count": learning_pending_count,

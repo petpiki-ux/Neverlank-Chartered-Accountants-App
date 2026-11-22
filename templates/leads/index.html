@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Leads - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set back = request.full_path %}
+<div class="page-header">
+  <h1>Leads</h1>
+  <p class="muted" style="margin:0;">People who asked for the {{ setup.year }} Compliance Calendar on the firm's web page. Each has a named owner and a follow-up plan: a personal note within 24 hours, then emails on days 0, 3, 7 and 14 and a WhatsApp check-in on day 5.
+    Someone who replies, books, is won or lost, or unsubscribes is not followed up again.</p>
+</div>
+
+<details class="card" style="padding:10px 16px;"{% if not setup.email or not setup.calendar %} open{% endif %}>
+  <summary style="cursor:pointer;"><strong>Set-up</strong>
+    <span class="muted" style="font-size:12.5px;">{% if setup.auto %}Emails go out automatically.{% else %}Emails wait for a person to press Send (automatic sending is off).{% endif %}</span></summary>
+  <table style="margin-top:8px;">
+    <tbody>
+      <tr><td style="width:26px;">&#10003;</td><td>The web page people sign up on</td><td class="muted" style="font-size:12.5px;"><a href="{{ setup.page }}" target="_blank" rel="noopener">{{ setup.page }}</a> &middot; share this link, or put it behind your website button</td></tr>
+      <tr><td>{{ '&#10003;'|safe if setup.owner else '&ndash;'|safe }}</td><td>Who owns new leads</td><td class="muted" style="font-size:12.5px;">{% if setup.owner %}{{ setup.owner.name }} (set <code>LEADS_DEFAULT_OWNER</code> to a username or email to change it){% else %}Nobody: no active partner was found. Set <code>LEADS_DEFAULT_OWNER</code>.{% endif %}</td></tr>
+      <tr><td>{{ '&#10003;'|safe if setup.email else '&ndash;'|safe }}</td><td>Email service</td><td class="muted" style="font-size:12.5px;">{% if setup.email %}Ready.{% else %}Not set up: add <code>EMAIL_API_KEY</code> and <code>EMAIL_FROM</code> on the server. Until then the emails can still be opened in your own email program.{% endif %}</td></tr>
+      <tr><td>{{ '&#10003;'|safe if setup.calendar else '&ndash;'|safe }}</td><td>Calendar file link</td><td class="muted" style="font-size:12.5px;">{% if setup.calendar %}Set.{% else %}Not set: add <code>LEADS_CALENDAR_URL</code> (where people can download the calendar). Automatic emails wait for this.{% endif %}</td></tr>
+      <tr><td>{{ '&#10003;'|safe if setup.auto else '&ndash;'|safe }}</td><td>Automatic emails</td><td class="muted" style="font-size:12.5px;">{% if setup.auto %}On.{% elif setup.auto_requested %}Asked for, but waiting for the email service and the calendar link above.{% else %}Off. Set <code>LEADS_AUTO_EMAIL=1</code> when you are happy with the wording of the emails.{% endif %}</td></tr>
+      <tr><td>{{ '&#10003;'|safe if setup.booking else '&ndash;'|safe }}</td><td>Booking page (optional)</td><td class="muted" style="font-size:12.5px;">{% if setup.booking %}Set.{% else %}Not set: the emails ask people to reply or WhatsApp instead. Add <code>LEADS_BOOKING_URL</code> to use a booking page.{% endif %}</td></tr>
+      <tr><td>{{ '&#10003;'|safe if setup.notify else '&ndash;'|safe }}</td><td>Who is told of a new sign-up</td><td class="muted" style="font-size:12.5px;">{% if setup.notify %}Set.{% else %}The lead's owner, if they have an email on their profile. Add <code>LEADS_NOTIFY_EMAIL</code> to name others.{% endif %}</td></tr>
+      <tr><td>{{ '&#10003;'|safe if setup.cron else '&ndash;'|safe }}</td><td>Timer (optional)</td><td class="muted" style="font-size:12.5px;">{% if setup.cron %}Set.{% else %}Without it, the follow-up emails go out when someone opens the app. Add <code>LEADS_CRON_TOKEN</code> and call <code>/leads/cron?token=...</code> from a Render Cron Job to send them on time every day.{% endif %}</td></tr>
+    </tbody>
+  </table>
+</details>
+
+<div class="card">
+  <h3 class="mt-0">Do these now {% if due %}<span class="badge" style="background:#b8923a;color:#fff;">{{ due|length }}</span>{% endif %}</h3>
+  {% if not due %}<p class="muted" style="margin:0;">Nothing is waiting. New sign-ups appear here with the wording already written.</p>{% endif %}
+  {% for touch, name, d in due %}
+  {% set lead = touch.lead %}
+  <div style="border-top:1px solid #e5e0d0;padding:10px 0;">
+    <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+      <strong><a href="{{ url_for('leads.detail', lead_id=lead.id) }}">{{ lead.full_name }}</a></strong>
+      {% if lead.company %}<span>{{ lead.company }}</span>{% endif %}
+      {% if lead.priority == 'High' %}<span class="badge overdue">High</span>{% endif %}
+      <span class="muted" style="font-size:12.5px;">{{ name }} &middot; due {{ (touch.due_at|cat).strftime('%d %b') }}{% if touch.status == 'failed' %} &middot; <span style="color:#b3261e;">could not be sent: {{ touch.error }}</span>{% endif %}</span>
+      <span style="flex:1"></span>
+      {% if touch.channel == 'email' %}
+        {% if email_ready %}<form method="post" action="{{ url_for('leads.send_touch', touch_id=touch.id) }}" class="inline"><input type="hidden" name="next" value="{{ back }}"><button type="submit" class="btn small gold">Send now</button></form>{% endif %}
+        <a class="btn small secondary" href="mailto:{{ lead.email }}?subject={{ d.subject|urlencode }}&amp;body={{ d.text|urlencode }}">Open in my email</a>
+      {% elif d.wa %}
+        <a class="btn small gold" href="{{ d.wa }}" target="_blank" rel="noopener">Open WhatsApp</a>
+      {% endif %}
+      <form method="post" action="{{ url_for('leads.done_touch', touch_id=touch.id) }}" class="inline"><input type="hidden" name="next" value="{{ back }}"><button type="submit" class="btn small secondary">Mark done</button></form>
+      <form method="post" action="{{ url_for('leads.skip_touch', touch_id=touch.id) }}" class="inline"><input type="hidden" name="next" value="{{ back }}"><button type="submit" class="btn small secondary">Skip</button></form>
+    </div>
+    <details style="margin-top:4px;"><summary class="muted" style="cursor:pointer;font-size:12.5px;">See the wording{% if touch.channel == 'email' %} ({{ d.subject }}){% endif %}</summary>
+      <pre style="white-space:pre-wrap;font:inherit;font-size:13px;background:#faf8f1;padding:10px;border-radius:6px;margin:6px 0 0;">{{ d.text }}</pre></details>
+  </div>
+  {% endfor %}
+</div>
+
+<div class="card" style="padding:10px 16px;">
+  <form method="get" action="{{ url_for('leads.index') }}" class="form-row" style="align-items:flex-end;">
+    <div style="flex:2;"><label for="q">Search</label><input type="text" id="q" name="q" value="{{ args.get('q','') }}" placeholder="name, company or email"></div>
+    <div><label for="status">Status</label><select id="status" name="status"><option value="">All ({{ total }})</option><option value="open"{% if args.get('status') == 'open' %} selected{% endif %}>Still being followed up</option>{% for s in statuses %}<option value="{{ s }}"{% if args.get('status') == s %} selected{% endif %}>{{ s }} ({{ counts.get(s, 0) }})</option>{% endfor %}</select></div>
+    <div><label for="owner">Owner</label><select id="owner" name="owner"><option value="">Anyone</option><option value="me"{% if args.get('owner') == 'me' %} selected{% endif %}>Me</option><option value="none"{% if args.get('owner') == 'none' %} selected{% endif %}>Nobody yet</option>{% for u in owners %}<option value="{{ u.id }}"{% if args.get('owner') == u.id|string %} selected{% endif %}>{{ u.name }}</option>{% endfor %}</select></div>
+    <div><label for="priority">Priority</label><select id="priority" name="priority"><option value="">Any</option>{% for p in priorities %}<option{% if args.get('priority') == p %} selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+    <div><button type="submit" class="btn small" style="margin-bottom:14px;">Filter</button>
+      <a class="btn small secondary" style="margin-bottom:14px;" href="{{ url_for('leads.export', **args) }}">Download list (CSV)</a></div>
+  </form>
+</div>
+
+<div class="card">
+  {% if leads %}
+  <table>
+    <thead><tr><th>Received</th><th>Name</th><th>Company</th><th>Role</th><th>Biggest headache</th><th>Owner</th><th>Status</th><th>Last follow-up</th></tr></thead>
+    <tbody>
+    {% for l in leads %}
+    <tr>
+      <td style="font-size:12.5px;">{{ (l.created_at|cat).strftime('%d %b %Y') }}</td>
+      <td><a href="{{ url_for('leads.detail', lead_id=l.id) }}">{{ l.full_name }}</a>{% if l.priority == 'High' %} <span class="badge overdue">High</span>{% endif %}<div class="muted" style="font-size:12px;">{{ l.email }}</div></td>
+      <td>{{ l.company }}</td>
+      <td class="muted">{{ l.job_role }}</td>
+      <td class="muted" style="font-size:12.5px;">{{ l.headache }}</td>
+      <td>{{ l.owner.name if l.owner else 'Nobody yet' }}</td>
+      <td>{{ l.status }}</td>
+      <td class="muted" style="font-size:12.5px;">{{ (l.last_touch_at|cat).strftime('%d %b') if l.last_touch_at else 'not yet' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="margin:0;">No leads {% if args %}match these filters{% else %}yet. They will appear here the moment someone fills in the form on the web page{% endif %}.</p>{% endif %}
+</div>
+{% endblock %}

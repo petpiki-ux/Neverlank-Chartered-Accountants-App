@@ -507,6 +507,10 @@ PERMISSIONS = [
      "summary/key points on each document. Viewing and downloading policies is unaffected by this setting and "
      "stays open to everyone - this only gates the AI research features, rolled out firm-wide after the pilot.",
      tuple(USER_ROLES)),
+    ("manage_leads", "Manage Marketing Leads",
+     "Open the Leads list (people who asked for the Compliance Calendar or another lead magnet), see their details, "
+     "send the follow-up emails and messages, change a lead's status or owner, and export the list.",
+     ("supervisor", "partner", "admin")),
 ]
 PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
 
