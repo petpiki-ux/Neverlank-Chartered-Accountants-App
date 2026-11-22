@@ -385,7 +385,7 @@ def index():
                   if (p.brief or "").strip() or any((v.body or "").strip() for v in p.versions)][:12]
     return render_template("social/index.html", weeks=weeks, today=today, posts=posts, counts=counts, waiting=waiting, ready=ready, statuses=POST_STATUSES,
                            platforms=PLATFORMS, args=request.args, approve=can_approve(), no_graphic=no_graphic, failed_sends=_SS.failed_count(),
-                           sched_ready=_SS.configured(), sched_text=_SS.cat_text)
+                           sched_ready=_SS.configured(), sched_text=_SS.cat_text, by_hand=_SS.due_by_hand())
 
 
 @social_bp.route("/new", methods=["GET", "POST"])
@@ -469,7 +469,9 @@ def detail(post_id):
                            ai=ai_available(), statuses=POST_STATUSES, whatsapp_version=versions.get("whatsapp"),
                            images=post.images, gstyles=_G.STYLES, gthemes=_G.THEMES, gsizes=_G.SIZES, gdefault=_gdefault(post), gcount=_G.slide_count,
                            sched=post.schedule, sched_local=(_SS.to_cat(post.schedule.publish_at) if post.schedule else None), sched_ready=_SS.configured(), sched_service=_SS.service_name(),
-                           sched_auto=_SS.AUTO_PLATFORMS, sched_text=_SS.cat_text, sched_tries=_SS.MAX_TRIES)
+                           sched_auto=_SS.AUTO_PLATFORMS, sched_text=_SS.cat_text, sched_tries=_SS.MAX_TRIES,
+                           wa_text=(final_text(post, versions["whatsapp"]) if "whatsapp" in versions else ""),
+                           story_images=[g for g in post.images if g.spec.get("size") == "story"])
 
 
 def _reopen_if_changed(post, changed):

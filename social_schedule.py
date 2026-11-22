@@ -209,6 +209,19 @@ def lazy_process():
         current_app.logger.warning("Social: automatic sending failed: %s", exc)
 
 
+def due_by_hand(now=None):
+    """Approved posts whose time has come and that still have platforms to post by hand (YouTube, TikTok, WhatsApp): [(post, [versions])]."""
+    now = now or datetime.utcnow()
+    out = []
+    rows = (SocialPost.query.join(SocialSchedule, SocialSchedule.post_id == SocialPost.id)
+            .filter(SocialPost.status == "Approved", SocialSchedule.publish_at <= now).order_by(SocialSchedule.publish_at).all())
+    for post in rows:
+        todo = [v for v in post.versions if v.platform not in AUTO_PLATFORMS and v.status == "pending" and (v.body or "").strip()]
+        if todo:
+            out.append((post, todo))
+    return out
+
+
 def failed_count():
     return SocialDispatch.query.filter(SocialDispatch.status == "failed").join(SocialPost, SocialPost.id == SocialDispatch.post_id).filter(SocialPost.status == "Approved").count()
 

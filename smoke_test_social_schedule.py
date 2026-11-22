@@ -290,5 +290,36 @@ with app.app_context():
     check(gi and gi.ai_used and gi.spec["title"] == "Who owns your tax dates?", "one click makes it from the post's own wording")
 check("Old post" not in partner.get("/social/").get_data(as_text=True).split("Posts without a graphic")[-1].split("The next four weeks")[0] if "Posts without a graphic" in partner.get("/social/").get_data(as_text=True) else True, "and it leaves the list")
 
+# ---- WhatsApp Status kit and "due now, post by hand"
+pw = make_post("Status post", platforms=("linkedin", "whatsapp"), graphic=False)
+page = partner.get(f"/social/{pw}").get_data(as_text=True)
+check("WhatsApp Status" in page and "Make the Status picture" in page and 'name="size" value="story"' in page, "a post with a WhatsApp wording offers to make the full-screen Status picture")
+check('id="wa-status"' not in partner.get(f"/social/{p1}").get_data(as_text=True), "a post without WhatsApp does not")
+SI._call_design = lambda s, m: ({"kicker": "Tax tip", "title": "Who owns your tax dates?", "body": "Name one person per date.", "check_these": []}, None)
+partner.post(f"/social/{pw}/graphics/new", data={"style": "tip", "theme": "navy", "size": "story", "mode": "ai"})
+with app.app_context():
+    gs = SocialImage.query.filter_by(post_id=pw).first(); gsid = gs.id
+    check(gs.spec["size"] == "story" and gs.spec["title"] == "Who owns your tax dates?", "the Status picture is made at 1080 x 1920 from the post's wording")
+page = partner.get(f"/social/{pw}").get_data(as_text=True)
+check("Share to WhatsApp Status" in page and "Copy caption" in page and "Tax dates: https://app.neverlank.co.zw" in page and f"/social/graphics/{gsid}/1.png" in page, "then the card shows the picture, the caption (with the tracked link) and the share button")
+r = partner.get(f"/social/graphics/{gsid}/1.png")
+check(Image.open(io.BytesIO(r.data)).size == (1080, 1920), "the picture is full screen")
+# due now: post by hand
+partner.post(f"/social/{pw}/submit"); partner.post(f"/social/{pw}/approve", data=ALL)
+check(status(pw) == "Approved", "(approved)")
+partner.post(f"/social/{pw}/schedule", data=dict(when(1), auto="1"))
+def due_card():
+    pg = partner.get("/social/").get_data(as_text=True)
+    return pg.split("Due now: post by hand")[1].split("</div>\n")[0] if "Due now: post by hand" in pg else ""
+check("Status post" not in due_card(), "before the time it is not listed as due")
+with app.app_context():
+    SocialPost.query.get(pw).schedule.publish_at = datetime.utcnow() - timedelta(minutes=3); db.session.commit()
+sent.clear(); due("https://x")
+page = partner.get("/social/").get_data(as_text=True)
+check([b["platform"] for b in sent] == ["linkedin"] and "Status post" in due_card() and "WhatsApp Status kit" in due_card(), "LinkedIn goes automatically; WhatsApp is listed on the Plan page as due, to post by hand")
+r = partner.post(f"/social/{pw}/version/whatsapp/posted", data={"post_url": ""}, follow_redirects=True)
+check(status(pw) == "Posted" and "Marked as posted on WhatsApp" in r.get_data(as_text=True), "marked posted with no address (a Status has none), the post is complete")
+check("Status post" not in due_card(), "and it leaves the due list")
+
 print(len(fails), "failure(s)")
 sys.exit(1 if fails else 0)

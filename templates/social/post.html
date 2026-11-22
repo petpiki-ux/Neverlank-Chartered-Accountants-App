@@ -88,6 +88,55 @@
   </form>
 </div>
 
+{% if wa_text or cards|selectattr(0, 'equalto', 'whatsapp')|list %}
+<div class="card" id="wa-status">
+  <h3 class="mt-0">WhatsApp Status</h3>
+  <p class="muted" style="margin:0 0 8px;font-size:13px;">WhatsApp does not let any program post to Status for you, so this is the quickest safe way: a full-screen picture and the caption, ready to share from your phone in two taps (Share, then WhatsApp, then My status).</p>
+  {% if story_images %}
+    <div style="display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start;">
+      {% for g in story_images %}<div style="width:150px;"><img src="{{ url_for('social.graphic_png', image_id=g.id, n=1, v=g.updated_at.strftime('%Y%m%d%H%M%S')) }}" alt="{{ g.label }}" style="width:100%;border:1px solid #e5e0d0;border-radius:6px;"><div style="font-size:12px;"><a href="{{ url_for('social.graphic_edit', image_id=g.id) }}">Edit</a> &middot; <a href="{{ url_for('social.graphic_png', image_id=g.id, n=1, download=1) }}">Download</a></div></div>{% endfor %}
+      <div style="flex:1;min-width:240px;">
+        <label for="wa_status_text">Caption</label>
+        <textarea id="wa_status_text" rows="4" readonly>{{ wa_text }}</textarea>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;">
+          <button type="button" class="btn small gold" id="wa-share" data-img="{{ url_for('social.graphic_png', image_id=story_images[0].id, n=1) }}">Share to WhatsApp Status</button>
+          <button type="button" class="btn small secondary" id="wa-copy">Copy caption</button>
+        </div>
+        <p id="wa-msg" class="muted" style="font-size:12.5px;margin:6px 0 0;"></p>
+      </div>
+    </div>
+  {% else %}
+    <form method="post" action="{{ url_for('social.graphic_new', post_id=post.id) }}" class="form-row" style="align-items:flex-end;">
+      <input type="hidden" name="size" value="story">
+      <div><label for="ws_style">Layout</label><select id="ws_style" name="style">{% for k, v in gstyles.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
+      <div><label for="ws_theme">Colours</label><select id="ws_theme" name="theme">{% for k, t in gthemes.items() %}<option value="{{ k }}">{{ t.label }}</option>{% endfor %}</select></div>
+      <div style="display:flex;gap:6px;"><button type="submit" name="mode" value="ai" class="btn small gold" style="margin-bottom:14px;">Make the Status picture, words by AI</button><button type="submit" name="mode" value="blank" class="btn small secondary" style="margin-bottom:14px;">I write the words</button></div>
+    </form>
+  {% endif %}
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">Once it is on your Status, press &ldquo;Mark as posted&rdquo; on the WhatsApp card above (the address can be left empty).</p>
+</div>
+<script>
+(function () {
+  var msg = document.getElementById('wa-msg'), share = document.getElementById('wa-share'), copy = document.getElementById('wa-copy');
+  if (!share) return;
+  function say(t) { if (msg) msg.textContent = t; }
+  var text = function () { return document.getElementById('wa_status_text').value; };
+  copy.addEventListener('click', function () {
+    var done = function () { say('Caption copied.'); };
+    if (navigator.clipboard && navigator.clipboard.writeText) { navigator.clipboard.writeText(text()).then(done, function () { say('Could not copy. Select the caption and copy it.'); }); }
+    else { var ta = document.getElementById('wa_status_text'); ta.select(); try { document.execCommand('copy'); done(); } catch (e) { say('Select the caption and copy it.'); } }
+  });
+  share.addEventListener('click', function () {
+    fetch(share.dataset.img, {credentials: 'same-origin'}).then(function (r) { return r.blob(); }).then(function (b) {
+      var f = new File([b], 'neverlank-status.png', {type: 'image/png'});
+      if (navigator.canShare && navigator.canShare({files: [f]})) { return navigator.share({files: [f], text: text()}); }
+      say('This computer cannot share straight to WhatsApp. Open this page on your phone, or download the picture, copy the caption and add them in WhatsApp > Status.');
+    }).catch(function (e) { if (!e || e.name !== 'AbortError') say('Could not share. Download the picture and copy the caption instead.'); });
+  });
+})();
+</script>
+{% endif %}
+
 <div class="card" id="schedule">
   <h3 class="mt-0">Date, time and automatic posting</h3>
   {% if post.status == 'Posted' %}

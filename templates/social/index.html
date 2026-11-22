@@ -10,6 +10,12 @@
 {% if failed_sends %}
 <div class="card" style="border-left:4px solid #9b2c2c;"><strong>{{ failed_sends }} automatic send{{ '' if failed_sends == 1 else 's' }} failed.</strong> <a href="{{ url_for('social.publishing') }}">See which, and why</a>.</div>
 {% endif %}
+{% if by_hand %}
+<div class="card" style="border-left:4px solid #b8923a;">
+  <h3 class="mt-0">Due now: post by hand <span class="badge" style="background:#b8923a;color:#fff;">{{ by_hand|length }}</span></h3>
+  {% for p, vs in by_hand %}<div style="padding:4px 0;"><a href="{{ url_for('social.detail', post_id=p.id) }}"><strong>{{ p.title }}</strong></a> <span class="muted" style="font-size:12.5px;">was set for {{ sched_text(p.schedule.publish_at) }} &middot; still to post: {% for v in vs %}{{ platforms[v.platform].label }}{% if not loop.last %}, {% endif %}{% endfor %}{% if vs|selectattr('platform', 'equalto', 'whatsapp')|list %} (WhatsApp Status kit on the post){% endif %}</span></div>{% endfor %}
+</div>
+{% endif %}
 {% if approve and waiting %}
 <div class="card" style="border-left:4px solid #b8923a;">
   <h3 class="mt-0">Waiting for your approval <span class="badge" style="background:#b8923a;color:#fff;">{{ waiting|length }}</span></h3>
