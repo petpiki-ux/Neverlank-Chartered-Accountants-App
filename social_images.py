@@ -103,34 +103,43 @@ def _save_spec(img, spec):
     img.updated_at = datetime.utcnow()
 
 
-@social_bp.route("/<int:post_id>/graphics/new", methods=["POST"])
-@login_required
-def graphic_new(post_id):
-    _need_manage()
-    post = SocialPost.query.get_or_404(post_id)
-    style = request.form.get("style") if request.form.get("style") in G.STYLES else "tip"
-    theme = request.form.get("theme") if request.form.get("theme") in G.THEMES else "navy"
-    size = request.form.get("size") if request.form.get("size") in G.SIZES else _default_size(post)
-    base = {"style": style, "theme": theme, "size": size, "title": "" if request.form.get("mode") == "ai" else (post.title if style != "carousel" else "")}
+def make_graphic(post, style, theme, size, use_ai):
+    """Adds one graphic to the post (words by the AI when asked and possible). Returns (image, [(message, category)]); the caller commits."""
+    notes = []
+    style = style if style in G.STYLES else "tip"
+    theme = theme if theme in G.THEMES else "navy"
+    size = size if size in G.SIZES else _default_size(post)
+    base = {"style": style, "theme": theme, "size": size, "title": "" if use_ai else (post.title if style != "carousel" else "")}
     img = SocialImage(post=post, label=f"{G.STYLES[style].split(' (')[0]} ({G.SIZES[size][0].split(' (')[0]})"[:80], created_by_id=current_user.id)
     spec = G.clean_spec(base)
-    if request.form.get("mode") == "ai":
+    if use_ai:
         from social import ai_available
         if not ai_available():
-            flash("The AI is not switched on on this server (no API key), so the words are blank for you to write.", "warning")
+            notes.append(("The AI is not switched on on this server (no API key), so the graphic's words are blank for you to write.", "warning"))
         elif not ((post.brief or "").strip() or any((v.body or "").strip() for v in post.versions)):
-            flash("Write the post (or its brief) first so the AI has facts to work from.", "warning")
+            notes.append(("Write the post (or its brief) first so the AI has facts to work from.", "warning"))
         else:
             drafted, info = design_with_ai(post, style, size)
             if drafted:
                 spec, img.ai_used = dict(drafted, theme=theme), True
                 if info:
                     post.ai_flags = "\n".join(filter(None, [post.ai_flags or ""] + info))[:3000]
-                flash("The AI wrote the words. Check them, then look at the picture.", "success")
+                notes.append(("The AI wrote the words. Check them, then look at the picture.", "success"))
             else:
-                flash(f"The AI could not write the words: {info} You can type them yourself.", "warning")
+                notes.append((f"The AI could not write the words: {info} You can type them yourself.", "warning"))
     _save_spec(img, spec)
     db.session.add(img)
+    return img, notes
+
+
+@social_bp.route("/<int:post_id>/graphics/new", methods=["POST"])
+@login_required
+def graphic_new(post_id):
+    _need_manage()
+    post = SocialPost.query.get_or_404(post_id)
+    img, notes = make_graphic(post, request.form.get("style"), request.form.get("theme"), request.form.get("size"), request.form.get("mode") == "ai")
+    for text, cat in notes:
+        flash(text, cat)
     _reopen_if_changed(post, True)
     post.updated_at = datetime.utcnow()
     db.session.commit()

@@ -22,6 +22,15 @@
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;">
       {% for k in order %}<label style="font-weight:normal;"><input type="checkbox" name="platforms" value="{{ k }}" style="width:auto;"{% if k in ('linkedin', 'x', 'facebook') %} checked{% endif %}> {{ platforms[k].label }}</label>{% endfor %}
     </div>
+    <div style="border:1px solid #d8dde3;border-radius:8px;padding:10px 12px;margin-bottom:12px;">
+      <label style="font-weight:600;margin:0;"><input type="checkbox" name="with_graphic" value="1" style="width:auto;" id="with_graphic" onchange="document.getElementById('gopts').style.display=this.checked?'flex':'none'"> Also make a graphic for this post</label>
+      <p class="muted" style="font-size:12px;margin:2px 0 8px;">The wording and the picture are made together and approved together. With "Draft with AI" the AI writes the graphic's words from the post it has just drafted; with "Start a blank draft" you type them.</p>
+      <div id="gopts" class="form-row" style="display:none;">
+        <div><label for="g_style">Layout</label><select id="g_style" name="g_style">{% for k, v in gstyles.items() %}<option value="{{ k }}"{% if k == 'tip' %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+        <div><label for="g_theme">Colours</label><select id="g_theme" name="g_theme">{% for k, v in gthemes.items() %}<option value="{{ k }}">{{ v.label if v.label is defined else k|capitalize }}</option>{% endfor %}</select></div>
+        <div><label for="g_size">Size</label><select id="g_size" name="g_size"><option value="">Best size for the first platform</option>{% for k, v in gsizes.items() %}<option value="{{ k }}">{{ v[0] }}</option>{% endfor %}</select></div>
+      </div>
+    </div>
     <div style="display:flex;gap:10px;flex-wrap:wrap;">
       <button type="submit" name="mode" value="ai" class="btn gold" {% if not ai %}title="The AI is not switched on on this server"{% endif %}>Draft with AI</button>
       <button type="submit" name="mode" value="draft" class="btn secondary">Start a blank draft</button>

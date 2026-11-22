@@ -186,5 +186,43 @@ partner.post(f"/social/{pid_post}/delete")
 with app.app_context():
     check(SocialImage.query.filter_by(post_id=pid_post).count() == 0, "deleting a post deletes its graphics")
 
+# ---- one step: post wording and graphic together (New post)
+page = partner.get("/social/new").get_data(as_text=True)
+check("Also make a graphic for this post" in page and 'name="g_style"' in page and 'name="g_size"' in page and "Best size for the first platform" in page, "New post offers a graphic together with the wording")
+SM.ai_available = lambda: True
+SM._call_ai = lambda system, message: ({"posts": [{"platform": "linkedin", "body": "Name one person for every tax date.\n\n{link}\n\nGeneral information, not advice."}, {"platform": "x", "body": "Name one person per tax date. {link}"}],
+                                        "check_these": ["Confirm the dates"]}, None)
+seen = []
+def _fake2(system, message):
+    seen.append(message)
+    return {"kicker": "Tax tip", "title": "Who owns your tax dates?", "body": "Name one person per date.", "check_these": []}, None
+SI._call_design = _fake2
+before = None
+r = partner.post("/social/new", data={"title": "Both at once", "brief": "Quarterly dates. Offer: free calendar.", "platforms": ["linkedin", "x"], "mode": "ai", "with_graphic": "1", "g_style": "tip", "g_theme": "gold", "g_size": "", "link_url": "https://app.neverlank.co.zw/compliance-calendar"}, follow_redirects=True)
+with app.app_context():
+    both = SocialPost.query.filter_by(title="Both at once").first()
+    imgs = SocialImage.query.filter_by(post_id=both.id).all()
+    check(len(imgs) == 1 and imgs[0].ai_used and imgs[0].spec["theme"] == "gold" and imgs[0].spec["size"] == "linkedin" and imgs[0].spec["title"] == "Who owns your tax dates?", "one click makes the wording and a graphic, in the chosen colours and the first platform's size")
+    check(any("Name one person for every tax date" in m for m in seen), "the graphic's words are written from the wording the AI has just drafted")
+    check(both.status == "Draft", "the post is a draft, awaiting review and approval")
+    both_id = both.id
+check("Graphic: The AI wrote the words" in r.get_data(as_text=True) and "Drafted by the AI" in r.get_data(as_text=True), "both results are announced")
+SI._call_design = lambda s, m: (None, "The AI is busy.")
+r = partner.post("/social/new", data={"title": "Graphic fails", "brief": "Something", "platforms": ["linkedin"], "mode": "ai", "with_graphic": "1", "g_style": "stat"}, follow_redirects=True)
+with app.app_context():
+    p2 = SocialPost.query.filter_by(title="Graphic fails").first()
+    check(p2 is not None and SocialImage.query.filter_by(post_id=p2.id).count() == 1 and SocialImage.query.filter_by(post_id=p2.id).first().spec["style"] == "stat", "if the AI cannot write the graphic's words, the post and an empty graphic are still made")
+check("Graphic: The AI could not write the words" in r.get_data(as_text=True), "and the person is told")
+partner.post("/social/new", data={"title": "Blank both", "brief": "", "platforms": ["instagram"], "mode": "draft", "with_graphic": "1", "g_style": "banner", "g_size": "story"})
+with app.app_context():
+    p3 = SocialPost.query.filter_by(title="Blank both").first()
+    g3 = SocialImage.query.filter_by(post_id=p3.id).first()
+    check(g3 and not g3.ai_used and g3.spec["size"] == "story" and g3.spec["title"] == "Blank both", "a blank draft with a graphic starts the graphic from the post title")
+partner.post("/social/new", data={"title": "No graphic", "brief": "x", "platforms": ["linkedin"], "mode": "draft"})
+partner.post("/social/new", data={"title": "Idea only", "brief": "x", "platforms": ["linkedin"], "mode": "idea", "with_graphic": "1"})
+with app.app_context():
+    check(SocialImage.query.filter_by(post_id=SocialPost.query.filter_by(title="No graphic").first().id).count() == 0 and SocialImage.query.filter_by(post_id=SocialPost.query.filter_by(title="Idea only").first().id).count() == 0, "no graphic unless asked, and none for a saved idea")
+check(staff.post("/social/new", data={"title": "x", "with_graphic": "1", "mode": "ai"}).status_code == 403, "staff still cannot")
+
 print(len(fails), "failure(s)")
 sys.exit(1 if fails else 0)

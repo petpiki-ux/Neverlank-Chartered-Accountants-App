@@ -413,6 +413,12 @@ def new():
             else:
                 ok, err = draft_with_ai(post, platforms)
                 flash("Drafted by the AI. Read every line and check the facts listed before you submit it." if ok else f"The AI could not draft it: {err} You can write it yourself.", "success" if ok else "warning")
+        if request.form.get("with_graphic") and request.form.get("mode") != "idea":
+            import social_images as _SI
+            _img, notes = _SI.make_graphic(post, request.form.get("g_style"), request.form.get("g_theme"), request.form.get("g_size") or None,
+                                           request.form.get("mode") == "ai")
+            for text, cat in notes:
+                flash("Graphic: " + text, cat)
         db.session.commit()
         return redirect(url_for("social.detail", post_id=post.id))
     prefill = {}
@@ -424,7 +430,7 @@ def new():
                    "brief": "\n".join(x for x in (f"A news story, {reported} by {item.publisher or 'a news source'}: {item.title}", item.summary or item.snippet or "",
                                                   f"Why it matters to our clients: {item.why}" if item.why else "",
                                                   "Treat this as reported news, not law: say so, and tell readers to check the source.") if x)}
-    return render_template("social/new.html", platforms=PLATFORMS, order=PLATFORM_ORDER, pillars=PILLARS, prefill=prefill, ai=ai_available())
+    return render_template("social/new.html", platforms=PLATFORMS, order=PLATFORM_ORDER, pillars=PILLARS, prefill=prefill, ai=ai_available(), gstyles=_G.STYLES, gthemes=_G.THEMES, gsizes=_G.SIZES)
 
 
 def _gdefault(post):
