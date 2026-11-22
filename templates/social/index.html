@@ -7,6 +7,9 @@
 </div>
 {% set active = 'plan' %}{% include 'social/_nav.html' %}
 
+{% if failed_sends %}
+<div class="card" style="border-left:4px solid #9b2c2c;"><strong>{{ failed_sends }} automatic send{{ '' if failed_sends == 1 else 's' }} failed.</strong> <a href="{{ url_for('social.publishing') }}">See which, and why</a>.</div>
+{% endif %}
 {% if approve and waiting %}
 <div class="card" style="border-left:4px solid #b8923a;">
   <h3 class="mt-0">Waiting for your approval <span class="badge" style="background:#b8923a;color:#fff;">{{ waiting|length }}</span></h3>
@@ -21,6 +24,17 @@
 </div>
 {% endif %}
 
+{% if no_graphic %}
+<div class="card">
+  <h3 class="mt-0">Posts without a graphic <span class="badge">{{ no_graphic|length }}</span></h3>
+  <p class="muted" style="margin:0 0 6px;font-size:13px;">Make a graphic in one click from the post's own wording (the AI writes only the words; check them on the next page). Open the post to choose another layout or size.</p>
+  {% for p in no_graphic %}<form method="post" action="{{ url_for('social.graphic_new', post_id=p.id) }}" style="display:flex;gap:8px;align-items:center;padding:3px 0;">
+    <input type="hidden" name="style" value="tip"><input type="hidden" name="mode" value="ai">
+    <a href="{{ url_for('social.detail', post_id=p.id) }}" style="flex:1;"><strong>{{ p.title }}</strong></a>
+    <span class="muted" style="font-size:12.5px;">{{ p.status }}{% if p.planned_date %} &middot; {{ p.planned_date.strftime('%d %b') }}{% endif %}</span>
+    <button type="submit" class="btn small gold">Make graphic</button></form>{% endfor %}
+</div>
+{% endif %}
 <div class="card">
   <h3 class="mt-0">The next four weeks</h3>
   <div style="overflow-x:auto;">
@@ -29,7 +43,7 @@
     {% for week in weeks %}{% for day, items in week %}
     <div style="border:1px solid {{ '#b8923a' if day == today else '#e5e0d0' }};border-radius:6px;min-height:74px;padding:4px;background:{{ '#fffaf0' if day == today else '#fff' }};">
       <div class="muted" style="font-size:11.5px;">{{ day.strftime('%d %b') }}</div>
-      {% for p in items %}<a href="{{ url_for('social.detail', post_id=p.id) }}" style="display:block;font-size:12px;line-height:1.25;margin-top:3px;padding:3px 5px;border-radius:4px;background:{{ {'Posted':'#e3f2e6','Approved':'#e3ecf7','Pending approval':'#fff1d6','Rejected':'#fbe3e0'}.get(p.status, '#f1efe6') }};text-decoration:none;color:inherit;" title="{{ p.status }}">{{ p.title[:48] }}</a>{% endfor %}
+      {% for p in items %}<a href="{{ url_for('social.detail', post_id=p.id) }}" style="display:block;font-size:12px;line-height:1.25;margin-top:3px;padding:3px 5px;border-radius:4px;background:{{ {'Posted':'#e3f2e6','Approved':'#e3ecf7','Pending approval':'#fff1d6','Rejected':'#fbe3e0'}.get(p.status, '#f1efe6') }};text-decoration:none;color:inherit;" title="{{ p.status }}">{% if p.schedule %}<strong>{{ sched_text(p.schedule.publish_at)[-5:] }}</strong>{% if p.schedule.enabled %} &#9201;{% endif %} {% endif %}{{ p.title[:48] }}</a>{% endfor %}
     </div>
     {% endfor %}{% endfor %}
   </div></div>

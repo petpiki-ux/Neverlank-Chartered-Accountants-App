@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Automatic posting - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Automatic posting</h1>
+  <p class="muted" style="margin:0;">Approved posts are handed, at the date and time you set, to a scheduling service you already use ({{ service }}). That service holds the platform logins and does the posting. The app never stores a LinkedIn, Facebook, Instagram or X password.</p></div>
+{% set active = 'publishing' %}{% include 'social/_nav.html' %}
+
+<div class="card">
+  <h3 class="mt-0">Connection {% if configured %}<span class="badge" style="background:#256d3b;color:#fff;">Ready</span>{% else %}<span class="badge" style="background:#9b2c2c;color:#fff;">Not connected</span>{% endif %}</h3>
+  <table class="table" style="width:100%;font-size:13.5px;">
+    <tr><td>Service web address <code>SOCIAL_WEBHOOK_URL</code></td><td>{{ 'Set' if url_set else 'Not set' }}</td></tr>
+    <tr><td>Secret <code>SOCIAL_WEBHOOK_SECRET</code></td><td>{{ 'Set' if secret_set else 'Not set' }}</td></tr>
+    <tr><td>Timer <code>SOCIAL_CRON_TOKEN</code> (optional)</td><td>{{ 'Set' if cron_set else 'Not set: posts are then sent only when someone opens the Social pages' }}</td></tr>
+    <tr><td>This site's address <code>PUBLIC_BASE_URL</code></td><td>{{ base }}</td></tr>
+  </table>
+  {% if configured %}<form method="post" action="{{ url_for('social.publishing_test') }}" style="margin-top:8px;"><button type="submit" class="btn small secondary">Send a test (nothing is posted)</button></form>{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Scheduled posts</h3>
+  {% if rows %}<table class="table" style="width:100%;font-size:13.5px;"><thead><tr><th>When (Harare)</th><th>Post</th><th>Status</th><th>Automatic</th><th></th></tr></thead><tbody>
+  {% for s in rows %}<tr><td>{{ cat_text(s.publish_at) }}</td><td><a href="{{ url_for('social.detail', post_id=s.post_id) }}">{{ s.post.title }}</a></td><td>{{ s.post.status }}</td><td>{{ 'Yes' if s.enabled else 'Reminder only' }}</td><td style="color:#9b2c2c;">{{ s.note }}</td></tr>{% endfor %}
+  </tbody></table>{% else %}<p class="muted" style="margin:0;">Nothing is scheduled. Open a post and set a date and time.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Recently sent</h3>
+  {% if recent %}<table class="table" style="width:100%;font-size:13.5px;"><thead><tr><th>Post</th><th>Platform</th><th>Result</th><th>When</th></tr></thead><tbody>
+  {% for d in recent %}<tr><td><a href="{{ url_for('social.detail', post_id=d.post_id) }}">{{ d.post.title }}</a></td><td>{{ platforms[d.platform].label }}</td>
+    <td>{% if d.status == 'sent' %}<span style="color:#256d3b;">Sent</span>{% else %}<span style="color:#9b2c2c;">Failed ({{ d.attempts }} of {{ tries }}): {{ d.error }}</span>{% endif %}</td><td>{{ cat_text(d.sent_at or d.updated_at) }}</td></tr>{% endfor %}
+  </tbody></table>{% else %}<p class="muted" style="margin:0;">Nothing has been sent yet.</p>{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">How to connect Make (about 15 minutes)</h3>
+  <ol style="margin:0;padding-left:20px;font-size:13.5px;line-height:1.6;">
+    <li>In Make, create a scenario that starts with <strong>Webhooks &gt; Custom webhook</strong>. Copy the web address it gives you into <code>SOCIAL_WEBHOOK_URL</code> on Render.</li>
+    <li>Choose a long random text and put it in <code>SOCIAL_WEBHOOK_SECRET</code> on Render. Every request carries it in the header <code>X-Neverlank-Token</code>; add a filter in Make that stops the scenario if the header is different.</li>
+    <li>Add a <strong>Router</strong> on the field <code>platform</code> (linkedin, x, facebook, instagram) and, on each branch, the platform's own module (for example LinkedIn &gt; Create a post). Map <code>text</code>, and for pictures use the <code>images</code> list: each has a <code>url</code> that Make can fetch.</li>
+    <li>Set <code>PUBLIC_BASE_URL</code> to the address of this app, then press &ldquo;Send a test&rdquo; above. The test carries <code>event = test</code>: stop the scenario on that so nothing is posted.</li>
+    <li>Optional: have the last Make step call the field <code>callback_url</code> with <code>post_id</code>, <code>platform</code> and <code>url</code> (the live address), or <code>ok=false</code> and <code>error</code>, so the app can show it. Buffer, Zapier and n8n work the same way.</li>
+    <li>Timer: a free service such as cron-job.org can call <code>{{ base }}/social/cron?token=YOUR_SOCIAL_CRON_TOKEN</code> every 5 minutes. Without it, due posts go out whenever someone opens the Social pages.</li>
+  </ol>
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">Rules: only approved posts with no errors in the checks are sent; a post whose time passed more than {{ late_hours }} hours ago is held, not sent; a failed send is tried again up to {{ tries }} times. Only {% for k in auto %}{{ platforms[k].label }}{% if not loop.last %}, {% endif %}{% endfor %} go out automatically.</p>
+</div>
+{% endblock %}

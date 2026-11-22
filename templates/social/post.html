@@ -87,6 +87,30 @@
   </form>
 </div>
 
+<div class="card" id="schedule">
+  <h3 class="mt-0">Date, time and automatic posting</h3>
+  {% if post.status == 'Posted' %}
+    <p class="muted" style="margin:0;">Posted{% if sched %} (it was set for {{ sched_text(sched.publish_at) }}){% endif %}.</p>
+  {% else %}
+  <form method="post" action="{{ url_for('social.schedule_save', post_id=post.id) }}" class="form-row" style="align-items:flex-end;">
+    <div><label for="s_date">Date</label><input type="date" id="s_date" name="date" required value="{{ sched_local.strftime('%Y-%m-%d') if sched_local else (post.planned_date.strftime('%Y-%m-%d') if post.planned_date else '') }}"></div>
+    <div><label for="s_time">Time (Harare)</label><input type="time" id="s_time" name="time" required value="{{ sched_local.strftime('%H:%M') if sched_local else '09:00' }}"></div>
+    <div style="flex:2;"><label style="font-weight:normal;display:flex;gap:8px;align-items:center;margin-bottom:14px;"><input type="checkbox" name="auto" value="1" style="width:auto;"{% if sched and sched.enabled %} checked{% endif %}> Send automatically at this time</label></div>
+    <div style="display:flex;gap:6px;"><button type="submit" class="btn small gold" style="margin-bottom:14px;">Save</button>{% if sched %}<button type="submit" name="clear" value="1" class="btn small secondary" style="margin-bottom:14px;" formnovalidate>Remove</button>{% endif %}</div>
+  </form>
+  {% if sched %}
+    <p style="margin:0 0 6px;font-size:13.5px;"><strong>{{ sched_text(sched.publish_at) }}</strong> &middot; {% if sched.enabled %}sent automatically{% else %}a reminder of the date only (not sent automatically){% endif %}{% if sched.enabled and post.status != 'Approved' %} <span class="muted">&middot; it is sent only once approved</span>{% endif %}</p>
+    {% if sched.note %}<p style="margin:0 0 6px;color:#9b2c2c;font-size:13px;">{{ sched.note }}</p>{% endif %}
+  {% endif %}
+  {% for key, cfg, v, link in cards %}{% if v.dispatch %}<div style="font-size:13px;">{{ cfg.label }}: {% if v.dispatch.status == 'sent' %}<span style="color:#256d3b;">sent to {{ sched_service }} {{ sched_text(v.dispatch.sent_at) }}</span>{% else %}<span style="color:#9b2c2c;">not sent (try {{ v.dispatch.attempts }} of {{ sched_tries }}): {{ v.dispatch.error }}</span>{% endif %}</div>{% endif %}{% endfor %}
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">Only {% for k in sched_auto %}{{ platforms[k].label }}{% if not loop.last %}, {% endif %}{% endfor %} are sent automatically; the others (YouTube, TikTok, WhatsApp) stay by hand. A post is sent only when it is approved and has no errors in the checks above.
+    {% if not sched_ready %}Nothing is sent yet because the scheduling service is not connected: see <a href="{{ url_for('social.publishing') }}">Automatic posting</a>.{% endif %}</p>
+  {% if post.status == 'Approved' and sched_ready %}
+  <form method="post" action="{{ url_for('social.send_now', post_id=post.id) }}" style="margin-top:8px;" onsubmit="return confirm('Send this to {{ sched_service }} now?');"><button type="submit" class="btn small secondary">Send now</button></form>
+  {% endif %}
+  {% endif %}
+</div>
+
 <div class="card">
   <h3 class="mt-0">Approval</h3>
   {% if post.status in ('Idea', 'Draft', 'Rejected') %}

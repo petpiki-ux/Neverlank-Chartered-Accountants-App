@@ -1,4 +1,4 @@
-"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine, MarketingLead, LeadTouch, SocialPost, SocialVersion, SocialImage, SocialAccount, WhatsAppContact, WhatsAppMessage.
+"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine, MarketingLead, LeadTouch, SocialPost, SocialVersion, SocialImage, SocialSchedule, SocialDispatch, SocialAccount, WhatsAppContact, WhatsAppMessage.
 
 See __init__.py: all parts share one set of names, exactly as the single file models.py did."""
 
@@ -418,6 +418,39 @@ class SocialVersion(db.Model):
     __table_args__ = (db.UniqueConstraint("post_id", "platform", name="uq_social_version_platform"),)
 
     posted_by = db.relationship("User", foreign_keys=[posted_by_id])
+
+
+class SocialSchedule(db.Model):
+    """When an approved post is to be sent automatically to the firm's scheduling service (Make, Buffer ...). publish_at is stored in UTC."""
+    __tablename__ = "social_schedule"
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey("social_post.id"), nullable=False, unique=True)
+    publish_at = db.Column(db.DateTime, nullable=False, index=True)
+    enabled = db.Column(db.Boolean, default=True)               # send automatically (off = a reminder of the date only)
+    note = db.Column(db.String(300), default="")                # why it is held, or the last problem
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    post = db.relationship("SocialPost", backref=db.backref("schedule", uselist=False, cascade="all, delete-orphan"))
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+
+class SocialDispatch(db.Model):
+    """The record of sending one platform's wording to the scheduling service: sent, or failed (with the reason and the number of tries)."""
+    __tablename__ = "social_dispatch"
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey("social_post.id"), nullable=False, index=True)
+    version_id = db.Column(db.Integer, db.ForeignKey("social_version.id"), nullable=False, unique=True)
+    platform = db.Column(db.String(20), nullable=False)
+    status = db.Column(db.String(10), default="failed")         # sent / failed
+    attempts = db.Column(db.Integer, default=0)
+    error = db.Column(db.String(500), default="")
+    sent_at = db.Column(db.DateTime)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    post = db.relationship("SocialPost", backref=db.backref("dispatches", cascade="all, delete-orphan"))
+    version = db.relationship("SocialVersion", backref=db.backref("dispatch", uselist=False, cascade="all, delete-orphan"))
 
 
 class SocialAccount(db.Model):

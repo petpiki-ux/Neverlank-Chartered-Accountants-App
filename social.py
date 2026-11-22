@@ -25,7 +25,7 @@ from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
 from extensions import db
-from models import (POST_STATUSES, Client, MarketingLead, NewsItem, SocialAccount, SocialPost, SocialVersion, User, WhatsAppContact, WhatsAppMessage,
+from models import (POST_STATUSES, SocialImage, Client, MarketingLead, NewsItem, SocialAccount, SocialPost, SocialVersion, User, WhatsAppContact, WhatsAppMessage,
                     user_has_permission)
 from timeutil import today_cat
 import graphics as _G
@@ -361,6 +361,8 @@ def _ensure_accounts():
 @login_required
 def index():
     _need_manage()
+    import social_schedule as _SS
+    _SS.lazy_process()
     query = SocialPost.query
     status = request.args.get("status") or ""
     if status in POST_STATUSES:
@@ -377,8 +379,13 @@ def index():
     counts = dict(db.session.query(SocialPost.status, func.count(SocialPost.id)).group_by(SocialPost.status).all())
     waiting = SocialPost.query.filter_by(status="Pending approval").order_by(SocialPost.updated_at).all()
     ready = SocialPost.query.filter_by(status="Approved").order_by(SocialPost.planned_date.is_(None), SocialPost.planned_date).all()
+    with_graphic = db.session.query(SocialImage.post_id)
+    no_graphic = [p for p in SocialPost.query.filter(SocialPost.status.in_(("Idea", "Draft", "Pending approval", "Approved", "Rejected")), SocialPost.id.notin_(with_graphic))
+                  .order_by(SocialPost.planned_date.is_(None), SocialPost.planned_date, SocialPost.id.desc()).limit(60).all()
+                  if (p.brief or "").strip() or any((v.body or "").strip() for v in p.versions)][:12]
     return render_template("social/index.html", weeks=weeks, today=today, posts=posts, counts=counts, waiting=waiting, ready=ready, statuses=POST_STATUSES,
-                           platforms=PLATFORMS, args=request.args, approve=can_approve())
+                           platforms=PLATFORMS, args=request.args, approve=can_approve(), no_graphic=no_graphic, failed_sends=_SS.failed_count(),
+                           sched_ready=_SS.configured(), sched_text=_SS.cat_text)
 
 
 @social_bp.route("/new", methods=["GET", "POST"])
@@ -444,6 +451,8 @@ def _gdefault(post):
 @login_required
 def detail(post_id):
     _need_manage()
+    import social_schedule as _SS
+    _SS.lazy_process()
     post = SocialPost.query.get_or_404(post_id)
     versions = {v.platform: v for v in post.versions}
     cards = []
@@ -458,7 +467,9 @@ def detail(post_id):
                            missing=[k for k in PLATFORM_ORDER if k not in versions], platforms=PLATFORMS, pillars=PILLARS, approve=can_approve(), news=news,
                            can_delete=current_user.role in ("partner", "admin") or (post.author_id == current_user.id and post.status in ("Idea", "Draft", "Rejected")),
                            ai=ai_available(), statuses=POST_STATUSES, whatsapp_version=versions.get("whatsapp"),
-                           images=post.images, gstyles=_G.STYLES, gthemes=_G.THEMES, gsizes=_G.SIZES, gdefault=_gdefault(post), gcount=_G.slide_count)
+                           images=post.images, gstyles=_G.STYLES, gthemes=_G.THEMES, gsizes=_G.SIZES, gdefault=_gdefault(post), gcount=_G.slide_count,
+                           sched=post.schedule, sched_local=(_SS.to_cat(post.schedule.publish_at) if post.schedule else None), sched_ready=_SS.configured(), sched_service=_SS.service_name(),
+                           sched_auto=_SS.AUTO_PLATFORMS, sched_text=_SS.cat_text, sched_tries=_SS.MAX_TRIES)
 
 
 def _reopen_if_changed(post, changed):
@@ -972,3 +983,4 @@ def whatsapp_broadcast(post_id):
 
 
 import social_images  # noqa: E402,F401  (adds the graphics pages to this blueprint)
+import social_schedule  # noqa: E402,F401  (adds scheduled automatic posting)
