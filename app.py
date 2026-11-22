@@ -958,6 +958,8 @@ def create_app():
     from leads import leads_bp, page_bp as leads_page_bp
     app.register_blueprint(leads_bp)
     app.register_blueprint(leads_page_bp)
+    from social import social_bp
+    app.register_blueprint(social_bp)
     app.register_blueprint(dtadj_bp)
     from cover_pages import covers_bp
     app.register_blueprint(covers_bp)
@@ -1130,6 +1132,7 @@ def create_app():
         daily_fire_count = 0
         news_unread_count = 0
         leads_badge = 0
+        social_badge = 0
         if current_user.is_authenticated:
             from models import Invoice
             import news_watch as _nw
@@ -1138,6 +1141,12 @@ def create_app():
                 if user_has_permission(current_user, "manage_leads"):
                     import leads as _leads
                     leads_badge = _leads.due_count()
+            except Exception:
+                db.session.rollback()
+            try:
+                if user_has_permission(current_user, "approve_social"):
+                    import social as _social
+                    social_badge = _social.pending_count()
             except Exception:
                 db.session.rollback()
             from invoice_send import due_reminder_count
@@ -1172,6 +1181,7 @@ def create_app():
             "daily_fire_count": daily_fire_count,
             "news_unread_count": news_unread_count,
             "leads_badge": leads_badge,
+            "social_badge": social_badge,
             "zimra_overdue_count": zimra_overdue_count,
             "zimra_approval_count": zimra_approval_count,
             "learning_pending_count": learning_pending_count,

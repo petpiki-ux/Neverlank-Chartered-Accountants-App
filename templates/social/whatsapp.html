@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}WhatsApp - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>WhatsApp</h1>
+  <p class="muted" style="margin:0;">People who agreed to be messaged on WhatsApp, with message wording ready to send. You press each send link yourself from the firm's own WhatsApp: nothing is sent in bulk, and nobody without consent can be messaged. Anyone who replies STOP is opted out automatically when you log their reply.</p></div>
+{% set active = 'whatsapp' %}{% include 'social/_nav.html' %}
+<div class="card" style="padding:10px 16px;display:flex;gap:18px;flex-wrap:wrap;align-items:center;">
+  <span><strong>{{ stats.all }}</strong> people</span><span><strong>{{ stats.ok }}</strong> can be messaged</span><span><strong>{{ stats.out }}</strong> opted out</span>
+  <span style="flex:1"></span>
+  {% if waiting_leads %}<form method="post" action="{{ url_for('social.whatsapp_import_leads') }}" class="inline"><button type="submit" class="btn small gold">Add {{ waiting_leads }} lead{{ 's' if waiting_leads != 1 }} who agreed to WhatsApp</button></form>{% endif %}
+</div>
+{% if broadcasts %}<div class="card"><h3 class="mt-0">Approved WhatsApp posts</h3>{% for v in broadcasts %}<div style="padding:3px 0;"><a href="{{ url_for('social.whatsapp_broadcast', post_id=v.post_id) }}">{{ v.post.title }}</a> <span class="muted" style="font-size:12.5px;">send to the list</span></div>{% endfor %}</div>{% endif %}
+<div class="card" style="padding:10px 16px;">
+  <form method="get" class="form-row" style="align-items:flex-end;">
+    <div style="flex:2;"><label for="q">Search</label><input type="text" id="q" name="q" value="{{ args.get('q','') }}" placeholder="name, company or number"></div>
+    <div><label for="list">List</label><select id="list" name="list"><option value="">All</option>{% for l in lists %}<option{% if args.get('list') == l %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+    <div><button type="submit" class="btn small" style="margin-bottom:14px;">Filter</button></div>
+  </form>
+</div>
+<div class="card">
+  {% if contacts %}<table><thead><tr><th>Name</th><th>Company</th><th>List</th><th>Number</th><th>May be messaged</th><th>Last message</th></tr></thead><tbody>
+  {% for c in contacts %}<tr><td><a href="{{ url_for('social.whatsapp_contact', contact_id=c.id) }}">{{ c.name }}</a></td><td>{{ c.company }}</td><td class="muted">{{ c.list_name }}</td><td class="muted">+{{ c.phone }}</td>
+    <td>{% if c.opted_out %}<span style="color:#b3261e;">Opted out</span>{% elif c.consent %}Yes <span class="muted" style="font-size:12px;">({{ c.consent_source }})</span>{% else %}<span style="color:#8a5a00;">No consent yet</span>{% endif %}</td>
+    <td class="muted" style="font-size:12.5px;">{{ (c.last_message_at|cat).strftime('%d %b') if c.last_message_at else '' }}</td></tr>{% endfor %}
+  </tbody></table>{% else %}<p class="muted" style="margin:0;">No one here yet. Add a person below.</p>{% endif %}
+</div>
+<details class="card" style="padding:10px 16px;"><summary style="cursor:pointer;"><strong>Add a person</strong></summary>
+  <form method="post" action="{{ url_for('social.whatsapp') }}" style="margin-top:8px;">
+    <div class="form-row">
+      <div><label for="name">Name *</label><input type="text" id="name" name="name" required></div>
+      <div><label for="phone">Mobile number * <span class="muted" style="font-weight:normal;">(077 123 4567 or +263 77 123 4567)</span></label><input type="text" id="phone" name="phone" required></div>
+      <div><label for="company">Company</label><input type="text" id="company" name="company"></div>
+      <div><label for="list_name">List</label><select id="list_name" name="list_name">{% for l in lists %}<option>{{ l }}</option>{% endfor %}</select></div>
+    </div>
+    <label style="font-weight:normal;"><input type="checkbox" name="consent" value="1" style="width:auto;"> They have agreed to be messaged on WhatsApp by Neverlank</label>
+    <label for="consent_source">How they agreed</label>
+    <select id="consent_source" name="consent_source" style="max-width:260px;"><option value="">Choose</option>{% for s in sources %}<option>{{ s }}</option>{% endfor %}</select>
+    <p class="muted" style="font-size:12.5px;margin:6px 0 10px;">Without consent they are kept in the list, but no message can be sent or logged as sent.</p>
+    <button type="submit" class="btn small gold">Add</button>
+  </form>
+</details>
+{% endblock %}

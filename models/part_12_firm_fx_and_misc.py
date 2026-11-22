@@ -1,4 +1,4 @@
-"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine, MarketingLead, LeadTouch.
+"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine, MarketingLead, LeadTouch, SocialPost, SocialVersion, SocialAccount, WhatsAppContact, WhatsAppMessage.
 
 See __init__.py: all parts share one set of names, exactly as the single file models.py did."""
 
@@ -354,3 +354,114 @@ class LeadTouch(db.Model):
     error = db.Column(db.String(300))
 
     done_by = db.relationship("User", foreign_keys=[done_by_id])
+
+
+# --------------------------------------------------------------------------- Social media management
+
+POST_STATUSES = ("Idea", "Draft", "Pending approval", "Approved", "Posted", "Rejected")
+
+
+class SocialPost(db.Model):
+    """One piece of content for the firm's social media, written once and adapted for each platform (see SocialVersion)."""
+    __tablename__ = "social_post"
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(160), nullable=False)
+    brief = db.Column(db.Text, default="")                      # what the post is about, in the author's words (the AI works only from this)
+    pillar = db.Column(db.String(40), default="")               # Authority / Education / Proof / Offer ...
+    status = db.Column(db.String(20), default="Draft", index=True)
+    planned_date = db.Column(db.Date, index=True)
+    link_url = db.Column(db.String(500), default="")            # where the post sends people; each platform gets its own tracked copy
+    campaign = db.Column(db.String(80), default="", index=True)  # utm_campaign used on the tracked links
+    news_item_id = db.Column(db.Integer)                        # the News Watch story it came from (no foreign key on purpose)
+    ai_used = db.Column(db.Boolean, default=False)
+    ai_flags = db.Column(db.Text, default="")                   # facts the AI said a person must check, one per line
+    author_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    approver_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    approved_at = db.Column(db.DateTime)
+    checks_json = db.Column(db.Text, default="[]")              # the checklist items the approver ticked
+    review_note = db.Column(db.Text, default="")                # why it was sent back
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    author = db.relationship("User", foreign_keys=[author_id])
+    approver = db.relationship("User", foreign_keys=[approver_id])
+    versions = db.relationship("SocialVersion", backref="post", cascade="all, delete-orphan", order_by="SocialVersion.id")
+
+    @property
+    def checks(self):
+        try:
+            return list(json.loads(self.checks_json or "[]"))
+        except ValueError:
+            return []
+
+
+class SocialVersion(db.Model):
+    """The wording of a post for one platform, whether it has been posted, and how it did."""
+    __tablename__ = "social_version"
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey("social_post.id"), nullable=False, index=True)
+    platform = db.Column(db.String(20), nullable=False)
+    headline = db.Column(db.String(150), default="")            # YouTube title
+    body = db.Column(db.Text, default="")                       # {link} stands for the tracked link
+    media_note = db.Column(db.Text, default="")                 # the picture, carousel or video this needs (Instagram, TikTok, YouTube ...)
+    status = db.Column(db.String(10), default="pending")        # pending / posted / skipped
+    posted_at = db.Column(db.DateTime)
+    posted_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    post_url = db.Column(db.String(500), default="")
+    impressions = db.Column(db.Integer)
+    likes = db.Column(db.Integer)
+    comments = db.Column(db.Integer)
+    shares = db.Column(db.Integer)
+    clicks = db.Column(db.Integer)
+    metrics_at = db.Column(db.DateTime)
+    __table_args__ = (db.UniqueConstraint("post_id", "platform", name="uq_social_version_platform"),)
+
+    posted_by = db.relationship("User", foreign_keys=[posted_by_id])
+
+
+class SocialAccount(db.Model):
+    """The firm's page or profile on one platform."""
+    __tablename__ = "social_account"
+    platform = db.Column(db.String(20), primary_key=True)
+    handle = db.Column(db.String(120), default="")
+    profile_url = db.Column(db.String(300), default="")
+    owner_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    notes = db.Column(db.Text, default="")
+
+    owner = db.relationship("User", foreign_keys=[owner_id])
+
+
+class WhatsAppContact(db.Model):
+    """A person the firm may message on WhatsApp, with the proof that they agreed to it. Messages are sent by a person, one by one, from the firm's own WhatsApp."""
+    __tablename__ = "whatsapp_contact"
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(160), nullable=False)
+    phone = db.Column(db.String(40), nullable=False, index=True)    # digits with country code, e.g. 263771234567
+    company = db.Column(db.String(160), default="")
+    list_name = db.Column(db.String(60), default="Clients")         # Clients / Leads / Broadcast ...
+    consent = db.Column(db.Boolean, default=False)
+    consent_source = db.Column(db.String(60), default="")
+    consent_at = db.Column(db.DateTime)
+    opted_out = db.Column(db.Boolean, default=False)
+    lead_id = db.Column(db.Integer)                                 # the marketing lead it came from (no foreign key on purpose)
+    notes = db.Column(db.Text, default="")
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    last_message_at = db.Column(db.DateTime)
+
+    messages = db.relationship("WhatsAppMessage", backref="contact", cascade="all, delete-orphan", order_by="WhatsAppMessage.at")
+
+
+class WhatsAppMessage(db.Model):
+    """One message sent to (out) or received from (in) a contact, logged by a person."""
+    __tablename__ = "whatsapp_message"
+    id = db.Column(db.Integer, primary_key=True)
+    contact_id = db.Column(db.Integer, db.ForeignKey("whatsapp_contact.id"), nullable=False, index=True)
+    direction = db.Column(db.String(3), default="out")
+    body = db.Column(db.Text, default="")
+    template = db.Column(db.String(30), default="")
+    post_id = db.Column(db.Integer)                                 # when it was a broadcast of a social post
+    by_user_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    by_user = db.relationship("User", foreign_keys=[by_user_id])

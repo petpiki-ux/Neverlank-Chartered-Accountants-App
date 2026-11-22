@@ -1,0 +1,171 @@
+{% extends "base.html" %}
+{% block title %}{{ post.title }} - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+{% set locked = post.status == 'Posted' and not approve %}
+<div class="page-header">
+  <h1>{{ post.title }} <span class="badge" style="vertical-align:middle;{{ 'background:#2e7d32;color:#fff;' if post.status == 'Posted' else ('background:#b8923a;color:#fff;' if post.status == 'Pending approval' else '') }}">{{ post.status }}</span></h1>
+  <p class="muted" style="margin:0;"><a href="{{ url_for('social.index') }}">back to Social Media</a> &middot; by {{ post.author.name if post.author else '?' }}{% if post.approver %} &middot; approved by {{ post.approver.name }} on {{ (post.approved_at|cat).strftime('%d %b %Y %H:%M') }}{% endif %}{% if post.ai_used %} &middot; first draft written by the AI{% endif %}</p>
+</div>
+
+{% if post.status == 'Rejected' and post.review_note %}<div class="card" style="border-left:4px solid #b3261e;"><strong>Sent back:</strong> {{ post.review_note }}</div>{% endif %}
+{% if news %}<div class="card" style="padding:8px 16px;font-size:13px;">From News Watch: <a href="{{ url_for('news.index', q=news.title[:40]) }}">{{ news.title }}</a> ({{ news.publisher }}){% if news.unconfirmed %} <span class="badge overdue">unconfirmed</span>{% endif %}. Check the real source before relying on it.</div>{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Checks</h3>
+  {% if issues %}
+  <ul style="margin:0 0 8px 18px;padding:0;">
+    {% for i in issues %}<li style="color:{{ '#b3261e' if i.level == 'error' else ('#8a5a00' if i.level == 'warn' else '#4a5873') }};font-size:13.5px;"><strong>{{ {'error':'Fix','warn':'Check','info':'Note'}[i.level] }}:</strong> {{ i.text }}</li>{% endfor %}
+  </ul>
+  {% else %}<p style="margin:0 0 8px;font-size:13.5px;color:#2e7d32;">The automatic checks found nothing to flag. You still read it and tick the checklist.</p>{% endif %}
+  {% if post.ai_flags %}
+  <p style="margin:8px 0 2px;font-weight:600;font-size:13.5px;">The AI says a person must verify these before posting:</p>
+  <ul style="margin:0 0 0 18px;padding:0;font-size:13.5px;">{% for f in post.ai_flags.split('\n') %}<li>{{ f }}</li>{% endfor %}</ul>
+  {% endif %}
+</div>
+
+<form method="post" action="{{ url_for('social.save', post_id=post.id) }}" id="postform">
+<div class="card">
+  <div class="form-row">
+    <div style="flex:3;"><label for="title">Title</label><input type="text" id="title" name="title" value="{{ post.title }}" maxlength="160"></div>
+    <div><label for="planned_date">Planned date</label><input type="date" id="planned_date" name="planned_date" value="{{ post.planned_date.strftime('%Y-%m-%d') if post.planned_date else '' }}"></div>
+    <div><label for="pillar">Pillar</label><select id="pillar" name="pillar"><option value="">None</option>{% for p in pillars %}<option{% if post.pillar == p %} selected{% endif %}>{{ p }}</option>{% endfor %}{% if post.pillar and post.pillar not in pillars %}<option selected>{{ post.pillar }}</option>{% endif %}</select></div>
+  </div>
+  <label for="link_url">Link in the post <span class="muted" style="font-weight:normal;">(write {link} in the wording where it should go; each platform gets its own tracked copy)</span></label>
+  <input type="text" id="link_url" name="link_url" value="{{ post.link_url }}">
+  <details style="margin-top:8px;"{% if not cards %} open{% endif %}><summary style="cursor:pointer;">The brief</summary>
+    <textarea id="brief" name="brief" rows="5">{{ post.brief }}</textarea></details>
+</div>
+
+{% for key, cfg, v, link in cards %}
+<div class="card platform" data-platform="{{ key }}" data-limit="{{ cfg.limit }}" data-link="{{ link }}" data-compose="{{ cfg.compose }}" data-home="{{ cfg.home }}">
+  <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;">
+    <h3 class="mt-0" style="margin-bottom:4px;">{{ cfg.label }}</h3>
+    {% if v.status == 'posted' %}<span class="badge" style="background:#2e7d32;color:#fff;">posted</span>{% elif v.status == 'skipped' %}<span class="badge">skipped</span>{% endif %}
+    <span class="muted" style="font-size:12.5px;">{{ cfg.ideal }}</span>
+    <span style="flex:1"></span><span class="count" style="font-size:13px;font-weight:600;"></span>
+  </div>
+  {% if key == 'youtube' %}<label>Video title <span class="muted" style="font-weight:normal;">(100 characters or fewer)</span></label>
+  <input type="text" name="headline_{{ key }}" value="{{ v.headline }}" maxlength="150" {% if locked %}readonly{% endif %}>{% endif %}
+  <textarea name="body_{{ key }}" rows="{{ 5 if key in ('x', 'whatsapp') else 9 }}" class="body" {% if locked %}readonly{% endif %}>{{ v.body }}</textarea>
+  {% if cfg.visual %}<label style="margin-top:6px;">The picture, carousel or video it needs</label>
+  <textarea name="media_{{ key }}" rows="2" {% if locked %}readonly{% endif %}>{{ v.media_note }}</textarea>{% else %}<input type="hidden" name="media_{{ key }}" value="{{ v.media_note }}">{% endif %}
+  <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center;">
+    <button type="button" class="btn small secondary js-copy">Copy</button>
+    {% if cfg.compose or cfg.home %}<button type="button" class="btn small gold js-open">Copy and open {{ cfg.label }}</button>{% endif %}
+    {% if key == 'youtube' %}<button type="button" class="btn small secondary js-copy-title">Copy title</button>{% endif %}
+    {% if link %}<span class="muted" style="font-size:12px;word-break:break-all;">Tracked link: {{ link }}</span>{% endif %}
+  </div>
+</div>
+{% endfor %}
+
+<div class="card">
+  {% if missing %}<p style="margin:0 0 6px;font-weight:600;">Add a platform</p>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;">{% for k in missing %}<label style="font-weight:normal;"><input type="checkbox" name="platforms" value="{{ k }}" style="width:auto;"> {{ platforms[k].label }}</label>{% endfor %}</div>{% endif %}
+  <button type="submit" class="btn gold">Save</button>
+  <span class="muted" style="font-size:12.5px;margin-left:8px;">{% if post.status in ('Pending approval', 'Approved') %}Changing the wording sends it back for approval.{% endif %}</span>
+</div>
+</form>
+
+{% if ai %}
+<form method="post" action="{{ url_for('social.redraft', post_id=post.id) }}" class="card" style="padding:10px 16px;">
+  <button type="submit" class="btn small secondary">Draft again with the AI</button>
+  <span class="muted" style="font-size:12.5px;">Replaces the wording of every platform on this post with a new draft from the brief.</span>
+</form>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Approval</h3>
+  {% if post.status in ('Idea', 'Draft', 'Rejected') %}
+    <form method="post" action="{{ url_for('social.submit', post_id=post.id) }}" class="inline"><button type="submit" class="btn" {% if blocked %}disabled title="Fix the errors above first"{% endif %}>Send for approval</button></form>
+  {% elif post.status == 'Pending approval' %}<p style="margin:0 0 8px;">Waiting for an approver.</p>{% endif %}
+  {% if approve and post.status in ('Idea', 'Draft', 'Pending approval', 'Rejected') %}
+  <form method="post" action="{{ url_for('social.approve', post_id=post.id) }}" style="margin-top:12px;">
+    <p style="margin:0 0 6px;font-weight:600;">Approver's checklist (every box must be ticked)</p>
+    {% for k, text in checklist %}<label style="display:flex;gap:8px;align-items:flex-start;font-weight:normal;margin-bottom:4px;"><input type="checkbox" name="check_{{ k }}" value="1" style="width:auto;margin-top:3px;"> <span>{{ text }}</span></label>{% endfor %}
+    <button type="submit" class="btn gold" style="margin-top:8px;" {% if blocked %}disabled title="Fix the errors above first"{% endif %}>Approve</button>
+  </form>
+  {% if post.status != 'Rejected' %}
+  <form method="post" action="{{ url_for('social.reject', post_id=post.id) }}" style="margin-top:12px;">
+    <label for="review_note">Or send it back, saying what to change</label>
+    <textarea id="review_note" name="review_note" rows="2"></textarea>
+    <button type="submit" class="btn small secondary">Send back</button>
+  </form>{% endif %}
+  {% elif post.status in ('Approved', 'Posted') %}
+  <p style="margin:0;font-size:13.5px;">Approved with the checklist ticked ({{ ticked|length }} of {{ checklist|length }}).
+  {% if approve and post.status == 'Approved' %}<form method="post" action="{{ url_for('social.reject', post_id=post.id) }}" style="margin-top:8px;"><label for="review_note2">Withdraw approval and send back</label><textarea id="review_note2" name="review_note" rows="2"></textarea><button type="submit" class="btn small secondary">Send back</button></form>{% endif %}</p>
+  {% elif not approve %}<p class="muted" style="margin:6px 0 0;font-size:13px;">Only an approver (Partner or Admin by default) can approve a post.</p>{% endif %}
+</div>
+
+{% if post.status in ('Approved', 'Posted') %}
+<div class="card">
+  <h3 class="mt-0">Posting and results</h3>
+  <p class="muted" style="font-size:12.5px;margin:0 0 8px;">Post it from the firm's own account (use the Copy buttons above), then paste the post's address here. Results are typed in by hand a few days later.</p>
+  {% for key, cfg, v, link in cards %}
+  <div style="border-top:1px solid #e5e0d0;padding:10px 0;">
+    <strong>{{ cfg.label }}</strong>
+    {% if v.status == 'posted' %}
+      <span class="muted" style="font-size:12.5px;">posted {{ (v.posted_at|cat).strftime('%d %b %H:%M') }}{% if v.posted_by %} by {{ v.posted_by.name }}{% endif %}{% if v.post_url %} &middot; <a href="{{ v.post_url }}" target="_blank" rel="noopener">open the post</a>{% endif %}</span>
+      <form method="post" action="{{ url_for('social.reopen_version', post_id=post.id, platform=key) }}" class="inline"><button type="submit" class="btn small secondary">Not posted after all</button></form>
+      {% if leads.get(key) %}<span class="badge" style="background:#b8923a;color:#fff;" title="Sign-ups on the Leads page that came through this platform's tracked link">{{ leads[key] }} lead{{ 's' if leads[key] != 1 }}</span>{% endif %}
+      <form method="post" action="{{ url_for('social.results_save', post_id=post.id, platform=key) }}" class="form-row" style="align-items:flex-end;margin-top:6px;">
+        {% for f, lab in [('impressions','Views'),('likes','Likes'),('comments','Comments'),('shares','Shares'),('clicks','Clicks')] %}<div style="max-width:110px;"><label>{{ lab }}</label><input type="text" inputmode="numeric" name="{{ f }}" value="{{ v[f] if v[f] is not none else '' }}"></div>{% endfor %}
+        <div><button type="submit" class="btn small secondary" style="margin-bottom:14px;">Save results</button></div>
+      </form>
+    {% elif v.status == 'skipped' %}
+      <span class="muted" style="font-size:12.5px;">skipped</span>
+      <form method="post" action="{{ url_for('social.skip_version', post_id=post.id, platform=key) }}" class="inline"><button type="submit" class="btn small secondary">Undo skip</button></form>
+    {% else %}
+      <form method="post" action="{{ url_for('social.mark_posted', post_id=post.id, platform=key) }}" class="form-row" style="align-items:flex-end;margin-top:4px;">
+        <div style="flex:3;"><label>Address of the live post <span class="muted" style="font-weight:normal;">(paste it after posting)</span></label><input type="text" name="post_url" placeholder="https://..."></div>
+        <div><button type="submit" class="btn small gold" style="margin-bottom:14px;">Mark as posted</button></div>
+      </form>
+      <form method="post" action="{{ url_for('social.skip_version', post_id=post.id, platform=key) }}" class="inline"><button type="submit" class="btn small secondary">Skip this platform</button></form>
+    {% endif %}
+  </div>
+  {% endfor %}
+  {% if whatsapp_version and whatsapp_version.status != 'skipped' %}<p style="margin:8px 0 0;"><a class="btn small secondary" href="{{ url_for('social.whatsapp_broadcast', post_id=post.id) }}">Send the WhatsApp version to people on the list</a></p>{% endif %}
+</div>
+{% endif %}
+
+{% if can_delete %}
+<form method="post" action="{{ url_for('social.delete', post_id=post.id) }}" onsubmit="return confirm('Delete this post for good? This cannot be undone.');"><button type="submit" class="btn small danger">Delete this post</button></form>
+{% endif %}
+
+<script>
+(function () {
+  var URL_RE = /https?:\/\/\S+/g;
+  function finalText(card) {
+    var ta = card.querySelector("textarea.body"), link = card.getAttribute("data-link") || "";
+    var t = ta.value.split("{link}").join(link);
+    return link ? t.trim() : t.replace(/\n{3,}/g, "\n\n").trim();
+  }
+  function count(card) {
+    var key = card.getAttribute("data-platform"), limit = parseInt(card.getAttribute("data-limit"), 10), t = finalText(card);
+    var n = key === "x" ? t.replace(URL_RE, new Array(24).join("x")).length : t.length;
+    var el = card.querySelector(".count");
+    el.textContent = n.toLocaleString() + " / " + limit.toLocaleString();
+    el.style.color = n > limit ? "#b3261e" : (n > limit * 0.9 ? "#8a5a00" : "#4a5873");
+  }
+  function copy(text) {
+    if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(text);
+    return new Promise(function (ok, no) {
+      var a = document.createElement("textarea"); a.value = text; a.style.position = "fixed"; a.style.opacity = "0"; document.body.appendChild(a); a.select();
+      try { document.execCommand("copy") ? ok() : no(); } catch (e) { no(e); } document.body.removeChild(a);
+    });
+  }
+  function flash(btn, msg) { var old = btn.getAttribute("data-label") || btn.textContent; btn.setAttribute("data-label", old); btn.textContent = msg; setTimeout(function () { btn.textContent = old; }, 1600); }
+  document.querySelectorAll(".platform").forEach(function (card) {
+    count(card);
+    card.querySelector("textarea.body").addEventListener("input", function () { count(card); });
+    var c = card.querySelector(".js-copy"), o = card.querySelector(".js-open"), ct = card.querySelector(".js-copy-title");
+    if (c) c.addEventListener("click", function () { copy(finalText(card)).then(function () { flash(c, "Copied"); }, function () { flash(c, "Press Ctrl+C"); }); });
+    if (ct) ct.addEventListener("click", function () { copy(card.querySelector("input[name^=headline_]").value).then(function () { flash(ct, "Copied"); }); });
+    if (o) o.addEventListener("click", function () {
+      var text = finalText(card), compose = card.getAttribute("data-compose"), home = card.getAttribute("data-home");
+      copy(text).then(function () { flash(o, "Copied"); }, function () {});
+      window.open(compose ? compose.replace("{text}", encodeURIComponent(text)) : home, "_blank", "noopener");
+    });
+  });
+})();
+</script>
+{% endblock %}

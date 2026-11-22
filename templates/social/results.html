@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block title %}Results - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Social media results</h1>
+  <p class="muted" style="margin:0;">Numbers are typed in by hand on each post. "Leads" are sign-ups on the Leads page that came through that platform's tracked link.</p></div>
+{% set active = 'results' %}{% include 'social/_nav.html' %}
+<div class="card">
+  <h3 class="mt-0">By platform</h3>
+  {% if totals %}
+  <table><thead><tr><th>Platform</th><th>Posts</th><th>Views</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Clicks</th><th>Leads</th></tr></thead><tbody>
+  {% for key, t in totals %}<tr><td>{{ t.label }}</td><td>{{ t.posts }}</td><td>{{ '{:,}'.format(t.impressions) }}</td><td>{{ t.likes }}</td><td>{{ t.comments }}</td><td>{{ t.shares }}</td><td>{{ t.clicks }}</td><td><strong>{{ t.leads }}</strong></td></tr>{% endfor %}
+  </tbody></table>
+  {% else %}<p class="muted" style="margin:0;">Nothing has been posted yet.</p>{% endif %}
+</div>
+<div class="card">
+  <h3 class="mt-0">Every post <a class="btn small secondary" style="float:right;" href="{{ url_for('social.results_csv') }}">Download (CSV)</a></h3>
+  {% if rows %}
+  <table><thead><tr><th>Posted</th><th>Post</th><th>Platform</th><th>Views</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Clicks</th><th>Leads</th></tr></thead><tbody>
+  {% for r in rows %}{% set v = r.version %}<tr>
+    <td style="font-size:12.5px;">{{ (v.posted_at|cat).strftime('%d %b %Y') if v.posted_at else '' }}</td>
+    <td><a href="{{ url_for('social.detail', post_id=r.post.id) }}">{{ r.post.title }}</a></td><td>{{ r.label }}</td>
+    {% for f in ['impressions','likes','comments','shares','clicks'] %}<td>{{ v[f] if v[f] is not none else '-' }}</td>{% endfor %}<td><strong>{{ r.leads }}</strong></td></tr>{% endfor %}
+  </tbody></table>{% endif %}
+</div>
+{% endblock %}

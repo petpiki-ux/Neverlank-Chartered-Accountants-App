@@ -17,6 +17,7 @@
   {% set ep = request.endpoint or '' %}
   {% set can_cf = user_has_permission(current_user, 'manage_corporate_finance') %}
   {% set can_leads = user_has_permission(current_user, 'manage_leads') %}
+  {% set can_social = user_has_permission(current_user, 'manage_social') %}
   {% set can_wb = user_has_permission(current_user, 'manage_whistleblower') %}
   {% set can_tr = user_has_permission(current_user, 'manage_training') %}
   {% set can_coa = user_has_permission(current_user, 'manage_chart_of_accounts') %}
@@ -86,6 +87,7 @@
       <a href="{{ url_for('invoicing.list_invoices') }}"{% if bp in finance_blueprints %} class="active"{% endif %}>Finance{% if recurring_review_count or invoice_reminder_count %} <span class="badge overdue" title="Recurring invoices waiting for review and overdue-invoice reminders due">{{ recurring_review_count + invoice_reminder_count }}</span>{% endif %}</a>
       {% if can_cf %}<a href="{{ url_for('corpfin.dashboard') }}"{% if bp == 'corpfin' %} class="active"{% endif %}>Corporate Finance</a>{% endif %}
       {% if can_leads %}<a href="{{ url_for('leads.index') }}"{% if bp == 'leads' %} class="active"{% endif %}>Leads{% if leads_badge %} <span class="badge" style="background:#b8923a;color:#fff;" title="Leads with a follow-up due now">{{ leads_badge }}</span>{% endif %}</a>{% endif %}
+      {% if can_social %}<a href="{{ url_for('social.index') }}"{% if bp == 'social' %} class="active"{% endif %}>Social{% if social_badge %} <span class="badge" style="background:#b8923a;color:#fff;" title="Posts waiting for your approval">{{ social_badge }}</span>{% endif %}</a>{% endif %}
       <a href="{{ url_for('learning.index') }}"{% if bp == 'learning' %} class="active"{% endif %}>Firm Learning{% if learning_pending_count %} <span class="badge" style="background:#b8934a;color:#fff;" title="Lessons waiting for your decision">{{ learning_pending_count }}</span>{% endif %}</a>
       <div class="nav-group nav-right{% if firm_on %} active{% endif %}">
         <button type="button" class="nav-trigger" aria-haspopup="true" aria-expanded="false">Firm <span class="caret"></span>{% if can_backup and backup_alert %}<span class="badge overdue" title="{{ backup_alert }}">!</span>{% endif %}</button>

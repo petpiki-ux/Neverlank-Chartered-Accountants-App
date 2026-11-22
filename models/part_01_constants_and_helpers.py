@@ -511,6 +511,13 @@ PERMISSIONS = [
      "Open the Leads list (people who asked for the Compliance Calendar or another lead magnet), see their details, "
      "send the follow-up emails and messages, change a lead's status or owner, and export the list.",
      ("supervisor", "partner", "admin")),
+    ("manage_social", "Manage Social Media",
+     "Plan and draft the firm's social media posts, track their results, and keep the WhatsApp contact list and message log. "
+     "Approving posts is a separate permission.",
+     ("supervisor", "partner", "admin")),
+    ("approve_social", "Approve Social Media Posts",
+     "Approve (or send back) a post after the compliance checklist, so it can be posted. A post cannot be posted without this approval.",
+     ("partner", "admin")),
 ]
 PERMISSION_KEYS = {p[0] for p in PERMISSIONS}
 

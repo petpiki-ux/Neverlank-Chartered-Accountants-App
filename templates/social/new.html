@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block title %}New post - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>New post</h1>
+  <p class="muted" style="margin:0;"><a href="{{ url_for('social.index') }}">back to Social Media</a></p></div>
+<div class="card">
+  <form method="post" action="{{ url_for('social.new') }}">
+    {% if prefill.news_item_id %}<input type="hidden" name="news_item_id" value="{{ prefill.news_item_id }}">
+    <p class="muted" style="font-size:12.5px;margin:0 0 10px;">Started from a News Watch story. The brief below says it is reported news, not law.</p>{% endif %}
+    <label for="title">Title * <span class="muted" style="font-weight:normal;">(for your own list; not posted)</span></label>
+    <input type="text" id="title" name="title" maxlength="160" required value="{{ prefill.get('title', '') }}">
+    <label for="brief">Brief <span class="muted" style="font-weight:normal;">(the facts and the point of the post, in your own words)</span></label>
+    <textarea id="brief" name="brief" rows="7" placeholder="e.g. Quarterly payment dates are coming. Businesses often miss them because nobody owns the date. Offer: free 2027 Compliance Calendar.">{{ prefill.get('brief', '') }}</textarea>
+    <p class="muted" style="font-size:12px;margin:2px 0 10px;">The AI works only from these facts. It is told never to add a figure, date or rule you have not given it, but you still check everything before approval.</p>
+    <div class="form-row">
+      <div><label for="pillar">Pillar</label><select id="pillar" name="pillar"><option value="">None</option>{% for p in pillars %}<option{% if prefill.get('pillar') == p %} selected{% endif %}>{{ p }}</option>{% endfor %}</select></div>
+      <div><label for="planned_date">Planned date</label><input type="date" id="planned_date" name="planned_date"></div>
+    </div>
+    <label for="link_url">Link in the post <span class="muted" style="font-weight:normal;">(optional; each platform gets its own tracked copy, so the Leads page shows where sign-ups came from)</span></label>
+    <input type="text" id="link_url" name="link_url" placeholder="https://app.neverlank.co.zw/compliance-calendar">
+    <p style="margin:12px 0 4px;font-weight:600;">Platforms</p>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:12px;">
+      {% for k in order %}<label style="font-weight:normal;"><input type="checkbox" name="platforms" value="{{ k }}" style="width:auto;"{% if k in ('linkedin', 'x', 'facebook') %} checked{% endif %}> {{ platforms[k].label }}</label>{% endfor %}
+    </div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+      <button type="submit" name="mode" value="ai" class="btn gold" {% if not ai %}title="The AI is not switched on on this server"{% endif %}>Draft with AI</button>
+      <button type="submit" name="mode" value="draft" class="btn secondary">Start a blank draft</button>
+      <button type="submit" name="mode" value="idea" class="btn secondary">Save as an idea</button>
+    </div>
+    {% if not ai %}<p class="muted" style="font-size:12.5px;margin:8px 0 0;">The AI is not switched on on this server (no API key), so Draft with AI will leave the wording blank for you to write.</p>{% endif %}
+  </form>
+</div>
+{% endblock %}

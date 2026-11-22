@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Social Media</h1>
+  <p class="muted" style="margin:0;">Plan, write, check, approve and post the firm's content on LinkedIn, X, Facebook, Instagram, YouTube, TikTok and WhatsApp. Nothing is posted until it has been approved, and you post it yourself from the firm's own accounts.</p>
+</div>
+{% set active = 'plan' %}{% include 'social/_nav.html' %}
+
+{% if approve and waiting %}
+<div class="card" style="border-left:4px solid #b8923a;">
+  <h3 class="mt-0">Waiting for your approval <span class="badge" style="background:#b8923a;color:#fff;">{{ waiting|length }}</span></h3>
+  {% for p in waiting %}<div style="padding:4px 0;"><a href="{{ url_for('social.detail', post_id=p.id) }}"><strong>{{ p.title }}</strong></a> <span class="muted" style="font-size:12.5px;">by {{ p.author.name if p.author else '?' }}{% if p.planned_date %} &middot; planned {{ p.planned_date.strftime('%d %b') }}{% endif %}</span></div>{% endfor %}
+</div>
+{% endif %}
+{% if ready %}
+<div class="card">
+  <h3 class="mt-0">Approved: ready to post <span class="badge">{{ ready|length }}</span></h3>
+  {% for p in ready %}<div style="padding:4px 0;"><a href="{{ url_for('social.detail', post_id=p.id) }}"><strong>{{ p.title }}</strong></a>
+    <span class="muted" style="font-size:12.5px;">{% if p.planned_date %}planned {{ p.planned_date.strftime('%a %d %b') }} &middot; {% endif %}{% for v in p.versions %}{{ platforms[v.platform].label }}{% if v.status == 'posted' %} (posted){% elif v.status == 'skipped' %} (skipped){% endif %}{% if not loop.last %}, {% endif %}{% endfor %}</span></div>{% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">The next four weeks</h3>
+  <div style="overflow-x:auto;">
+  <div style="min-width:760px;display:grid;grid-template-columns:repeat(7,1fr);gap:4px;">
+    {% for d in ['Mon','Tue','Wed','Thu','Fri','Sat','Sun'] %}<div class="muted" style="font-size:12px;font-weight:600;">{{ d }}</div>{% endfor %}
+    {% for week in weeks %}{% for day, items in week %}
+    <div style="border:1px solid {{ '#b8923a' if day == today else '#e5e0d0' }};border-radius:6px;min-height:74px;padding:4px;background:{{ '#fffaf0' if day == today else '#fff' }};">
+      <div class="muted" style="font-size:11.5px;">{{ day.strftime('%d %b') }}</div>
+      {% for p in items %}<a href="{{ url_for('social.detail', post_id=p.id) }}" style="display:block;font-size:12px;line-height:1.25;margin-top:3px;padding:3px 5px;border-radius:4px;background:{{ {'Posted':'#e3f2e6','Approved':'#e3ecf7','Pending approval':'#fff1d6','Rejected':'#fbe3e0'}.get(p.status, '#f1efe6') }};text-decoration:none;color:inherit;" title="{{ p.status }}">{{ p.title[:48] }}</a>{% endfor %}
+    </div>
+    {% endfor %}{% endfor %}
+  </div></div>
+  <p class="muted" style="font-size:12px;margin:8px 0 0;">Colours: grey draft or idea, amber waiting for approval, blue approved, green posted, red sent back.</p>
+</div>
+
+<div class="card" style="padding:10px 16px;">
+  <form method="get" action="{{ url_for('social.index') }}" class="form-row" style="align-items:flex-end;">
+    <div style="flex:2;"><label for="q">Search</label><input type="text" id="q" name="q" value="{{ args.get('q','') }}" placeholder="title or brief"></div>
+    <div><label for="status">Status</label><select id="status" name="status"><option value="">All</option>{% for s in statuses %}<option{% if args.get('status') == s %} selected{% endif %}>{{ s }}</option>{% endfor %}</select></div>
+    <div><label for="platform">Platform</label><select id="platform" name="platform"><option value="">All</option>{% for k, p in platforms.items() %}<option value="{{ k }}"{% if args.get('platform') == k %} selected{% endif %}>{{ p.label }}</option>{% endfor %}</select></div>
+    <div><button type="submit" class="btn small" style="margin-bottom:14px;">Filter</button></div>
+  </form>
+</div>
+
+<div class="card">
+  {% if posts %}
+  <table>
+    <thead><tr><th>Planned</th><th>Post</th><th>Platforms</th><th>Pillar</th><th>Status</th><th>Author</th></tr></thead>
+    <tbody>
+    {% for p in posts %}
+    <tr>
+      <td style="font-size:12.5px;">{{ p.planned_date.strftime('%d %b %Y') if p.planned_date else 'not planned' }}</td>
+      <td><a href="{{ url_for('social.detail', post_id=p.id) }}">{{ p.title }}</a>{% if p.ai_used %} <span class="badge" title="First draft written by the AI">AI</span>{% endif %}</td>
+      <td class="muted" style="font-size:12.5px;">{% for v in p.versions %}{{ platforms[v.platform].label }}{% if not loop.last %}, {% endif %}{% endfor %}</td>
+      <td class="muted" style="font-size:12.5px;">{{ p.pillar }}</td>
+      <td>{{ p.status }}</td>
+      <td>{{ p.author.name if p.author else '' }}</td>
+    </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}<p class="muted" style="margin:0;">{% if args %}No posts match these filters.{% else %}No posts yet. Press New post to start, or open a story in News Watch and choose "Draft a post".{% endif %}</p>{% endif %}
+</div>
+{% endblock %}

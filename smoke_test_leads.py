@@ -328,6 +328,10 @@ os.environ["LEADS_DEFAULT_OWNER"] = "SV@x.co"
 with app.app_context():
     check(LD.default_owner().id == svid, "the owner can be set by email")
 os.environ.pop("LEADS_DEFAULT_OWNER")
+with app.app_context():
+    pu_ = User.query.get(pid); pu_.is_active_flag = False; db.session.commit()
+    check(LD.default_owner().id == User.query.filter_by(role="admin").order_by(User.id).first().id, "with no active partner, an admin owns new leads")
+    pu_.is_active_flag = True; db.session.commit()
 
 print(len(fails), "failure(s)")
 sys.exit(1 if fails else 0)

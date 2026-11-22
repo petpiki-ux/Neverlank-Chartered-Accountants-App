@@ -84,6 +84,7 @@
     <form method="post" action="{{ url_for('news.pin', item_id=it.id) }}" class="inline"><button type="submit" class="btn small secondary">{{ 'Unpin' if it.pinned else 'Pin' }}</button></form>
     {% if can_file and not it.filed_update_id %}<form method="post" action="{{ url_for('news.file_to_library', item_id=it.id) }}" class="inline"><button type="submit" class="btn small secondary">File in the Firm Library</button></form>
     {% elif it.filed_update_id %}<a href="{{ url_for('tax.read_legislative_update', update_id=it.filed_update_id) }}" class="btn small secondary">In the Firm Library</a>{% endif %}
+    {% if user_has_permission(current_user, 'manage_social') %}<a class="btn small secondary" href="{{ url_for('social.new', news=it.id) }}">Draft a post</a>{% endif %}
     <form method="post" action="{{ url_for('news.hide', item_id=it.id) }}" class="inline"><button type="submit" class="btn small secondary">{{ 'Bring back' if hidden_view else 'Not relevant' }}</button></form>
   </div>
 </div>

@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Send to the list - WhatsApp - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Send "{{ post.title }}" on WhatsApp</h1>
+  <p class="muted" style="margin:0;"><a href="{{ url_for('social.detail', post_id=post.id) }}">back to the post</a> &middot; Only people who agreed and have not opted out are listed. Press each link yourself, then log it.</p></div>
+<div class="card"><strong>The message</strong> <span class="muted" style="font-size:12.5px;">(each person's first name is added at the front)</span>
+  <pre style="white-space:pre-wrap;font:inherit;background:#faf8f1;padding:10px;border-radius:6px;margin:8px 0 0;">{{ text }}</pre></div>
+<div class="card" style="padding:10px 16px;"><form method="get" class="form-row" style="align-items:flex-end;"><div><label for="list">List</label><select id="list" name="list"><option value="">All who agreed</option>{% for l in lists %}<option{% if list_name == l %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div><div><button class="btn small" style="margin-bottom:14px;">Show</button></div></form></div>
+<div class="card">
+  {% if rows %}<table><thead><tr><th>Name</th><th>List</th><th></th></tr></thead><tbody>
+  {% for c, t, link, sent in rows %}<tr><td><a href="{{ url_for('social.whatsapp_contact', contact_id=c.id) }}">{{ c.name }}</a>{% if c.company %} <span class="muted">{{ c.company }}</span>{% endif %}</td><td class="muted">{{ c.list_name }}</td>
+    <td class="text-right">{% if sent %}<span class="muted">logged as sent</span>{% else %}
+      <a class="btn small gold" href="{{ link }}" target="_blank" rel="noopener">Open WhatsApp</a>
+      <form method="post" action="{{ url_for('social.whatsapp_log', contact_id=c.id) }}" class="inline"><input type="hidden" name="direction" value="out"><input type="hidden" name="body" value="{{ t }}"><input type="hidden" name="post_id" value="{{ post.id }}"><input type="hidden" name="next" value="{{ request.full_path }}"><button type="submit" class="btn small secondary">I sent it</button></form>{% endif %}</td></tr>{% endfor %}
+  </tbody></table>{% else %}<p class="muted" style="margin:0;">No one on the list has agreed to be messaged yet.</p>{% endif %}
+</div>
+{% endblock %}

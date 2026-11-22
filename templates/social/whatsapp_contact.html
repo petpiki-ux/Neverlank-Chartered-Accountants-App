@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}{{ c.name }} - WhatsApp - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>{{ c.name }}{% if c.company %} <span class="muted" style="font-weight:normal;">&middot; {{ c.company }}</span>{% endif %}</h1>
+  <p class="muted" style="margin:0;"><a href="{{ url_for('social.whatsapp') }}">back to WhatsApp</a> &middot; +{{ c.phone }} &middot; {{ c.list_name }}</p></div>
+{% if not ok %}<div class="card" style="border-left:4px solid #b3261e;">{% if c.opted_out %}This person has opted out. Do not message them.{% else %}This person has not agreed to be messaged on WhatsApp, so no message can be sent or logged as sent. Record their consent below once they have agreed.{% endif %}</div>{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Write a message</h3>
+  <form method="get" class="form-row" style="align-items:flex-end;">
+    <div style="flex:2;"><label for="template">Message</label><select id="template" name="template">{% for k, t in templates.items() %}<option value="{{ k }}"{% if key == k %} selected{% endif %}>{{ t[0] }}</option>{% endfor %}</select></div>
+    <div style="flex:3;"><label for="topic">What it is about <span class="muted" style="font-weight:normal;">(for reminders, updates and thank-yous)</span></label><input type="text" id="topic" name="topic" value="{{ topic }}" maxlength="300"></div>
+    <div><button type="submit" class="btn small" style="margin-bottom:14px;">Show message</button></div>
+  </form>
+  {% if why %}<p style="color:#b3261e;margin:0;">{{ why }}</p>{% endif %}
+  {% if text %}
+  <pre style="white-space:pre-wrap;font:inherit;background:#faf8f1;padding:10px;border-radius:6px;margin:8px 0;">{{ text }}</pre>
+  {% if link %}<a class="btn small gold" href="{{ link }}" target="_blank" rel="noopener">Open WhatsApp with this message</a>
+  <form method="post" action="{{ url_for('social.whatsapp_log', contact_id=c.id) }}" class="inline"><input type="hidden" name="direction" value="out"><input type="hidden" name="body" value="{{ text }}"><input type="hidden" name="template" value="{{ key }}"><button type="submit" class="btn small secondary">I sent it: log it</button></form>
+  {% elif not ok %}<p class="muted" style="margin:0;font-size:13px;">Sending is switched off for this person.</p>{% endif %}
+  {% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Log a reply</h3>
+  <form method="post" action="{{ url_for('social.whatsapp_log', contact_id=c.id) }}">
+    <input type="hidden" name="direction" value="in">
+    <textarea name="body" rows="3" placeholder="Paste what they wrote"></textarea>
+    <p class="muted" style="font-size:12.5px;margin:2px 0 8px;">If it says STOP (or unsubscribe, opt out), they are marked as opted out.</p>
+    <button type="submit" class="btn small secondary">Log the reply</button>
+  </form>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Messages</h3>
+  {% for m in c.messages|reverse %}
+  <div style="border-top:1px solid #e5e0d0;padding:6px 0;"><span class="badge" style="{{ 'background:#e3ecf7;color:#1f4e79;' if m.direction == 'out' else 'background:#e3f2e6;color:#2e7d32;' }}">{{ 'We sent' if m.direction == 'out' else 'They wrote' }}</span>
+    <span class="muted" style="font-size:12.5px;">{{ (m.at|cat).strftime('%d %b %Y %H:%M') }}{% if m.by_user %} &middot; logged by {{ m.by_user.name }}{% endif %}</span>
+    <div style="white-space:pre-wrap;margin-top:2px;">{{ m.body }}</div></div>
+  {% else %}<p class="muted" style="margin:0;">Nothing logged yet.</p>{% endfor %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Details and consent</h3>
+  <form method="post" action="{{ url_for('social.whatsapp_update', contact_id=c.id) }}">
+    <div class="form-row">
+      <div><label>Name</label><input type="text" name="name" value="{{ c.name }}"></div>
+      <div><label>Company</label><input type="text" name="company" value="{{ c.company }}"></div>
+      <div><label>List</label><select name="list_name">{% for l in lists %}<option{% if c.list_name == l %} selected{% endif %}>{{ l }}</option>{% endfor %}</select></div>
+    </div>
+    <label style="font-weight:normal;"><input type="checkbox" name="consent" value="1" style="width:auto;"{% if c.consent %} checked{% endif %}> Agreed to be messaged on WhatsApp{% if c.consent_at %} <span class="muted">({{ c.consent_source }}, {{ (c.consent_at|cat).strftime('%d %b %Y') }})</span>{% endif %}</label>
+    {% if not c.consent %}<label for="cs">How they agreed</label><select id="cs" name="consent_source" style="max-width:260px;"><option value="">Choose</option>{% for s in sources %}<option>{{ s }}</option>{% endfor %}</select>{% endif %}
+    <label style="font-weight:normal;"><input type="checkbox" name="opted_out" value="1" style="width:auto;"{% if c.opted_out %} checked{% endif %}> Opted out (never message them)</label>
+    <label>Notes</label><textarea name="notes" rows="3">{{ c.notes }}</textarea>
+    <button type="submit" class="btn small gold" style="margin-top:8px;">Save</button>
+  </form>
+  {% if current_user.role in ('partner', 'admin') %}<form method="post" action="{{ url_for('social.whatsapp_delete', contact_id=c.id) }}" onsubmit="return confirm('Delete this contact and their message log for good?');" style="margin-top:10px;"><button type="submit" class="btn small danger">Delete this contact</button></form>{% endif %}
+</div>
+{% endblock %}

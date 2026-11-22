@@ -1,0 +1,17 @@
+{% extends "base.html" %}
+{% block title %}Our accounts - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>The firm's accounts</h1><p class="muted" style="margin:0;">Where the firm's pages are, and who looks after each one. Never put a password here.</p></div>
+{% set active = 'accounts' %}{% include 'social/_nav.html' %}
+<form method="post" action="{{ url_for('social.accounts') }}" class="card">
+  <table><thead><tr><th>Platform</th><th>Handle or page name</th><th>Address of the page</th><th>Looked after by</th><th>Notes</th></tr></thead><tbody>
+  {% for k in order %}{% set a = accounts.get(k) %}<tr>
+    <td><strong>{{ platforms[k].label }}</strong>{% if a and a.profile_url %}<br><a href="{{ a.profile_url }}" target="_blank" rel="noopener" style="font-size:12px;">open</a>{% endif %}</td>
+    <td><input type="text" name="handle_{{ k }}" value="{{ a.handle if a else '' }}" maxlength="120"></td>
+    <td><input type="text" name="url_{{ k }}" value="{{ a.profile_url if a else '' }}" placeholder="https://..."></td>
+    <td><select name="owner_{{ k }}"><option value="">Nobody yet</option>{% for u in users %}<option value="{{ u.id }}"{% if a and a.owner_id == u.id %} selected{% endif %}>{{ u.name }}</option>{% endfor %}</select></td>
+    <td><input type="text" name="notes_{{ k }}" value="{{ a.notes if a else '' }}" maxlength="500"></td></tr>{% endfor %}
+  </tbody></table>
+  <button type="submit" class="btn gold" style="margin-top:10px;">Save</button>
+</form>
+{% endblock %}

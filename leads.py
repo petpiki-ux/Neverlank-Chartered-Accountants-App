@@ -13,7 +13,7 @@ Settings (Render > Environment), all optional:
     LEADS_CALENDAR_URL      where the calendar file can be downloaded (needed before any automatic email goes out)
     LEADS_BOOKING_URL       a booking page for the free 20-minute check (otherwise the emails point to WhatsApp)
     LEADS_NOTIFY_EMAIL      who is told when someone signs up (addresses separated by commas; default: the lead's owner)
-    LEADS_DEFAULT_OWNER     username or email of the person who owns new leads (default: the first active partner)
+    LEADS_DEFAULT_OWNER     username or email of the person who owns new leads (default: the first active partner, else the first active admin)
     LEADS_ALLOWED_ORIGINS   other websites allowed to post sign-ups here (only needed if the page is hosted elsewhere)
     LEADS_CRON_TOKEN        lets a timer call /leads/cron?token=... so follow-ups go out even when nobody opens the app
     LEADS_YEAR              the year printed on the page and emails (default: next year from September, else this year)
@@ -150,7 +150,11 @@ def default_owner():
         user = User.query.filter(User.is_active_flag.is_(True), or_(func.lower(User.username) == ident.lower(), func.lower(User.email) == ident.lower())).first()
         if user:
             return user
-    return User.query.filter(User.is_active_flag.is_(True), User.role == "partner").order_by(User.id).first()
+    for role in ("partner", "admin"):                       # the first active partner; failing that the first active admin
+        user = User.query.filter(User.is_active_flag.is_(True), User.role == role).order_by(User.id).first()
+        if user:
+            return user
+    return None
 
 
 def _priority_for(role, headache):
