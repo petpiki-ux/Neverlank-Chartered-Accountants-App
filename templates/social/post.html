@@ -53,6 +53,7 @@
     <button type="button" class="btn small secondary js-copy">Copy</button>
     {% if cfg.compose or cfg.home %}<button type="button" class="btn small gold js-open">Copy and open {{ cfg.label }}</button>{% endif %}
     {% if key == 'youtube' %}<button type="button" class="btn small secondary js-copy-title">Copy title</button>{% endif %}
+    <a href="#graphics" class="btn small secondary" style="text-decoration:none;">{% if images %}Graphics ({{ images|length }}){% else %}Add a graphic{% endif %}</a>
     {% if link %}<span class="muted" style="font-size:12px;word-break:break-all;">Tracked link: {{ link }}</span>{% endif %}
   </div>
 </div>
@@ -73,7 +74,7 @@
 </form>
 {% endif %}
 
-<div class="card">
+<div class="card" id="graphics">
   <h3 class="mt-0">Graphics</h3>
   {% if images %}<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;">
     {% for g in images %}<div style="max-width:220px;"><a href="{{ url_for('social.graphic_edit', image_id=g.id) }}"><img src="{{ url_for('social.graphic_png', image_id=g.id, n=1, v=g.updated_at.strftime('%Y%m%d%H%M%S')) }}" alt="{{ g.label }}" style="width:100%;height:auto;border:1px solid #e5e0d0;border-radius:6px;"></a>
