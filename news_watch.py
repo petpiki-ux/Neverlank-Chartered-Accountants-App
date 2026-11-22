@@ -774,7 +774,7 @@ def index():
     if seen is not None:
         new_since = seen.seen_at
     related = related_clients(items[:150], current_user) if request.args.get("show", "relevant") != "hidden" else {}
-    page = render_template("newswatch/index.html", items=items, related=related, today=today, topics=TOPICS, urgencies=URGENCIES, regions=REGIONS, args=request.args,
+    page = render_template("newswatch/index.html", items=items, related=related, today=today, days=(request.args.get("days", type=int) or RECENT_DAYS), topics=TOPICS, urgencies=URGENCIES, regions=REGIONS, args=request.args,
                            state=refresh_state(), configured=is_configured(), can_manage=can_manage(current_user), new_since=new_since,
                            n_sources=NewsSource.query.filter_by(active=True).count(), last=last_refresh_at(), refreshing=_state["running"] or started,
                            can_file=user_has_permission(current_user, "manage_legislative_updates"), social_hosts=SOCIAL_HOSTS)
