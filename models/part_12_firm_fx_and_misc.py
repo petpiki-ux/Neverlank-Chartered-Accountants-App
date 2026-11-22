@@ -1,4 +1,4 @@
-"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine, MarketingLead, LeadTouch, SocialPost, SocialVersion, SocialAccount, WhatsAppContact, WhatsAppMessage.
+"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine, MarketingLead, LeadTouch, SocialPost, SocialVersion, SocialImage, SocialAccount, WhatsAppContact, WhatsAppMessage.
 
 See __init__.py: all parts share one set of names, exactly as the single file models.py did."""
 
@@ -386,6 +386,7 @@ class SocialPost(db.Model):
     author = db.relationship("User", foreign_keys=[author_id])
     approver = db.relationship("User", foreign_keys=[approver_id])
     versions = db.relationship("SocialVersion", backref="post", cascade="all, delete-orphan", order_by="SocialVersion.id")
+    images = db.relationship("SocialImage", backref="post", cascade="all, delete-orphan", order_by="SocialImage.id")
 
     @property
     def checks(self):
@@ -465,3 +466,26 @@ class WhatsAppMessage(db.Model):
     at = db.Column(db.DateTime, default=datetime.utcnow)
 
     by_user = db.relationship("User", foreign_keys=[by_user_id])
+
+
+class SocialImage(db.Model):
+    """A branded graphic for a post. Only its description (the style, colours and short texts) is kept; the picture is drawn when it is asked for (graphics.py)."""
+    __tablename__ = "social_image"
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey("social_post.id"), nullable=False, index=True)
+    label = db.Column(db.String(80), default="")
+    spec_json = db.Column(db.Text, default="{}")
+    ai_used = db.Column(db.Boolean, default=False)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    @property
+    def spec(self):
+        try:
+            data = json.loads(self.spec_json or "{}")
+        except ValueError:
+            data = {}
+        return data if isinstance(data, dict) else {}

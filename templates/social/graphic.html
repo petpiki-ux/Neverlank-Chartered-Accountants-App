@@ -1,0 +1,59 @@
+{% extends "base.html" %}
+{% block title %}Graphic - {{ post.title }} - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Graphic for "{{ post.title }}"</h1>
+  <p class="muted" style="margin:0;"><a href="{{ url_for('social.detail', post_id=post.id) }}">back to the post</a> &middot; drawn by the app in the firm's navy and gold; the words are yours (or the AI's, for you to check){% if img.ai_used %} &middot; words first written by the AI{% endif %}. Saving a change sends an approved post back for approval.</p></div>
+
+{% if problems %}<div class="card" style="border-left:4px solid #b3261e;">{% for p in problems %}<div><strong>Fix:</strong> {{ p }}</div>{% endfor %}</div>{% endif %}
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;">
+<form method="post" action="{{ url_for('social.graphic_edit', image_id=img.id) }}" class="card">
+  <label for="label">Name <span class="muted" style="font-weight:normal;">(for your list)</span></label>
+  <input type="text" id="label" name="label" value="{{ img.label }}" maxlength="80">
+  <div class="form-row">
+    <div><label for="style">Layout</label><select id="style" name="style">{% for k, v in styles.items() %}<option value="{{ k }}"{% if spec.style == k %} selected{% endif %}>{{ v }}</option>{% endfor %}</select></div>
+    <div><label for="theme">Colours</label><select id="theme" name="theme">{% for k, t in themes.items() %}<option value="{{ k }}"{% if spec.theme == k %} selected{% endif %}>{{ t.label }}</option>{% endfor %}</select></div>
+  </div>
+  <label for="size">Size</label>
+  <select id="size" name="size">{% for k, v in sizes.items() %}<option value="{{ k }}"{% if spec.size == k %} selected{% endif %}>{{ v[0] }} ({{ v[1] }} x {{ v[2] }})</option>{% endfor %}</select>
+  <p class="muted" style="font-size:12px;margin:2px 0 10px;">To change the layout, pick it and press Save: the fields below then change to match.</p>
+  {% for field, label, long, hint in fields %}
+    <label for="f_{{ field }}">{{ label }}{% if hint %} <span class="muted" style="font-weight:normal;">({{ hint }})</span>{% endif %}</label>
+    {% if field == 'points' %}<textarea id="f_{{ field }}" name="points" rows="4">{{ spec.points|join('\n') }}</textarea>
+    {% elif long %}<textarea id="f_{{ field }}" name="{{ field }}" rows="{{ 3 if field in ('title', 'body') else 2 }}" maxlength="{{ limits[field] }}">{{ spec[field] }}</textarea>
+    {% else %}<input type="text" id="f_{{ field }}" name="{{ field }}" value="{{ spec[field] }}" maxlength="{{ limits[field] }}">{% endif %}
+  {% endfor %}
+  {% if spec.style == 'carousel' %}
+    <p style="margin:12px 0 4px;font-weight:600;">Slides <span class="muted" style="font-weight:normal;font-size:12.5px;">(leave a row empty to leave it out; up to {{ max_slides }})</span></p>
+    {% for i in range(1, max_slides + 1) %}{% set sl = spec.slides[i - 1] if i <= spec.slides|length else {'title': '', 'body': ''} %}
+    <div style="border:1px solid #e5e0d0;border-radius:6px;padding:6px 8px;margin-bottom:6px;"><span class="muted" style="font-size:12px;">Slide {{ i }}</span>
+      <input type="text" name="slide_title_{{ i }}" value="{{ sl.title }}" maxlength="70" placeholder="Title">
+      <input type="text" name="slide_body_{{ i }}" value="{{ sl.body }}" maxlength="200" placeholder="One short line"></div>
+    {% endfor %}
+  {% endif %}
+  <label for="footer">Website shown at the bottom</label>
+  <input type="text" id="footer" name="footer" value="{{ spec.footer }}" maxlength="60">
+  <label style="font-weight:normal;"><input type="checkbox" name="paab" value="1" style="width:auto;"{% if spec.paab %} checked{% endif %}> Show the PAAB firm number at the bottom</label>
+  <button type="submit" class="btn gold" style="margin-top:10px;">Save and redraw</button>
+</form>
+
+<div>
+  <div class="card">
+    <h3 class="mt-0">The picture{% if count > 1 %}s ({{ count }} slides){% endif %}</h3>
+    {% for n in range(1, count + 1) %}
+    <div style="margin-bottom:12px;">
+      <img src="{{ url_for('social.graphic_png', image_id=img.id, n=n, v=img.updated_at.strftime('%Y%m%d%H%M%S')) }}" alt="{{ alt }}" style="max-width:100%;height:auto;border:1px solid #e5e0d0;border-radius:6px;">
+      <a class="btn small secondary" href="{{ url_for('social.graphic_png', image_id=img.id, n=n, download=1) }}">Download{% if count > 1 %} slide {{ n }}{% endif %}</a>
+    </div>
+    {% endfor %}
+    {% if count > 1 %}<a class="btn small gold" href="{{ url_for('social.graphic_zip', image_id=img.id) }}">Download all slides (zip)</a>{% endif %}
+    <p class="muted" style="font-size:12.5px;margin:8px 0 0;">Alt text for the platform: {{ alt }}</p>
+  </div>
+  <form method="post" action="{{ url_for('social.graphic_redraft', image_id=img.id) }}" class="card" style="padding:10px 16px;">
+    <button type="submit" class="btn small secondary">Write the words again with the AI</button>
+    <span class="muted" style="font-size:12.5px;">Replaces the words with a new draft from the post.</span>
+  </form>
+  <form method="post" action="{{ url_for('social.graphic_delete', image_id=img.id) }}" onsubmit="return confirm('Delete this graphic?');"><button type="submit" class="btn small danger">Delete this graphic</button></form>
+</div>
+</div>
+{% endblock %}

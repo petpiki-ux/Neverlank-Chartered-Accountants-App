@@ -28,6 +28,7 @@ from extensions import db
 from models import (POST_STATUSES, Client, MarketingLead, NewsItem, SocialAccount, SocialPost, SocialVersion, User, WhatsAppContact, WhatsAppMessage,
                     user_has_permission)
 from timeutil import today_cat
+import graphics as _G
 
 social_bp = Blueprint("social", __name__, url_prefix="/social")
 
@@ -192,7 +193,7 @@ def scan(post):
             out.append({"level": "error" if v.platform == "instagram" and len(tags) > 30 else "warn", "platform": v.platform, "text": f"{label}: {len(tags)} hashtags; {high} or fewer reads better."})
         elif len(tags) > high:
             out.append({"level": "warn", "platform": v.platform, "text": f"{label}: {len(tags)} hashtags; {high} or fewer reads better."})
-        if cfg["visual"] and not (v.media_note or "").strip():
+        if cfg["visual"] and not (v.media_note or "").strip() and not post.images:
             out.append({"level": "warn", "platform": v.platform, "text": f"{label}: say which picture or video goes with it."})
         if v.platform == "instagram" and tracked_link(post, v.platform) and tracked_link(post, v.platform) in text:
             out.append({"level": "info", "platform": v.platform, "text": "Instagram does not make links in captions clickable: put the link in your profile."})
@@ -204,7 +205,24 @@ def scan(post):
             out.append({"level": "warn", "platform": v.platform, "text": f"{label}: wording that sounds like a promise or a tax-avoidance claim ('{_PROMISE.search(text).group(0)}')."})
         if _TAXY.search(text) and not _DISCLAIMER.search(text) and v.platform in ("linkedin", "facebook", "youtube", "instagram", "tiktok") and len(text) > 200:
             out.append({"level": "warn", "platform": v.platform, "text": f"{label}: it explains tax or law but does not say it is general information, not advice."})
-    joined = "\n".join(f"{v.headline or ''}\n{v.body or ''}" for v in versions) + f"\n{post.title}"
+    import graphics as G
+    gtexts = []
+    for img in post.images:
+        spec = img.spec
+        gtext = G.text_of(spec)
+        gtexts.append(gtext)
+        name = img.label or "Graphic"
+        for problem in G.problems(spec):
+            out.append({"level": "error", "platform": "", "text": f"Graphic '{name}': {problem}"})
+        if _PLACEHOLDER.search(gtext):
+            out.append({"level": "error", "platform": "", "text": f"Graphic '{name}': a [bracket] or {{brace}} placeholder is still in the words."})
+        if _MONEY.search(gtext) or spec.get("big_value"):
+            out.append({"level": "warn", "platform": "", "text": f"Graphic '{name}': it shows a figure. Confirm it against the source."})
+        if _DATE.search(gtext) or spec.get("date_label"):
+            out.append({"level": "warn", "platform": "", "text": f"Graphic '{name}': it shows a date. Confirm it against the Act, Statutory Instrument or ZIMRA notice."})
+        if _PROMISE.search(gtext):
+            out.append({"level": "warn", "platform": "", "text": f"Graphic '{name}': wording that sounds like a promise or a tax-avoidance claim."})
+    joined = "\n".join(f"{v.headline or ''}\n{v.body or ''}" for v in versions) + f"\n{post.title}" + "\n" + "\n".join(gtexts)
     hits = client_mentions(joined)
     if hits:
         out.append({"level": "warn", "platform": "", "text": "It mentions a client by name: " + ", ".join(sorted(set(hits))[:5]) + ". Only with their written consent."})
@@ -409,6 +427,13 @@ def new():
     return render_template("social/new.html", platforms=PLATFORMS, order=PLATFORM_ORDER, pillars=PILLARS, prefill=prefill, ai=ai_available())
 
 
+def _gdefault(post):
+    for v in post.versions:
+        if v.platform in _G.PLATFORM_SIZE:
+            return _G.PLATFORM_SIZE[v.platform]
+    return "linkedin"
+
+
 @social_bp.route("/<int:post_id>")
 @login_required
 def detail(post_id):
@@ -426,7 +451,8 @@ def detail(post_id):
     return render_template("social/post.html", post=post, cards=cards, issues=issues, blocked=bool(blocking(issues)), checklist=CHECKLIST, ticked=set(post.checks), leads=leads,
                            missing=[k for k in PLATFORM_ORDER if k not in versions], platforms=PLATFORMS, pillars=PILLARS, approve=can_approve(), news=news,
                            can_delete=current_user.role in ("partner", "admin") or (post.author_id == current_user.id and post.status in ("Idea", "Draft", "Rejected")),
-                           ai=ai_available(), statuses=POST_STATUSES, whatsapp_version=versions.get("whatsapp"))
+                           ai=ai_available(), statuses=POST_STATUSES, whatsapp_version=versions.get("whatsapp"),
+                           images=post.images, gstyles=_G.STYLES, gthemes=_G.THEMES, gsizes=_G.SIZES, gdefault=_gdefault(post), gcount=_G.slide_count)
 
 
 def _reopen_if_changed(post, changed):
@@ -937,3 +963,6 @@ def whatsapp_broadcast(post_id):
         text = f"Hello {c.name.split()[0]}, {base}"
         rows.append((c, text, wa_link(c, text), c.id in sent))
     return render_template("social/whatsapp_broadcast.html", post=post, rows=rows, lists=WA_LISTS, list_name=list_name, text=base)
+
+
+import social_images  # noqa: E402,F401  (adds the graphics pages to this blueprint)
