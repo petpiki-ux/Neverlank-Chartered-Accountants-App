@@ -72,10 +72,12 @@ def _post_text(post):
     return "\n\n".join(parts)[:7000]
 
 
-def design_with_ai(post, style, size_key):
+def design_with_ai(post, style, size_key, instruction=""):
     """(spec fields dict, flags list) or (None, error)."""
     label = G.SIZES[size_key][0]
     message = f"{_post_text(post)}\n\nSTYLE: {style} ({G.STYLES[style]}). {STYLE_HELP[style]}\nSIZE: {label}"
+    if instruction:
+        message += f"\n\nREQUESTED CHANGE (apply it, keep every fact as in the post): {instruction[:500]}"
     data, err = _call_design(DESIGN_SYSTEM, message)
     if not data:
         return None, err or "The AI did not answer."
@@ -183,7 +185,7 @@ def graphic_redraft(image_id):
     if not ai_available():
         flash("The AI is not switched on on this server (no API key).", "warning")
     else:
-        drafted, info = design_with_ai(post, spec["style"], spec["size"])
+        drafted, info = design_with_ai(post, spec["style"], spec["size"], one_line(request.form.get("instruction"), 500))
         if drafted:
             _save_spec(img, dict(drafted, theme=spec["theme"], paab=spec["paab"], footer=spec["footer"]))
             img.ai_used = True
@@ -203,13 +205,17 @@ def graphic_png(image_id, n):
     _need_manage()
     img = _image_or_404(image_id)
     spec = G.clean_spec(img.spec)
+    size = request.args.get("size")
+    if size in G.SIZES:
+        spec = G.at_size(spec, size)                                  # the same graphic at another platform's size
     if n < 1 or n > G.slide_count(spec):
         abort(404)
     png, _problems = G.render(spec, n - 1)
     headers = {"Cache-Control": "private, max-age=60"}
     if request.args.get("download"):
         name = re.sub(r"[^a-z0-9]+", "-", (img.post.title or "graphic").lower()).strip("-")[:40] or "graphic"
-        headers["Content-Disposition"] = f'attachment; filename="neverlank-{name}-{n:02d}.png"'
+        suffix = f"-{size.replace('_', '-')}" if size in G.SIZES else ""
+        headers["Content-Disposition"] = f'attachment; filename="neverlank-{name}{suffix}-{n:02d}.png"'
     return Response(png, mimetype="image/png", headers=headers)
 
 
@@ -221,6 +227,17 @@ def graphic_zip(image_id):
     name = re.sub(r"[^a-z0-9]+", "-", (img.post.title or "graphic").lower()).strip("-")[:40] or "graphic"
     return Response(G.zip_of(G.clean_spec(img.spec), f"neverlank-{name}"), mimetype="application/zip",
                     headers={"Content-Disposition": f'attachment; filename="neverlank-{name}.zip"', "Cache-Control": "private, no-store"})
+
+
+@social_bp.route("/graphics/<int:image_id>/sizes.zip")
+@login_required
+def graphic_sizes_zip(image_id):
+    """The graphic at every platform's size in one download, so nothing has to be resized by hand."""
+    _need_manage()
+    img = _image_or_404(image_id)
+    name = re.sub(r"[^a-z0-9]+", "-", (img.post.title or "graphic").lower()).strip("-")[:40] or "graphic"
+    return Response(G.zip_all_sizes(G.clean_spec(img.spec), f"neverlank-{name}"), mimetype="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="neverlank-{name}-all-sizes.zip"', "Cache-Control": "private, no-store"})
 
 
 @social_bp.route("/graphics/<int:image_id>/delete", methods=["POST"])

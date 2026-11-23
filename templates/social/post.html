@@ -56,6 +56,20 @@
     <a href="#graphics" class="btn small secondary" style="text-decoration:none;">{% if images %}Graphics ({{ images|length }}){% else %}Add a graphic{% endif %}</a>
     {% if link %}<span class="muted" style="font-size:12px;word-break:break-all;">Tracked link: {{ link }}</span>{% endif %}
   </div>
+  {% set psize = platform_size.get(key) %}
+  {% set gimg = main_graphic %}
+  {% if psize and (gimg or (key in ('tiktok', 'youtube') and videos)) %}
+  <div class="kit" style="margin-top:10px;padding-top:8px;border-top:1px dashed #e5e0d0;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">
+    {% if gimg and not (key in ('tiktok', 'youtube') and videos) %}
+    <div style="width:{{ 120 if psize in ('story', 'instagram_portrait') else 180 }}px;"><img src="{{ url_for('social.graphic_png', image_id=gimg.id, n=1, size=psize, v=gimg.updated_at.strftime('%Y%m%d%H%M%S')) }}" alt="{{ gimg.label }}" loading="lazy" style="width:100%;height:auto;border:1px solid #e5e0d0;border-radius:6px;">
+      <div style="font-size:12px;"><a href="{{ url_for('social.graphic_png', image_id=gimg.id, n=1, size=psize, download=1) }}">Download at {{ gsizes[psize][0] }}</a></div></div>
+    {% endif %}
+    {% if key in ('tiktok', 'youtube') and videos %}
+      {% for vid, vstatus in videos if vstatus == 'ready' %}<div style="font-size:13px;"><strong>Video ready</strong> ({{ '%.0f'|format(vid.seconds or 0) }} s)<br><a class="btn small gold" href="{{ url_for('social.video_file', video_id=vid.id, download=1) }}" style="text-decoration:none;">Download the video</a> <a href="{{ url_for('social.video_edit', video_id=vid.id) }}">Open</a></div>
+      {% else %}<div style="font-size:13px;" class="muted">The video is not made yet. <a href="#videos">Go to Videos</a>.</div>{% endfor %}
+    {% endif %}
+  </div>
+  {% endif %}
 </div>
 {% endfor %}
 
@@ -69,8 +83,10 @@
 
 {% if ai %}
 <form method="post" action="{{ url_for('social.redraft', post_id=post.id) }}" class="card" style="padding:10px 16px;">
-  <button type="submit" class="btn small secondary">Draft again with the AI</button>
-  <span class="muted" style="font-size:12.5px;">Replaces the wording of every platform on this post with a new draft from the brief.</span>
+  <label for="redraft_instruction" style="margin-top:0;">What should change? <span class="muted" style="font-weight:normal;">(optional, e.g. "shorter", "more formal", "open with a question")</span></label>
+  <input type="text" id="redraft_instruction" name="instruction" maxlength="500">
+  <button type="submit" class="btn small secondary" style="margin-top:6px;">Draft again with the AI</button>
+  <span class="muted" style="font-size:12.5px;">With a change typed above, the AI revises the current wording; without, it writes a new draft from the brief. Either way it replaces the wording of the platforms on this post.</span>
 </form>
 {% endif %}
 
@@ -79,12 +95,26 @@
   {% if images %}<div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:10px;">
     {% for g in images %}<div style="max-width:220px;"><a href="{{ url_for('social.graphic_edit', image_id=g.id) }}"><img src="{{ url_for('social.graphic_png', image_id=g.id, n=1, v=g.updated_at.strftime('%Y%m%d%H%M%S')) }}" alt="{{ g.label }}" style="width:100%;height:auto;border:1px solid #e5e0d0;border-radius:6px;"></a>
       <div style="font-size:12.5px;"><a href="{{ url_for('social.graphic_edit', image_id=g.id) }}">{{ g.label or 'Graphic' }}</a>{% if gcount(g.spec) > 1 %} <span class="muted">({{ gcount(g.spec) }} slides)</span>{% endif %}</div></div>{% endfor %}
-  </div>{% else %}<p class="muted" style="margin:0 0 8px;font-size:13.5px;">No graphic yet. Add one in the firm's navy and gold, at the size the platform wants.</p>{% endif %}
+  </div>
+  <p style="margin:0 0 10px;font-size:13px;"><a href="{{ url_for('social.graphic_sizes_zip', image_id=images[0].id) }}">Download the first graphic at every platform size (zip)</a></p>{% else %}<p class="muted" style="margin:0 0 8px;font-size:13.5px;">No graphic yet. Add one in the firm's navy and gold, at the size the platform wants.</p>{% endif %}
   <form method="post" action="{{ url_for('social.graphic_new', post_id=post.id) }}" class="form-row" style="align-items:flex-end;">
     <div><label for="g_style">Layout</label><select id="g_style" name="style">{% for k, v in gstyles.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}</select></div>
     <div><label for="g_size">Size</label><select id="g_size" name="size">{% for k, v in gsizes.items() %}<option value="{{ k }}"{% if k == gdefault %} selected{% endif %}>{{ v[0] }}</option>{% endfor %}</select></div>
     <div><label for="g_theme">Colours</label><select id="g_theme" name="theme">{% for k, t in gthemes.items() %}<option value="{{ k }}">{{ t.label }}</option>{% endfor %}</select></div>
     <div style="display:flex;gap:6px;"><button type="submit" name="mode" value="ai" class="btn small gold" style="margin-bottom:14px;">Add, words by AI</button><button type="submit" name="mode" value="blank" class="btn small secondary" style="margin-bottom:14px;">Add, I write the words</button></div>
+  </form>
+</div>
+
+<div class="card" id="videos">
+  <h3 class="mt-0">Short videos <span class="muted" style="font-weight:normal;font-size:13px;">for TikTok and YouTube Shorts</span></h3>
+  {% if videos %}<div style="margin-bottom:10px;">
+    {% for vid, vstatus in videos %}<div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:4px 0;border-bottom:1px solid #f0ece0;"><a href="{{ url_for('social.video_edit', video_id=vid.id) }}"><strong>{{ vid.label or 'Short video' }}</strong></a>
+      <span class="badge"{% if vstatus == 'ready' %} style="background:#2e7d32;color:#fff;"{% endif %}>{{ {'none': 'not made yet', 'rendering': 'being made', 'ready': 'ready', 'stale': 'out of date', 'failed': 'failed'}.get(vstatus, vstatus) }}</span>
+      {% if vstatus == 'ready' %}<a href="{{ url_for('social.video_file', video_id=vid.id, download=1) }}">Download</a>{% endif %}</div>{% endfor %}
+  </div>{% else %}<p class="muted" style="margin:0 0 8px;font-size:13.5px;">No video yet. The app draws a 15 to 45 second captioned video in the firm's navy and gold (no extra service, no cost); you can add music or a voice in TikTok or YouTube.</p>{% endif %}
+  <form method="post" action="{{ url_for('social.video_new', post_id=post.id) }}" class="form-row" style="align-items:flex-end;">
+    <div><label for="v_theme">Colours</label><select id="v_theme" name="theme">{% for k, t in vthemes.items() %}<option value="{{ k }}">{{ t.label }}</option>{% endfor %}</select></div>
+    <div style="display:flex;gap:6px;"><button type="submit" name="mode" value="ai" class="btn small gold" style="margin-bottom:14px;">Add a video, words by AI</button><button type="submit" name="mode" value="blank" class="btn small secondary" style="margin-bottom:14px;">Add, I write the words</button></div>
   </form>
 </div>
 
@@ -153,7 +183,7 @@
     {% if sched.note %}<p style="margin:0 0 6px;color:#9b2c2c;font-size:13px;">{{ sched.note }}</p>{% endif %}
   {% endif %}
   {% for key, cfg, v, link in cards %}{% if v.dispatch %}<div style="font-size:13px;">{{ cfg.label }}: {% if v.dispatch.status == 'sent' %}<span style="color:#256d3b;">sent to {{ sched_service }} {{ sched_text(v.dispatch.sent_at) }}</span>{% else %}<span style="color:#9b2c2c;">not sent (try {{ v.dispatch.attempts }} of {{ sched_tries }}): {{ v.dispatch.error }}</span>{% endif %}</div>{% endif %}{% endfor %}
-  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">Only {% for k in sched_auto %}{{ platforms[k].label }}{% if not loop.last %}, {% endif %}{% endfor %} are sent automatically; the others (YouTube, TikTok, WhatsApp) stay by hand. A post is sent only when it is approved and has no errors in the checks above.
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">Only {% for k in sched_auto %}{{ platforms[k].label }}{% if not loop.last %}, {% endif %}{% endfor %} are sent automatically, and so are YouTube and TikTok when the post has a finished video (see Short videos above); WhatsApp stays by hand. A post is sent only when it is approved and has no errors in the checks above.
     {% if not sched_ready %}Nothing is sent yet because the scheduling service is not connected: see <a href="{{ url_for('social.publishing') }}">Automatic posting</a>.{% endif %}</p>
   {% if post.status == 'Approved' and sched_ready %}
   <form method="post" action="{{ url_for('social.send_now', post_id=post.id) }}" style="margin-top:8px;" onsubmit="return confirm('Send this to {{ sched_service }} now?');"><button type="submit" class="btn small secondary">Send now</button></form>

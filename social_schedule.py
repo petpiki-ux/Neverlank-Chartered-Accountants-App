@@ -29,6 +29,7 @@ from social import (PLATFORMS, _need_manage, _refresh_posted, blocking, final_te
 from timeutil import CAT_OFFSET, to_cat
 
 AUTO_PLATFORMS = ("linkedin", "x", "facebook", "instagram")      # the ones a scheduling service can post with text and pictures
+VIDEO_PLATFORMS = ("youtube", "tiktok")                          # sent automatically only when the post has a finished video
 MAX_TRIES = 3
 LATE_HOURS = 6
 # which graphic sizes suit which platform, best first
@@ -71,32 +72,62 @@ def cat_text(value):
 
 # ------------------------------------------------------------------ the graphics' public web addresses
 
-def _signature(image, n):
+def _signature(image, n, size=None):
     key = (secret() or current_app.config.get("SECRET_KEY") or "x").encode()
-    return hmac.new(key, f"{image.id}:{n}:{hashlib.sha256((image.spec_json or '').encode()).hexdigest()[:16]}".encode(), hashlib.sha256).hexdigest()[:32]
+    return hmac.new(key, f"{image.id}:{n}:{size or ''}:{hashlib.sha256((image.spec_json or '').encode()).hexdigest()[:16]}".encode(), hashlib.sha256).hexdigest()[:32]
 
 
-def media_url(image, n, base):
-    return f"{base}/social/media/{image.id}/{n}.png?t={_signature(image, n)}"
+def media_url(image, n, base, size=None):
+    extra = f"&s={size}" if size else ""
+    return f"{base}/social/media/{image.id}/{n}.png?t={_signature(image, n, size)}{extra}"
+
+
+def graphic_for(post):
+    """The graphic to send with a post: the first one that is not a Story-size one (those are for WhatsApp Status), else the first."""
+    imgs = list(post.images)
+    for img in imgs:
+        if img.spec.get("size") != "story":
+            return img
+    return imgs[0] if imgs else None
+
+
+def is_auto(post, version):
+    """Does this wording go out automatically? Text and picture platforms always do; YouTube and TikTok only when the post has a finished, up-to-date video."""
+    if version.platform in AUTO_PLATFORMS:
+        return True
+    if version.platform in VIDEO_PLATFORMS:
+        import social_video as SV
+        return SV.video_for(post) is not None
+    return False
+
+
+def video_for_payload(post, platform, base):
+    if platform not in VIDEO_PLATFORMS:
+        return None
+    import social_video as SV
+    video = SV.video_for(post)
+    if video is None:
+        return None
+    return {"url": SV.vmedia_url(video, base), "width": SV.V.W, "height": SV.V.H, "seconds": video.seconds, "alt": SV.V.alt_text(video.spec)}
 
 
 def images_for(post, platform, base):
-    """The pictures to send with this platform's wording: the graphics at this platform's size (every slide of a carousel), or else the first graphic."""
-    imgs = list(post.images)
-    chosen = []
-    for size in SIZE_FAMILY.get(platform, ()):
-        chosen = [i for i in imgs if i.spec.get("size") == size]
-        if chosen:
-            break
-    if not chosen and imgs:
-        chosen = imgs[:1]
-    out = []
-    for img in chosen:
-        spec = img.spec
-        for n in range(1, G.slide_count(spec) + 1):
-            w, h = G.SIZES[spec.get("size") if spec.get("size") in G.SIZES else "linkedin"][1:3]
-            out.append({"url": media_url(img, n, base), "width": w, "height": h, "alt": G.alt_text(spec)})
-    return out
+    """The pictures to send with this platform's wording: the post's graphic drawn at THIS platform's size (every slide of a carousel), so nothing needs resizing by hand."""
+    img = graphic_for(post)
+    if img is None:
+        return []
+    size = G.PLATFORM_SIZE.get(platform) or img.spec.get("size") or "linkedin"
+    spec = G.at_size(img.spec, size)
+    w, h = G.SIZES[size][1:3]
+    return [{"url": media_url(img, n, base, size), "width": w, "height": h, "alt": G.alt_text(spec)} for n in range(1, G.slide_count(spec) + 1)]
+
+
+def size_problems(post, platform):
+    """Text that does not fit the graphic at this platform's size (checked before sending)."""
+    img = graphic_for(post)
+    if img is None:
+        return []
+    return G.problems(G.at_size(img.spec, G.PLATFORM_SIZE.get(platform) or img.spec.get("size")))
 
 
 # ------------------------------------------------------------------ sending
@@ -107,7 +138,8 @@ def payload(post, version, base, event="post"):
     return {"event": event, "post_id": post.id, "campaign": post.campaign, "platform": version.platform, "platform_label": PLATFORMS[version.platform]["label"],
             "text": final_text(post, version), "headline": version.headline or "", "link": link,
             "publish_at": (to_cat(sched.publish_at).strftime("%Y-%m-%dT%H:%M:00+02:00") if sched else ""),
-            "images": images_for(post, version.platform, base),
+            "images": [] if version.platform in VIDEO_PLATFORMS and video_for_payload(post, version.platform, base) else images_for(post, version.platform, base),
+            "video": video_for_payload(post, version.platform, base),
             "callback_url": f"{base}/social/callback?token={secret()}"}
 
 
@@ -127,8 +159,14 @@ def _dispatch_one(post, v, base, now):
     d = v.dispatch or SocialDispatch(post_id=post.id, version=v, platform=v.platform)
     if d.id is None:
         db.session.add(d)
-    if v.platform == "instagram" and not post.images:
+    if v.platform in VIDEO_PLATFORMS and video_for_payload(post, v.platform, base) is None:
+        ok, err = False, "There is no finished video for this post."
+        d.attempts = MAX_TRIES
+    elif v.platform == "instagram" and not post.images:
         ok, err = False, "Instagram needs a picture: add a graphic to the post."
+        d.attempts = MAX_TRIES
+    elif v.platform not in VIDEO_PLATFORMS and size_problems(post, v.platform):
+        ok, err = False, "The graphic does not fit at this platform's size: " + size_problems(post, v.platform)[0]
         d.attempts = MAX_TRIES
     else:
         ok, err = _send(payload(post, v, base))
@@ -143,7 +181,7 @@ def _dispatch_one(post, v, base, now):
 
 
 def _auto_versions(post):
-    return [v for v in post.versions if v.platform in AUTO_PLATFORMS and v.status == "pending" and (v.body or "").strip()]
+    return [v for v in post.versions if is_auto(post, v) and v.status == "pending" and (v.body or "").strip()]
 
 
 def send_post(post, base, now=None, force=False):
@@ -216,7 +254,7 @@ def due_by_hand(now=None):
     rows = (SocialPost.query.join(SocialSchedule, SocialSchedule.post_id == SocialPost.id)
             .filter(SocialPost.status == "Approved", SocialSchedule.publish_at <= now).order_by(SocialSchedule.publish_at).all())
     for post in rows:
-        todo = [v for v in post.versions if v.platform not in AUTO_PLATFORMS and v.status == "pending" and (v.body or "").strip()]
+        todo = [v for v in post.versions if not is_auto(post, v) and v.status == "pending" and (v.body or "").strip()]
         if todo:
             out.append((post, todo))
     return out
@@ -323,9 +361,12 @@ def media(image_id, n):
     """A graphic's picture for the scheduling service to fetch (no sign-in; the address carries a signature and only approved posts' graphics are served)."""
     img = db.session.get(SocialImage, image_id)
     token = request.args.get("t") or ""
-    if not img or not hmac.compare_digest(_signature(img, n), token) or img.post.status not in ("Approved", "Posted"):
+    size = request.args.get("s") or None
+    if size is not None and size not in G.SIZES:
         abort(404)
-    spec = img.spec
+    if not img or not hmac.compare_digest(_signature(img, n, size), token) or img.post.status not in ("Approved", "Posted"):
+        abort(404)
+    spec = G.at_size(img.spec, size) if size else img.spec
     if n < 1 or n > G.slide_count(spec):
         abort(404)
     data, _ = G.render(spec, n - 1)

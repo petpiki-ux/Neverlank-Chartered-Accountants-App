@@ -222,7 +222,9 @@ def scan(post):
             out.append({"level": "warn", "platform": "", "text": f"Graphic '{name}': it shows a date. Confirm it against the Act, Statutory Instrument or ZIMRA notice."})
         if _PROMISE.search(gtext):
             out.append({"level": "warn", "platform": "", "text": f"Graphic '{name}': wording that sounds like a promise or a tax-avoidance claim."})
-    joined = "\n".join(f"{v.headline or ''}\n{v.body or ''}" for v in versions) + f"\n{post.title}" + "\n" + "\n".join(gtexts)
+    import social_video as _SV
+    out += _SV.scan_items(post)
+    joined = "\n".join(f"{v.headline or ''}\n{v.body or ''}" for v in versions) + f"\n{post.title}" + "\n" + "\n".join(gtexts) + "\n" + "\n".join(_SV.texts(post))
     hits = client_mentions(joined)
     if hits:
         out.append({"level": "warn", "platform": "", "text": "It mentions a client by name: " + ", ".join(sorted(set(hits))[:5]) + ". Only with their written consent."})
@@ -285,13 +287,17 @@ def ai_available():
     return NW.is_configured()
 
 
-def draft_with_ai(post, platforms):
-    """Fill the post's versions from its brief. Returns (True, '') or (False, reason). Nothing is lost if it fails."""
+def draft_with_ai(post, platforms, instruction=""):
+    """Fill the post's versions from its brief. Returns (True, '') or (False, reason). Nothing is lost if it fails.
+    With an instruction (what the person wants changed), the current wording is sent with it so the AI revises instead of starting again."""
     lines = [f"BRIEF:\n{post.brief or post.title}", f"\nPILLAR: {post.pillar or 'not specified'}", f"TITLE: {post.title}",
              "LINK SUPPLIED: yes (use {link})" if post.link_url else "LINK SUPPLIED: no (do not use {link})", "\nPLATFORMS WANTED:"]
     for key in platforms:
         cfg = PLATFORMS[key]
         lines.append(f"- {key}: {cfg['label']}, limit {cfg['limit']} characters. {cfg['ideal']}.")
+    if instruction:
+        current = [f"CURRENT WORDING FOR {PLATFORMS[v.platform]['label']}:\n{(v.body or '')[:3000]}" for v in post.versions if v.platform in platforms and (v.body or "").strip()]
+        lines += ["", *current, "", f"REQUESTED CHANGE (apply it; keep every fact exactly as in the brief and current wording; do not add facts): {instruction}"]
     data, err = _call_ai(DRAFT_SYSTEM, "\n".join(lines))
     if not data:
         return False, err or "The AI did not answer."
@@ -453,6 +459,7 @@ def detail(post_id):
     _need_manage()
     import social_schedule as _SS
     _SS.lazy_process()
+    import social_video as _SV
     post = SocialPost.query.get_or_404(post_id)
     versions = {v.platform: v for v in post.versions}
     cards = []
@@ -471,7 +478,8 @@ def detail(post_id):
                            sched=post.schedule, sched_local=(_SS.to_cat(post.schedule.publish_at) if post.schedule else None), sched_ready=_SS.configured(), sched_service=_SS.service_name(),
                            sched_auto=_SS.AUTO_PLATFORMS, sched_text=_SS.cat_text, sched_tries=_SS.MAX_TRIES,
                            wa_text=(final_text(post, versions["whatsapp"]) if "whatsapp" in versions else ""),
-                           story_images=[g for g in post.images if g.spec.get("size") == "story"])
+                           story_images=[g for g in post.images if g.spec.get("size") == "story"],
+                           videos=[(v, _SV.display_status(v)) for v in post.videos], vthemes=_G.THEMES, platform_size=_G.PLATFORM_SIZE, main_graphic=_SS.graphic_for(post))
 
 
 def _reopen_if_changed(post, changed):
@@ -537,7 +545,7 @@ def redraft(post_id):
         flash("Write a few lines in the brief first.", "warning")
     else:
         keys = _selected_platforms(request.form) or [v.platform for v in post.versions if v.status != "skipped"]
-        ok, err = draft_with_ai(post, keys)
+        ok, err = draft_with_ai(post, keys, one_line(request.form.get("instruction"), 500))
         post.updated_at = datetime.utcnow()
         _reopen_if_changed(post, ok)
         db.session.commit()
@@ -986,3 +994,4 @@ def whatsapp_broadcast(post_id):
 
 import social_images  # noqa: E402,F401  (adds the graphics pages to this blueprint)
 import social_schedule  # noqa: E402,F401  (adds scheduled automatic posting)
+import social_video  # noqa: E402,F401  (adds the short videos for TikTok and YouTube)

@@ -1,4 +1,4 @@
-"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine, MarketingLead, LeadTouch, SocialPost, SocialVersion, SocialImage, SocialSchedule, SocialDispatch, SocialAccount, WhatsAppContact, WhatsAppMessage.
+"""models, part 12 of 12.  Holds: FirmFxConfig, FirmFxMiss, FirmRbzReading, DailyUpdate, ScanText, ValuationCertificate, CashFlowPriorLine, CoverSetting, PPERevaluation, PPERevaluationLine, MarketingLead, LeadTouch, SocialPost, SocialVersion, SocialImage, SocialVideo, SocialSchedule, SocialDispatch, SocialAccount, WhatsAppContact, WhatsAppMessage.
 
 See __init__.py: all parts share one set of names, exactly as the single file models.py did."""
 
@@ -387,6 +387,7 @@ class SocialPost(db.Model):
     approver = db.relationship("User", foreign_keys=[approver_id])
     versions = db.relationship("SocialVersion", backref="post", cascade="all, delete-orphan", order_by="SocialVersion.id")
     images = db.relationship("SocialImage", backref="post", cascade="all, delete-orphan", order_by="SocialImage.id")
+    videos = db.relationship("SocialVideo", backref="post", cascade="all, delete-orphan", order_by="SocialVideo.id")
 
     @property
     def checks(self):
@@ -418,6 +419,36 @@ class SocialVersion(db.Model):
     __table_args__ = (db.UniqueConstraint("post_id", "platform", name="uq_social_version_platform"),)
 
     posted_by = db.relationship("User", foreign_keys=[posted_by_id])
+
+
+class SocialVideo(db.Model):
+    """A short captioned video (TikTok, YouTube Shorts) for a post. Only the description of the video (spec_json) is stored in the database; the MP4 is
+    made on request and kept on the server's disk (file_name), and is made again when the description changes."""
+    __tablename__ = "social_video"
+    id = db.Column(db.Integer, primary_key=True)
+    post_id = db.Column(db.Integer, db.ForeignKey("social_post.id"), nullable=False, index=True)
+    label = db.Column(db.String(80), default="")
+    spec_json = db.Column(db.Text, default="{}")
+    ai_used = db.Column(db.Boolean, default=False)
+    status = db.Column(db.String(12), default="none")           # none / rendering / ready / failed
+    error = db.Column(db.String(500), default="")
+    file_name = db.Column(db.String(120), default="")           # the MP4 on disk
+    file_key = db.Column(db.String(64), default="")             # fingerprint of the description the file was made from
+    seconds = db.Column(db.Float)
+    rendered_at = db.Column(db.DateTime)
+    created_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    created_by = db.relationship("User", foreign_keys=[created_by_id])
+
+    @property
+    def spec(self):
+        try:
+            data = json.loads(self.spec_json or "{}")
+            return data if isinstance(data, dict) else {}
+        except ValueError:
+            return {}
 
 
 class SocialSchedule(db.Model):

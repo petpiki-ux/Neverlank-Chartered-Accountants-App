@@ -470,6 +470,27 @@ def _problems(s):
     return found
 
 
+def at_size(spec, size_key):
+    """The same graphic drawn at another platform's size (the words and colours stay; the layout refits)."""
+    return clean_spec(dict(spec, size=size_key if size_key in SIZES else spec.get("size")))
+
+
+def size_name(size_key):
+    return SIZES[size_key][0].split(" (")[0]
+
+
+def zip_all_sizes(spec, base="neverlank", sizes=None):
+    """One zip with the graphic at every platform size (or the given sizes): neverlank-<name>-<size>[-NN].png"""
+    out = io.BytesIO()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
+        for key in (sizes or list(SIZES)):
+            s = at_size(spec, key)
+            n = slide_count(s)
+            for i in range(n):
+                z.writestr(f"{base}-{key.replace('_', '-')}" + (f"-{i + 1:02d}" if n > 1 else "") + ".png", render(s, i)[0])
+    return out.getvalue()
+
+
 def zip_of(spec, base="neverlank"):
     out = io.BytesIO()
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:

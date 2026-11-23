@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Video - {{ post.title }} - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Short video for "{{ post.title }}"</h1>
+  <p class="muted" style="margin:0;"><a href="{{ url_for('social.detail', post_id=post.id) }}">back to the post</a> &middot; for TikTok and YouTube Shorts: silent, words on the screen, in the firm's navy and gold; the words are yours (or the AI's, for you to check){% if video.ai_used %} &middot; words first written by the AI{% endif %}. Changing the words sends an approved post back for approval.</p></div>
+
+{% if problems %}<div class="card" style="border-left:4px solid #b3261e;">{% for p in problems %}<div><strong>Fix:</strong> {{ p }}</div>{% endfor %}</div>{% endif %}
+{% if not ffmpeg %}<div class="card" style="border-left:4px solid #b3261e;">The video maker (ffmpeg) is not installed on this server, so the video file cannot be made here. The words and the scene pictures still work.</div>{% endif %}
+
+<div style="display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;align-items:start;">
+<form method="post" action="{{ url_for('social.video_edit', video_id=video.id) }}" class="card">
+  <label for="label">Name <span class="muted" style="font-weight:normal;">(for your list)</span></label>
+  <input type="text" id="label" name="label" value="{{ video.label }}" maxlength="80">
+  <label for="theme">Colours</label>
+  <select id="theme" name="theme">{% for k, t in themes.items() %}<option value="{{ k }}"{% if spec.theme == k %} selected{% endif %}>{{ t.label }}</option>{% endfor %}</select>
+  <label for="kicker">Small label above the opening line <span class="muted" style="font-weight:normal;">(e.g. TAX TIP)</span></label>
+  <input type="text" id="kicker" name="kicker" value="{{ spec.kicker }}" maxlength="40">
+  <label for="hook">Opening line <span class="muted" style="font-weight:normal;">(makes a viewer stop; short)</span></label>
+  <textarea id="hook" name="hook" rows="2" maxlength="80">{{ spec.hook }}</textarea>
+  <p style="margin:12px 0 4px;font-weight:600;">Scenes <span class="muted" style="font-weight:normal;font-size:12.5px;">(two to {{ max_scenes }}; leave a row empty to leave it out; one idea each)</span></p>
+  {% for i in range(1, max_scenes + 1) %}{% set sc = rows[i - 1] %}
+  <div style="border:1px solid #e5e0d0;border-radius:6px;padding:6px 8px;margin-bottom:6px;"><span class="muted" style="font-size:12px;">Scene {{ i }}</span>
+    <input type="text" name="scene_title_{{ i }}" value="{{ sc.title }}" maxlength="60" placeholder="The idea, in a few words">
+    <input type="text" name="scene_body_{{ i }}" value="{{ sc.body }}" maxlength="140" placeholder="One short sentence (optional)"></div>
+  {% endfor %}
+  <label for="cta">Closing line <span class="muted" style="font-weight:normal;">(what to do next)</span></label>
+  <input type="text" id="cta" name="cta" value="{{ spec.cta }}" maxlength="60">
+  <label for="caption">Line under it <span class="muted" style="font-weight:normal;">(e.g. Link in our profile)</span></label>
+  <input type="text" id="caption" name="caption" value="{{ spec.caption }}" maxlength="120">
+  <label for="footer">Website shown at the bottom</label>
+  <input type="text" id="footer" name="footer" value="{{ spec.footer }}" maxlength="60">
+  <label style="font-weight:normal;"><input type="checkbox" name="paab" value="1" style="width:auto;"{% if spec.paab %} checked{% endif %}> Show the PAAB firm number at the bottom</label>
+  <button type="submit" class="btn gold" style="margin-top:10px;">Save</button>
+</form>
+
+<div>
+  <div class="card" id="video-file">
+    <h3 class="mt-0">The video <span class="muted" style="font-weight:normal;font-size:13px;">about {{ '%.0f'|format(total) }} seconds, 1080 x 1920</span></h3>
+    <div id="vstate" data-url="{{ url_for('social.video_status', video_id=video.id) }}" data-status="{{ status }}">
+      {% if status == 'ready' %}
+        <video controls playsinline preload="metadata" style="width:100%;max-width:270px;border-radius:8px;background:#0b1f3a;" src="{{ url_for('social.video_file', video_id=video.id) }}"></video>
+        <div style="margin-top:8px;display:flex;gap:8px;flex-wrap:wrap;">
+          <a class="btn small gold" href="{{ url_for('social.video_file', video_id=video.id, download=1) }}">Download the video (MP4)</a>
+          <button type="button" class="btn small secondary" id="v-share" data-src="{{ url_for('social.video_file', video_id=video.id) }}">Share from phone</button>
+        </div>
+        <p class="muted" style="font-size:12.5px;margin:6px 0 0;">Upload it to TikTok and YouTube Shorts (music or a voice can be added there), or let the automatic posting send it.</p>
+      {% elif status == 'rendering' %}
+        <p id="vmsg" style="margin:0;">Making the video&hellip; <span id="vpct">0%</span></p>
+      {% elif status == 'stale' %}
+        <p class="muted" style="margin:0 0 6px;">The words changed after the video was made. Make it again to match.</p>
+      {% elif status == 'failed' %}
+        <p style="margin:0 0 6px;color:#b3261e;">The video could not be made{% if video.error %}: {{ video.error }}{% endif %}.</p>
+      {% else %}
+        <p class="muted" style="margin:0 0 6px;">Not made yet. Check the scene pictures below, then press the button.</p>
+      {% endif %}
+      {% if status != 'rendering' %}
+      <form method="post" action="{{ url_for('social.video_make', video_id=video.id) }}" style="margin-top:8px;"><button type="submit" class="btn small {{ 'secondary' if status == 'ready' else 'gold' }}"{% if problems or not ffmpeg %} disabled{% endif %}>{{ 'Make it again' if status == 'ready' else 'Make the video' }}</button>
+        <span class="muted" style="font-size:12.5px;">Takes under a minute.</span></form>
+      {% endif %}
+    </div>
+  </div>
+  <div class="card">
+    <h3 class="mt-0">The scenes</h3>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;">
+    {% for sc in scenes %}<div style="width:112px;"><img src="{{ url_for('social.video_scene', video_id=video.id, n=loop.index, v=video.updated_at.strftime('%Y%m%d%H%M%S')) }}" alt="Scene {{ loop.index }}" loading="lazy" style="width:100%;height:auto;border:1px solid #e5e0d0;border-radius:6px;"><div class="muted" style="font-size:11.5px;">{{ '%.1f'|format(sc.seconds) }} s</div></div>{% endfor %}
+    </div>
+  </div>
+  {% if ai %}
+  <form method="post" action="{{ url_for('social.video_redraft', video_id=video.id) }}" class="card" style="padding:10px 16px;">
+    <label for="instruction" style="margin-top:0;">What should change? <span class="muted" style="font-weight:normal;">(optional, e.g. "shorter", "start with a question")</span></label>
+    <input type="text" id="instruction" name="instruction" maxlength="500">
+    <button type="submit" class="btn small secondary" style="margin-top:6px;">Write the words again with the AI</button>
+  </form>
+  {% endif %}
+  <form method="post" action="{{ url_for('social.video_delete', video_id=video.id) }}" onsubmit="return confirm('Delete this video?');"><button type="submit" class="btn small danger">Delete this video</button></form>
+</div>
+</div>
+<script>
+(function () {
+  var box = document.getElementById('vstate');
+  if (!box) return;
+  if (box.dataset.status === 'rendering') {
+    var pct = document.getElementById('vpct');
+    var tick = function () {
+      fetch(box.dataset.url, {credentials: 'same-origin'}).then(function (r) { return r.json(); }).then(function (d) {
+        if (d.status === 'rendering') { if (pct) pct.textContent = Math.round(d.progress * 100) + '%'; setTimeout(tick, 1500); }
+        else { location.reload(); }
+      }).catch(function () { setTimeout(tick, 4000); });
+    };
+    setTimeout(tick, 1200);
+  }
+  var share = document.getElementById('v-share');
+  if (share) share.addEventListener('click', function () {
+    fetch(share.dataset.src, {credentials: 'same-origin'}).then(function (r) { return r.blob(); }).then(function (b) {
+      var f = new File([b], 'neverlank-video.mp4', {type: 'video/mp4'});
+      if (navigator.canShare && navigator.canShare({files: [f]})) { return navigator.share({files: [f]}); }
+      alert('This computer cannot share straight to an app. Download the video, or open this page on your phone.');
+    }).catch(function (e) { if (!e || e.name !== 'AbortError') alert('Could not share. Download the video instead.'); });
+  });
+})();
+</script>
+{% endblock %}

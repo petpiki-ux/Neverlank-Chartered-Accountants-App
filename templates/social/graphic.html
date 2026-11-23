@@ -47,10 +47,13 @@
     </div>
     {% endfor %}
     {% if count > 1 %}<a class="btn small gold" href="{{ url_for('social.graphic_zip', image_id=img.id) }}">Download all slides (zip)</a>{% endif %}
+    <a class="btn small secondary" href="{{ url_for('social.graphic_sizes_zip', image_id=img.id) }}">Download at every platform size (zip)</a>
     <p class="muted" style="font-size:12.5px;margin:8px 0 0;">Alt text for the platform: {{ alt }}</p>
   </div>
   <form method="post" action="{{ url_for('social.graphic_redraft', image_id=img.id) }}" class="card" style="padding:10px 16px;">
-    <button type="submit" class="btn small secondary">Write the words again with the AI</button>
+    <label for="instruction" style="margin-top:0;">What should change? <span class="muted" style="font-weight:normal;">(optional, e.g. "shorter", "bigger number")</span></label>
+    <input type="text" id="instruction" name="instruction" maxlength="500">
+    <button type="submit" class="btn small secondary" style="margin-top:6px;">Write the words again with the AI</button>
     <span class="muted" style="font-size:12.5px;">Replaces the words with a new draft from the post.</span>
   </form>
   <form method="post" action="{{ url_for('social.graphic_delete', image_id=img.id) }}" onsubmit="return confirm('Delete this graphic?');"><button type="submit" class="btn small danger">Delete this graphic</button></form>
