@@ -326,7 +326,8 @@ def init_security(app):
     def _security_headers(resp):
         h = resp.headers
         h.setdefault("X-Content-Type-Options", "nosniff")
-        h.setdefault("X-Frame-Options", "SAMEORIGIN")
+        if "frame-ancestors" not in (h.get("Content-Security-Policy") or ""):       # a page that names who may frame it (the public Compliance Calendar) is left alone
+            h.setdefault("X-Frame-Options", "SAMEORIGIN")
         h.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
         h.setdefault("Permissions-Policy", "camera=(self), microphone=(self), geolocation=(), payment=()")
         if https:

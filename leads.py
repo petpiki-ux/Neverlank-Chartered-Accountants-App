@@ -459,6 +459,15 @@ def allowed_origins():
     return {o.strip().rstrip("/").lower() for o in _env("LEADS_ALLOWED_ORIGINS").split(",") if o.strip()}
 
 
+DEFAULT_EMBED_ORIGINS = ("https://neverlank.co.zw", "https://www.neverlank.co.zw")
+
+
+def embed_origins():
+    """Websites allowed to show the Compliance Calendar page inside their own page (an iframe). Default: the firm's website; LEADS_EMBED_ORIGINS adds or replaces."""
+    extra = {o.strip().rstrip("/").lower() for o in _env("LEADS_EMBED_ORIGINS").split(",") if o.strip().startswith("https://")}
+    return extra or set(DEFAULT_EMBED_ORIGINS)
+
+
 def _cors(response):
     origin = (request.headers.get("Origin") or "").strip().rstrip("/").lower()
     if origin and origin in allowed_origins():
@@ -476,6 +485,7 @@ def landing():
     resp = Response(render_template("leads/compliance_calendar.html", endpoint=url_for("leads.capture"), calendar_url=calendar_url(),
                                     booking_url=booking_url(), year=year, whatsapp=WHATSAPP, auto_email=auto_enabled()), mimetype="text/html")
     resp.headers["Cache-Control"] = "public, max-age=300"
+    resp.headers["Content-Security-Policy"] = "frame-ancestors " + " ".join(["'self'"] + sorted(embed_origins()))   # so the firm's website can show this page inside its own page
     return resp
 
 

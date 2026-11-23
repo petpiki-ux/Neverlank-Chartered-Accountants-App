@@ -335,4 +335,14 @@ var AUTO_EMAIL    = {{ auto_email|tojson }};
   });
 })();
 </script>
+<script>
+/* When this page is shown inside another site's page (the firm's website), tell that page how tall it is so no inner scrollbar appears. */
+(function () {
+  if (window.parent === window) return;
+  function send() { window.parent.postMessage({ neverlankHeight: document.documentElement.scrollHeight }, "*"); }
+  window.addEventListener("load", send);
+  window.addEventListener("resize", send);
+  if (window.ResizeObserver) new ResizeObserver(send).observe(document.body);
+})();
+</script>
 </body></html>

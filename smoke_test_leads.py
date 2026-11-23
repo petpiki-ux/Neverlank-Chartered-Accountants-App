@@ -59,6 +59,16 @@ html = anon.get("/compliance-calendar").get_data(as_text=True)
 check('"https://files.example.org/calendar.pdf"' in html and '"https://cal.example.org/neverlank"' in html, "the calendar and booking links are put on the page when set")
 os.environ["LEADS_CALENDAR_URL"] = ""; os.environ["LEADS_BOOKING_URL"] = ""
 
+# ---- the firm's website may show the page inside its own page; nobody else may
+csp = r.headers.get("Content-Security-Policy", "")
+check("frame-ancestors 'self' https://neverlank.co.zw https://www.neverlank.co.zw" == csp.strip() and "X-Frame-Options" not in r.headers, "the Compliance Calendar page may be framed by neverlank.co.zw and www.neverlank.co.zw only")
+check("neverlankHeight" in html and "postMessage" in html, "the page tells the page around it how tall it is")
+os.environ["LEADS_EMBED_ORIGINS"] = "https://other.example.org, http://insecure.example.org"
+check("https://other.example.org" in anon.get("/compliance-calendar").headers["Content-Security-Policy"] and "insecure" not in anon.get("/compliance-calendar").headers["Content-Security-Policy"], "LEADS_EMBED_ORIGINS replaces the list and only https addresses count")
+os.environ.pop("LEADS_EMBED_ORIGINS")
+r2 = anon.get("/leads/unsubscribe/nothing")
+check(r2.headers.get("X-Frame-Options") == "SAMEORIGIN", "every other page is still not allowed to be framed by other sites")
+
 # ---- sign-up
 def form(**kw):
     d = {"first_name": "Tendai", "last_name": "Moyo", "company": "Moyo Logistics (Pvt) Ltd", "role": "Owner or Director", "email": "Tendai@MoyoLogistics.co.zw",
