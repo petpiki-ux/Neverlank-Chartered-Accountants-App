@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block title %}Publish to the website - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+  <h1>Publish to the website</h1>
+  <p class="muted" style="margin:0;"><a href="{{ url_for('news.index') }}#n{{ it.id }}">back to News Watch</a> &middot; Goes on the website under "{{ category }}". Nothing is published until you press the button.</p>
+</div>
+
+{% if blocked %}<div class="card" style="border-left:4px solid #b3261e;"><p style="margin:0;">{{ blocked }}</p></div>
+{% else %}
+{% if not configured %}<div class="card" style="border-left:4px solid #b8923a;"><p style="margin:0;"><strong>Not connected yet.</strong> On Render add <code>WP_USERNAME</code> and <code>WP_APP_PASSWORD</code>
+  (WordPress &gt; Users &gt; Profile &gt; Application Passwords, a password made just for this app). You can still prepare the note here.</p></div>{% endif %}
+{% for p in problems %}<div class="card" style="border-left:4px solid #b3261e;"><p style="margin:0;">{{ p }}</p></div>{% endfor %}
+
+<div class="card">
+  <p class="muted" style="margin-top:0;">Story: <a href="{{ it.url }}" target="_blank" rel="noopener noreferrer">{{ it.title }}</a> ({{ it.publisher or 'publisher not named' }}). Only your note, the headline, the date and a link to the original go on the site. The article itself is never copied.</p>
+  <form method="post">
+    <label for="title"><strong>Headline on the website</strong></label>
+    <input type="text" id="title" name="title" value="{{ form.title }}" maxlength="200" style="width:100%;margin-bottom:12px;">
+    <label for="note"><strong>What this means (your own words)</strong></label>
+    <p class="muted" style="margin:2px 0 6px;font-size:12.5px;">{{ limits[0] }} to {{ limits[1] }} characters. Started from the app's summary: rewrite it so it sounds like the firm, and leave out any client's name.</p>
+    <textarea id="note" name="note" rows="8" style="width:100%;margin-bottom:12px;">{{ form.note }}</textarea>
+    <p class="muted" style="font-size:12.5px;">This line is added under every post: <em>{{ disclaimer }}</em></p>
+    <label style="display:flex;gap:8px;align-items:flex-start;margin:10px 0;"><input type="checkbox" name="checked" value="1"{% if form.ticked %} checked{% endif %}> <span>I have checked this story against the source and it is fit for the public website.</span></label>
+    <button type="submit" name="mode" value="publish" class="btn">Publish now</button>
+    <button type="submit" name="mode" value="draft" class="btn secondary">Save as draft on the website</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

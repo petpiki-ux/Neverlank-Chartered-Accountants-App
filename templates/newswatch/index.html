@@ -85,6 +85,10 @@
     {% if can_file and not it.filed_update_id %}<form method="post" action="{{ url_for('news.file_to_library', item_id=it.id) }}" class="inline"><button type="submit" class="btn small secondary">File in the Firm Library</button></form>
     {% elif it.filed_update_id %}<a href="{{ url_for('tax.read_legislative_update', update_id=it.filed_update_id) }}" class="btn small secondary">In the Firm Library</a>{% endif %}
     {% if user_has_permission(current_user, 'manage_social') %}<a class="btn small secondary" href="{{ url_for('social.new', news=it.id) }}">Draft a post</a>{% endif %}
+    {% if can_publish and not it.unconfirmed %}{% if it.wp_post_id and it.wp_status == 'publish' %}<a class="btn small secondary" href="{{ it.wp_url }}" target="_blank" rel="noopener noreferrer">On the website</a>
+      <a class="btn small secondary" href="{{ url_for('news.publish_to_site', item_id=it.id) }}">Edit post</a>
+      <form method="post" action="{{ url_for('news.unpublish_from_site', item_id=it.id) }}" class="inline" onsubmit="return confirm('Take this off the website?');"><button type="submit" class="btn small danger">Take off website</button></form>
+    {% else %}<a class="btn small" href="{{ url_for('news.publish_to_site', item_id=it.id) }}">{{ 'Publish again' if it.wp_post_id else 'Publish to website' }}</a>{% endif %}{% endif %}
     <form method="post" action="{{ url_for('news.hide', item_id=it.id) }}" class="inline"><button type="submit" class="btn small secondary">{{ 'Bring back' if hidden_view else 'Not relevant' }}</button></form>
   </div>
 </div>

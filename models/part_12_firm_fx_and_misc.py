@@ -270,6 +270,11 @@ class NewsItem(db.Model):
     shared_by_id = db.Column(db.Integer, db.ForeignKey("user.id"))
     pinned = db.Column(db.Boolean, default=False)
     filed_update_id = db.Column(db.Integer)                  # the Legislative Update Control News entry made from this story (no foreign key on purpose)
+    wp_post_id = db.Column(db.Integer)                       # the post made on the firm's website from this story (see news_site.py)
+    wp_url = db.Column(db.String(500))
+    wp_status = db.Column(db.String(12))                     # publish / draft (draft = taken down or saved for later)
+    wp_posted_at = db.Column(db.DateTime)
+    wp_posted_by_id = db.Column(db.Integer)                  # no foreign key on purpose
 
     source = db.relationship("NewsSource", foreign_keys=[source_id])
     shared_by = db.relationship("User", foreign_keys=[shared_by_id])

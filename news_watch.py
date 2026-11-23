@@ -777,7 +777,7 @@ def index():
     page = render_template("newswatch/index.html", items=items, related=related, today=today, days=(request.args.get("days", type=int) or RECENT_DAYS), topics=TOPICS, urgencies=URGENCIES, regions=REGIONS, args=request.args,
                            state=refresh_state(), configured=is_configured(), can_manage=can_manage(current_user), new_since=new_since,
                            n_sources=NewsSource.query.filter_by(active=True).count(), last=last_refresh_at(), refreshing=_state["running"] or started,
-                           can_file=user_has_permission(current_user, "manage_legislative_updates"), social_hosts=SOCIAL_HOSTS)
+                           can_file=user_has_permission(current_user, "manage_legislative_updates"), social_hosts=SOCIAL_HOSTS, can_publish=can_manage(current_user))
     if request.args.get("show", "relevant") != "hidden":
         if seen is None:
             db.session.add(NewsSeen(user_id=current_user.id, seen_at=datetime.utcnow()))
@@ -939,6 +939,55 @@ def file_to_library(item_id):
     item.filed_update_id = update.id
     db.session.commit()
     flash("Filed in the Firm Library as a News entry. It is a report, not law: check the instrument itself before relying on it.", "success")
+    return redirect(request.referrer or url_for("news.index"))
+
+
+# ---- publish an approved story to the firm's website (Partners and Admin only; see news_site.py)
+
+@news_bp.route("/<int:item_id>/publish", methods=["GET", "POST"])
+@login_required
+def publish_to_site(item_id):
+    if not can_manage(current_user):
+        abort(403)
+    import news_site
+    item = NewsItem.query.get_or_404(item_id)
+    reason = news_site.blocked_reason(item)
+    form = {"title": request.form.get("title", item.title or "").strip(), "note": request.form.get("note", news_site.default_note(item)).strip(),
+            "ticked": bool(request.form.get("checked")), "draft": request.form.get("mode") == "draft"}
+    problems = []
+    if request.method == "POST" and not reason:
+        problems = news_site.check_text(form["title"], form["note"], form["ticked"])
+        if not news_site.configured():
+            problems.append("The website connection is not set up yet: add WP_USERNAME and WP_APP_PASSWORD on Render.")
+        if not problems:
+            ok, data = news_site.publish(item, form["title"], form["note"], draft=form["draft"])
+            if ok:
+                item.wp_post_id = data.get("id") or item.wp_post_id
+                item.wp_url = (data.get("link") or "")[:500]
+                item.wp_status = "draft" if form["draft"] else "publish"
+                item.wp_posted_at, item.wp_posted_by_id = datetime.utcnow(), current_user.id
+                db.session.commit()
+                flash("Saved as a draft on the website." if form["draft"] else "Published on the website.", "success")
+                return redirect(url_for("news.index") + f"#n{item.id}")
+            problems.append(data)
+    return render_template("newswatch/publish.html", it=item, form=form, problems=problems, blocked=reason, configured=news_site.configured(),
+                           category=news_site.settings()["category"], limits=(news_site.NOTE_MIN, news_site.NOTE_MAX), disclaimer=news_site.DISCLAIMER)
+
+
+@news_bp.route("/<int:item_id>/unpublish", methods=["POST"])
+@login_required
+def unpublish_from_site(item_id):
+    if not can_manage(current_user):
+        abort(403)
+    import news_site
+    item = NewsItem.query.get_or_404(item_id)
+    ok, data = news_site.take_down(item)
+    if ok:
+        item.wp_status = "draft"
+        db.session.commit()
+        flash("Taken off the website (kept there as a draft).", "success")
+    else:
+        flash(data, "danger")
     return redirect(request.referrer or url_for("news.index"))
 
 

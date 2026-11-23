@@ -653,7 +653,8 @@ def _add_missing_columns():
                     ("reminders_paused", "BOOLEAN DEFAULT 0")],
         # News Watch: where a source / story comes from (Zimbabwe, South Africa, International) - see news_watch.py
         "news_source": [("region", "VARCHAR(20) DEFAULT 'Zimbabwe'")],
-        "news_item": [("region", "VARCHAR(20) DEFAULT 'Zimbabwe'")],
+        "news_item": [("region", "VARCHAR(20) DEFAULT 'Zimbabwe'"), ("wp_post_id", "INTEGER"), ("wp_url", "VARCHAR(500)"), ("wp_status", "VARCHAR(12)"),
+                      ("wp_posted_at", "DATETIME"), ("wp_posted_by_id", "INTEGER")],
     }
     # The Managing Partner's e-signature columns (models.MPSignedMixin) - MERGED into each table's list, because some of these tables
     # (receipt, zimra_reply, invoice) already have their own entry above and a repeated key in the literal would replace it.
