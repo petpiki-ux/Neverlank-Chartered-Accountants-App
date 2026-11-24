@@ -8,7 +8,14 @@
     Someone who replies, books, is won or lost, or unsubscribes is not followed up again.</p>
 </div>
 
-<details class="card" style="padding:10px 16px;"{% if not setup.email or not setup.calendar %} open{% endif %}>
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  <div style="flex:1 1 260px;"><strong>The {{ setup.year }} Compliance Calendar</strong><br><span class="muted" style="font-size:12.5px;">This is the file every new lead is sent. Open it to see exactly what they get.</span></div>
+  <a class="btn gold" href="{{ setup.calendar_pdf }}" target="_blank" rel="noopener">Open the PDF</a>
+  {% if setup.calendar_one %}<a class="btn secondary" href="{{ setup.calendar_one }}" target="_blank" rel="noopener">Open the one-page summary</a>{% endif %}
+  {% if setup.calendar_xlsx %}<a class="btn secondary" href="{{ setup.calendar_xlsx }}" target="_blank" rel="noopener">Open the Excel file</a>{% endif %}
+</div>
+
+<details class="card" style="padding:10px 16px;"{% if not setup.email %} open{% endif %}>
   <summary style="cursor:pointer;"><strong>Set-up</strong>
     <span class="muted" style="font-size:12.5px;">{% if setup.auto %}Emails go out automatically.{% else %}Emails wait for a person to press Send (automatic sending is off).{% endif %}</span></summary>
   <table style="margin-top:8px;">
@@ -16,7 +23,8 @@
       <tr><td style="width:26px;">&#10003;</td><td>The web page people sign up on</td><td class="muted" style="font-size:12.5px;"><a href="{{ setup.page }}" target="_blank" rel="noopener">{{ setup.page }}</a> &middot; share this link, or put it behind your website button</td></tr>
       <tr><td>{{ '&#10003;'|safe if setup.owner else '&ndash;'|safe }}</td><td>Who owns new leads</td><td class="muted" style="font-size:12.5px;">{% if setup.owner %}{{ setup.owner.name }} (set <code>LEADS_DEFAULT_OWNER</code> to a username or email to change it){% else %}Nobody: no active partner or admin was found. Set <code>LEADS_DEFAULT_OWNER</code>.{% endif %}</td></tr>
       <tr><td>{{ '&#10003;'|safe if setup.email else '&ndash;'|safe }}</td><td>Email service</td><td class="muted" style="font-size:12.5px;">{% if setup.email %}Ready.{% else %}Not set up: add <code>EMAIL_API_KEY</code> and <code>EMAIL_FROM</code> on the server. Until then the emails can still be opened in your own email program.{% endif %}</td></tr>
-      <tr><td>{{ '&#10003;'|safe if setup.calendar else '&ndash;'|safe }}</td><td>Calendar file link</td><td class="muted" style="font-size:12.5px;">{% if setup.calendar %}Set.{% else %}Not set: add <code>LEADS_CALENDAR_URL</code> (where people can download the calendar). Automatic emails wait for this.{% endif %}</td></tr>
+      <tr><td>&#10003;</td><td>The calendar file</td><td class="muted" style="font-size:12.5px;">{% if setup.calendar_custom %}Using your own link (<code>LEADS_CALENDAR_URL</code>). Remove that setting to send the app's own branded calendar.{% else %}The app's own branded {{ setup.year }} calendar is sent (full PDF, one-page summary and Excel).{% endif %}</td></tr>
+      <tr><td>{{ '&#10003;'|safe if setup.calendar_reviewed else '&ndash;'|safe }}</td><td>Calendar reviewed</td><td class="muted" style="font-size:12.5px;">{% if setup.calendar_reviewed %}{{ setup.calendar_reviewed }}{% else %}Have the tax manager check the dates each November, then set <code>LEADS_CALENDAR_REVIEWED</code> (for example "Reviewed by the tax manager on 3 December 2026") so it prints in the calendar.{% endif %}</td></tr>
       <tr><td>{{ '&#10003;'|safe if setup.auto else '&ndash;'|safe }}</td><td>Automatic emails</td><td class="muted" style="font-size:12.5px;">{% if setup.auto %}On.{% elif setup.auto_requested %}Asked for, but waiting for the email service and the calendar link above.{% else %}Off. Set <code>LEADS_AUTO_EMAIL=1</code> when you are happy with the wording of the emails.{% endif %}</td></tr>
       <tr><td>{{ '&#10003;'|safe if setup.booking else '&ndash;'|safe }}</td><td>Booking page (optional)</td><td class="muted" style="font-size:12.5px;">{% if setup.booking %}Set.{% else %}Not set: the emails ask people to reply or WhatsApp instead. Add <code>LEADS_BOOKING_URL</code> to use a booking page.{% endif %}</td></tr>
       <tr><td>{{ '&#10003;'|safe if setup.notify else '&ndash;'|safe }}</td><td>Who is told of a new sign-up</td><td class="muted" style="font-size:12.5px;">{% if setup.notify %}Set.{% else %}The lead's owner, if they have an email on their profile. Add <code>LEADS_NOTIFY_EMAIL</code> to name others.{% endif %}</td></tr>

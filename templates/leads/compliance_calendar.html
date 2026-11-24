@@ -164,7 +164,9 @@ footer p{margin:0 0 6px}
           <h2>Your calendar is on its way.</h2>
           <p class="sm" id="thanksMsg">Check your inbox in the next few minutes, and your spam folder just in case.</p>
           <div class="stack">
-            <a class="btn" id="dl" href="#" hidden>Download the calendar now</a>
+            <a class="btn" id="dl" href="#" target="_blank" rel="noopener noreferrer" hidden>Download the calendar now (PDF)</a>
+            <a class="btn alt" id="dlx" href="#" target="_blank" rel="noopener noreferrer" hidden>Download the Excel version</a>
+            <a class="btn alt" id="dl1" href="#" target="_blank" rel="noopener noreferrer" hidden>Download the one-page summary</a>
             <a class="btn alt" id="wa" href="#" target="_blank" rel="noopener noreferrer">Message us on WhatsApp</a>
             <a class="btn alt" id="check20" href="#" target="_blank" rel="noopener noreferrer">Book a free 20-minute compliance health check</a>
           </div>
@@ -260,11 +262,13 @@ footer p{margin:0 0 6px}
    These are filled in by the Neverlank app (see leads.py and the LEADS_ settings on the server).
    LEAD_ENDPOINT : address that receives each sign-up as JSON (the app's /leads/capture route). While empty,
                    nothing is stored: the thank-you box gives the visitor a prefilled WhatsApp message instead.
-   CALENDAR_URL  : link to the calendar file (PDF or spreadsheet). While empty, the download button stays hidden.
+   CALENDAR_URL  : link to the calendar file (PDF or spreadsheet). The app serves its own PDF and Excel file; set LEADS_CALENDAR_URL to use another link. While empty, the download button stays hidden.
    BOOKING_URL   : a booking page for the 20-minute check. While empty, the button opens WhatsApp.
    YEAR          : the year printed on the page. */
 var LEAD_ENDPOINT = {{ endpoint|tojson }};
 var CALENDAR_URL  = {{ calendar_url|tojson }};
+var CALENDAR_XLSX_URL = {{ calendar_xlsx_url|tojson }};
+var CALENDAR_ONE_URL = {{ calendar_one_url|tojson }};
 var BOOKING_URL   = {{ booking_url|tojson }};
 var WHATSAPP      = {{ whatsapp|tojson }};
 var YEAR          = {{ year|tojson }};
@@ -317,6 +321,8 @@ var AUTO_EMAIL    = {{ auto_email|tojson }};
         ? (AUTO_EMAIL ? "Check your inbox in the next few minutes, and your spam folder just in case." : "Thank you, " + data.first_name + ". We have your request and will email your calendar within one working day. Need it sooner? Message us on WhatsApp.")
         : "Thank you, " + data.first_name + ". To get your calendar fastest, send us a quick WhatsApp message with the button below.";
       if (CALENDAR_URL) { $("dl").href = CALENDAR_URL; $("dl").hidden = false; }
+      if (CALENDAR_XLSX_URL) { $("dlx").href = CALENDAR_XLSX_URL; $("dlx").hidden = false; }
+      if (CALENDAR_ONE_URL) { $("dl1").href = CALENDAR_ONE_URL; $("dl1").hidden = false; }
       t.focus();
     };
 

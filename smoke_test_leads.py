@@ -53,7 +53,7 @@ r = anon.get("/compliance-calendar")
 html = r.get_data(as_text=True)
 check(r.status_code == 200 and "Compliance Calendar" in html, "the landing page opens without signing in")
 check('var LEAD_ENDPOINT = "/leads/capture";' in html and 'name="website"' in html and "{{" not in html and "{%" not in html, "the page posts to the app's own route, has the hidden robot trap and no template leftovers")
-check('var CALENDAR_URL  = "";' in html and "var AUTO_EMAIL    = false;" in html, "no calendar link and no automatic email until they are set")
+check('var CALENDAR_URL  = "/compliance-calendar/neverlank-compliance-calendar-' in html and ".pdf" in html and "calendar-" in html and "var AUTO_EMAIL    = false;" in html, "the app's own calendar is offered with no setting, and there is no automatic email until it is asked for")
 os.environ["LEADS_CALENDAR_URL"] = "https://files.example.org/calendar.pdf"; os.environ["LEADS_BOOKING_URL"] = "https://cal.example.org/neverlank"; os.environ["LEADS_YEAR"] = "2027"
 html = anon.get("/compliance-calendar").get_data(as_text=True)
 check('"https://files.example.org/calendar.pdf"' in html and '"https://cal.example.org/neverlank"' in html, "the calendar and booking links are put on the page when set")
@@ -150,7 +150,10 @@ with app.app_context():
         else:
             check("unsubscribe" not in d["text"].lower(), f"{step}: a personal message carries no unsubscribe footer")
     e1 = LD.build_draft(lead, _T("email1"), "")["text"]
-    check("files.example.org" not in e1 and "Download your calendar" not in e1 and "WhatsApp us on +263 71 811 0832" in e1 and "2027" in e1, "email 1 without links set: the download line is left out and WhatsApp is offered")
+    check("files.example.org" not in e1 and "Download your calendar: /compliance-calendar/neverlank-compliance-calendar-2027.pdf" in e1 and "Excel version: /compliance-calendar/neverlank-compliance-calendar-2027.xlsx" in e1 and "whole year on one page, to pin on the wall: /compliance-calendar/neverlank-compliance-calendar-2027-one-page.pdf" in e1
+          and "WhatsApp us on +263 71 811 0832" in e1 and "2027" in e1, "email 1 without a custom link: the app's own PDF and Excel links are in it and WhatsApp is offered")
+    e1root = LD.build_draft(lead, _T("email1"), "https://app.neverlank.co.zw")
+    check("https://app.neverlank.co.zw/compliance-calendar/neverlank-compliance-calendar-2027.pdf" in e1root["text"] and 'href="https://app.neverlank.co.zw/compliance-calendar/neverlank-compliance-calendar-2027.pdf"' in e1root["html"], "in the sent email the links are full addresses")
     check("Tax and penalties" not in LD.build_draft(lead, _T("email2"), "")["text"] and "penalties" in LD.build_draft(lead, _T("email2"), "")["text"], "email 2 speaks to the headache they named")
     other = MarketingLead(first_name="Z", email="z@z.co", headache="Other", unsub_token="t" * 30)
     check("named person" in LD.build_draft(other, _T("email2"), "")["text"].lower() or "name next to every line" in LD.build_draft(other, _T("email2"), "")["text"], "email 2 has a general version")
@@ -161,9 +164,47 @@ with app.app_context():
     check("<script>" not in h and "&lt;script&gt;" in h, "text typed on the public page is escaped in the HTML email")
     os.environ["LEADS_CALENDAR_URL"] = "https://files.example.org/calendar.pdf"; os.environ["LEADS_BOOKING_URL"] = "https://cal.example.org/neverlank"
     d1 = LD.build_draft(lead, _T("email1"), "https://app.neverlank.co.zw")
+    check("Excel version" not in d1["text"], "with your own calendar link there is no Excel line (the app does not know that file)")
     check("Download your calendar: https://files.example.org/calendar.pdf" in d1["text"] and 'href="https://files.example.org/calendar.pdf"' in d1["html"], "with the links set they appear in the text and the button")
     check("Book it here" in LD.build_draft(lead, _T("email3"), "")["text"] and "cal.example.org" in LD.build_draft(lead, _T("email3"), "")["text"], "the booking page is used when set")
     os.environ["LEADS_CALENDAR_URL"] = ""; os.environ["LEADS_BOOKING_URL"] = ""
+
+
+# ---- the calendar files themselves
+os.environ["LEADS_YEAR"] = "2027"
+r = anon.get("/compliance-calendar/neverlank-compliance-calendar-2027.pdf")
+check(r.status_code == 200 and r.data[:5] == b"%PDF-" and r.mimetype == "application/pdf" and len(r.data) > 20000 and "inline" in r.headers["Content-Disposition"], "the PDF calendar opens without signing in and is a real PDF")
+r = anon.get("/compliance-calendar/neverlank-compliance-calendar-2027-one-page.pdf")
+import pdfplumber as _pp1
+with _pp1.open(__import__("io").BytesIO(r.data)) as _p1:
+    _t1 = " ".join((pg.extract_text() or "") for pg in _p1.pages); _n1 = len(_p1.pages)
+check(r.status_code == 200 and r.data[:5] == b"%PDF-" and _n1 == 1 and "Compliance Calendar 2027" in _t1 and "Fri 08 Apr" not in _t1 and "Which VAT" not in _t1 and "VAT category" in _t1 and "Mon 22 Feb" in _t1, "the one-page summary is a single branded PDF page")
+check(anon.get("/compliance-calendar/neverlank-compliance-calendar-1999-one-page.pdf").status_code == 404, "and a silly year is a 404")
+r = anon.get("/compliance-calendar/neverlank-compliance-calendar-2027.xlsx")
+import io as _io, openpyxl as _ox
+wb_ = _ox.load_workbook(_io.BytesIO(r.data))
+check(r.status_code == 200 and "attachment" in r.headers["Content-Disposition"] and wb_.sheetnames[0] == "Key dates" and "Year at a glance" in wb_.sheetnames, "the Excel calendar downloads and has its sheets")
+check(anon.get("/compliance-calendar/neverlank-compliance-calendar-2027.docx").status_code == 404 and anon.get("/compliance-calendar/neverlank-compliance-calendar-1999.pdf").status_code == 404, "other file types and absurd years are a 404")
+import compliance_calendar as CCAL
+from datetime import date as _d
+g = {x["month"]: x for x in CCAL.glance(2027)}
+fm = lambda pr: " ".join(v for v in CCAL.glance_text(pr) if v)
+check(fm(g["January"]["payments"]) == "Fri 08 Jan (10 Jan)" and fm(g["August"]["payments"]) == "Fri 06 Aug (10 Aug)" and fm(g["September"]["vat"]) == "Tue 14 Sep (15 Sep)" and fm(g["May"]["vat"]) == "Fri 14 May (15 May)",
+      "the year-at-a-glance dates match the firm's table: weekends and the 9-10 August and 15 September holidays move the date back")
+check([fm(p) for l, p in g["March"]["extra"]] == ["Fri 19 Mar (20 Mar)", "Thu 25 Mar"] and [fm(p) for l, p in g["December"]["extra"]] == ["Wed 15 Dec", "Mon 20 Dec"] and fm(g["April"]["extra"][0][1]) == "Fri 30 Apr", "quarterly returns and payments and the annual return are right")
+hol = {n: d for d, n, _ in CCAL.holidays(2027)}
+check(hol["Good Friday"] == _d(2027, 3, 26) and hol["Easter Monday"] == _d(2027, 3, 29) and hol["Heroes' Day"] == _d(2027, 8, 9) and hol["Defence Forces Day"] == _d(2027, 8, 10)
+      and hol["Robert Gabriel Mugabe National Youth Day (observed)"] == _d(2027, 2, 22) and hol["Independence Day (observed)"] == _d(2027, 4, 19) and hol["Boxing Day (observed)"] == _d(2027, 12, 27)
+      and hol["Munhumutapa Day"] == _d(2027, 9, 15), "public holidays: Easter, Heroes, Defence Forces, Munhumutapa and the Sunday ones moved to Monday")
+check(all(it["act_by"].weekday() < 5 and it["act_by"] <= it["date"] for it in CCAL.items(2027) if it["group"] != "advice"), "every due date has a working day to act by, never later than the date")
+check(CCAL.vat_cat(2) == "A" and CCAL.vat_cat(3) == "B" and "Category A (every two months): December 2026 and January 2027" in CCAL.vat_text(2, 2027) and "Category B (every two months): November 2026 and December 2026" in CCAL.vat_text(1, 2027), "VAT categories: A files in even months, B in odd months, with the periods named")
+os.environ["LEADS_CALENDAR_REVIEWED"] = "Reviewed by the tax manager on 3 December 2026."
+r = anon.get("/compliance-calendar/neverlank-compliance-calendar-2027.pdf")
+import pdfplumber as _pp
+with _pp.open(_io.BytesIO(r.data)) as pdf_:
+    txt_ = " ".join((pg.extract_text() or "") for pg in pdf_.pages)
+check("Reviewed by the tax manager on 3 December 2026." in txt_ and "Which VAT category are you?" in txt_ and "Fri 08 Jan" in txt_ and "Munhumutapa Day" in txt_ and "{" not in txt_, "the PDF prints the review line, the VAT categories and the dates, with no template leftovers")
+os.environ["LEADS_CALENDAR_REVIEWED"] = ""
 
 # ---- phone numbers
 check(LD.phone_digits("077 123 4567") == "263771234567" and LD.phone_digits("+263 77 123 4567") == "263771234567" and LD.phone_digits("00263771234567") == "263771234567" and LD.phone_digits("") == "", "phone numbers are made WhatsApp-ready")
@@ -240,8 +281,10 @@ os.environ.pop("LEADS_NOTIFY_EMAIL"); sent.clear(); emailer.is_configured = lamb
 check(anon.get("/leads/", follow_redirects=False).status_code in (302, 401), "the list needs a sign-in")
 check(staff.get("/leads/").status_code == 403, "ordinary staff are not allowed in")
 check(partner.get("/leads/").status_code == 200 and sup.get("/leads/").status_code == 200 and admin.get("/leads/").status_code == 200, "supervisors, partners and admins are")
+_keep_cal = os.environ.get("LEADS_CALENDAR_URL", ""); os.environ["LEADS_CALENDAR_URL"] = ""
 page = partner.get("/leads/").get_data(as_text=True)
 check("Tendai Moyo" in page and "Moyo Logistics" in page and "Do these now" in page and "Pat Partner" in page, "the list shows the lead, the company and the owner")
+check('href="/compliance-calendar/neverlank-compliance-calendar-' in page and "Open the PDF" in page and "Open the one-page summary" in page and "Open the Excel file" in page and "Calendar reviewed" in page, "the Leads page shows the calendar that is sent, with PDF and Excel buttons, and the review setting")
 check('href="/leads/"' in page, "the menu has a Leads link for those allowed")
 check('href="/leads/"' not in staff.get("/", follow_redirects=True).get_data(as_text=True) and 'href="/leads/"' in partner.get("/", follow_redirects=True).get_data(as_text=True), "and not for staff")
 check(partner.get("/leads/?status=open&owner=me&priority=High&q=moyo").status_code == 200 and "Tendai" in partner.get("/leads/?q=MOYO").get_data(as_text=True), "search and filters work")
@@ -249,6 +292,8 @@ check("No leads match these filters" in partner.get("/leads/?q=nobody-by-this-na
 check("No leads match these filters" in partner.get("/leads/?status=Won").get_data(as_text=True), "the status filter works")
 d = partner.get(f"/leads/{lid}")
 check(d.status_code == 200 and "Follow-up plan" in d.get_data(as_text=True) and "tendai@moyologistics.co.zw" in d.get_data(as_text=True), "the lead page opens")
+check("The calendar they asked for" in d.get_data(as_text=True) and "neverlank-compliance-calendar-" in d.get_data(as_text=True), "and links to the calendar file")
+os.environ["LEADS_CALENDAR_URL"] = _keep_cal
 check(staff.get(f"/leads/{lid}").status_code == 403 and anon.get(f"/leads/{lid}").status_code in (302, 401), "and is closed to others")
 
 # send / done / skip from the page

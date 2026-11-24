@@ -18,6 +18,13 @@
   </div>
 </div>
 
+<div class="card" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+  <div style="flex:1 1 240px;"><strong>The calendar they asked for</strong><br><span class="muted" style="font-size:12.5px;">Open it, or copy the link to send it yourself.</span></div>
+  <a class="btn gold small" href="{{ cal_pdf }}" target="_blank" rel="noopener">PDF</a>
+  {% if cal_one %}<a class="btn secondary small" href="{{ cal_one }}" target="_blank" rel="noopener">One page</a>{% endif %}
+  {% if cal_xlsx %}<a class="btn secondary small" href="{{ cal_xlsx }}" target="_blank" rel="noopener">Excel</a>{% endif %}
+</div>
+
 <div class="card">
   <h3 class="mt-0">Owner, status and notes</h3>
   <form method="post" action="{{ url_for('leads.update', lead_id=lead.id) }}">

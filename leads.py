@@ -34,6 +34,7 @@ from flask import (Blueprint, Response, abort, current_app, flash, jsonify, redi
 from flask_login import current_user, login_required
 from sqlalchemy import func, or_
 
+import compliance_calendar
 import emailer
 from extensions import db
 from models import (LEAD_STATUSES, LEAD_STOP_STATUSES, LeadTouch, MarketingLead, User, user_has_permission)
@@ -77,8 +78,29 @@ def auto_requested():
     return _env("LEADS_AUTO_EMAIL").lower() in ("1", "true", "yes", "on", "y")
 
 
-def calendar_url():
-    return _env("LEADS_CALENDAR_URL")
+def calendar_url(root=""):
+    """Where the calendar can be downloaded. A link set in LEADS_CALENDAR_URL wins; otherwise the app serves its own PDF (compliance_calendar.py)."""
+    custom = _env("LEADS_CALENDAR_URL")
+    if custom:
+        return custom
+    return f"{root}/compliance-calendar/{compliance_calendar.filename(calendar_year(), 'pdf')}"
+
+
+def calendar_xlsx_url(root=""):
+    """The Excel version, only when the app serves the calendar itself (a custom link points to one file we know nothing about)."""
+    if _env("LEADS_CALENDAR_URL"):
+        return ""
+    return f"{root}/compliance-calendar/{compliance_calendar.filename(calendar_year(), 'xlsx')}"
+
+
+def calendar_onepager_url(root=""):
+    """The one-page summary, always the app's own file."""
+    return f"{root}/compliance-calendar/{compliance_calendar.onepager_filename(calendar_year())}"
+
+
+def calendar_reviewed():
+    """Printed in the calendar's notice, e.g. 'Reviewed by the tax manager on 3 December 2026.' Set LEADS_CALENDAR_REVIEWED."""
+    return _env("LEADS_CALENDAR_REVIEWED")
 
 
 def booking_url():
@@ -202,7 +224,8 @@ def build_draft(lead, touch, root=""):
     first = lead.first_name or "there"
     company = lead.company or ""
     year = calendar_year()
-    cal, book = calendar_url(), booking_url()
+    cal, cal_xlsx, book = calendar_url(root), calendar_xlsx_url(root), booking_url()
+    cal_one = calendar_onepager_url(root) if cal_xlsx else ""
     owner = (lead.owner.name if lead.owner else "") or "Petros Piki"
     unsub = f"{root}/leads/unsubscribe/{lead.unsub_token}" if lead.unsub_token else ""
     paras, cta, subject = [], None, ""
@@ -225,6 +248,8 @@ def build_draft(lead, touch, root=""):
                  f"Thank you for asking for the {year} Compliance Calendar" + (f" for {company}." if company else "."),
                  "Ten minutes is enough to make it work: put a name next to every date, add your own year-end and any lender or customer deadlines, "
                  "and put a 15-minute review in the diary for the first week of each month.",
+                 (f"Prefer a spreadsheet you can filter and tick off? Here is the Excel version: {cal_xlsx}" if cal_xlsx else ""),
+                 (f"And here is the whole year on one page, to pin on the wall: {cal_one}" if cal_one else ""),
                  "Dates can change when the law changes, so please confirm anything critical with us before you rely on it.",
                  "If you would like a second pair of eyes, we do a free 20-minute compliance check. " + booking_line,
                  "Reply to this email with any question and a person will answer.",
@@ -482,10 +507,53 @@ def _cors(response):
 @page_bp.route("/compliance-calendar")
 def landing():
     year = calendar_year()
-    resp = Response(render_template("leads/compliance_calendar.html", endpoint=url_for("leads.capture"), calendar_url=calendar_url(),
+    resp = Response(render_template("leads/compliance_calendar.html", endpoint=url_for("leads.capture"), calendar_url=calendar_url(), calendar_xlsx_url=calendar_xlsx_url(), calendar_one_url=calendar_onepager_url() if calendar_xlsx_url() else "",
                                     booking_url=booking_url(), year=year, whatsapp=WHATSAPP, auto_email=auto_enabled()), mimetype="text/html")
     resp.headers["Cache-Control"] = "public, max-age=300"
     resp.headers["Content-Security-Policy"] = "frame-ancestors " + " ".join(["'self'"] + sorted(embed_origins()))   # so the firm's website can show this page inside its own page
+    return resp
+
+
+_CAL_CACHE = {}
+
+
+@page_bp.route("/compliance-calendar/neverlank-compliance-calendar-<int:year>-one-page.pdf")
+def calendar_onepager(year):
+    """The year on one branded page, for sending in a message."""
+    if not 2025 <= year <= 2040:
+        abort(404)
+    reviewed = calendar_reviewed()
+    key = (year, "one", reviewed, compliance_calendar.PREPARED)
+    data = _CAL_CACHE.get(key)
+    if data is None:
+        data = compliance_calendar.build_onepager(year, reviewed)
+        if len(_CAL_CACHE) > 12:
+            _CAL_CACHE.clear()
+        _CAL_CACHE[key] = data
+    resp = Response(data, mimetype="application/pdf")
+    resp.headers["Content-Disposition"] = f'inline; filename="{compliance_calendar.onepager_filename(year)}"'
+    resp.headers["Cache-Control"] = "public, max-age=3600"
+    return resp
+
+
+@page_bp.route("/compliance-calendar/neverlank-compliance-calendar-<int:year>.<fmt>")
+def calendar_file(year, fmt):
+    """The calendar itself, built from compliance_calendar.py: public, so it can be linked from emails and the website."""
+    if fmt not in ("pdf", "xlsx") or not 2025 <= year <= 2040:
+        abort(404)
+    reviewed = calendar_reviewed()
+    key = (year, fmt, reviewed, compliance_calendar.PREPARED)
+    data = _CAL_CACHE.get(key)
+    if data is None:
+        data = compliance_calendar.build_pdf(year, reviewed) if fmt == "pdf" else compliance_calendar.build_xlsx(year, reviewed)
+        if len(_CAL_CACHE) > 12:
+            _CAL_CACHE.clear()
+        _CAL_CACHE[key] = data
+    mime = "application/pdf" if fmt == "pdf" else "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    name = compliance_calendar.filename(year, fmt)
+    resp = Response(data, mimetype=mime)
+    resp.headers["Content-Disposition"] = f'{"inline" if fmt == "pdf" else "attachment"}; filename="{name}"'
+    resp.headers["Cache-Control"] = "public, max-age=3600"
     return resp
 
 
@@ -631,7 +699,8 @@ def index():
     for touch in due_now(40):
         due.append((touch, STEPS[touch.step][3] if touch.step in STEPS else touch.step, build_draft(touch.lead, touch, root)))
     setup = {
-        "email": emailer.is_configured(), "auto_requested": auto_requested(), "auto": auto_enabled(), "calendar": bool(calendar_url()),
+        "email": emailer.is_configured(), "auto_requested": auto_requested(), "auto": auto_enabled(), "calendar": True, "calendar_custom": bool(_env("LEADS_CALENDAR_URL")), "calendar_reviewed": calendar_reviewed(),
+        "calendar_pdf": calendar_url(), "calendar_xlsx": calendar_xlsx_url(), "calendar_one": calendar_onepager_url() if calendar_xlsx_url() else "",
         "booking": bool(booking_url()), "notify": bool(emailer.split_addresses(_env("LEADS_NOTIFY_EMAIL"))), "cron": bool(_env("LEADS_CRON_TOKEN")),
         "owner": default_owner(), "page": f"{root}/compliance-calendar", "year": calendar_year(),
     }
@@ -650,7 +719,8 @@ def detail(lead_id):
     for touch in lead.touches:
         rows.append((touch, STEPS[touch.step][3] if touch.step in STEPS else touch.step, build_draft(lead, touch, root)))
     return render_template("leads/detail.html", lead=lead, rows=rows, statuses=LEAD_STATUSES, priorities=PRIORITIES, owners=_owners(),
-                           can_delete=current_user.role in ("partner", "admin"), email_ready=emailer.is_configured(), wa_number=phone_digits(lead.mobile))
+                           can_delete=current_user.role in ("partner", "admin"), email_ready=emailer.is_configured(), wa_number=phone_digits(lead.mobile),
+                           cal_pdf=calendar_url(root), cal_xlsx=calendar_xlsx_url(root), cal_one=(calendar_onepager_url(root) if calendar_xlsx_url(root) else ""))
 
 
 @leads_bp.route("/<int:lead_id>/update", methods=["POST"])
