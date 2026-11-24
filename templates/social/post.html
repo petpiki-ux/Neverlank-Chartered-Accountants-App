@@ -37,7 +37,10 @@
 </div>
 
 {% for key, cfg, v, link in cards %}
-<div class="card platform" data-platform="{{ key }}" data-limit="{{ cfg.limit }}" data-link="{{ link }}" data-compose="{{ cfg.compose }}" data-home="{{ cfg.home }}">
+{% set psize = platform_size.get(key) %}
+{% set gimg = main_graphic %}
+{% set imgurl = url_for('social.graphic_png', image_id=gimg.id, n=1, size=psize, v=gimg.updated_at.strftime('%Y%m%d%H%M%S')) if (psize and gimg and not (key in ('tiktok', 'youtube') and videos)) else '' %}
+<div class="card platform" data-platform="{{ key }}" data-limit="{{ cfg.limit }}" data-link="{{ link }}" data-compose="{{ cfg.compose }}" data-home="{{ cfg.home }}" data-img="{{ imgurl }}">
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;">
     <h3 class="mt-0" style="margin-bottom:4px;">{{ cfg.label }}</h3>
     {% if v.status == 'posted' %}<span class="badge" style="background:#2e7d32;color:#fff;">posted</span>{% elif v.status == 'skipped' %}<span class="badge">skipped</span>{% endif %}
@@ -52,12 +55,12 @@
   <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px;align-items:center;">
     <button type="button" class="btn small secondary js-copy">Copy</button>
     {% if cfg.compose or cfg.home %}<button type="button" class="btn small gold js-open">Copy and open {{ cfg.label }}</button>{% endif %}
+    {% if imgurl %}<button type="button" class="btn small secondary js-copy-img" title="Copies the picture, so you can paste it into the post with Ctrl+V">Copy picture</button>{% endif %}
     {% if key == 'youtube' %}<button type="button" class="btn small secondary js-copy-title">Copy title</button>{% endif %}
     <a href="#graphics" class="btn small secondary" style="text-decoration:none;">{% if images %}Graphics ({{ images|length }}){% else %}Add a graphic{% endif %}</a>
     {% if link %}<span class="muted" style="font-size:12px;word-break:break-all;">Tracked link: {{ link }}</span>{% endif %}
   </div>
-  {% set psize = platform_size.get(key) %}
-  {% set gimg = main_graphic %}
+  <p class="muted js-note" style="font-size:12.5px;margin:6px 0 0;display:none;"></p>
   {% if psize and (gimg or (key in ('tiktok', 'youtube') and videos)) %}
   <div class="kit" style="margin-top:10px;padding-top:8px;border-top:1px dashed #e5e0d0;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-start;">
     {% if gimg and not (key in ('tiktok', 'youtube') and videos) %}
@@ -271,17 +274,43 @@
       try { document.execCommand("copy") ? ok() : no(); } catch (e) { no(e); } document.body.removeChild(a);
     });
   }
+  function copyImage(url) {
+    /* Puts the picture itself on the clipboard (not its address), so it can be pasted into a post. */
+    if (!(window.ClipboardItem && navigator.clipboard && navigator.clipboard.write && window.isSecureContext)) return Promise.reject(new Error("no picture clipboard"));
+    var blob = fetch(url, {credentials: "same-origin"}).then(function (r) { if (!r.ok) throw new Error("picture " + r.status); return r.blob(); })
+      .then(function (b) { return b.type === "image/png" ? b : b.slice(0, b.size, "image/png"); });
+    return navigator.clipboard.write([new ClipboardItem({"image/png": blob})]);
+  }
   function flash(btn, msg) { var old = btn.getAttribute("data-label") || btn.textContent; btn.setAttribute("data-label", old); btn.textContent = msg; setTimeout(function () { btn.textContent = old; }, 1600); }
   document.querySelectorAll(".platform").forEach(function (card) {
     count(card);
     card.querySelector("textarea.body").addEventListener("input", function () { count(card); });
-    var c = card.querySelector(".js-copy"), o = card.querySelector(".js-open"), ct = card.querySelector(".js-copy-title");
+    var c = card.querySelector(".js-copy"), o = card.querySelector(".js-open"), ct = card.querySelector(".js-copy-title"), ci = card.querySelector(".js-copy-img");
+    var img = card.getAttribute("data-img") || "", note = card.querySelector(".js-note");
+    function say(t) { if (note) { note.textContent = t; note.style.display = t ? "block" : "none"; } }
     if (c) c.addEventListener("click", function () { copy(finalText(card)).then(function () { flash(c, "Copied"); }, function () { flash(c, "Press Ctrl+C"); }); });
     if (ct) ct.addEventListener("click", function () { copy(card.querySelector("input[name^=headline_]").value).then(function () { flash(ct, "Copied"); }); });
+    if (ci) ci.addEventListener("click", function () {
+      copyImage(img).then(function () { flash(ci, "Picture copied"); say("The picture is copied. Click in the post box and press Ctrl+V to add it."); },
+        function () { say("This browser could not copy the picture. Use the Download link under the picture below, then add it to the post yourself."); });
+    });
     if (o) o.addEventListener("click", function () {
       var text = finalText(card), compose = card.getAttribute("data-compose"), home = card.getAttribute("data-home");
-      copy(text).then(function () { flash(o, "Copied"); }, function () {});
+      /* Open the platform first, in the same click, so the browser does not block it. */
       window.open(compose ? compose.replace("{text}", encodeURIComponent(text)) : home, "_blank", "noopener");
+      if (img && compose) {
+        /* The words travel in the address; only one thing fits on the clipboard, so it carries the picture. */
+        copyImage(img).then(function () {
+          flash(o, "Picture copied");
+          say("The words are already in the post box and the picture is copied. Click in the box and press Ctrl+V to add the picture.");
+        }, function () {
+          copy(text).then(function () { flash(o, "Copied"); }, function () {});
+          say("This browser could not copy the picture. The words are copied; download the picture below and add it to the post yourself.");
+        });
+      } else {
+        copy(text).then(function () { flash(o, "Copied"); }, function () {});
+        if (img) say("The words are copied. Press \"Copy picture\" to copy the picture, then paste each one into the post.");
+      }
     });
   });
 })();
