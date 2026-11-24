@@ -40,7 +40,8 @@
 {% set psize = platform_size.get(key) %}
 {% set gimg = main_graphic %}
 {% set imgurl = url_for('social.graphic_png', image_id=gimg.id, n=1, size=psize, v=gimg.updated_at.strftime('%Y%m%d%H%M%S')) if (psize and gimg and not (key in ('tiktok', 'youtube') and videos)) else '' %}
-<div class="card platform" data-platform="{{ key }}" data-limit="{{ cfg.limit }}" data-link="{{ link }}" data-compose="{{ cfg.compose }}" data-home="{{ cfg.home }}" data-img="{{ imgurl }}">
+{% set dlurl = url_for('social.graphic_png', image_id=gimg.id, n=1, size=psize, download=1) if imgurl else '' %}
+<div class="card platform" data-platform="{{ key }}" data-limit="{{ cfg.limit }}" data-link="{{ link }}" data-compose="{{ cfg.compose }}" data-home="{{ cfg.home }}" data-img="{{ imgurl }}" data-dl="{{ dlurl }}">
   <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:baseline;">
     <h3 class="mt-0" style="margin-bottom:4px;">{{ cfg.label }}</h3>
     {% if v.status == 'posted' %}<span class="badge" style="background:#2e7d32;color:#fff;">posted</span>{% elif v.status == 'skipped' %}<span class="badge">skipped</span>{% endif %}
@@ -281,12 +282,25 @@
       .then(function (b) { return b.type === "image/png" ? b : b.slice(0, b.size, "image/png"); });
     return navigator.clipboard.write([new ClipboardItem({"image/png": blob})]);
   }
+  function saveFile(url, name) {
+    /* Saves the picture to the Downloads folder (plain link click, inside the user's click). */
+    var a = document.createElement("a"); a.href = url; a.download = name; a.style.display = "none";
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  }
+  function steps(key) {
+    var base = "The words are copied and the picture is saved in your Downloads folder. ";
+    if (key === "facebook") return base + "In Facebook, click \"What's on your mind?\", press Ctrl+V to paste the words, then click Photo/video and choose the saved picture.";
+    if (key === "instagram") return base + "In Instagram, click Create (+), then Post, choose the saved picture, and press Ctrl+V in the caption box to paste the words.";
+    if (key === "tiktok") return base + "In TikTok Studio, upload the saved picture and press Ctrl+V in the description to paste the words.";
+    if (key === "youtube") return base + "In YouTube Studio, use the saved picture as the thumbnail or community post image, and press Ctrl+V to paste the words.";
+    return base + "Add the picture in the post screen and press Ctrl+V to paste the words.";
+  }
   function flash(btn, msg) { var old = btn.getAttribute("data-label") || btn.textContent; btn.setAttribute("data-label", old); btn.textContent = msg; setTimeout(function () { btn.textContent = old; }, 1600); }
   document.querySelectorAll(".platform").forEach(function (card) {
     count(card);
     card.querySelector("textarea.body").addEventListener("input", function () { count(card); });
     var c = card.querySelector(".js-copy"), o = card.querySelector(".js-open"), ct = card.querySelector(".js-copy-title"), ci = card.querySelector(".js-copy-img");
-    var img = card.getAttribute("data-img") || "", note = card.querySelector(".js-note");
+    var img = card.getAttribute("data-img") || "", dl = card.getAttribute("data-dl") || "", note = card.querySelector(".js-note");
     function say(t) { if (note) { note.textContent = t; note.style.display = t ? "block" : "none"; } }
     if (c) c.addEventListener("click", function () { copy(finalText(card)).then(function () { flash(c, "Copied"); }, function () { flash(c, "Press Ctrl+C"); }); });
     if (ct) ct.addEventListener("click", function () { copy(card.querySelector("input[name^=headline_]").value).then(function () { flash(ct, "Copied"); }); });
@@ -296,6 +310,15 @@
     });
     if (o) o.addEventListener("click", function () {
       var text = finalText(card), compose = card.getAttribute("data-compose"), home = card.getAttribute("data-home");
+      /* On a phone or tablet, the share sheet carries picture and words together into the Facebook, Instagram, LinkedIn... app. */
+      if (img && window.matchMedia && window.matchMedia("(pointer: coarse)").matches && navigator.share && navigator.canShare) {
+        fetch(img, {credentials: "same-origin"}).then(function (r) { return r.blob(); }).then(function (b) {
+          var f = new File([b], "neverlank-" + card.getAttribute("data-platform") + ".png", {type: "image/png"});
+          if (navigator.canShare({files: [f]})) { return navigator.share({files: [f], text: text}); }
+          say("This phone cannot share the picture from here. Press \"Copy picture\" or use the Download link below the picture.");
+        }).catch(function (e) { if (!e || e.name !== "AbortError") say("Could not open the share sheet. Use the Download link below the picture and press Copy for the words."); });
+        return;
+      }
       /* Open the platform first, in the same click, so the browser does not block it. */
       window.open(compose ? compose.replace("{text}", encodeURIComponent(text)) : home, "_blank", "noopener");
       if (img && compose) {
@@ -307,9 +330,13 @@
           copy(text).then(function () { flash(o, "Copied"); }, function () {});
           say("This browser could not copy the picture. The words are copied; download the picture below and add it to the post yourself.");
         });
+      } else if (img) {
+        /* Facebook, Instagram, TikTok, YouTube: no address can carry the words or the picture, so: words to the clipboard, picture saved as a file to attach. */
+        copy(text).then(function () { flash(o, "Words copied"); }, function () {});
+        saveFile(dl, "neverlank-" + card.getAttribute("data-platform") + ".png");
+        say(steps(card.getAttribute("data-platform")));
       } else {
         copy(text).then(function () { flash(o, "Copied"); }, function () {});
-        if (img) say("The words are copied. Press \"Copy picture\" to copy the picture, then paste each one into the post.");
       }
     });
   });
