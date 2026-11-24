@@ -7,7 +7,7 @@ How it works, in plain words
 * The app does not post for you: each platform has a "Copy" and a "Copy and open" button, then you press "Mark as posted" and paste the post's address.
   (Posting for you needs a separate approved developer account on each platform; this module is built so that can be added one platform at a time.)
 * Links in a post are tracked: every platform gets its own copy with utm tags, so the Leads page shows which post and platform brought each sign-up.
-* Results (views, likes, comments, shares, clicks) are typed in by hand on the post.
+* Results (views, likes, comments, shares, clicks) are typed in by hand on the post, or imported from a platform's own report (see social_analytics.py).
 * WhatsApp: a list of people who agreed to be messaged, message templates, click-to-send links and a log of what was sent and received. Messages are sent one by
   one by a person from the firm's own WhatsApp: no bulk sending.
 
@@ -688,6 +688,7 @@ def results_save(post_id, platform):
     for field, value in values.items():
         setattr(v, field, value)
     v.metrics_at = datetime.utcnow()
+    v.metrics_source = "typed"
     db.session.commit()
     flash("Results saved.", "success")
     return redirect(url_for("social.detail", post_id=post.id))
@@ -995,3 +996,4 @@ def whatsapp_broadcast(post_id):
 import social_images  # noqa: E402,F401  (adds the graphics pages to this blueprint)
 import social_schedule  # noqa: E402,F401  (adds scheduled automatic posting)
 import social_video  # noqa: E402,F401  (adds the short videos for TikTok and YouTube)
+import social_analytics  # noqa: E402,F401  (adds the analytics dashboard, Google Analytics visits and the platform report import)

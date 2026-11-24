@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block title %}Analytics - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+{% macro bar(pct, label) %}<span style="display:flex;align-items:center;gap:8px;"><span style="flex:1;min-width:60px;max-width:150px;height:10px;background:#e8ecf3;border-radius:5px;overflow:hidden;" title="{{ label }}"><i style="display:block;height:10px;width:{{ pct }}%;background:#13335e;border-radius:5px;"></i></span><span style="min-width:44px;">{{ label }}</span></span>{% endmacro %}
+{% macro tile(value, caption, note='') %}<div style="flex:1 1 150px;min-width:140px;background:#fff;border:1px solid #e5e0d0;border-radius:10px;padding:12px 14px;"><div style="font-size:26px;font-weight:700;color:#0a1f3c;line-height:1.1;">{{ value }}</div><div style="font-size:13px;color:#4a5873;margin-top:2px;">{{ caption }}</div>{% if note %}<div style="font-size:12px;color:#6b7385;margin-top:2px;">{{ note }}</div>{% endif %}</div>{% endmacro %}
+{% macro columns(weeks, field, pct_field) %}
+<div style="display:flex;align-items:flex-end;gap:3px;height:96px;border-bottom:1px solid #cfd6e2;">
+  {% for w in weeks %}<div title="Week of {{ w.label }}: {{ w[field] }}" style="flex:1;min-width:4px;height:{{ [w[pct_field], 3]|max if w[field] else 2 }}%;background:{{ '#13335e' if w[field] else '#cfd6e2' }};border-radius:3px 3px 0 0;"></div>{% endfor %}
+</div>
+<div style="display:flex;gap:3px;font-size:11px;color:#6b7385;margin-top:3px;">
+  {% for w in weeks %}<div style="flex:1;min-width:4px;overflow:visible;white-space:nowrap;">{% if loop.index0 % ((weeks|length // 6) or 1) == 0 %}{{ w.label }}{% endif %}</div>{% endfor %}
+</div>
+{% endmacro %}
+<div class="page-header"><h1>Social media analytics</h1>
+  <p class="muted" style="margin:0;">What was posted, how it did, and what it brought. Built from the numbers on each post and the sign-ups counted from the tracked links.</p></div>
+{% set active = 'analytics' %}{% include 'social/_nav.html' %}
+
+<p style="margin:0 0 12px;display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+  {% for key, label, d in periods %}<a class="btn small {{ 'gold' if key == period else 'secondary' }}" href="{{ url_for('social.analytics', period=key) }}">{{ label }}</a>{% endfor %}
+  <span style="flex:1"></span>
+  <a class="btn small secondary" href="{{ url_for('social.analytics_import') }}">Import a platform report</a>
+  <a class="btn small secondary" href="{{ url_for('social.analytics_connect') }}">Connections</a>
+</p>
+
+{% set t = rep.totals %}
+<div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:12px;">
+  {{ tile(t.posts, 'posts published', t.versions ~ ' on platforms') }}
+  {{ tile('{:,}'.format(t.impressions), 'views', (t.missing ~ ' without numbers') if t.missing else '') }}
+  {{ tile('{:,}'.format(t.engagement), 'likes, comments and shares', ('%.1f%% of views' % t.rate) if t.rate is not none else 'rate needs views') }}
+  {{ tile('{:,}'.format(t.clicks), 'link clicks') }}
+  {{ tile(t.leads, 'sign-ups from tracked links', 'on the Leads page') }}
+  {% if ga_on %}{{ tile('{:,}'.format(t.visits), 'website visits', 'Google Analytics') }}{% endif %}
+</div>
+
+<div class="card">
+  <h3 class="mt-0">What the numbers say</h3>
+  <ul style="margin:0;padding-left:20px;">
+    {% for kind, text in rep.insights %}<li style="margin-bottom:6px;"><strong>{{ {'good': 'Working:', 'look': 'Look at:', 'note': 'Note:'}[kind] }}</strong> {{ text }}</li>{% endfor %}
+  </ul>
+</div>
+
+{% if rep.platforms %}
+<div class="card">
+  <h3 class="mt-0">By platform</h3>
+  <div style="overflow-x:auto;">
+  <table><thead><tr><th>Platform</th><th>Posts</th><th>Views</th><th>Likes, comments, shares</th><th>Rate</th><th>Link clicks</th>{% if ga_on %}<th>Website visits</th>{% endif %}<th>Sign-ups</th></tr></thead><tbody>
+  {% for g in rep.platforms %}<tr>
+    <td>{{ g.label }}</td><td>{{ g.versions }}</td>
+    <td>{{ bar(g.views_pct, '{:,}'.format(g.impressions)) }}</td>
+    <td>{{ bar(g.eng_pct, '{:,}'.format(g.engagement)) }}</td>
+    <td>{{ ('%.1f%%' % g.rate) if g.rate is not none else '-' }}</td>
+    <td>{{ '{:,}'.format(g.clicks) }}</td>
+    {% if ga_on %}<td>{{ bar(g.visits_pct, '{:,}'.format(g.visits)) }}</td>{% endif %}
+    <td>{{ bar(g.leads_pct, g.leads) }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">Rate = likes, comments and shares divided by views, counting only posts whose views are known. A dash means no post on that platform has views yet.</p>
+</div>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;">
+  <div class="card" style="flex:1 1 320px;margin-bottom:12px;"><h3 class="mt-0">Posts per week</h3>{{ columns(rep.weeks, 'posts', 'posts_pct') }}</div>
+  <div class="card" style="flex:1 1 320px;margin-bottom:12px;"><h3 class="mt-0">Sign-ups per week</h3>{{ columns(rep.weeks, 'leads', 'leads_pct') }}
+    <p class="muted" style="font-size:12.5px;margin:6px 0 0;">All sign-ups that came through any tracked social link.</p></div>
+</div>
+
+<div style="display:flex;gap:12px;flex-wrap:wrap;">
+  <div class="card" style="flex:1 1 320px;margin-bottom:12px;">
+    <h3 class="mt-0">By content pillar</h3>
+    <table><thead><tr><th>Pillar</th><th>Posts</th><th>Views</th><th>Engagement</th><th>Sign-ups</th></tr></thead><tbody>
+    {% for g in rep.pillars %}<tr><td>{{ g.label }}</td><td>{{ g.versions }}</td><td>{{ '{:,}'.format(g.impressions) }}</td><td>{{ '{:,}'.format(g.engagement) }}</td><td><strong>{{ g.leads }}</strong></td></tr>{% endfor %}
+    </tbody></table>
+  </div>
+  <div class="card" style="flex:1 1 320px;margin-bottom:12px;">
+    <h3 class="mt-0">Day of the week</h3>
+    <table><thead><tr><th>Day</th><th>Posts</th><th>Average likes, comments, shares per post</th></tr></thead><tbody>
+    {% for d in rep.days %}<tr><td>{{ d.label }}</td><td>{{ d.versions }}</td><td>{% if d.avg is not none %}{{ bar(d.pct, '%.1f' % d.avg) }}{% else %}-{% endif %}</td></tr>{% endfor %}
+    </tbody></table>
+    <p class="muted" style="font-size:12.5px;margin:6px 0 0;">Harare time. Only meaningful once a day has several posts.</p>
+  </div>
+</div>
+
+{% if rep.best %}
+<div class="card">
+  <h3 class="mt-0">Best posts</h3>
+  <table><thead><tr><th>Post</th><th>Platform</th><th>Views</th><th>Engagement</th><th>Sign-ups</th></tr></thead><tbody>
+  {% for r in rep.best %}<tr><td><a href="{{ url_for('social.detail', post_id=r.post.id) }}">{{ r.post.title }}</a></td><td>{{ r.label }}</td><td>{{ '{:,}'.format(r.impressions or 0) }}</td><td>{{ '{:,}'.format(r.engagement) }}</td><td><strong>{{ r.leads }}</strong></td></tr>{% endfor %}
+  </tbody></table>
+  <p class="muted" style="font-size:12.5px;margin:6px 0 0;">Ranked by sign-ups first, then likes, comments and shares, then views.</p>
+</div>
+{% endif %}
+{% endif %}
+
+<div class="card">
+  <h3 class="mt-0">Where the numbers come from</h3>
+  <ul style="margin:0;padding-left:20px;font-size:13.5px;">
+    <li>Views, likes, comments, shares and clicks are typed in on each post or imported from a platform's own report (<a href="{{ url_for('social.analytics_import') }}">Import</a>).</li>
+    <li>Sign-ups are people on the Leads page whose sign-up came through that post's tracked link. A post without a link cannot bring counted sign-ups.</li>
+    <li>{% if ga_on %}Website visits come from Google Analytics for the same tracked links. Only visitors who accepted cookies on the website are counted there, so the true number is higher. <a href="{{ url_for('social.analytics', period=period, refresh=1) }}">Refresh now</a>.
+      {% elif ga_configured %}Website visits could not be read from Google Analytics: {{ ga_note }} <a href="{{ url_for('social.analytics_connect') }}">Connections</a>
+      {% else %}Website visits from Google Analytics are not connected. <a href="{{ url_for('social.analytics_connect') }}">How to connect</a>.{% endif %}</li>
+  </ul>
+</div>
+{% endblock %}

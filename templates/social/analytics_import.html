@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}Import results - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Import results from a platform report</h1>
+  <p class="muted" style="margin:0;">Download the analytics report from the platform, upload it here, check the matches, and the views, likes, comments, shares and clicks are filled in for you.</p></div>
+{% set active = 'analytics' %}{% include 'social/_nav.html' %}
+
+{% if items is none %}
+<div class="card">
+  <form method="post" enctype="multipart/form-data" class="form-row" style="align-items:flex-end;">
+    <input type="hidden" name="step" value="preview">
+    <div><label for="platform">Platform</label><select id="platform" name="platform">{% for k, p in platforms.items() %}<option value="{{ k }}"{% if k == platform %} selected{% endif %}>{{ p.label }}</option>{% endfor %}</select></div>
+    <div style="flex:2;"><label for="report">Report file (.csv, .xlsx or .xls, up to 5 MB)</label><input type="file" id="report" name="report" accept=".csv,.xlsx,.xls,.txt" required></div>
+    <div><button type="submit" class="btn gold" style="margin-bottom:14px;">Read the report</button></div>
+  </form>
+  <p class="muted" style="font-size:12.5px;margin:0;">Nothing is changed until you have looked at the matches and pressed "Update the results".</p>
+</div>
+<div class="card">
+  <h3 class="mt-0">Where to find each report</h3>
+  <table><thead><tr><th>Platform</th><th>Where to download it</th></tr></thead><tbody>
+    <tr><td>LinkedIn</td><td>Page analytics, Content tab, Export (choose the dates).</td></tr>
+    <tr><td>X (Twitter)</td><td>analytics.x.com, Tweets tab, Export data (by Tweet).</td></tr>
+    <tr><td>Facebook and Instagram</td><td>Meta Business Suite, Insights, Content, Export data (CSV).</td></tr>
+    <tr><td>TikTok</td><td>TikTok Studio, Analytics, Content, Download data.</td></tr>
+    <tr><td>YouTube</td><td>YouTube Studio, Analytics, Advanced mode, Export current view.</td></tr>
+  </tbody></table>
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">The platforms change their menus now and then; look for "export" or "download" on the analytics page. Each row must be one post. A row is matched to a post here by its address (paste the live address when you press "Mark as posted"), or failing that by its wording. Only posts already marked as posted can be matched.</p>
+</div>
+{% else %}
+<form method="post">
+<input type="hidden" name="step" value="apply"><input type="hidden" name="platform" value="{{ platform }}"><input type="hidden" name="n" value="{{ items|length }}">
+<div class="card">
+  <h3 class="mt-0">{{ platforms[platform].label }}: {{ items|length }} row{{ 's' if items|length != 1 }} in {{ filename }}, {{ matched }} matched</h3>
+  {% if not choices %}<p style="margin:0 0 8px;color:#9b2c2c;">No post has been marked as posted on {{ platforms[platform].label }} yet, so there is nothing to match. Mark the posts as posted first.</p>{% endif %}
+  <div style="overflow-x:auto;">
+  <table><thead><tr><th>In the report</th><th>Matched to</th><th>Views</th><th>Likes</th><th>Comments</th><th>Shares</th><th>Clicks</th></tr></thead><tbody>
+  {% for it in items %}{% set r = it.row %}{% set i = loop.index0 %}<tr>
+    <td style="max-width:260px;font-size:12.5px;">{{ r.date }}<br>{{ r.text[:90] }}{% if r.text|length > 90 %}...{% endif %}{% if not r.text and r.url %}{{ r.url[:60] }}{% endif %}
+      <input type="hidden" name="url_{{ i }}" value="{{ r.url }}"></td>
+    <td><select name="vid_{{ i }}" style="max-width:240px;"><option value="">Skip this row</option>
+      {% for c in choices %}<option value="{{ c.id }}"{% if c.id == it.vid %} selected{% endif %}>{{ c.title[:50] }} ({{ c.when }})</option>{% endfor %}</select>
+      <div class="muted" style="font-size:12px;">{% if it.how == 'address' %}matched by its address{% elif it.how == 'wording' %}matched by its wording, please check{% else %}no match found{% endif %}</div></td>
+    {% for f in metrics %}<td style="font-size:13px;"><input type="hidden" name="{{ f }}_{{ i }}" value="{{ r[f] if r[f] is not none else '' }}">{{ '{:,}'.format(r[f]) if r[f] is not none else '-' }}
+      {% if it.vid and it.current.get(f) is not none and it.current.get(f) != r[f] %}<div class="muted" style="font-size:11.5px;">now {{ '{:,}'.format(it.current[f]) }}</div>{% endif %}</td>{% endfor %}
+  </tr>{% endfor %}
+  </tbody></table></div>
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">Numbers in the report replace the numbers now on the post (shown under "now" where they differ). A blank in the report never clears a number.</p>
+  <p style="margin:10px 0 0;"><button type="submit" class="btn gold">Update the results</button> <a class="btn secondary" href="{{ url_for('social.analytics_import', platform=platform) }}">Start again</a></p>
+</div>
+</form>
+{% endif %}
+{% endblock %}

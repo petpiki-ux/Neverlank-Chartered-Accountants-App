@@ -1,6 +1,7 @@
 <p style="margin:0 0 12px;display:flex;gap:8px;flex-wrap:wrap;">
   <a class="btn small {{ 'gold' if active == 'plan' else 'secondary' }}" href="{{ url_for('social.index') }}">Plan</a>
   <a class="btn small {{ 'gold' if active == 'results' else 'secondary' }}" href="{{ url_for('social.results') }}">Results</a>
+  <a class="btn small {{ 'gold' if active == 'analytics' else 'secondary' }}" href="{{ url_for('social.analytics') }}">Analytics</a>
   <a class="btn small {{ 'gold' if active == 'whatsapp' else 'secondary' }}" href="{{ url_for('social.whatsapp') }}">WhatsApp</a>
   <a class="btn small {{ 'gold' if active == 'accounts' else 'secondary' }}" href="{{ url_for('social.accounts') }}">Our accounts</a>
   <a class="btn small gold" href="{{ url_for('social.new') }}" style="margin-left:auto;">New post</a>

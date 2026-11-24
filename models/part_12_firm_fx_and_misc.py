@@ -421,6 +421,7 @@ class SocialVersion(db.Model):
     shares = db.Column(db.Integer)
     clicks = db.Column(db.Integer)
     metrics_at = db.Column(db.DateTime)
+    metrics_source = db.Column(db.String(10), default="")        # typed (by a person) / import (a platform report) - blank when there are no numbers
     __table_args__ = (db.UniqueConstraint("post_id", "platform", name="uq_social_version_platform"),)
 
     posted_by = db.relationship("User", foreign_keys=[posted_by_id])

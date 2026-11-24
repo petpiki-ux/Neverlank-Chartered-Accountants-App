@@ -1,0 +1,39 @@
+{% extends "base.html" %}
+{% block title %}Connections - Social Media - {{ firm_name }}{% endblock %}
+{% block content %}
+<div class="page-header"><h1>Analytics connections</h1>
+  <p class="muted" style="margin:0;">What is connected to the Social analytics, and what each platform would need for live numbers.</p></div>
+{% set active = 'analytics' %}{% include 'social/_nav.html' %}
+
+<div class="card">
+  <h3 class="mt-0">Google Analytics (website visits from each post)</h3>
+  <p style="margin:0 0 8px;"><strong>Status:</strong>
+    {% if ga_ready %}connected for property {{ ga_property }}, using {{ ga_email }}.
+    {% else %}not connected.
+      {% if not ga_property %}<br>The setting <code>GA4_PROPERTY_ID</code> is missing or is not a number.{% endif %}
+      {% if not ga_has_key %}<br>The setting <code>GA4_SERVICE_ACCOUNT_JSON</code> is missing or is not a service account key.{% endif %}
+    {% endif %}</p>
+  {% if ga_ready %}<form method="post" action="{{ url_for('social.analytics_connect_test') }}" style="margin:0 0 8px;"><button type="submit" class="btn small gold">Test the connection</button></form>{% endif %}
+  <p style="margin:8px 0 4px;font-weight:600;">One-time set-up (about 15 minutes; the website's Google Analytics already exists)</p>
+  <ol style="margin:0;padding-left:20px;">
+    <li>Go to <strong>console.cloud.google.com</strong>, signed in with the Google account that owns the analytics. Create a project called "Neverlank analytics".</li>
+    <li>In that project open <strong>APIs and Services, then Library</strong>, search for "Google Analytics Data API" and press <strong>Enable</strong>.</li>
+    <li>Open <strong>IAM and Admin, then Service Accounts</strong>, press Create service account, name it "neverlank-app", and finish (no roles needed).</li>
+    <li>Open that service account, choose <strong>Keys, Add key, Create new key, JSON</strong>. A file downloads. Keep it private: it is a password.</li>
+    <li>In <strong>analytics.google.com</strong> go to Admin, Property access management, press +, add the service account's email (it looks like neverlank-app@...iam.gserviceaccount.com) and give it the <strong>Viewer</strong> role.</li>
+    <li>In Analytics, Admin, Property details, copy the <strong>Property ID</strong> (a number, not the G- code).</li>
+    <li>On Render, open the app's Environment page and add <code>GA4_PROPERTY_ID</code> (that number) and <code>GA4_SERVICE_ACCOUNT_JSON</code> (open the downloaded file in Notepad and paste all of it). Save, wait for the redeploy, then press "Test the connection" here.</li>
+  </ol>
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">The app only reads (Viewer). Only visitors who pressed Accept on the website's cookie banner are counted by Google Analytics, so website visits are a minimum. Never paste the key into a chat or an email.</p>
+</div>
+
+<div class="card">
+  <h3 class="mt-0">Live numbers straight from each platform</h3>
+  <p style="margin:0 0 8px;">Not connected, and not built yet. Each platform only gives post numbers to an app it has approved, which takes an application and sometimes a business check, and X charges for it. Until then, <a href="{{ url_for('social.analytics_import') }}">Import a platform report</a> does the same job in a minute, with no approval needed.</p>
+  <div style="overflow-x:auto;">
+  <table><thead><tr><th>Platform</th><th>What live numbers would need</th><th>Report to import instead</th></tr></thead><tbody>
+  {% for key, label, need, where in notes %}<tr><td>{{ label }}</td><td>{{ need }}</td><td>{{ where }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p class="muted" style="font-size:12.5px;margin:8px 0 0;">The requirements are the platforms' own and change; check each platform's developer pages before applying.</p>
+</div>
+{% endblock %}

@@ -655,6 +655,8 @@ def _add_missing_columns():
         "news_source": [("region", "VARCHAR(20) DEFAULT 'Zimbabwe'")],
         "news_item": [("region", "VARCHAR(20) DEFAULT 'Zimbabwe'"), ("wp_post_id", "INTEGER"), ("wp_url", "VARCHAR(500)"), ("wp_status", "VARCHAR(12)"),
                       ("wp_posted_at", "DATETIME"), ("wp_posted_by_id", "INTEGER")],
+        # Social analytics: where a post's numbers came from (typed by hand, or imported from a platform report) - see social_analytics.py
+        "social_version": [("metrics_source", "VARCHAR(10)")],
     }
     # The Managing Partner's e-signature columns (models.MPSignedMixin) - MERGED into each table's list, because some of these tables
     # (receipt, zimra_reply, invoice) already have their own entry above and a repeated key in the literal would replace it.
