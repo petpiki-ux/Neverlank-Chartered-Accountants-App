@@ -27,20 +27,21 @@ from flask import current_app, jsonify, request
 from flask_login import current_user, login_required
 
 import wp_docx
+import wp_xlsx
 import zimra_ai
 from extensions import db
 from wp_editor import _check_writable, _doc_or_404, _ext, _fin_facts, _path, wpedit_bp
 
 MODEL = os.environ.get("WP_ASSIST_MODEL") or os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
 FALLBACK_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-5")
-TIMEOUT = 150                 # seconds the AI may take over one answer
+TIMEOUT = 100                 # seconds the AI may take over one answer
 MAX_TOKENS = 6000
 MAX_PAPER_CHARS = 60000       # how much of the paper is sent (the rest is cut, and Claude is told)
 MAX_CELL_CHARS = 1500
 MAX_MESSAGE = 4000
 MAX_SELECTION = 6000
 MAX_HISTORY = 10
-MAX_EDITS = 6
+MAX_EDITS = 10
 MAX_EDIT_CHARS = 8000
 RATE = (30, 600)              # at most 30 questions per person per 10 minutes
 _calls = {}
@@ -62,8 +63,8 @@ TOOL = {
                 "items": {
                     "type": "object",
                     "properties": {
-                        "path": {"type": "string", "description": "The position in square brackets before the paragraph, for example 3.1.2.0. Use only positions shown in the paper."},
-                        "kind": {"type": "string", "enum": ["replace", "insert_after"], "description": "replace = new wording for that whole paragraph; insert_after = a new paragraph below it."},
+                        "path": {"type": "string", "description": "Word: the position in square brackets before the paragraph, for example 3.1.2.0. Excel: the sheet and cell, for example CGT Computation!B16. Use only positions shown."},
+                        "kind": {"type": "string", "enum": ["replace", "insert_after"], "description": "replace = new wording for that whole paragraph (or the new value of that Excel cell, which may be a simple formula starting with =); insert_after = a new paragraph below it (Word only)."},
                         "text": {"type": "string", "description": "The complete new paragraph text, plain text, in the voice of the paper."},
                         "why": {"type": "string", "description": "One short sentence: why this change."},
                     },
@@ -87,10 +88,15 @@ SYSTEM = (
     "explain and to review, but anything the paper and Library do not show must be marked \"(to be verified)\".\n"
     "3. Do not compute tax, penalties or interest. You may check simple arithmetic in the paper (totals, ratios, agreement of one figure to "
     "another): show the sum you did and say plainly if two figures do not agree.\n"
-    "4. A suggested change is one whole paragraph: kind replace gives the complete new text of that paragraph; kind insert_after adds a new paragraph "
-    "below it. At most six suggestions in a reply. Plain text, no markdown, in the voice and tense of the paper. Never suggest changes to sign-off, "
-    "preparer, reviewer, signature or date-signed cells. Suggest changes only when the person asked for wording, a fix or a draft; for a question, "
-    "just answer.\n"
+    "4. A suggested change is one whole paragraph (Word) or one cell (Excel): kind replace gives the complete new text of that paragraph or cell, "
+    "including filling in one that is shown as (empty - can be filled in); kind insert_after adds a new paragraph below one (Word only). At most ten "
+    "suggestions in a reply. Plain text, no markdown, in the voice and tense of the paper. Never suggest changes to sign-off, preparer, reviewer, "
+    "signature or date-signed cells.\n"
+    "   WHEN TO SUGGEST: whenever the person asks you to write, draft, fill in, complete, fix, correct, rewrite, improve, tighten, shorten, "
+    "proofread or update something, you MUST return the change as a suggestion in the edits list - never only describe it or paste it into your "
+    "message. When you review or check a paper and find a clear mistake you can correct from what the paper, the record and the Library show, "
+    "also give the correction as a suggestion. For a pure question, just answer. If you cannot suggest the change (for example the figure is not "
+    "in the paper), say so in the message and say what you need.\n"
     "5. When asked to review or check, say what is wrong or missing and where (quote the position), in order of importance, and do not pad with praise. "
     "If the paper is fine, say so briefly.\n"
     "6. If the person selected text, 'this', 'it' and 'the selection' mean that selection.\n"
@@ -154,20 +160,26 @@ class Mask:
 
 # ------------------------------------------------------------------ the paper as text
 
-def docx_outline(d):
-    """[(path, text, where)] for every paragraph that has text, in reading order; table cells say which table, row and cell."""
+def docx_outline(d, empty=False):
+    """[(path, text, where)] for every paragraph that has text, in reading order; table cells say which table, row and cell.
+    With empty=True the empty paragraphs inside table cells are listed too (text ""), so a blank field can be filled in."""
     out = []
 
     def walk(el, prefix, where):
         for idx, blk in enumerate(wp_docx._blocks(el)):
             if blk.tag == qn("w:p"):
                 text = wp_docx.para_text(blk).strip()
-                if text:
+                if text or (empty and where):
                     out.append((".".join(str(x) for x in prefix + [idx]), text, where))
             else:
                 for ri, tr in enumerate(wp_docx._rows(blk)):
-                    for ci, tc in enumerate(wp_docx._cells(tr)):
-                        walk(tc, prefix + [idx, ri, ci], f"table {idx}, row {ri}, cell {ci}")
+                    cells = wp_docx._cells(tr)
+                    label = ""
+                    if cells:
+                        label = " ".join(wp_docx.para_text(p).strip() for p in cells[0].iter(qn("w:p"))).strip()[:40]
+                    for ci, tc in enumerate(cells):
+                        w = f"table {idx}, row {ri}, cell {ci}" + (f", row starts \"{label}\"" if label and ci else "")
+                        walk(tc, prefix + [idx, ri, ci], w)
 
     walk(d.element.body, [], "")
     return out
@@ -175,8 +187,8 @@ def docx_outline(d):
 
 def docx_paper_text(d):
     lines, size, cut = [], 0, False
-    for path, text, where in docx_outline(d):
-        line = f"[{path}] " + (f"({where}) " if where else "") + text[:MAX_CELL_CHARS]
+    for path, text, where in docx_outline(d, empty=True):
+        line = f"[{path}] " + (f"({where}) " if where else "") + (text[:MAX_CELL_CHARS] if text else "(empty - can be filled in)")
         if size + len(line) > MAX_PAPER_CHARS:
             cut = True
             break
@@ -338,6 +350,8 @@ def clean_edits(raw, d, known, mask):
         if p is None or p.tag != qn("w:p"):
             continue
         before = wp_docx.para_text(p)
+        if not before.strip():
+            before = ""
         if _SIGNOFF.search(before) or _SIGNOFF.search(text):
             continue
         if kind == "replace" and p.find(".//" + qn("w:drawing")) is not None:
@@ -345,6 +359,51 @@ def clean_edits(raw, d, known, mask):
         item = {"path": ".".join(str(x) for x in path), "kind": kind, "text": text, "before": before,
                 "why": mask.back(str(e.get("why") or ""))[:300], "warn": ""}
         unknown = _unknown_figures(text, known)
+        if unknown:
+            item["warn"] = "Check these figures: they are not in the paper, the engagement record or your message: " + ", ".join(unknown[:6]) + "."
+        out.append(item)
+    return out
+
+
+def clean_cell_edits(raw, path, known, mask):
+    """Excel: keep only suggestions that name a real sheet and a cell in the grid, are not sign-off cells, and say what is new in them."""
+    import openpyxl
+    from openpyxl.utils import column_index_from_string
+    out = []
+    if not isinstance(raw, list):
+        return out
+    try:
+        wb = openpyxl.load_workbook(path)
+    except Exception:
+        return out
+    sheets = {ws.title: ws for ws in wb.worksheets if ws.sheet_state == "visible"}
+    for e in raw:
+        if len(out) >= MAX_EDITS:
+            break
+        if not isinstance(e, dict) or e.get("kind", "replace") != "replace":
+            continue
+        ref_text = str(e.get("path") or "").strip().strip("[]")
+        if "!" not in ref_text:
+            continue
+        sname, ref = ref_text.rsplit("!", 1)
+        sname = sname.strip().strip("'")
+        m = re.fullmatch(r"\$?([A-Za-z]{1,3})\$?(\d{1,4})", ref.strip())
+        ws = sheets.get(sname)
+        if not m or ws is None:
+            continue
+        col, row = column_index_from_string(m.group(1).upper()), int(m.group(2))
+        if col > wp_xlsx.MAX_COLS or row > wp_xlsx.MAX_ROWS or row < 1:
+            continue
+        text = mask.back(str(e.get("text") if e.get("text") is not None else "")).strip()
+        if not text or len(text) > 1500:
+            continue
+        cell = ws.cell(row=row, column=col)
+        before = "" if cell.value is None else str(cell.value)
+        if _SIGNOFF.search(before) or _SIGNOFF.search(text):
+            continue
+        item = {"path": f"{sname}!{m.group(1).upper()}{row}", "kind": "replace", "text": text, "before": before,
+                "why": mask.back(str(e.get("why") or ""))[:300], "warn": ""}
+        unknown = [] if text.startswith("=") else _unknown_figures(text, known)
         if unknown:
             item["warn"] = "Check these figures: they are not in the paper, the engagement record or your message: " + ", ".join(unknown[:6]) + "."
         out.append(item)
@@ -411,7 +470,10 @@ def assist(doc_id):
     if lib:
         parts.append("LIBRARY EXCERPTS (the firm's filed legislation and guidance, for anything about the law)\n\n" + lib)
     if not is_docx:
-        parts.append("NOTE: this is an Excel paper. You can explain and check it but cannot suggest changes to it: leave edits empty.")
+        parts.append("NOTE: this is an Excel paper. Cells are shown as Sheet!Cell: value (a formula is shown with = and what it currently shows). To change or fill in a cell, "
+                     "suggest kind replace with the path Sheet!Cell (for example CGT Computation!B16) and the new value as the text - a number, words, or a simple "
+                     "formula starting with = that uses only + - * / ( ), SUM, AVERAGE, MIN, MAX, ROUND, IF and cell references. Any cell in the grid can be filled in, "
+                     "even if it is not listed because it is empty. Do not suggest changes to formulas that are correct.")
     parts.append("THE PERSON'S MESSAGE\n" + mask.out(message))
     final = "\n\n=====\n\n".join(parts)
 
@@ -426,10 +488,14 @@ def assist(doc_id):
     known = zimra_ai.numbers_in(corpus)
     this_year = date.today().year
     known |= {f"{y:.2f}" for y in (this_year - 1, this_year, this_year + 1)}
-    edits = clean_edits(result.get("edits"), d, known, mask) if is_docx else []
+    raw_edits = result.get("edits") if isinstance(result.get("edits"), list) else []
+    edits = clean_edits(raw_edits, d, known, mask) if is_docx else clean_cell_edits(raw_edits, _path(doc), known, mask)
     reply = mask.back(str(result.get("message") or "")).strip() or ("I have suggested the changes below." if edits else "I have nothing to add.")
-    current_app.logger.info("wp_assist doc=%s user=%s ok chars_in=%s edits=%s", doc.id, current_user.id, len(final), len(edits))
-    return jsonify(ok=True, reply=reply, edits=edits, can_edit=bool(is_docx and not doc.is_partner_signed))
+    dropped = len(raw_edits) - len(edits)
+    if dropped > 0:
+        reply += f"\n\n({dropped} of my suggestions could not be placed in the paper: " + ("the position was not a real paragraph, was a sign-off cell, or the text was empty" if is_docx else "the sheet or cell was not valid, was a sign-off cell, or the value was empty") + ". Ask me again, or select the place you mean first.)"
+    current_app.logger.warning("wp_assist doc=%s user=%s ok chars_in=%s edits=%s dropped=%s", doc.id, current_user.id, len(final), len(edits), max(dropped, 0))
+    return jsonify(ok=True, reply=reply, edits=edits, can_edit=bool(not doc.is_partner_signed))
 
 
 @wpedit_bp.route("/<int:doc_id>/assist/insert", methods=["POST"])
@@ -463,3 +529,34 @@ def assist_insert(doc_id):
     db.session.commit()
     current_app.logger.info("wp_assist doc=%s user=%s inserted a paragraph after %s", doc.id, current_user.id, path_text)
     return jsonify(ok=True, message="Paragraph added.")
+
+
+@wpedit_bp.route("/<int:doc_id>/assist/fill", methods=["POST"])
+@login_required
+def assist_fill(doc_id):
+    """Apply a suggestion that fills in an empty paragraph (a blank field in a table, say): the text goes into the paragraph at `path`."""
+    doc = _doc_or_404(doc_id)
+    bad = _check_writable(doc)
+    if bad:
+        return bad
+    if _ext(doc) != "docx":
+        return jsonify(ok=False, error="Only Word papers are filled in this way."), 400
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text") or "").strip()[:MAX_EDIT_CHARS]
+    path_text = str(data.get("path") or "")
+    if not text:
+        return jsonify(ok=False, error="There is no text to add."), 400
+    d = DocxDocument(_path(doc))
+    p = wp_docx.resolve(d, wp_docx.parse_path(path_text) or [])
+    if p is None or p.tag != qn("w:p"):
+        return jsonify(ok=False, error="That place is no longer in the paper."), 400
+    if _SIGNOFF.search(wp_docx.para_text(p)) or _SIGNOFF.search(text):
+        return jsonify(ok=False, error="Sign-off cells cannot be filled in by Claude."), 400
+    wp_docx.apply_changes(d, [{"path": path_text, "segments": [{"t": text}]}])
+    wp_docx.save_atomic(d, _path(doc))
+    doc.uploaded_at = datetime.utcnow()
+    doc.reviewed_by_id = None
+    doc.reviewed_at = None
+    db.session.commit()
+    current_app.logger.info("wp_assist doc=%s user=%s filled %s", doc.id, current_user.id, path_text)
+    return jsonify(ok=True, message="Filled in.")

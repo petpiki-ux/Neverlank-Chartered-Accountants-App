@@ -113,9 +113,9 @@ with app.app_context():
     check("never change the paper yourself" in seen["system"].lower() or "you never change the paper yourself" in seen["system"].lower(), "the AI is told it only suggests")
 
     # a long reply is capped at six suggestions
-    seen["result"] = {"message": "ok", "edits": [{"path": first_path, "kind": "insert_after", "text": f"Line {i}"} for i in range(10)]}
+    seen["result"] = {"message": "ok", "edits": [{"path": first_path, "kind": "insert_after", "text": f"Line {i}"} for i in range(14)]}
     j = c.post(f"/working-papers/{did}/assist", json={"message": "Add lines"}).get_json()
-    check(len(j["edits"]) == 6, "at most six suggestions in a reply")
+    check(len(j["edits"]) == 10 and "4 of my suggestions could not be placed" in j["reply"], "at most ten suggestions in a reply, and the person is told when some could not be placed")
     seen["result"] = {"message": "", "edits": []}
     j = c.post(f"/working-papers/{did}/assist", json={"message": "x"}).get_json()
     check(j["ok"] and j["reply"], "an empty answer is replaced by a short sentence")
@@ -154,12 +154,42 @@ with app.app_context():
     c.post(f"/working-papers/{xd.id}/save", json={"changes": [{"sheet": "CGT Computation", "cell": "B13", "value": "1,000,000"}, {"sheet": "CGT Computation", "cell": "B16", "value": "=B13+B15"}]})
     xpage = c.get(f"/working-papers/{xd.id}/edit").get_data(as_text=True)
     check('id="claude"' in xpage and 'id="b-claude"' in xpage and "Explain this sheet" in xpage and "Check the formulas and totals" in xpage, "the Excel editor has the panel too")
-    seen["result"] = {"message": "B16 adds B13 and B15.", "edits": [{"path": "1", "kind": "replace", "text": "x"}]}
+    seen["result"] = {"message": "B16 adds B13 and B15.", "edits": [{"path": "CGT Computation!B15", "kind": "replace", "text": "250,000", "why": "Cost of improvements per the invoice."},
+                                                                   {"path": "CGT Computation!B20", "kind": "replace", "text": "=B16-B13"},
+                                                                   {"path": "Nope!B1", "kind": "replace", "text": "x"}, {"path": "CGT Computation!ZZZ9999", "kind": "replace", "text": "x"},
+                                                                   {"path": "CGT Computation!B13", "kind": "insert_after", "text": "x"}]}
     j = c.post(f"/working-papers/{xd.id}/assist", json={"message": "Check the formulas", "selection": {"path": "CGT Computation!B16", "text": "=B13+B15", "selected": True}}).get_json()
     final = seen["messages"][-1]["content"]
-    check(j["ok"] and j["edits"] == [] and j["can_edit"] is False, "Excel answers carry no suggested changes")
-    check("=== Sheet: CGT Computation ===" in final and "B13: 1000000" in final and "B16: =B13+B15" in final and "THE CELL THE PERSON HAS SELECTED (CGT Computation!B16)" in final and "leave edits empty" in final and "Penanel" not in final,
+    check(j["ok"] and [e["path"] for e in j["edits"]] == ["CGT Computation!B15", "CGT Computation!B20"] and j["can_edit"] is True and "3 of my suggestions could not be placed" in j["reply"],
+          "Excel answers can carry suggested cell values (only for real sheets and cells), and the person is told about the rest")
+    check(j["edits"][0]["warn"] != "" and j["edits"][1]["warn"] == "" and j["edits"][1]["text"].startswith("="), "a new figure in a cell is flagged; a formula is not")
+    check("=== Sheet: CGT Computation ===" in final and "B13: 1000000" in final and "B16: =B13+B15" in final and "THE CELL THE PERSON HAS SELECTED (CGT Computation!B16)" in final and "suggest kind replace with the path Sheet!Cell" in final and "Penanel" not in final,
           "the workbook is sent with cell addresses, formulas and the selected cell, and the client is masked")
+    xpage = c.get(f"/working-papers/{xd.id}/edit").get_data(as_text=True)
+    check("replace: function (path, text)" in xpage and "typed(sh, ref, text)" in xpage, "the Excel editor can apply a suggested cell value")
+
+    # ---- blank fields in a Word paper can be seen, suggested for and filled in
+    e3 = Engagement(client_id=cl.id, title="FY25 blanks", type="Audit", partner_id=aid, period_end=dtm.date(2025, 12, 31), reporting_framework="ifrs_for_smes", acceptance_required=False); db.session.add(e3); db.session.commit()
+    c.post(f"/working-papers/engagements/{e3.id}/generate/{tpl.id}")
+    bd = Document.query.filter_by(engagement_id=e3.id).first(); bp = os.path.join(app.config["UPLOAD_FOLDER"], bd.stored_filename)
+    d4 = DocxDocument(bp)
+    blanks = [(p_, w_) for p_, t_, w_ in wp_assist.docx_outline(d4, empty=True) if not t_]
+    rationale = [p_ for p_, t_, w_ in wp_assist.docx_outline(d4, empty=True) if not t_ and "Rationale" in w_]
+    check(len(blanks) >= 5 and rationale, "empty table cells are listed as places that can be filled in, with the row label")
+    seen_text = wp_assist.docx_paper_text(d4)
+    check("(empty - can be filled in)" in seen_text and 'row starts "Rationale:"' in seen_text, "the AI is shown the blank fields and which row they belong to")
+    seen["result"] = {"message": "Filled.", "edits": [{"path": rationale[0], "kind": "replace", "text": "Revenue is stable, so 1% of revenue is used.", "why": "Stable benchmark."}]}
+    j = c.post(f"/working-papers/{bd.id}/assist", json={"message": "Fill in the blank fields"}).get_json()
+    check(len(j["edits"]) == 1 and j["edits"][0]["before"] == "" and j["edits"][0]["kind"] == "replace", "a suggestion for a blank cell is accepted (before is empty)")
+    r = c.post(f"/working-papers/{bd.id}/assist/fill", json={"path": rationale[0], "text": "Revenue is stable, so 1% of revenue is used."})
+    d5 = DocxDocument(bp)
+    check(r.get_json()["ok"] and wp_docx.para_text(wp_docx.resolve(d5, wp_docx.parse_path(rationale[0]))) == "Revenue is stable, so 1% of revenue is used.", "filling a blank cell puts the text in the paper")
+    check(c.post(f"/working-papers/{bd.id}/assist/fill", json={"path": "999.0", "text": "x"}).status_code == 400 and c.post(f"/working-papers/{bd.id}/assist/fill", json={"path": rationale[0], "text": ""}).status_code == 400, "a missing place or empty text is refused")
+    sign = [p_ for p_, t_, w_ in wp_assist.docx_outline(d5, empty=True) if "Prepared by" in t_][0]
+    check(c.post(f"/working-papers/{bd.id}/assist/fill", json={"path": sign, "text": "Someone"}).status_code == 400, "a sign-off cell cannot be filled in")
+    page = c.get(f"/working-papers/{bd.id}/edit").get_data(as_text=True)
+    check("fill: function (path, text)" in page and "Fill in the blank fields" in page, "the Word editor can apply a fill-in")
+    check("WHEN TO SUGGEST" in wp_assist.SYSTEM and "MUST return the change" in wp_assist.SYSTEM, "the AI is told to put requested changes in the suggestions, not in the message")
 
     # ---- a paper that is not open in the app, a stranger
     up = DocxDocument(); up.add_paragraph("Uploaded."); buf = io.BytesIO(); up.save(buf); buf.seek(0)

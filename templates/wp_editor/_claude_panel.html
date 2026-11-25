@@ -91,8 +91,8 @@
   var msgs = [], busy = false;
 
   var CHIPS = W.kind === 'docx'
-    ? [['Summarise this paper', 0], ['Check it for mistakes and inconsistencies', 0], ['What is missing or incomplete?', 0], ['Proofread the whole paper', 0], ['Draft a conclusion', 0], ['Improve the selected text', 1], ['Make it shorter', 1], ['Explain this', 1]]
-    : [['Explain this sheet', 0], ['Check the formulas and totals', 0], ['What is missing or incomplete?', 0], ['Explain the selected cell', 1]];
+    ? [['Summarise this paper', 0], ['Check it for mistakes and inconsistencies', 0], ['What is missing or incomplete?', 0], ['Proofread the whole paper', 0], ['Fill in the blank fields', 0], ['Draft a conclusion', 0], ['Improve the selected text', 1], ['Make it shorter', 1], ['Explain this', 1]]
+    : [['Explain this sheet', 0], ['Check the formulas and totals', 0], ['What is missing or incomplete?', 0], ['Fix any errors you find', 0], ['Explain the selected cell', 1]];
 
   function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
   function inline(s) { return esc(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'); }
@@ -132,14 +132,14 @@
     var box = document.createElement('div');
     box.className = 'cl-ed' + (ed.state === 'applied' ? ' done' : '') + (ed.state === 'dismissed' ? ' gone' : '');
     var isNew = ed.kind === 'insert_after';
-    var h = '<div class="eh">' + (isNew ? 'New paragraph below' + (ed.before ? ': “' + esc(ed.before.slice(0, 50)) + (ed.before.length > 50 ? '…' : '') + '”' : '') : 'Suggested change') + '</div>';
+    var h = '<div class="eh">' + (isNew ? 'New paragraph below' + (ed.before ? ': “' + esc(ed.before.slice(0, 50)) + (ed.before.length > 50 ? '…' : '') + '”' : '') : (W.kind === 'xlsx' ? 'Suggested value for ' + esc(ed.path) : (ed.before ? 'Suggested change' : 'Fill in this blank'))) + '</div>';
     if (!isNew) h += '<div class="eb">' + esc(ed.before || '(empty)') + '</div>';
     h += '<div class="ea">' + esc(ed.text) + '</div>';
     if (ed.why) h += '<div class="ew">' + esc(ed.why) + '</div>';
     if (ed.warn) h += '<div class="ewarn">' + esc(ed.warn) + '</div>';
     h += '<div class="eact">';
     if (ed.state === 'applied') {
-      h += '<span class="est">Applied</span>' + (!isNew ? '<button type="button" data-a="undo">Undo</button>' : '') + '<button type="button" data-a="show">Show</button>';
+      h += '<span class="est">Applied</span>' + (!isNew && ed.before ? '<button type="button" data-a="undo">Undo</button>' : '') + '<button type="button" data-a="show">Show</button>';
     } else if (ed.state === 'stale') {
       h += '<span class="ew">The paper has changed since this suggestion. Ask again if you still want it.</span>';
     } else {
@@ -160,6 +160,14 @@
   }
   function apply(ed) {
     if (W.locked) return;
+    if (ed.kind === 'replace' && !ed.before && W.fill) {     // a blank field: the server fills it in and the page reloads
+      ed.state = 'applied'; save();
+      Promise.resolve(W.fill(ed.path, ed.text)).then(function (j) {
+        if (j && j.ok) return;
+        ed.state = 'pending'; save(); render(); addNote((j && (j.error || j.message)) || 'Could not fill that in.');
+      }).catch(function () { ed.state = 'pending'; save(); render(); addNote('Could not fill that in - check your connection.'); });
+      return;
+    }
     if (ed.kind === 'replace') {
       var before = W.replace(ed.path, ed.text);
       if (before === null) { ed.state = 'stale'; save(); render(); return; }
@@ -178,7 +186,7 @@
     body.innerHTML = '';
     if (!msgs.length) {
       var e = document.createElement('div'); e.className = 'cl-empty';
-      e.innerHTML = '<h4>How can I help with this paper?</h4><p>I can read the whole paper, answer questions about it, check it, and suggest wording. Nothing changes until you press Apply.</p><div class="cl-chips"></div>';
+      e.innerHTML = '<h4>How can I help with this paper?</h4><p>I can read the whole paper, answer questions about it, check it, fill in blanks and suggest wording or values. Nothing changes until you press Apply.</p><div class="cl-chips"></div>';
       var chips = e.querySelector('.cl-chips');
       CHIPS.forEach(function (c) { var b = document.createElement('button'); b.type = 'button'; b.textContent = c[0]; if (c[1]) b.setAttribute('data-needs', '1'); b.addEventListener('click', function () { send(c[0]); }); chips.appendChild(b); });
       body.appendChild(e); refreshSel(); return;

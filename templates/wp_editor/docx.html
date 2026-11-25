@@ -91,6 +91,14 @@ window.__wpHooks = function (ctx) {
       ctx.queue(p);
       return before;
     },
+    fill: function (path, text) {                          // an empty paragraph (a blank field): the server puts the text in, then the page reloads
+      return ctx.flush().then(function () {
+        return fetch(ctx.fillUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: path, text: text }) }).then(function (r) { return r.json(); });
+      }).then(function (j) {
+        if (j && j.ok) { try { sessionStorage.setItem('wp_scroll_' + location.pathname, String(window.scrollY)); } catch (e) {} location.reload(); }
+        return j;
+      });
+    },
     insertAfter: function (path, text) {
       return ctx.flush().then(function () {
         return fetch(ctx.insertUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: path, text: text }) }).then(function (r) { return r.json(); });
@@ -232,7 +240,7 @@ window.__wpHooks = function (ctx) {
   document.getElementById('b-par-del').onclick = function () { if (!LOCKED && confirm('Delete this paragraph?')) structural('para_delete'); };
   try { var y = sessionStorage.getItem('wp_scroll_' + location.pathname); if (y) { sessionStorage.removeItem('wp_scroll_' + location.pathname); window.scrollTo(0, +y); } } catch (e) {}
   if (window.__wpHooks) window.__wpHooks({ page: page, last: function () { return last; }, locked: LOCKED, plainText: plainText, queue: queue, flush: flush,
-    assistUrl: {{ url_for('wpedit.assist', doc_id=doc.id)|tojson }}, insertUrl: {{ url_for('wpedit.assist_insert', doc_id=doc.id)|tojson }} });
+    assistUrl: {{ url_for('wpedit.assist', doc_id=doc.id)|tojson }}, insertUrl: {{ url_for('wpedit.assist_insert', doc_id=doc.id)|tojson }}, fillUrl: {{ url_for('wpedit.assist_fill', doc_id=doc.id)|tojson }} });
   document.getElementById('b-claude').disabled = false;
   window.addEventListener('pagehide', function () { flush(true); });
   window.addEventListener('beforeunload', function (e) { if (Object.keys(dirty).length || saving) { e.preventDefault(); e.returnValue = ''; } });

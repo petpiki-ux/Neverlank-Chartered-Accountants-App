@@ -378,6 +378,26 @@
   window.WPAI = {
     kind: 'xlsx', locked: LOCKED, assistUrl: {{ url_for('wpedit.assist', doc_id=doc.id)|tojson }},
     selection: function () { var sh = sheets[cur]; return { path: (sh ? sh.sh.name : '') + '!' + xref.textContent, text: (bar.value || '').slice(0, 2000), selected: true }; },
+    show: function (path) {
+      var i = String(path).lastIndexOf('!'), sn = path.slice(0, i), ref = path.slice(i + 1);
+      for (var k = 0; k < sheets.length; k++) if (sheets[k].sh.name === sn) { if (k !== cur) { commit(); current = null; cur = k; build(); } break; }
+      var td = tbl.querySelector('td[data-ref="' + ref + '"]'); if (!td) return;
+      td.scrollIntoView({ block: 'center', inline: 'center', behavior: 'smooth' });
+      td.classList.add('wp-flash'); setTimeout(function () { td.classList.remove('wp-flash'); }, 2600);
+    },
+    replace: function (path, text) {                        // sets one cell as if it had been typed; returns what was there, or null if the sheet is gone
+      if (LOCKED) return null;
+      var i = String(path).lastIndexOf('!'), sn = path.slice(0, i), ref = path.slice(i + 1), k = -1;
+      for (var j = 0; j < sheets.length; j++) if (sheets[j].sh.name === sn) k = j;
+      if (k < 0) return null;
+      commit();
+      var sh = sheets[k], before = rawText(sh, ref);
+      typed(sh, ref, text);
+      pending[sn + '!' + ref] = { sheet: sn, cell: ref, value: text };
+      if (k !== cur) { current = null; cur = k; build(); } else { current = null; paint(); }
+      queue();
+      return before;
+    },
     beforeSend: function () {
       commit(); flush();
       return new Promise(function (resolve) { var n = 0; (function wait() { if ((!Object.keys(pending).length && !saving) || n++ > 12) resolve(); else setTimeout(wait, 400); })(); });
