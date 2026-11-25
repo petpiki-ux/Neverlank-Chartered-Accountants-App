@@ -384,6 +384,8 @@ DOCUMENT_LIBRARY = [
      "Document the technical analysis and position adopted for a tax matter."),
     ("Tax Advisory", "TX-05 Client Outcome Letter.docx", "TX-05", "Client Outcome Letter",
      "Letter communicating the tax outcome and obligations to the client."),
+    ("Tax Advisory", "TX-06 Tax and Advisory Services Engagement Letter.docx", "TX-06", "Engagement Letter (Tax and Advisory Services)",
+     "Full engagement letter for tax compliance, tax advisory and business advisory services, with terms, a services schedule, fees schedule and information checklist."),
 ]
 
 
