@@ -1,0 +1,243 @@
+{# Claude beside the working paper (wp_assist.py). Included by docx.html and xlsx.html after they define window.WPAI:
+   kind ('docx'|'xlsx'), locked, assistUrl, selection(), beforeSend(), and for Word replace / insertAfter / show; onSelect is set here. #}
+<style>
+  .wp-split { display: flex; gap: 12px; align-items: flex-start; }
+  .wp-main { flex: 1 1 auto; min-width: 0; }
+  #claude { display: none; flex: 0 0 380px; width: 380px; position: sticky; top: 66px; height: calc(100vh - 84px); min-height: 420px; background: #fff; border: 1px solid #d9dde3; border-radius: 10px; box-shadow: 0 2px 10px rgba(15,41,66,.12); flex-direction: column; overflow: hidden; font-size: 13.5px; color: #1b2a41; }
+  #claude.open { display: flex; }
+  .cl-head { background: #0f2942; color: #fff; padding: 10px 12px; display: flex; align-items: center; gap: 8px; border-bottom: 3px solid #b8934a; }
+  .cl-head .cl-mark { color: #d4af6a; font-size: 18px; line-height: 1; }
+  .cl-head .cl-t { font-weight: 700; font-size: 14.5px; line-height: 1.1; }
+  .cl-head .cl-s { font-size: 11px; color: #cdd8e4; }
+  .cl-head .cl-sp { flex: 1; }
+  .cl-head button { background: transparent; color: #cdd8e4; border: 1px solid rgba(255,255,255,.28); border-radius: 5px; font: inherit; font-size: 11.5px; padding: 2px 8px; cursor: pointer; margin: 0; }
+  .cl-head button:hover { background: rgba(255,255,255,.12); color: #fff; }
+  .cl-body { flex: 1 1 auto; overflow-y: auto; padding: 12px; background: #f7f8fa; }
+  .cl-empty h4 { margin: 4px 0 6px; font-size: 15px; color: #0f2942; }
+  .cl-empty p { margin: 0 0 10px; color: #4a5873; }
+  .cl-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 6px 0 4px; }
+  .cl-chips button { font: inherit; font-size: 12.5px; padding: 5px 10px; border: 1px solid #c8ced6; background: #fff; border-radius: 16px; cursor: pointer; color: #0f2942; margin: 0; }
+  .cl-chips button:hover { border-color: #b8934a; background: #fffaf0; }
+  .cl-chips button:disabled { opacity: .45; cursor: default; }
+  .cl-m { margin: 0 0 12px; }
+  .cl-m .who { font-size: 11px; font-weight: 700; letter-spacing: .03em; text-transform: uppercase; color: #6b7684; margin-bottom: 2px; }
+  .cl-m.u .bub { background: #0f2942; color: #fff; border-radius: 10px 10px 2px 10px; padding: 8px 11px; margin-left: 36px; white-space: pre-wrap; overflow-wrap: anywhere; }
+  .cl-m.u .who { text-align: right; }
+  .cl-m.a .bub { background: #fff; border: 1px solid #e3e8ee; border-radius: 10px 10px 10px 2px; padding: 8px 11px; margin-right: 18px; overflow-wrap: anywhere; line-height: 1.45; }
+  .cl-m.a .bub p { margin: 0 0 8px; } .cl-m.a .bub p:last-child { margin-bottom: 0; }
+  .cl-m.a .bub ul { margin: 0 0 8px 18px; padding: 0; } .cl-m.a .bub li { margin: 0 0 3px; }
+  .cl-m.err .bub { background: #fdecec; border-color: #f0b9b9; color: #8a1f1f; }
+  .cl-tools { margin: 3px 0 0 2px; } .cl-tools button { background: none; border: 0; color: #6b7684; font: inherit; font-size: 11.5px; cursor: pointer; padding: 0 8px 0 0; margin: 0; text-decoration: underline; }
+  .cl-ed { border: 1px solid #e3d3a8; background: #fffdf6; border-radius: 8px; margin: 8px 18px 0 0; padding: 8px 10px; }
+  .cl-ed .eh { font-weight: 700; color: #7a5c1c; font-size: 12px; margin-bottom: 4px; }
+  .cl-ed .eb { font-size: 12.5px; background: #fbeaea; border-radius: 4px; padding: 4px 6px; text-decoration: line-through; color: #7a3a3a; white-space: pre-wrap; margin-bottom: 4px; max-height: 110px; overflow: auto; }
+  .cl-ed .ea { font-size: 12.5px; background: #e9f6ec; border-radius: 4px; padding: 4px 6px; white-space: pre-wrap; max-height: 170px; overflow: auto; }
+  .cl-ed .ew { font-size: 12px; color: #6b7684; margin-top: 4px; }
+  .cl-ed .ewarn { font-size: 12px; color: #8a4b00; background: #fff1d6; border-radius: 4px; padding: 3px 6px; margin-top: 4px; }
+  .cl-ed .eact { margin-top: 6px; display: flex; gap: 6px; flex-wrap: wrap; align-items: center; }
+  .cl-ed .eact button { font: inherit; font-size: 12px; padding: 3px 10px; border-radius: 5px; border: 1px solid #c8ced6; background: #fff; cursor: pointer; margin: 0; }
+  .cl-ed .eact button.go { background: #0f2942; color: #fff; border-color: #0f2942; font-weight: 600; }
+  .cl-ed .eact button:disabled { opacity: .45; cursor: default; }
+  .cl-ed .est { font-size: 12px; color: #2d6a3a; font-weight: 600; }
+  .cl-ed.done { opacity: .8; background: #f6fbf7; border-color: #cfe6d4; }
+  .cl-ed.gone { display: none; }
+  .cl-think { color: #6b7684; font-style: italic; padding: 4px 2px; }
+  .cl-think i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: #b8934a; margin-right: 3px; animation: clb 1s infinite ease-in-out; }
+  .cl-think i:nth-child(2) { animation-delay: .15s; } .cl-think i:nth-child(3) { animation-delay: .3s; }
+  @keyframes clb { 0%,80%,100% { opacity: .25; transform: scale(.8); } 40% { opacity: 1; transform: scale(1.1); } }
+  .cl-foot { border-top: 1px solid #e3e8ee; background: #fff; padding: 8px 10px 6px; }
+  .cl-sel { font-size: 11.5px; color: #4a5873; background: #eef2f8; border-radius: 5px; padding: 3px 7px; margin-bottom: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .cl-sel.on { background: #fff4d6; color: #6b4b00; }
+  .cl-row { display: flex; gap: 6px; align-items: flex-end; }
+  .cl-row textarea { flex: 1; margin: 0; resize: none; min-height: 38px; max-height: 120px; font: inherit; font-size: 13.5px; padding: 7px 9px; border: 1px solid #c8ced6; border-radius: 8px; }
+  .cl-row textarea:focus { outline: 2px solid #b8934a; outline-offset: -1px; border-color: #b8934a; }
+  .cl-row button { margin: 0; background: #0f2942; color: #fff; border: 0; border-radius: 8px; font: inherit; font-weight: 600; padding: 8px 14px; cursor: pointer; }
+  .cl-row button:disabled { opacity: .5; cursor: default; }
+  .cl-note { font-size: 10.8px; color: #6b7684; margin: 5px 0 0; line-height: 1.35; }
+  .claude-btn { background: #0f2942 !important; color: #fff !important; border-color: #0f2942 !important; font-weight: 600; }
+  .claude-btn:hover { background: #17395c !important; }
+  .claude-btn .cl-mark { color: #d4af6a; margin-right: 3px; }
+  .wp-flash { outline: 2px solid #b8934a !important; background: rgba(212,175,55,.2) !important; transition: background 1.6s; }
+  @media (max-width: 1000px) { .wp-split { flex-direction: column; } .wp-main { width: 100%; } #claude { flex: none; width: 100%; position: static; height: 72vh; } }
+</style>
+
+<aside id="claude" aria-label="Claude, working paper assistant">
+  <div class="cl-head">
+    <span class="cl-mark" aria-hidden="true">&#10043;</span>
+    <div><div class="cl-t">Claude</div><div class="cl-s">Working paper assistant</div></div>
+    <span class="cl-sp"></span>
+    <button type="button" id="cl-new" title="Clear this conversation">New chat</button>
+    <button type="button" id="cl-close" title="Close the panel" aria-label="Close the panel">&#10005;</button>
+  </div>
+  <div class="cl-body" id="cl-body" aria-live="polite"></div>
+  <div class="cl-foot">
+    <div class="cl-sel" id="cl-sel">Claude reads the whole paper.</div>
+    <div class="cl-row">
+      <textarea id="cl-in" rows="1" maxlength="4000" placeholder="Ask Claude about this paper..." aria-label="Ask Claude"></textarea>
+      <button type="button" id="cl-send">Send</button>
+    </div>
+    <p class="cl-note">Claude can make mistakes: check every figure and reference. It changes nothing in the paper until you press Apply. The client's name, TIN, e-mail addresses and phone numbers are removed before your question is sent.</p>
+  </div>
+</aside>
+
+<script>
+(function () {
+  function boot() {
+  var W = window.WPAI;
+  if (!W) return;
+  var panel = document.getElementById('claude'), body = document.getElementById('cl-body'), input = document.getElementById('cl-in'), sendBtn = document.getElementById('cl-send');
+  var selBox = document.getElementById('cl-sel'), openBtn = document.getElementById('b-claude');
+  var KEY = 'wp_claude_' + location.pathname, OPENKEY = 'wp_claude_open';
+  var msgs = [], busy = false;
+
+  var CHIPS = W.kind === 'docx'
+    ? [['Summarise this paper', 0], ['Check it for mistakes and inconsistencies', 0], ['What is missing or incomplete?', 0], ['Proofread the whole paper', 0], ['Draft a conclusion', 0], ['Improve the selected text', 1], ['Make it shorter', 1], ['Explain this', 1]]
+    : [['Explain this sheet', 0], ['Check the formulas and totals', 0], ['What is missing or incomplete?', 0], ['Explain the selected cell', 1]];
+
+  function esc(s) { return String(s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function inline(s) { return esc(s).replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>'); }
+  function md(text) {
+    var out = '', list = false;
+    String(text).split(/\n/).forEach(function (line) {
+      var m = /^\s*[-*]\s+(.*)$/.exec(line);
+      if (m) { if (!list) { out += '<ul>'; list = true; } out += '<li>' + inline(m[1]) + '</li>'; return; }
+      if (list) { out += '</ul>'; list = false; }
+      if (line.trim() !== '') out += '<p>' + inline(line) + '</p>';
+    });
+    return out + (list ? '</ul>' : '');
+  }
+  function save() { try { sessionStorage.setItem(KEY, JSON.stringify(msgs.slice(-40))); } catch (e) {} }
+  function setOpen(on) {
+    panel.classList.toggle('open', on);
+    if (openBtn) openBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+    try { localStorage.setItem(OPENKEY, on ? '1' : '0'); } catch (e) {}
+    if (on) { refreshSel(); setTimeout(function () { input.focus(); }, 50); }
+  }
+
+  // ---------- selection chip
+  function refreshSel() {
+    var s = W.selection ? W.selection() : null;
+    if (s && s.text) {
+      var t = s.text.replace(/\s+/g, ' ');
+      selBox.className = 'cl-sel on';
+      selBox.textContent = (s.selected ? 'Selected: ' : (W.kind === 'xlsx' ? 'Cell ' + (s.path || '') + ': ' : 'In this paragraph: ')) + '“' + (t.length > 70 ? t.slice(0, 70) + '…' : t) + '”';
+    } else { selBox.className = 'cl-sel'; selBox.textContent = W.kind === 'xlsx' ? 'Claude reads the whole workbook.' : 'Claude reads the whole paper.'; }
+    var has = !!(s && s.text);
+    body.querySelectorAll('.cl-chips button[data-needs]').forEach(function (b) { b.disabled = !has; });
+  }
+  W.onSelect = refreshSel;
+
+  // ---------- drawing
+  function drawEdit(host, m, ed) {
+    var box = document.createElement('div');
+    box.className = 'cl-ed' + (ed.state === 'applied' ? ' done' : '') + (ed.state === 'dismissed' ? ' gone' : '');
+    var isNew = ed.kind === 'insert_after';
+    var h = '<div class="eh">' + (isNew ? 'New paragraph below' + (ed.before ? ': “' + esc(ed.before.slice(0, 50)) + (ed.before.length > 50 ? '…' : '') + '”' : '') : 'Suggested change') + '</div>';
+    if (!isNew) h += '<div class="eb">' + esc(ed.before || '(empty)') + '</div>';
+    h += '<div class="ea">' + esc(ed.text) + '</div>';
+    if (ed.why) h += '<div class="ew">' + esc(ed.why) + '</div>';
+    if (ed.warn) h += '<div class="ewarn">' + esc(ed.warn) + '</div>';
+    h += '<div class="eact">';
+    if (ed.state === 'applied') {
+      h += '<span class="est">Applied</span>' + (!isNew ? '<button type="button" data-a="undo">Undo</button>' : '') + '<button type="button" data-a="show">Show</button>';
+    } else if (ed.state === 'stale') {
+      h += '<span class="ew">The paper has changed since this suggestion. Ask again if you still want it.</span>';
+    } else {
+      var dis = (W.locked || m.canEdit === false) ? ' disabled title="This paper is read-only"' : '';
+      h += '<button type="button" class="go" data-a="apply"' + dis + '>Apply</button><button type="button" data-a="show">Show</button><button type="button" data-a="dismiss">Dismiss</button>';
+    }
+    h += '</div>';
+    box.innerHTML = h;
+    host.appendChild(box);
+    box.addEventListener('click', function (ev) {
+      var a = ev.target && ev.target.getAttribute && ev.target.getAttribute('data-a');
+      if (!a) return;
+      if (a === 'show') { if (W.show) W.show(ed.path); return; }
+      if (a === 'dismiss') { ed.state = 'dismissed'; save(); render(); return; }
+      if (a === 'undo') { if (W.replace && ed.undoText !== undefined) { W.replace(ed.path, ed.undoText); ed.state = 'pending'; save(); render(); } return; }
+      if (a === 'apply') apply(ed);
+    });
+  }
+  function apply(ed) {
+    if (W.locked) return;
+    if (ed.kind === 'replace') {
+      var before = W.replace(ed.path, ed.text);
+      if (before === null) { ed.state = 'stale'; save(); render(); return; }
+      ed.undoText = before; ed.state = 'applied'; save(); render(); if (W.show) W.show(ed.path);
+    } else {
+      ed.state = 'applied'; save();
+      Promise.resolve(W.insertAfter(ed.path, ed.text)).then(function (j) {
+        if (j && j.ok) return;                         // the page reloads; the card comes back as Applied
+        ed.state = 'pending'; save(); render(); addNote((j && (j.error || j.message)) || 'Could not add the paragraph.');
+      }).catch(function () { ed.state = 'pending'; save(); render(); addNote('Could not add the paragraph - check your connection.'); });
+    }
+  }
+  function addNote(t) { msgs.push({ role: 'assistant', text: t, error: true }); save(); render(); }
+
+  function render() {
+    body.innerHTML = '';
+    if (!msgs.length) {
+      var e = document.createElement('div'); e.className = 'cl-empty';
+      e.innerHTML = '<h4>How can I help with this paper?</h4><p>I can read the whole paper, answer questions about it, check it, and suggest wording. Nothing changes until you press Apply.</p><div class="cl-chips"></div>';
+      var chips = e.querySelector('.cl-chips');
+      CHIPS.forEach(function (c) { var b = document.createElement('button'); b.type = 'button'; b.textContent = c[0]; if (c[1]) b.setAttribute('data-needs', '1'); b.addEventListener('click', function () { send(c[0]); }); chips.appendChild(b); });
+      body.appendChild(e); refreshSel(); return;
+    }
+    msgs.forEach(function (m, i) {
+      var d = document.createElement('div'); d.className = 'cl-m ' + (m.role === 'user' ? 'u' : 'a') + (m.error ? ' err' : '');
+      d.innerHTML = '<div class="who">' + (m.role === 'user' ? 'You' : 'Claude') + '</div><div class="bub">' + (m.role === 'user' ? esc(m.text) : md(m.text)) + '</div>';
+      body.appendChild(d);
+      if (m.role === 'assistant' && !m.error) {
+        (m.edits || []).forEach(function (ed) { drawEdit(d, m, ed); });
+        var t = document.createElement('div'); t.className = 'cl-tools';
+        var cp = document.createElement('button'); cp.type = 'button'; cp.textContent = 'Copy';
+        cp.addEventListener('click', function () { copy(m.text); cp.textContent = 'Copied'; setTimeout(function () { cp.textContent = 'Copy'; }, 1400); });
+        t.appendChild(cp); d.appendChild(t);
+      }
+    });
+    if (busy) { var k = document.createElement('div'); k.className = 'cl-think'; k.innerHTML = '<i></i><i></i><i></i> Claude is reading the paper'; body.appendChild(k); }
+    body.scrollTop = body.scrollHeight;
+  }
+  function copy(text) {
+    try { navigator.clipboard.writeText(text); } catch (e) { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); } catch (x) {} document.body.removeChild(t); }
+  }
+
+  // ---------- talking to the server
+  function send(text) {
+    text = (text || '').trim();
+    if (!text || busy) return;
+    var history = msgs.filter(function (m) { return !m.error; }).map(function (m) { return { role: m.role, content: m.text }; });
+    var sel = W.selection ? W.selection() : { path: '', text: '', selected: false };
+    msgs.push({ role: 'user', text: text }); input.value = ''; autosize(); busy = true; sendBtn.disabled = true; save(); render();
+    Promise.resolve(W.beforeSend ? W.beforeSend() : null).then(function () {
+      return fetch(W.assistUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, history: history, selection: sel }) });
+    }).then(function (r) { return r.json().catch(function () { return { ok: false, error: 'Claude could not be reached (status ' + r.status + ').' }; }); })
+      .then(function (j) {
+        busy = false; sendBtn.disabled = false;
+        if (!j.ok) { msgs.push({ role: 'assistant', text: j.error || 'Claude could not answer. Try again.', error: true }); }
+        else { msgs.push({ role: 'assistant', text: j.reply, canEdit: j.can_edit, edits: (j.edits || []).map(function (e) { e.state = 'pending'; return e; }) }); }
+        save(); render();
+      })
+      .catch(function () { busy = false; sendBtn.disabled = false; msgs.push({ role: 'assistant', text: 'Could not reach the server - check your connection and try again.', error: true }); save(); render(); });
+  }
+  function autosize() { input.style.height = 'auto'; input.style.height = Math.min(input.scrollHeight, 120) + 'px'; }
+
+  sendBtn.addEventListener('click', function () { send(input.value); });
+  input.addEventListener('input', autosize);
+  input.addEventListener('keydown', function (e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input.value); } });
+  document.getElementById('cl-close').addEventListener('click', function () { setOpen(false); });
+  document.getElementById('cl-new').addEventListener('click', function () { if (busy) return; msgs = []; try { sessionStorage.removeItem(KEY); } catch (e) {} render(); });
+  if (openBtn) openBtn.addEventListener('click', function () { setOpen(!panel.classList.contains('open')); });
+
+  // ---------- start: bring back the conversation (after a reload) and the open / closed state
+  try {
+    var saved = JSON.parse(sessionStorage.getItem(KEY) || '[]');
+    if (Array.isArray(saved)) { msgs = saved; msgs.forEach(function (m) { (m.edits || []).forEach(function (ed) { if (ed.state === 'pending') ed.state = 'stale'; }); }); }
+  } catch (e) {}
+  var wasOpen = null; try { wasOpen = localStorage.getItem(OPENKEY); } catch (e) {}
+  render();
+  setOpen(wasOpen === null ? window.innerWidth >= 1250 : wasOpen === '1');
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', boot); else boot();
+})();
+</script>

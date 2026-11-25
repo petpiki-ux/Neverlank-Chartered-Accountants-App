@@ -224,3 +224,6 @@ def op(doc_id):
         doc.reviewed_at = None
         db.session.commit()
     return jsonify(ok=ok, message=msg)
+
+
+import wp_assist  # noqa: E402,F401  (the Claude side panel: routes /<doc_id>/assist)

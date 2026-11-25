@@ -39,12 +39,18 @@
   <span class="sep"></span>
   <span style="font-size:12.5px;color:#5b6573;">Click a cell and type; formulas (=B13+B15) calculate as you type. Blue text cells are for your figures.</span>
   <a class="tb" href="{{ url_for('engagements.download_document', doc_id=doc.id) }}" style="margin-left:8px;">Download .xlsx</a>
+  <span class="sep"></span>
+  <button type="button" id="b-claude" class="claude-btn" aria-pressed="false" title="Open or close Claude, the working paper assistant"><span class="cl-mark" aria-hidden="true">&#10043;</span>Claude</button>
   <span class="wp-status" id="wpstatus">Opened - changes save automatically</span>
 </div>
 
+<div class="wp-split"><div class="wp-main">
 <div class="xl-fx"><span class="ref" id="xref">A1</span><input type="text" id="xbar" autocomplete="off" placeholder="Value or formula" {% if locked %}disabled{% endif %}></div>
 <div class="xl-scroll"><table class="xl" id="xl"></table></div>
 <div class="xl-tabs" id="xtabs"></div>
+</div>
+{% include 'wp_editor/_claude_panel.html' %}
+</div>
 
 <script id="xmodel" type="application/json">{{ model|tojson }}</script>
 <script>
@@ -369,6 +375,15 @@
       .then(function (j) { saving = false; if (!j.ok) { setStatus(j.error || 'Could not save', true); return; } setStatus('All changes saved ' + (j.saved_at || '')); if (Object.keys(pending).length) flush(); })
       .catch(function () { saving = false; changes.forEach(function (c) { pending[c.sheet + '!' + c.cell] = c; }); setStatus('Could not save - check your connection', true); });
   }
+  window.WPAI = {
+    kind: 'xlsx', locked: LOCKED, assistUrl: {{ url_for('wpedit.assist', doc_id=doc.id)|tojson }},
+    selection: function () { var sh = sheets[cur]; return { path: (sh ? sh.sh.name : '') + '!' + xref.textContent, text: (bar.value || '').slice(0, 2000), selected: true }; },
+    beforeSend: function () {
+      commit(); flush();
+      return new Promise(function (resolve) { var n = 0; (function wait() { if ((!Object.keys(pending).length && !saving) || n++ > 12) resolve(); else setTimeout(wait, 400); })(); });
+    }
+  };
+  try { new MutationObserver(function () { if (window.WPAI.onSelect) window.WPAI.onSelect(); }).observe(xref, { childList: true, characterData: true, subtree: true }); } catch (e) {}
   window.addEventListener('pagehide', function () { commit(); flush(true); });
   window.addEventListener('beforeunload', function (e) { if (Object.keys(pending).length || saving) { e.preventDefault(); e.returnValue = ''; } });
   if (LOCKED) setStatus('Read-only (partner signed)');

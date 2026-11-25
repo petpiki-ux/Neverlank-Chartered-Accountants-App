@@ -49,10 +49,64 @@
   <button type="button" id="b-par-del" title="Delete the paragraph you are in">&minus; Paragraph</button>
   <span class="sep"></span>
   <a class="tb" href="{{ url_for('engagements.download_document', doc_id=doc.id) }}" title="Download this version as a Word file">Download .docx</a>
+  <span class="sep"></span>
+  <button type="button" id="b-claude" class="claude-btn" aria-pressed="false" title="Open or close Claude, the working paper assistant"><span class="cl-mark" aria-hidden="true">&#10043;</span>Claude</button>
   <span class="wp-status" id="wpstatus">Opened - changes save automatically</span>
 </div>
 
+<script>
+/* hooks the Claude panel uses (it is included below, after the paper's own script has run) */
+window.__wpHooks = function (ctx) {
+  var page = ctx.page, last = function () { return ctx.last(); }, lastSel = null;
+  function inPage(n) { return n && page.contains(n.nodeType === 3 ? n.parentNode : n); }
+  document.addEventListener('selectionchange', function () {
+    var s = window.getSelection();
+    if (!s || !s.anchorNode || !inPage(s.anchorNode)) return;
+    var t = s.isCollapsed ? '' : s.toString().trim();
+    if (!t) { lastSel = null; } else {
+      var el = s.anchorNode.nodeType === 3 ? s.anchorNode.parentNode : s.anchorNode, p = el.closest && el.closest('.wp-p');
+      lastSel = { path: p ? p.getAttribute('data-path') : '', text: t.slice(0, 6000), selected: true };
+    }
+    if (window.WPAI && window.WPAI.onSelect) window.WPAI.onSelect();
+  });
+  function find(path) { return page.querySelector('.wp-p[data-path="' + String(path).replace(/"/g, '') + '"]'); }
+  window.WPAI = {
+    kind: 'docx', locked: ctx.locked, assistUrl: ctx.assistUrl,
+    selection: function () {
+      if (lastSel) return lastSel;
+      var l = last();
+      return l ? { path: l.getAttribute('data-path'), text: ctx.plainText(l).trim().slice(0, 6000), selected: false } : { path: '', text: '', selected: false };
+    },
+    beforeSend: function () { return ctx.flush(); },
+    show: function (path) {
+      var el = find(path); if (!el) return;
+      el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+      el.classList.add('wp-flash'); setTimeout(function () { el.classList.remove('wp-flash'); }, 2600);
+    },
+    replace: function (path, text) {                       // returns the old text, or null if that paragraph is gone
+      var p = find(path); if (!p || ctx.locked) return null;
+      var before = ctx.plainText(p);
+      var runs = p.querySelectorAll(':scope > span.wr:not(.pic)');
+      if (runs.length) { runs[0].textContent = text; for (var i = 1; i < runs.length; i++) runs[i].textContent = ''; } else { p.textContent = text; }
+      ctx.queue(p);
+      return before;
+    },
+    insertAfter: function (path, text) {
+      return ctx.flush().then(function () {
+        return fetch(ctx.insertUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ path: path, text: text }) }).then(function (r) { return r.json(); });
+      }).then(function (j) {
+        if (j && j.ok) { try { sessionStorage.setItem('wp_scroll_' + location.pathname, String(window.scrollY)); } catch (e) {} location.reload(); }
+        return j;
+      });
+    }
+  };
+};
+</script>
+<div class="wp-split"><div class="wp-main">
 <div class="wp-desk"><div class="wp-page" id="wppage" style="width:{{ page_width|round|int }}px;">{{ body|safe }}</div></div>
+</div>
+{% include 'wp_editor/_claude_panel.html' %}
+</div>
 
 <script>
 (function () {
@@ -177,6 +231,9 @@
   document.getElementById('b-par-add').onclick = function () { if (!LOCKED) structural('para_add'); };
   document.getElementById('b-par-del').onclick = function () { if (!LOCKED && confirm('Delete this paragraph?')) structural('para_delete'); };
   try { var y = sessionStorage.getItem('wp_scroll_' + location.pathname); if (y) { sessionStorage.removeItem('wp_scroll_' + location.pathname); window.scrollTo(0, +y); } } catch (e) {}
+  if (window.__wpHooks) window.__wpHooks({ page: page, last: function () { return last; }, locked: LOCKED, plainText: plainText, queue: queue, flush: flush,
+    assistUrl: {{ url_for('wpedit.assist', doc_id=doc.id)|tojson }}, insertUrl: {{ url_for('wpedit.assist_insert', doc_id=doc.id)|tojson }} });
+  document.getElementById('b-claude').disabled = false;
   window.addEventListener('pagehide', function () { flush(true); });
   window.addEventListener('beforeunload', function (e) { if (Object.keys(dirty).length || saving) { e.preventDefault(); e.returnValue = ''; } });
 })();
