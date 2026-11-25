@@ -1234,6 +1234,8 @@ def create_app():
         # The new Tax and Advisory Services Engagement Letter replaces the old TX-01 (once; the old copy is kept in _replaced).
         from seed import replace_tx01_engagement_letter
         replace_tx01_engagement_letter()
+        from seed import ensure_tx01_engagement_letter
+        ensure_tx01_engagement_letter()
         # Configurable role permissions: seed_permissions() only ever adds a
         # (role, key) row that doesn't already exist, so it's safe/cheap to
         # call on every startup rather than gating it on the table being

@@ -505,6 +505,46 @@ def replace_tx01_engagement_letter():
     return True
 
 
+TX01_ENSURE_MARKER = ".tx01_ensure_row_v2"
+
+
+def ensure_tx01_engagement_letter():
+    """One-time safety net: if the TX-01 row was deleted in the app (for example while clearing out the old letter), seed_document_templates()
+    never puts it back on an existing install, so the new letter would be missing altogether. This adds the TX-01 row back from the bundled
+    new letter (any file left behind is kept in _replaced first). Runs once; the marker stops it bringing the row back after a later deletion."""
+    marker = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, TX01_ENSURE_MARKER)
+    if os.path.exists(marker):
+        return False
+    folder, filename = "Tax Advisory", "TX-01 Engagement Letter.docx"
+    lib = next((r for r in DOCUMENT_LIBRARY if r[0] == folder and r[1] == filename), None)
+    src = os.path.join(Config.DOCUMENT_TEMPLATES_SEED_DIR, folder, filename)
+    if lib is None or not os.path.exists(src):
+        return False
+    changed = False
+    if not DocumentTemplate.query.filter_by(type=folder, filename=filename).first():
+        dst_dir = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, folder)
+        os.makedirs(dst_dir, exist_ok=True)
+        dst = os.path.join(dst_dir, filename)
+        if os.path.exists(dst):
+            keep_dir = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, "_replaced")
+            os.makedirs(keep_dir, exist_ok=True)
+            try:
+                shutil.copy2(dst, os.path.join(keep_dir, "TX-01 Engagement Letter (left behind after delete).docx"))
+            except OSError:
+                pass
+        shutil.copy2(src, dst)
+        order = next((i for i, r in enumerate(DOCUMENT_LIBRARY) if r is lib), 0)
+        db.session.add(DocumentTemplate(type=folder, ref_code=lib[2], title=lib[3], description=lib[4], filename=filename, order=order))
+        db.session.commit()
+        changed = True
+    try:
+        with open(marker, "w") as fh:
+            fh.write("done")
+    except OSError:
+        pass
+    return changed
+
+
 # (old, new) exact-text pairs for CompanyDocument.document_type rows already
 # stored under the old Companies Act [Chapter 24:03] CR-form labels, now
 # renumbered under the Companies and Other Business Entities Act [Chapter

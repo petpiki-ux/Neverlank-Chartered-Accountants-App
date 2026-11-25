@@ -83,5 +83,12 @@ with app.app_context():
     check(DocumentTemplate.query.filter_by(ref_code="TX-06").count() == 0 and not os.path.exists(os.path.join(dd, "Tax Advisory", "TX-06 Tax and Advisory Services Engagement Letter.docx")), "the TX-06 row and file are removed")
     with open(live, "wb") as fh: fh.write(b"EDITED LATER")
     check(seed.replace_tx01_engagement_letter() is False and open(live, "rb").read() == b"EDITED LATER", "it never runs twice, so later edits are kept")
+    # If TX-01 was deleted in the app, it is put back once from the bundled new letter.
+    emark = os.path.join(dd, seed.TX01_ENSURE_MARKER)
+    DocumentTemplate.query.filter_by(ref_code="TX-01", type="Tax Advisory").delete(); db.session.commit(); os.remove(live)
+    if os.path.exists(emark): os.remove(emark)
+    check(seed.ensure_tx01_engagement_letter() is True and DocumentTemplate.query.filter_by(ref_code="TX-01", type="Tax Advisory").count() == 1 and os.path.getsize(live) > 1000, "a deleted TX-01 is put back from the bundled new letter")
+    DocumentTemplate.query.filter_by(ref_code="TX-01", type="Tax Advisory").delete(); db.session.commit()
+    check(seed.ensure_tx01_engagement_letter() is False and DocumentTemplate.query.filter_by(ref_code="TX-01", type="Tax Advisory").count() == 0, "...once only, so a later deliberate delete stays deleted")
 print("\nALL PASSED" if not fails else "\nFAILED: %d" % len(fails))
 sys.exit(1 if fails else 0)
