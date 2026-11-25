@@ -374,8 +374,8 @@ DOCUMENT_LIBRARY = [
      "Deliverable report template: findings, recommendations, next steps."),
     (CORPFIN_ENGAGEMENT_TYPE, "CE-03 Client Sign-off Acceptance Form.docx", "CE-03", "Client Sign-off / Acceptance Form",
      "Client acceptance form for a corporate finance / advisory deliverable."),
-    ("Tax Advisory", "TX-01 Engagement Letter.docx", "TX-01", "Engagement Letter (Tax / CGT Advisory)",
-     "Engagement letter for tax advisory and CGT engagements."),
+    ("Tax Advisory", "TX-01 Engagement Letter.docx", "TX-01", "Engagement Letter (Tax and Advisory Services)",
+     "Full engagement letter for tax compliance, tax advisory and business advisory services: scope, fees, responsibilities, confidentiality and data protection, anti-money laundering, term and termination, disputes and signatures."),
     ("Tax Advisory", "TX-02 Fact Finding Information Request Schedule.docx", "TX-02", "Fact-Finding / Information Request Schedule",
      "Checklist of documents to request from the client for a CGT computation."),
     ("Tax Advisory", "TX-03 CGT Computation Workpaper.xlsx", "TX-03", "CGT Computation Workpaper (Excel)",
@@ -384,8 +384,6 @@ DOCUMENT_LIBRARY = [
      "Document the technical analysis and position adopted for a tax matter."),
     ("Tax Advisory", "TX-05 Client Outcome Letter.docx", "TX-05", "Client Outcome Letter",
      "Letter communicating the tax outcome and obligations to the client."),
-    ("Tax Advisory", "TX-06 Tax and Advisory Services Engagement Letter.docx", "TX-06", "Engagement Letter (Tax and Advisory Services)",
-     "Full engagement letter for tax compliance, tax advisory and business advisory services, with terms, a services schedule, fees schedule and information checklist."),
 ]
 
 
@@ -458,6 +456,53 @@ def migrate_document_template_ref_codes():
             changed = True
     if changed:
         db.session.commit()
+
+
+TX01_LETTER_MARKER = ".tx01_tax_advisory_services_letter_v1"
+
+
+def replace_tx01_engagement_letter():
+    """One-time: the new Tax and Advisory Services Engagement Letter replaces the old TX-01 in the writable library, even when the old copy
+    was edited (the edited copy is kept in a _replaced folder, never deleted), and the short-lived TX-06 copy of it is removed. After that
+    the marker file stops this from running again, so later edits to TX-01 in the app are never overwritten. Safe on every start."""
+    filename = "TX-01 Engagement Letter.docx"
+    folder = "Tax Advisory"
+    dst_dir = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, folder)
+    marker = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, TX01_LETTER_MARKER)
+    if os.path.exists(marker):
+        return False
+    src = os.path.join(Config.DOCUMENT_TEMPLATES_SEED_DIR, folder, filename)
+    if not os.path.exists(src):
+        return False
+    keep_dir = os.path.join(Config.DOCUMENT_TEMPLATES_DATA_DIR, "_replaced")
+    os.makedirs(dst_dir, exist_ok=True)
+    os.makedirs(keep_dir, exist_ok=True)
+    dst = os.path.join(dst_dir, filename)
+    if os.path.exists(dst):
+        try:
+            shutil.copy2(dst, os.path.join(keep_dir, "TX-01 Engagement Letter (before the Tax and Advisory Services letter).docx"))
+        except OSError:
+            pass
+    shutil.copy2(src, dst)
+    lib = {row[1]: row for row in DOCUMENT_LIBRARY if row[0] == folder}.get(filename)
+    row = DocumentTemplate.query.filter_by(type=folder, filename=filename).first()
+    if row and lib:
+        row.title, row.description = lib[3], lib[4]
+    for old in DocumentTemplate.query.filter_by(type=folder, ref_code="TX-06").all():
+        old_file = os.path.join(dst_dir, old.filename or "")
+        if old.filename and os.path.exists(old_file):
+            try:
+                shutil.move(old_file, os.path.join(keep_dir, old.filename))
+            except OSError:
+                pass
+        db.session.delete(old)
+    db.session.commit()
+    try:
+        with open(marker, "w") as fh:
+            fh.write("done")
+    except OSError:
+        pass
+    return True
 
 
 # (old, new) exact-text pairs for CompanyDocument.document_type rows already

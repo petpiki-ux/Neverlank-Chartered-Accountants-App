@@ -1231,6 +1231,9 @@ def create_app():
         # copies in the writable library; edited ones are left alone.
         from seed import refresh_branded_document_templates
         refresh_branded_document_templates()
+        # The new Tax and Advisory Services Engagement Letter replaces the old TX-01 (once; the old copy is kept in _replaced).
+        from seed import replace_tx01_engagement_letter
+        replace_tx01_engagement_letter()
         # Configurable role permissions: seed_permissions() only ever adds a
         # (role, key) row that doesn't already exist, so it's safe/cheap to
         # call on every startup rather than gating it on the table being
