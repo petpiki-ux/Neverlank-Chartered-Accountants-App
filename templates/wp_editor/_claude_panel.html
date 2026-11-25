@@ -53,6 +53,17 @@
   .cl-row textarea:focus { outline: 2px solid #b8934a; outline-offset: -1px; border-color: #b8934a; }
   .cl-row button { margin: 0; background: #0f2942; color: #fff; border: 0; border-radius: 8px; font: inherit; font-weight: 600; padding: 8px 14px; cursor: pointer; }
   .cl-row button:disabled { opacity: .5; cursor: default; }
+  .cl-pics { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 6px; }
+  .cl-pics:empty { display: none; }
+  .cl-pic { position: relative; width: 56px; height: 56px; border: 1px solid #c8ced6; border-radius: 6px; overflow: hidden; background: #eef2f8; }
+  .cl-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .cl-pic button { position: absolute; top: 1px; right: 1px; width: 18px; height: 18px; padding: 0; margin: 0; border-radius: 50%; border: 0; background: rgba(15,41,66,.85); color: #fff; font-size: 11px; line-height: 18px; cursor: pointer; }
+  .cl-attach { background: #fff !important; color: #0f2942 !important; border: 1px solid #c8ced6 !important; padding: 8px 10px !important; font-size: 15px !important; }
+  .cl-attach:hover { border-color: #b8934a !important; background: #fffaf0 !important; }
+  .cl-m.u .thumbs { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; margin: 0 0 4px 36px; }
+  .cl-m.u .thumbs img { max-width: 120px; max-height: 90px; border-radius: 6px; border: 1px solid #c8ced6; }
+  .cl-m.u .pn { font-size: 11px; color: #6b7684; text-align: right; margin: 0 0 3px; }
+  #claude.drop { outline: 3px dashed #b8934a; outline-offset: -3px; }
   .cl-note { font-size: 10.8px; color: #6b7684; margin: 5px 0 0; line-height: 1.35; }
   .claude-btn { background: #0f2942 !important; color: #fff !important; border-color: #0f2942 !important; font-weight: 600; }
   .claude-btn:hover { background: #17395c !important; }
@@ -72,11 +83,14 @@
   <div class="cl-body" id="cl-body" aria-live="polite"></div>
   <div class="cl-foot">
     <div class="cl-sel" id="cl-sel">Claude reads the whole paper.</div>
+    <div class="cl-pics" id="cl-pics"></div>
     <div class="cl-row">
-      <textarea id="cl-in" rows="1" maxlength="4000" placeholder="Ask Claude about this paper..." aria-label="Ask Claude"></textarea>
+      <button type="button" id="cl-attach" class="cl-attach" title="Attach a picture (or paste one with Ctrl+V)" aria-label="Attach a picture">&#128206;</button>
+      <input type="file" id="cl-file" accept="image/png,image/jpeg,image/gif,image/webp" multiple hidden>
+      <textarea id="cl-in" rows="1" maxlength="4000" placeholder="Ask Claude about this paper... (paste a picture with Ctrl+V)" aria-label="Ask Claude"></textarea>
       <button type="button" id="cl-send">Send</button>
     </div>
-    <p class="cl-note">Claude can make mistakes: check every figure and reference. It changes nothing in the paper until you press Apply. The client's name, TIN, e-mail addresses and phone numbers are removed before your question is sent.</p>
+    <p class="cl-note">Claude can make mistakes: check every figure and reference. It changes nothing in the paper until you press Apply. The client's name, TIN, e-mail addresses and phone numbers are removed from your words before they are sent. Pictures (the ones in the paper, such as logos, and any you attach) go as they are, so crop out anything that names the client.</p>
   </div>
 </aside>
 
@@ -88,7 +102,8 @@
   var panel = document.getElementById('claude'), body = document.getElementById('cl-body'), input = document.getElementById('cl-in'), sendBtn = document.getElementById('cl-send');
   var selBox = document.getElementById('cl-sel'), openBtn = document.getElementById('b-claude');
   var KEY = 'wp_claude_' + location.pathname, OPENKEY = 'wp_claude_open';
-  var msgs = [], busy = false;
+  var msgs = [], busy = false, pics = [];
+  var picsBox = document.getElementById('cl-pics'), fileIn = document.getElementById('cl-file'), MAXPICS = 4, MAXEDGE = 1568;
 
   var CHIPS = W.kind === 'docx'
     ? [['Summarise this paper', 0], ['Check it for mistakes and inconsistencies', 0], ['What is missing or incomplete?', 0], ['Proofread the whole paper', 0], ['Fill in the blank fields', 0], ['Draft a conclusion', 0], ['Improve the selected text', 1], ['Make it shorter', 1], ['Explain this', 1]]
@@ -106,7 +121,7 @@
     });
     return out + (list ? '</ul>' : '');
   }
-  function save() { try { sessionStorage.setItem(KEY, JSON.stringify(msgs.slice(-40))); } catch (e) {} }
+  function save() { try { sessionStorage.setItem(KEY, JSON.stringify(msgs.slice(-40).map(function (m) { if (!m.thumbs) return m; var c = {}; for (var k in m) if (k !== 'thumbs') c[k] = m[k]; return c; }))); } catch (e) {} }
   function setOpen(on) {
     panel.classList.toggle('open', on);
     if (openBtn) openBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -186,7 +201,7 @@
     body.innerHTML = '';
     if (!msgs.length) {
       var e = document.createElement('div'); e.className = 'cl-empty';
-      e.innerHTML = '<h4>How can I help with this paper?</h4><p>I can read the whole paper, answer questions about it, check it, fill in blanks and suggest wording or values. Nothing changes until you press Apply.</p><div class="cl-chips"></div>';
+      e.innerHTML = '<h4>How can I help with this paper?</h4><p>I can read the whole paper, answer questions about it, check it, fill in blanks and suggest wording or values. You can paste or attach a picture (a screenshot, a scanned invoice) with Ctrl+V. Nothing changes until you press Apply.</p><div class="cl-chips"></div>';
       var chips = e.querySelector('.cl-chips');
       CHIPS.forEach(function (c) { var b = document.createElement('button'); b.type = 'button'; b.textContent = c[0]; if (c[1]) b.setAttribute('data-needs', '1'); b.addEventListener('click', function () { send(c[0]); }); chips.appendChild(b); });
       body.appendChild(e); refreshSel(); return;
@@ -194,6 +209,12 @@
     msgs.forEach(function (m, i) {
       var d = document.createElement('div'); d.className = 'cl-m ' + (m.role === 'user' ? 'u' : 'a') + (m.error ? ' err' : '');
       d.innerHTML = '<div class="who">' + (m.role === 'user' ? 'You' : 'Claude') + '</div><div class="bub">' + (m.role === 'user' ? esc(m.text) : md(m.text)) + '</div>';
+      if (m.role === 'user' && m.pics) {
+        var tb = d.querySelector('.bub'), th = document.createElement('div');
+        if (m.thumbs && m.thumbs.length) { th.className = 'thumbs'; m.thumbs.forEach(function (u) { var im = document.createElement('img'); im.src = u; im.alt = 'Attached picture'; th.appendChild(im); }); }
+        else { th.className = 'pn'; th.textContent = m.pics + ' picture' + (m.pics > 1 ? 's' : '') + ' attached'; }
+        d.insertBefore(th, tb);
+      }
       body.appendChild(d);
       if (m.role === 'assistant' && !m.error) {
         (m.edits || []).forEach(function (ed) { drawEdit(d, m, ed); });
@@ -210,15 +231,63 @@
     try { navigator.clipboard.writeText(text); } catch (e) { var t = document.createElement('textarea'); t.value = text; document.body.appendChild(t); t.select(); try { document.execCommand('copy'); } catch (x) {} document.body.removeChild(t); }
   }
 
+
+  // ---------- pictures (paste, attach or drop)
+  function drawPics() {
+    picsBox.innerHTML = '';
+    pics.forEach(function (p, i) {
+      var d = document.createElement('div'); d.className = 'cl-pic';
+      var im = document.createElement('img'); im.src = p.url; im.alt = 'Attached picture ' + (i + 1);
+      var x = document.createElement('button'); x.type = 'button'; x.textContent = '×'; x.title = 'Remove this picture'; x.setAttribute('aria-label', 'Remove picture ' + (i + 1));
+      x.addEventListener('click', function () { pics.splice(i, 1); drawPics(); });
+      d.appendChild(im); d.appendChild(x); picsBox.appendChild(d);
+    });
+  }
+  function addNoteSoft(t) { msgs.push({ role: 'assistant', text: t, error: true }); save(); render(); }
+  function addPicture(file) {
+    if (!file || !/^image\/(png|jpe?g|gif|webp)$/i.test(file.type)) { addNoteSoft('Only PNG, JPEG, GIF or WebP pictures can be attached.'); return; }
+    if (pics.length >= MAXPICS) { addNoteSoft('You can attach up to ' + MAXPICS + ' pictures at a time.'); return; }
+    var fr = new FileReader();
+    fr.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        var w = img.naturalWidth, h = img.naturalHeight, k = Math.min(1, MAXEDGE / Math.max(w, h));
+        var c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+        var g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height);
+        var type = 'image/png', url = c.toDataURL(type);
+        if (url.length > 2400000) { type = 'image/jpeg'; url = c.toDataURL(type, 0.85); }
+        if (url.length > 4800000) { addNoteSoft('That picture is too large. Crop it or use a smaller one.'); return; }
+        if (pics.length < MAXPICS) { pics.push({ type: type, data: url.slice(url.indexOf(',') + 1), url: url }); drawPics(); }
+      };
+      img.onerror = function () { addNoteSoft('That picture could not be read.'); };
+      img.src = fr.result;
+    };
+    fr.readAsDataURL(file);
+  }
+  input.addEventListener('paste', function (e) {
+    var items = (e.clipboardData && e.clipboardData.items) || [], got = false;
+    for (var i = 0; i < items.length; i++) {
+      if (items[i].kind === 'file' && /^image\//.test(items[i].type)) { var f = items[i].getAsFile(); if (f) { addPicture(f); got = true; } }
+    }
+    if (got) e.preventDefault();
+  });
+  document.getElementById('cl-attach').addEventListener('click', function () { fileIn.click(); });
+  fileIn.addEventListener('change', function () { Array.prototype.forEach.call(fileIn.files || [], addPicture); fileIn.value = ''; });
+  ['dragenter', 'dragover'].forEach(function (ev) { panel.addEventListener(ev, function (e) { if (e.dataTransfer && Array.prototype.indexOf.call(e.dataTransfer.types || [], 'Files') >= 0) { e.preventDefault(); panel.classList.add('drop'); } }); });
+  ['dragleave', 'drop'].forEach(function (ev) { panel.addEventListener(ev, function () { panel.classList.remove('drop'); }); });
+  panel.addEventListener('drop', function (e) { if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) { e.preventDefault(); Array.prototype.forEach.call(e.dataTransfer.files, addPicture); } });
+
   // ---------- talking to the server
   function send(text) {
     text = (text || '').trim();
-    if (!text || busy) return;
-    var history = msgs.filter(function (m) { return !m.error; }).map(function (m) { return { role: m.role, content: m.text }; });
+    if ((!text && !pics.length) || busy) return;
+    if (!text) text = pics.length > 1 ? 'Look at these pictures and help me with this paper.' : 'Look at this picture and help me with this paper.';
+    var sent = pics.slice(), images = sent.map(function (p) { return { media_type: p.type, data: p.data }; });
+    var history = msgs.filter(function (m) { return !m.error; }).map(function (m) { return { role: m.role, content: m.text + (m.pics ? ' [' + m.pics + ' picture' + (m.pics > 1 ? 's' : '') + ' attached; not shown again]' : '') }; });
     var sel = W.selection ? W.selection() : { path: '', text: '', selected: false };
-    msgs.push({ role: 'user', text: text }); input.value = ''; autosize(); busy = true; sendBtn.disabled = true; save(); render();
+    msgs.push({ role: 'user', text: text, pics: sent.length, thumbs: sent.map(function (p) { return p.url; }) }); pics = []; drawPics(); input.value = ''; autosize(); busy = true; sendBtn.disabled = true; save(); render();
     Promise.resolve(W.beforeSend ? W.beforeSend() : null).then(function () {
-      return fetch(W.assistUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, history: history, selection: sel }) });
+      return fetch(W.assistUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, history: history, selection: sel, images: images }) });
     }).then(function (r) { return r.json().catch(function () { return { ok: false, error: 'Claude could not be reached (status ' + r.status + ').' }; }); })
       .then(function (j) {
         busy = false; sendBtn.disabled = false;

@@ -21,6 +21,10 @@ from models import *
 import wp_docx, wp_assist
 app = create_app(); app.config["WTF_CSRF_ENABLED"] = False
 fails = []
+def _txt(m):
+    return m["content"] if isinstance(m["content"], str) else m["content"][-1]["text"]
+
+
 def check(cond, msg):
     print(("PASS " if cond else "FAIL ") + msg)
     if not cond: fails.append(msg)
@@ -95,9 +99,9 @@ with app.app_context():
     hist = [{"role": "assistant", "content": "stray first"}, {"role": "user", "content": "Earlier question about jane@penanel.co.zw"}, {"role": "assistant", "content": "Earlier answer"}, {"role": "user", "content": "unanswered"}]
     r = c.post(f"/working-papers/{did}/assist", json={"message": "Check the figures in Penanel Trading's paper", "history": hist, "selection": {"path": contact_path, "text": "Contact: jane@penanel.co.zw", "selected": True}})
     j = r.get_json()
-    msgs = seen["messages"]; final = msgs[-1]["content"]
+    msgs = seen["messages"]; final = _txt(msgs[-1])
     check(j["ok"], "an answer comes back: %s" % (j.get("error") or ""))
-    check("Penanel" not in final and "2000123456" not in final and "jane@penanel.co.zw" not in final and "+263 77 123 4567" not in final and all("Penanel" not in m["content"] and "jane@" not in m["content"] for m in msgs),
+    check("Penanel" not in final and "2000123456" not in final and "jane@penanel.co.zw" not in final and "+263 77 123 4567" not in final and all("Penanel" not in _txt(m) and "jane@" not in _txt(m) for m in msgs),
           "the client's name, TIN, e-mail and phone never leave the app")
     check("{client_name}" in final and "{client_tin}" in final and "{email_1}" in final and "{phone_1}" in final, "they are swapped for tokens")
     check("Revenue 120,000" in final and "FY25 Statutory Audit" in final and "THE WORKING PAPER" in final and f"[{contact_path}]" in final and "SELECTED TEXT" in final, "the engagement record, the paper with positions and the selection are sent")
@@ -159,7 +163,7 @@ with app.app_context():
                                                                    {"path": "Nope!B1", "kind": "replace", "text": "x"}, {"path": "CGT Computation!ZZZ9999", "kind": "replace", "text": "x"},
                                                                    {"path": "CGT Computation!B13", "kind": "insert_after", "text": "x"}]}
     j = c.post(f"/working-papers/{xd.id}/assist", json={"message": "Check the formulas", "selection": {"path": "CGT Computation!B16", "text": "=B13+B15", "selected": True}}).get_json()
-    final = seen["messages"][-1]["content"]
+    final = _txt(seen["messages"][-1])
     check(j["ok"] and [e["path"] for e in j["edits"]] == ["CGT Computation!B15", "CGT Computation!B20"] and j["can_edit"] is True and "3 of my suggestions could not be placed" in j["reply"],
           "Excel answers can carry suggested cell values (only for real sheets and cells), and the person is told about the rest")
     check(j["edits"][0]["warn"] != "" and j["edits"][1]["warn"] == "" and j["edits"][1]["text"].startswith("="), "a new figure in a cell is flagged; a formula is not")
@@ -167,6 +171,58 @@ with app.app_context():
           "the workbook is sent with cell addresses, formulas and the selected cell, and the client is masked")
     xpage = c.get(f"/working-papers/{xd.id}/edit").get_data(as_text=True)
     check("replace: function (path, text)" in xpage and "typed(sh, ref, text)" in xpage, "the Excel editor can apply a suggested cell value")
+
+    # ---- the paper's own pictures (logos) are seen by Claude
+    import io as _io
+    from PIL import Image as _Im
+    def _png(color, size):
+        b = _io.BytesIO(); _Im.new("RGB", size, color).save(b, "PNG"); b.seek(0); return b
+    pd = DocxDocument()
+    pd.sections[0].header.paragraphs[0].add_run().add_picture(_png((10, 40, 80), (300, 300)), width=914400)
+    pd.sections[0].footer.paragraphs[0].text = "Neverlank footer text"
+    t = pd.add_table(rows=1, cols=2); t.cell(0, 0).paragraphs[0].add_run().add_picture(_png((10, 40, 80), (300, 300)), width=914400); t.cell(0, 1).text = "Banner text"
+    pd.add_paragraph("Letter body.")
+    pd.add_paragraph().add_run().add_picture(_png((200, 150, 20), (1200, 400)), width=3000000)
+    pd.add_paragraph().add_run().add_picture(_png((0, 0, 0), (8, 8)), width=60000)
+    pics = []
+    text = wp_assist.docx_paper_text(pd, pics)
+    check(len(pics) == 4 and text.startswith("[page header and footer") and "(header) [PICTURE 1:" in text and "(footer) Neverlank footer text" in text, "the page header and footer are listed first, with their pictures marked")
+    check("[PICTURE 2:" in text and "Banner text" in text and "[PICTURE 3:" in text and "Letter body." in text, "pictures in a table cell and a body paragraph are marked where they sit, so the cell is not called empty")
+    shown, note = wp_assist.prepare_pictures(pics)
+    check(len(shown) == 2 and "PICTURE 1 in the paper" in shown[0][0] and "also appears as PICTURE 2" in shown[0][0] and "PICTURE 3 in the paper" in shown[1][0] and note == "", "the same logo is sent once, a tiny picture is skipped, and what is sent is labelled")
+    check(all(mt in ("image/png", "image/jpeg") and len(b64) > 100 for _, mt, b64 in shown), "the pictures are sent as base64 images")
+    wp_assist.MAX_PAPER_PICTURES = 1
+    shown1, note1 = wp_assist.prepare_pictures(pics)
+    wp_assist.MAX_PAPER_PICTURES = 4
+    check(len(shown1) == 1 and "could not be shown" in note1, "more pictures than the limit are left out, and Claude is told")
+    seen["result"] = {"message": "ok", "edits": []}
+    c.post(f"/working-papers/{did}/assist", json={"message": "How many logos are there?"})
+    cont = seen["messages"][-1]["content"]
+    labels = [b["text"] for b in cont if b["type"] == "text" and b["text"].startswith("PICTURE ")]
+    check(isinstance(cont, list) and labels and any(b["type"] == "image" for b in cont) and "PICTURES IN THE PAPER" in cont[-1]["text"], "the pictures in a real generated paper are sent with the question")
+    check("[PICTURE" in cont[-1]["text"], "and their positions are marked in the paper text")
+
+    # ---- pictures pasted or attached in the panel
+    import base64
+    png = base64.b64encode(base64.b64decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==")).decode()
+    seen["result"] = {"message": "I can see a scanned invoice.", "edits": []}
+    j = c.post(f"/working-papers/{did}/assist", json={"message": "", "images": [{"media_type": "image/png", "data": png}]}).get_json()
+    cont = seen["messages"][-1]["content"]
+    atts = [b for b in cont if b["type"] == "image" and b["source"]["data"] == png]
+    check(j["ok"] and isinstance(cont, list) and cont[-1]["type"] == "text" and len(atts) == 1 and atts[0]["source"]["media_type"] == "image/png"
+          and "attached 1 picture" in cont[-1]["text"] and "Look at the picture and help me" in cont[-1]["text"], "a picture goes to the AI as an image block with the paper text, and a picture alone is a valid question")
+    check("Penanel" not in cont[-1]["text"], "the text beside the picture is still masked")
+    j = c.post(f"/working-papers/{did}/assist", json={"message": "Compare these", "images": [{"media_type": "image/png", "data": png}] * 2}).get_json()
+    check(j["ok"] and len([b for b in seen["messages"][-1]["content"] if b["type"] == "image" and b["source"]["data"] == png]) == 2, "several pictures are sent in order")
+    bad = lambda imgs: c.post(f"/working-papers/{did}/assist", json={"message": "x", "images": imgs})
+    check(bad([{"media_type": "image/png", "data": png}] * 5).status_code == 400, "more than four pictures are refused")
+    check(bad([{"media_type": "application/pdf", "data": png}]).status_code == 400 and bad([{"media_type": "image/png", "data": "not base64 !!"}]).status_code == 400, "other file types and rubbish are refused")
+    check(bad([{"media_type": "image/jpeg", "data": png}]).status_code == 400, "a file that is not the picture type it says is refused")
+    check(bad([{"media_type": "image/png", "data": "A" * (wp_assist.MAX_PICTURE_CHARS + 4)}]).status_code == 400, "an oversized picture is refused")
+    check(c.post(f"/working-papers/{did}/assist", json={"message": "", "images": []}).status_code == 400, "no words and no picture is still refused")
+    page = c.get(f"/working-papers/{did}/edit").get_data(as_text=True)
+    check('id="cl-attach"' in page and "addPicture" in page and "Ctrl+V" in page and "crop out anything that names the client" in page, "the panel lets you paste, attach or drop a picture and warns that pictures are not masked")
+    check("PICTURES" not in wp_assist.SYSTEM and "attach pictures" in wp_assist.SYSTEM, "the AI is told how to treat pictures")
 
     # ---- blank fields in a Word paper can be seen, suggested for and filled in
     e3 = Engagement(client_id=cl.id, title="FY25 blanks", type="Audit", partner_id=aid, period_end=dtm.date(2025, 12, 31), reporting_framework="ifrs_for_smes", acceptance_required=False); db.session.add(e3); db.session.commit()

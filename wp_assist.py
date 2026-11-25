@@ -42,6 +42,9 @@ MAX_MESSAGE = 4000
 MAX_SELECTION = 6000
 MAX_HISTORY = 10
 MAX_EDITS = 10
+MAX_PICTURES = 4
+MAX_PICTURE_CHARS = 5_000_000   # base64 characters per picture (about 3.7 MB of image)
+_PIC_TYPES = {"image/png": b"\x89PNG", "image/jpeg": b"\xff\xd8\xff", "image/gif": b"GIF8", "image/webp": b"RIFF"}
 MAX_EDIT_CHARS = 8000
 RATE = (30, 600)              # at most 30 questions per person per 10 minutes
 _calls = {}
@@ -102,7 +105,13 @@ SYSTEM = (
     "6. If the person selected text, 'this', 'it' and 'the selection' mean that selection.\n"
     "7. The client's identifiers are shown as tokens such as {client_name}, {client_tin}, {email_1}. Keep the tokens exactly as they are.\n"
     "8. Write in clear British English. Be as brief as the question allows. Ask one short question only if you truly cannot proceed.\n"
-    "9. Return everything through the reply_in_paper_panel tool."
+    "9. The person may attach pictures (screenshots, scans, photos of a document). Read them carefully and use what they show, but treat a figure you "
+    "cannot read clearly as unreadable and say so rather than guessing. A picture is not masked, so do not repeat the client's name or identifiers from "
+    "it: write {client_name} instead. Pictures are only attached to the message they come with.\n"
+    "   The paper's own pictures (logos, scanned documents) are also shown to you, labelled PICTURE n in the paper and marked [PICTURE n: ...] in "
+    "the text. A paragraph or cell marked [PICTURE ...] holds a picture: it is not empty. Look at them before you say what the paper contains, and "
+    "count them correctly. The page header and footer are listed first; they cannot be changed by a suggestion.\n"
+    "10. Return everything through the reply_in_paper_panel tool."
 )
 
 
@@ -160,15 +169,68 @@ class Mask:
 
 # ------------------------------------------------------------------ the paper as text
 
-def docx_outline(d, empty=False):
+_A_BLIP = "{http://schemas.openxmlformats.org/drawingml/2006/main}blip"
+_R_EMBED = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed"
+_V_IMG = "{urn:schemas-microsoft-com:vml}imagedata"
+_R_ID = "{http://schemas.openxmlformats.org/officeDocument/2006/relationships}id"
+_MC_FALLBACK = "{http://schemas.openxmlformats.org/markup-compatibility/2006}Fallback"
+_DOCPR = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}docPr"
+_EXTENT = "{http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing}extent"
+MAX_PAPER_PICTURES = 4          # pictures inside the paper that are shown to Claude (a logo that repeats counts once)
+MAX_PICTURE_EDGE = 1000
+
+
+def _para_pictures(p, part, where):
+    """The pictures in one paragraph: [{rid, blob, mime, name, descr, w, h, where}] (w, h in pixels as laid out on the page)."""
+    out = []
+    for el in p.iter(_A_BLIP, _V_IMG):
+        rid = el.get(_R_EMBED) or el.get(_R_ID)
+        if not rid or any(a.tag == _MC_FALLBACK for a in el.iterancestors()):      # Word stores some pictures twice (a drawing and a fallback copy)
+            continue
+        try:
+            ip = part.related_parts[rid]
+            blob, mime = ip.blob, getattr(ip, "content_type", "image/png")
+        except Exception:
+            continue
+        name = descr = ""
+        w = h = 0
+        anc = el.getparent()
+        while anc is not None and anc is not p and anc.tag not in (qn("w:drawing"), qn("w:pict")):
+            anc = anc.getparent()
+        if anc is not None and anc is not p:
+            for pr in anc.iter(_DOCPR):
+                name, descr = pr.get("name") or "", pr.get("descr") or ""
+                break
+            for ex in anc.iter(_EXTENT):
+                try:
+                    w, h = round(int(ex.get("cx")) / 9525), round(int(ex.get("cy")) / 9525)
+                except (TypeError, ValueError):
+                    pass
+                break
+        out.append({"blob": blob, "mime": mime, "name": name, "descr": descr, "w": w, "h": h, "where": where})
+    return out
+
+
+def _picture_label(pic):
+    bits = [x for x in (pic["name"], pic["descr"]) if x]
+    size = f"{pic['w']}x{pic['h']} px" if pic["w"] else ""
+    return "picture" + (f" ({', '.join(bits)}" + (f"; {size}" if size else "") + ")" if bits else (f" ({size})" if size else ""))
+
+
+def docx_outline(d, empty=False, pics=None):
     """[(path, text, where)] for every paragraph that has text, in reading order; table cells say which table, row and cell.
-    With empty=True the empty paragraphs inside table cells are listed too (text ""), so a blank field can be filled in."""
+    With empty=True the empty paragraphs inside table cells are listed too (text ""), so a blank field can be filled in.
+    With pics=[] a paragraph that holds a picture is listed as well (its text ends "[PICTURE n: ...]") and the pictures are collected into `pics`."""
     out = []
 
     def walk(el, prefix, where):
         for idx, blk in enumerate(wp_docx._blocks(el)):
             if blk.tag == qn("w:p"):
                 text = wp_docx.para_text(blk).strip()
+                found = _para_pictures(blk, d.part, ".".join(str(x) for x in prefix + [idx])) if pics is not None else []
+                for f in found:
+                    pics.append(f)
+                    text = (text + " " if text else "") + f"[PICTURE {len(pics)}: {_picture_label(f)}]"
                 if text or (empty and where):
                     out.append((".".join(str(x) for x in prefix + [idx]), text, where))
             else:
@@ -185,9 +247,91 @@ def docx_outline(d, empty=False):
     return out
 
 
-def docx_paper_text(d):
+def docx_header_footer(d, pics):
+    """The page header and footer (they repeat on every page): lines of text, with any picture marked and collected into `pics`."""
+    lines, seen = [], set()
+    for si, sec in enumerate(d.sections):
+        for label, c in (("HEADER", sec.header), ("FIRST-PAGE HEADER", sec.first_page_header), ("FOOTER", sec.footer), ("FIRST-PAGE FOOTER", sec.first_page_footer)):
+            try:
+                if c.is_linked_to_previous and si:
+                    continue
+                el = c._element
+                if id(el) in seen:
+                    continue
+                seen.add(id(el))
+                for p in el.iter(qn("w:p")):
+                    text = wp_docx.para_text(p).strip()
+                    for f in _para_pictures(p, c.part, label.lower()):
+                        pics.append(f)
+                        text = (text + " " if text else "") + f"[PICTURE {len(pics)}: {_picture_label(f)}]"
+                    if text:
+                        lines.append(f"({label.lower()}) {text[:MAX_CELL_CHARS]}")
+            except Exception:
+                continue
+    return lines
+
+
+def prepare_pictures(pics):
+    """The paper's own pictures as [(label, media_type, base64)] for the AI: the same logo is sent once, tiny ones (bullets, rules) are skipped,
+    big ones are shrunk, at most MAX_PAPER_PICTURES. Also returns a note of what was left out (or '')."""
+    import base64, hashlib, io
+    from PIL import Image
+    out, seen, left = [], {}, 0
+    for n, f in enumerate(pics, 1):
+        h = hashlib.sha1(f["blob"]).hexdigest()
+        if h in seen:
+            seen[h]["also"].append(n)
+            continue
+        entry = {"n": n, "also": [], "pic": f}
+        seen[h] = entry
+        try:
+            im = Image.open(io.BytesIO(f["blob"]))
+            im.load()
+        except Exception:
+            left += 1
+            entry["skip"] = True
+            continue
+        if min(im.size) < 24 or (f["w"] and f["h"] and min(f["w"], f["h"]) < 16):
+            entry["skip"] = True
+            continue
+        if len(out) >= MAX_PAPER_PICTURES:
+            left += 1
+            entry["skip"] = True
+            continue
+        if im.mode in ("RGBA", "LA", "P"):
+            im = im.convert("RGBA")
+            bg = Image.new("RGB", im.size, (255, 255, 255))
+            bg.paste(im, mask=im.split()[-1])
+            im = bg
+        else:
+            im = im.convert("RGB")
+        im.thumbnail((MAX_PICTURE_EDGE, MAX_PICTURE_EDGE))
+        buf = io.BytesIO()
+        im.save(buf, "PNG", optimize=True)
+        data = buf.getvalue()
+        mt = "image/png"
+        if len(data) > 1_500_000:
+            buf = io.BytesIO()
+            im.save(buf, "JPEG", quality=85)
+            data, mt = buf.getvalue(), "image/jpeg"
+        entry["sent"] = (mt, base64.b64encode(data).decode())
+        out.append(entry)
+    shown = []
+    for e in out:
+        also = (" (the same picture also appears as PICTURE " + ", ".join(str(x) for x in e["also"]) + ")") if e["also"] else ""
+        shown.append((f"PICTURE {e['n']} in the paper, at {e['pic']['where']}{also}:", e["sent"][0], e["sent"][1]))
+    note = f"{left} picture(s) in the paper could not be shown to you (too many, or a format that cannot be read)." if left else ""
+    return shown, note
+
+
+def docx_paper_text(d, pics=None):
     lines, size, cut = [], 0, False
-    for path, text, where in docx_outline(d, empty=True):
+    if pics is not None:
+        lines += docx_header_footer(d, pics)
+        size = sum(len(x) + 1 for x in lines)
+        if lines:
+            lines.insert(0, "[page header and footer: they repeat on every page and cannot be changed by a suggestion]")
+    for path, text, where in docx_outline(d, empty=True, pics=pics):
         line = f"[{path}] " + (f"({where}) " if where else "") + (text[:MAX_CELL_CHARS] if text else "(empty - can be filled in)")
         if size + len(line) > MAX_PAPER_CHARS:
             cut = True
@@ -410,6 +554,32 @@ def clean_cell_edits(raw, path, known, mask):
     return out
 
 
+def clean_images(raw):
+    """[(media_type, base64)] for the pictures the person attached, or (None, error). Each must really be the picture type it says."""
+    import base64
+    if not raw:
+        return [], None
+    if not isinstance(raw, list) or len(raw) > MAX_PICTURES:
+        return None, f"You can attach up to {MAX_PICTURES} pictures at a time."
+    out = []
+    for im in raw:
+        mt = str((im or {}).get("media_type") or "").lower() if isinstance(im, dict) else ""
+        data = str(im.get("data") or "") if isinstance(im, dict) else ""
+        if mt not in _PIC_TYPES or not data:
+            return None, "Only PNG, JPEG, GIF or WebP pictures can be attached."
+        if len(data) > MAX_PICTURE_CHARS:
+            return None, "A picture is too large. Crop it or use a smaller one."
+        try:
+            head = base64.b64decode(data[:64] + "=" * (-len(data[:64]) % 4))
+            base64.b64decode(data, validate=True)
+        except Exception:
+            return None, "That picture could not be read."
+        if not head.startswith(_PIC_TYPES[mt]):
+            return None, "That file is not the kind of picture it says it is."
+        out.append((mt, data))
+    return out, None
+
+
 def _history(raw, mask):
     """The earlier turns as plain text, alternating user / assistant, starting with the user."""
     turns = []
@@ -443,7 +613,12 @@ def assist(doc_id):
     if not _rate_ok(current_user.id):
         return jsonify(ok=False, error="That is a lot of questions in a short time. Give it a few minutes."), 429
     data = request.get_json(silent=True) or {}
+    pictures, pic_error = clean_images(data.get("images"))
+    if pic_error:
+        return jsonify(ok=False, error=pic_error), 400
     message = str(data.get("message") or "").strip()[:MAX_MESSAGE]
+    if not message and pictures:
+        message = "Look at the picture" + ("s" if len(pictures) > 1 else "") + " and help me with this paper."
     if not message:
         return jsonify(ok=False, error="Type a question or choose one of the suggestions."), 400
     sel = data.get("selection") if isinstance(data.get("selection"), dict) else {}
@@ -455,7 +630,9 @@ def assist(doc_id):
     mask = Mask(eng.client)
     is_docx = _ext(doc) == "docx"
     d = DocxDocument(_path(doc)) if is_docx else None
-    paper = docx_paper_text(d) if is_docx else xlsx_paper_text(_path(doc))
+    paper_pics = []
+    paper = docx_paper_text(d, paper_pics) if is_docx else xlsx_paper_text(_path(doc))
+    shown_pics, pics_note = prepare_pictures(paper_pics) if paper_pics else ([], "")
     context = engagement_context(eng)
 
     head = f"THE WORKING PAPER ({doc.original_filename}, {'Word' if is_docx else 'Excel'}" + (f", reference {doc.reference}" if doc.reference else "") + ")\n" + paper
@@ -474,10 +651,26 @@ def assist(doc_id):
                      "suggest kind replace with the path Sheet!Cell (for example CGT Computation!B16) and the new value as the text - a number, words, or a simple "
                      "formula starting with = that uses only + - * / ( ), SUM, AVERAGE, MIN, MAX, ROUND, IF and cell references. Any cell in the grid can be filled in, "
                      "even if it is not listed because it is empty. Do not suggest changes to formulas that are correct.")
+    if pictures:
+        parts.append(f"PICTURES\nThe person attached {len(pictures)} picture{'s' if len(pictures) > 1 else ''} to this message (shown above this text, in order). They are not masked.")
     parts.append("THE PERSON'S MESSAGE\n" + mask.out(message))
     final = "\n\n=====\n\n".join(parts)
 
-    messages = _history(data.get("history"), mask) + [{"role": "user", "content": final}]
+    if shown_pics:
+        final += "\n\n=====\n\nPICTURES IN THE PAPER\nThe paper's own pictures (logos, scans, images) are shown above this text, labelled PICTURE n, matching the [PICTURE n] marks in the paper." + (" " + pics_note if pics_note else "") + " They are the firm's or the client's own pictures and are not masked."
+    elif pics_note:
+        final += "\n\n=====\n\nPICTURES IN THE PAPER\n" + pics_note
+    content = final
+    if pictures or shown_pics:
+        content = []
+        for label, mt, b64 in shown_pics:
+            content.append({"type": "text", "text": label})
+            content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
+        for n, (mt, b64) in enumerate(pictures, 1):
+            content.append({"type": "text", "text": f"ATTACHED picture {n} of {len(pictures)} (from the person's message):"})
+            content.append({"type": "image", "source": {"type": "base64", "media_type": mt, "data": b64}})
+        content.append({"type": "text", "text": final})
+    messages = _history(data.get("history"), mask) + [{"role": "user", "content": content}]
     result, error = _call_model(SYSTEM, messages)
     if error or not result:
         current_app.logger.info("wp_assist doc=%s user=%s failed: %s", doc.id, current_user.id, error)
@@ -494,7 +687,7 @@ def assist(doc_id):
     dropped = len(raw_edits) - len(edits)
     if dropped > 0:
         reply += f"\n\n({dropped} of my suggestions could not be placed in the paper: " + ("the position was not a real paragraph, was a sign-off cell, or the text was empty" if is_docx else "the sheet or cell was not valid, was a sign-off cell, or the value was empty") + ". Ask me again, or select the place you mean first.)"
-    current_app.logger.warning("wp_assist doc=%s user=%s ok chars_in=%s edits=%s dropped=%s", doc.id, current_user.id, len(final), len(edits), max(dropped, 0))
+    current_app.logger.warning("wp_assist doc=%s user=%s ok chars_in=%s pictures=%s edits=%s dropped=%s", doc.id, current_user.id, len(final), len(pictures), len(edits), max(dropped, 0))
     return jsonify(ok=True, reply=reply, edits=edits, can_edit=bool(not doc.is_partner_signed))
 
 
