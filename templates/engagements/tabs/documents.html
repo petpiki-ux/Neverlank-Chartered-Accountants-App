@@ -58,6 +58,9 @@
           <td style="white-space:nowrap;">
             {% if d.original_filename.lower().endswith(('.docx', '.xlsx')) %}<a href="{{ url_for('wpedit.open_doc', doc_id=d.id) }}" class="btn small gold" title="{{ 'Work in this paper in the app' if d.in_app else 'Opens an editable copy as a new version; this upload stays unchanged' }}">{{ 'Open' if d.in_app else 'Open in app' }}</a>{% endif %}
             <a href="{{ url_for('engagements.download_document', doc_id=d.id) }}" class="btn small secondary">Download</a>
+            {% if d.in_app and d.is_generated and d.workpaper_kind and d.workpaper_kind.startswith('template_') and not d.is_partner_signed %}
+            <form method="post" action="{{ url_for('wpedit.rebuild_from_template', doc_id=d.id) }}" class="inline" onsubmit="return confirm('Start a new paper from the current version of this template? This paper stays as it is, but anything you typed into it is not copied across.')"><button type="submit" class="btn small secondary" title="Use this after the firm has replaced the template">Rebuild from current template</button></form>
+            {% endif %}
             {% if user_has_permission(current_user, 'delete_documents') %}
             <form method="post" action="{{ url_for('engagements.delete_document', doc_id=d.id) }}" class="inline" onsubmit="return confirm('Delete this document?')"><button type="submit" class="btn small danger">Delete</button></form>
             {% endif %}

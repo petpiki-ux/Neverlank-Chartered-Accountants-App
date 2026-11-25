@@ -49,6 +49,25 @@ with app.app_context():
     check("section 2.1" in full and "hourly rates below" in full and "[Client Name]" not in full and "Schedule" not in full, "the services and fees are stated in the letter itself (sections 2.1 and 6.1)")
     import wp_assist
     check(len(wp_assist.docx_outline(d, empty=True)) > 100, "the Claude panel can read it (paragraphs and blank fields are listed)")
+    # An existing paper made from the old template can be rebuilt from the current one (old paper kept untouched).
+    old_title = tpl.title; tpl.title = "Engagement Letter (Tax / CGT Advisory)"; db.session.commit()
+    r = c.post(f"/working-papers/engagements/{e.id}/generate/{tpl.id}"); old_paper = Document.query.filter_by(engagement_id=e.id).order_by(Document.id.desc()).first()
+    check("CGT Advisory" in old_paper.original_filename, "a paper made while the template had the old title (stands in for the old Yu Cheng paper)")
+    tpl.title = old_title; db.session.commit()
+    n_before = Document.query.filter_by(engagement_id=e.id).count()
+    r = c.post(f"/working-papers/{old_paper.id}/rebuild-from-template")
+    new_paper = Document.query.filter_by(engagement_id=e.id).order_by(Document.id.desc()).first()
+    check(r.status_code == 302 and new_paper.id != old_paper.id and Document.query.filter_by(engagement_id=e.id).count() == n_before + 1, "rebuilding adds a new paper")
+    check("Tax and Advisory Services" in new_paper.original_filename and "CGT Advisory" not in new_paper.original_filename and new_paper.in_app, "the new paper carries the current template title")
+    nd = DocxDocument(os.path.join(app.config["UPLOAD_FOLDER"], new_paper.stored_filename))
+    nfull = "\n".join(wp_docx.para_text(p) for p in nd.element.body.iter(wp_docx.qn("w:p")))
+    check("Yu Cheng Group (Private) Limited" in nfull and "Ref. TX-01" in nfull and "[Client Name]" not in nfull, "and it is refilled from the engagement")
+    check(Document.query.get(old_paper.id).stored_filename == old_paper.stored_filename and os.path.exists(os.path.join(app.config["UPLOAD_FOLDER"], old_paper.stored_filename)), "the old paper is left untouched")
+    uploaded = Document(engagement_id=e.id, original_filename="x.docx", stored_filename="x.docx", category="Other", version=1, uploaded_by_id=aid, uploaded_at=dtm.datetime.utcnow()); db.session.add(uploaded); db.session.commit()
+    r = c.post(f"/working-papers/{uploaded.id}/rebuild-from-template", follow_redirects=False)
+    check(r.status_code == 302 and Document.query.filter_by(engagement_id=e.id).count() == n_before + 2, "a paper that did not come from a template cannot be rebuilt (nothing is added)")
+    r = c.get(f"/engagements/{e.id}?tab=documents")
+    check(b"Rebuild from current template" in r.data, "the Documents tab offers the button on template papers")
     # One-time swap on a live app: an old, customised TX-01 is replaced once (and backed up), TX-06 row removed, later edits are not overwritten.
     import shutil, seed
     dd = app.config["DOCUMENT_TEMPLATES_DATA_DIR"]; live = os.path.join(dd, "Tax Advisory", "TX-01 Engagement Letter.docx")

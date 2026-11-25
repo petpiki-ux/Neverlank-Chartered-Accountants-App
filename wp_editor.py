@@ -124,6 +124,33 @@ def generate(engagement_id, template_id):
     return redirect(url_for("wpedit.edit", doc_id=doc.id))
 
 
+@wpedit_bp.route("/<int:doc_id>/rebuild-from-template", methods=["POST"])
+@login_required
+def rebuild_from_template(doc_id):
+    """Start a fresh paper from the CURRENT version of the template this paper was generated from (after the firm replaced the template).
+    The old paper is left exactly as it is; the new one is a separate paper, refilled from the engagement. Typed-in changes are not carried over."""
+    doc = _doc_or_404(doc_id)
+    back = url_for("engagements.view_engagement", engagement_id=doc.engagement_id, tab="documents")
+    kind = doc.workpaper_kind or ""
+    if not (doc.is_generated and kind.startswith("template_")):
+        flash("Only a paper generated from a template can be rebuilt from it.", "info")
+        return redirect(back)
+    if doc.is_partner_signed:
+        flash("This paper is signed off by the partner; remove the sign-off first, or generate a new one from Document Templates.", "warning")
+        return redirect(back)
+    tpl = None
+    try:
+        tpl = DocumentTemplate.query.get(int(kind.split("_", 1)[1]))
+    except (ValueError, IndexError):
+        pass
+    if tpl is None and doc.reference:
+        tpl = DocumentTemplate.query.filter_by(ref_code=doc.reference, type=doc.engagement.type).first()
+    if tpl is None:
+        flash("The template this paper came from is no longer in the library.", "danger")
+        return redirect(back)
+    return generate(doc.engagement_id, tpl.id)
+
+
 # ------------------------------------------------------------------ open / edit
 @wpedit_bp.route("/<int:doc_id>/open")
 @login_required
