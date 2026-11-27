@@ -753,9 +753,11 @@ def _query_items(args):
         like = f"%{term}%"
         q = q.filter(db.or_(NewsItem.title.ilike(like), NewsItem.summary.ilike(like), NewsItem.snippet.ilike(like), NewsItem.publisher.ilike(like)))
     q = q.filter(db.or_(NewsItem.pinned.is_(True), db.func.coalesce(NewsItem.published_at, NewsItem.fetched_at) >= datetime.utcnow() - timedelta(days=days)))
-    items = q.order_by(NewsItem.pinned.desc(), NewsItem.published_at.desc().nullslast(), NewsItem.id.desc()).limit(400).all()
-    rank = {"Urgent": 0, "Important": 1, "FYI": 2}
-    items.sort(key=lambda i: (0 if i.pinned else 1, rank.get(i.urgency, 3)))        # stable sort keeps newest first inside each group
+    when = db.func.coalesce(NewsItem.published_at, NewsItem.fetched_at)         # a story with no publish date counts from when it was found
+    items = q.order_by(when.desc(), NewsItem.id.desc()).limit(400).all()          # newest first, whatever its urgency or pin
+    if args.get("sort") == "urgency":
+        rank = {"Urgent": 0, "Important": 1, "FYI": 2}
+        items.sort(key=lambda i: (0 if i.pinned else 1, rank.get(i.urgency, 3)))    # stable sort keeps newest first inside each group
     return items
 
 

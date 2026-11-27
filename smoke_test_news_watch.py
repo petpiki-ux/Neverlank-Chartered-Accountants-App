@@ -182,8 +182,9 @@ with app.app_context():
 
 # ---- the page
 pg = staff.get("/news-watch/").get_data(as_text=True)
-check("ZIMRA extends VAT filing deadline" in pg and "Urgent" in pg and "Why it matters" in pg and "Local football derby" not in pg, "the page lists what matters, Urgent first, without the sport")
-check(pg.index("ZIMRA extends VAT") < pg.index("RBZ tightens"), "Urgent comes before Important")
+check("ZIMRA extends VAT filing deadline" in pg and "Urgent" in pg and "Why it matters" in pg and "Local football derby" not in pg, "the page lists what matters, without the sport")
+pg_u = staff.get("/news-watch/?sort=urgency").get_data(as_text=True)
+check(pg_u.index("ZIMRA extends VAT") < pg_u.index("RBZ tightens"), "with 'Most urgent first', Urgent comes before Important")
 check("from the headline or a short snippet only" in pg, "a low-confidence summary says it is thin")
 pga = admin.get("/news-watch/").get_data(as_text=True)
 check("Kudzai Traders" in pga and "same sector" in pga, "clients in the same sector are shown with the reason")
@@ -453,6 +454,22 @@ r = partner.post("/news-watch/add-link", data={"url": "https://x.com/someone/sta
 with app.app_context():
     sh = NewsItem.query.filter_by(url="https://x.com/someone/status/5").first()
     check(sh is not None and sh.region == "International" and sh.unconfirmed, "a link added by hand can be given a region")
+
+# ---- newest first (urgency only on request)
+with app.app_context():
+    now = dtm.datetime.utcnow()
+    db.session.add_all([
+        NewsItem(title="ORD-OLD urgent story", url="https://example.org/ord1", publisher="P", published_at=now - dtm.timedelta(days=3), status="relevant", urgency="Urgent", fingerprint="ord1"),
+        NewsItem(title="ORD-MID pinned story", url="https://example.org/ord2", publisher="P", published_at=now - dtm.timedelta(days=2), status="relevant", urgency="FYI", pinned=True, fingerprint="ord2"),
+        NewsItem(title="ORD-NEW fyi story", url="https://example.org/ord3", publisher="P", published_at=now - dtm.timedelta(hours=2), status="relevant", urgency="FYI", fingerprint="ord3"),
+        NewsItem(title="ORD-NODATE found today", url="https://example.org/ord4", publisher="P", published_at=None, fetched_at=now - dtm.timedelta(hours=1), status="relevant", urgency="Important", fingerprint="ord4"),
+    ]); db.session.commit()
+pg = staff.get("/news-watch/?days=30").get_data(as_text=True)
+pos = [pg.find(t) for t in ("ORD-NODATE", "ORD-NEW", "ORD-MID", "ORD-OLD")]
+check(all(p > 0 for p in pos) and pos == sorted(pos), "stories are listed newest first, even over urgent or pinned ones (a story with no date counts from when it was found)")
+pg = staff.get("/news-watch/?days=30&sort=urgency").get_data(as_text=True)
+check(pg.find("ORD-MID") < pg.find("ORD-OLD") < pg.find("ORD-NODATE") < pg.find("ORD-NEW"), "'Most urgent first' still groups pinned, then Urgent, Important, FYI")
+check('name="sort"' in pg and "Newest first" in pg, "the page has an Order choice")
 
 print(len(fails), "failure(s)")
 sys.exit(1 if fails else 0)
